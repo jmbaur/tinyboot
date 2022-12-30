@@ -1,7 +1,7 @@
 { stdenv, pkgsStatic, rust-bin, crane, ... }:
 let
   target = pkgsStatic.stdenv.hostPlatform.config;
-  toolchain = (rust-bin.stable.latest.minimal.override {
+  toolchain = (rust-bin.stable.latest.default.override {
     targets = [ target ];
   });
 in

@@ -7,5 +7,5 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.68"
-extlinux = { path = "../extlinux" }
+boot = { path = "../boot" }
 nix = "0.26.1"
