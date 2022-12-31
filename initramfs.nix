@@ -1,11 +1,9 @@
 { lib, buildEnv, runCommand, rsync, cpio, xz, pkgsStatic, tinyboot, compressed ? true, ... }:
-let
-  paths = [ pkgsStatic.busybox tinyboot ];
-in
-runCommand "tinyboot-initramfs"
-{ nativeBuildInputs = [ cpio rsync ] ++ (lib.optional compressed xz); } ''
-  mkdir -p root
-  ${lib.concatMapStringsSep "; " (p: "rsync -aP ${p}/. root") paths}
+runCommand "tinyboot-initramfs" { nativeBuildInputs = [ cpio rsync ] ++ (lib.optional compressed xz); } ''
+  mkdir -p root/bin
+  rsync -aP ${pkgsStatic.busybox}/bin/. root/bin
+  rsync -aP ${pkgsStatic.kexec-tools}/bin/. root/bin
+  rsync -aP ${tinyboot}/. root
   pushd root &&
     find . -print0 | cpio --null --create --format=newc >../initramfs.cpio &&
     popd

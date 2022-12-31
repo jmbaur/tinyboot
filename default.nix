@@ -12,8 +12,6 @@ in
   CARGO_BUILD_RUSTFLAGS = "-C target-feature=+crt-static";
   cargoExtraArgs = "-p tinyboot";
   postInstall = ''
-    mkdir -p $out/sbin
-    ln -s $out/bin/tinyboot $out/sbin/init
     ln -s $out/bin/tinyboot $out/init
     ln -s $out/bin/tinyboot $out/linuxrc
   '';

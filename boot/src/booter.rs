@@ -58,13 +58,17 @@ impl Display for BootParts {
 
 impl BootParts {
     pub fn kexec(&self) -> io::Result<()> {
-        let kernel = fs::File::open(&self.kernel).unwrap().as_raw_fd() as usize;
-        let initrd = fs::File::open(&self.initrd).unwrap().as_raw_fd() as usize;
-        let cmdline = ffi::CString::new(self.cmdline.as_str()).unwrap();
+        let kernel = fs::File::open(&self.kernel)
+            .expect("failed to open kernel")
+            .as_raw_fd() as usize;
+        let initrd = fs::File::open(&self.initrd)
+            .expect("failed to open initrd")
+            .as_raw_fd() as usize;
+        let cmdline = ffi::CString::new(self.cmdline.as_str()).expect("failed to prepare cmdline");
 
         debug!("kernel loaded at fd {}", kernel);
         debug!("initrd loaded at fd {}", initrd);
-        debug!("cmdline loaded as '{:?}'", cmdline);
+        debug!("cmdline loaded as {:?}", cmdline);
 
         let retval: usize;
 
@@ -91,7 +95,7 @@ impl BootParts {
                 in("rdi") kernel,
                 in("rsi") initrd,
                 in("rdx") cmdline.to_bytes_with_nul().len(),
-                in("r10") cmdline.as_ptr(),
+                in("r10") cmdline.to_bytes_with_nul().as_ptr(),
                 in("r8") 0,
                 in("r9") 0,
             );
