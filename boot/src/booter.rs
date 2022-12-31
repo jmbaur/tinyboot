@@ -1,4 +1,5 @@
 use log::debug;
+use nix::libc;
 use std::fmt::{self, Display};
 use std::os::fd::AsRawFd;
 use std::path::PathBuf;
@@ -59,13 +60,9 @@ impl Display for BootParts {
 
 impl BootParts {
     pub fn kexec(&self) -> io::Result<()> {
-        let kernel = fs::File::open(&self.kernel)
-            .expect("failed to open kernel")
-            .as_raw_fd() as usize;
-        let initrd = fs::File::open(&self.initrd)
-            .expect("failed to open initrd")
-            .as_raw_fd();
-        let cmdline = ffi::CString::new(self.cmdline.as_str()).expect("failed to prepare cmdline");
+        let kernel = fs::File::open(&self.kernel)?.as_raw_fd() as usize;
+        let initrd = fs::File::open(&self.initrd)?.as_raw_fd();
+        let cmdline = ffi::CString::new(self.cmdline.as_str())?;
         let cmdline = cmdline.to_bytes_with_nul();
 
         debug!("kernel loaded from {}", self.kernel.display());
@@ -79,7 +76,7 @@ impl BootParts {
         unsafe {
             asm!(
                 "svc #0",
-                in("w8") nix::libc::SYS_kexec_file_load,
+                in("w8") libc::SYS_kexec_file_load,
                 inout("x0") kernel => retval,
                 in("x1") initrd,
                 in("x2") cmdline.len(),
@@ -93,7 +90,7 @@ impl BootParts {
         unsafe {
             arch::asm!(
                 "syscall",
-                inout("rax") nix::libc::SYS_kexec_file_load => retval,
+                inout("rax") libc::SYS_kexec_file_load => retval,
                 in("rdi") kernel,
                 in("rsi") initrd,
                 in("rdx") cmdline.len(),
@@ -111,6 +108,11 @@ impl BootParts {
         while std::fs::read("/sys/kernel/kexec_loaded")? != [b'1', b'\n'] {
             debug!("waiting for kexec_loaded");
             thread::sleep(time::Duration::from_millis(100));
+        }
+
+        let ret = unsafe { libc::reboot(libc::LINUX_REBOOT_CMD_KEXEC) };
+        if ret < 0 {
+            return Err(io::Error::last_os_error());
         }
 
         Ok(())

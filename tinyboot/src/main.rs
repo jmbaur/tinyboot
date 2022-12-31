@@ -217,7 +217,7 @@ fn main() -> Result<(), convert::Infallible> {
     debug!("config: {:?}", cfg);
 
     if let Err(e) = logic() {
-        error!("{e}");
+        error!("failed to boot {e}");
         return shell(option_env!("TINYBOOT_EMERGENCY_SHELL").unwrap_or("/bin/sh"));
     };
 
