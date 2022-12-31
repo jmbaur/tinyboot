@@ -157,15 +157,13 @@ fn logic() -> anyhow::Result<()> {
         print!("choose a boot option: ");
         let mut input = String::new();
         _ = io::stdin().read_line(&mut input)?;
-        let selection = match input.trim().parse::<usize>() {
-            Ok(x) if 0 < x || x < parts.len() - 1 => x,
+        match input.trim().parse::<usize>() {
+            Ok(x) if 0 < x || x < parts.len() - 1 => break 'input &parts[x - 1],
             _ => {
                 println!("bad selection");
                 continue;
             }
         };
-
-        break 'input &parts[selection + 1];
     };
 
     debug!("{selected}");
