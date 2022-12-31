@@ -81,7 +81,7 @@ fn shell(sh: &str) -> Result<(), std::convert::Infallible> {
 fn logic() -> anyhow::Result<()> {
     println!("tinyboot started");
 
-    // mount_pseudofilesystems()?;
+    mount_pseudofilesystems()?;
 
     let parts = find_block_devices()?
         .iter()
