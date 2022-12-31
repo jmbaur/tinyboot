@@ -96,8 +96,6 @@ fn detect_fs_type(p: &Path) -> anyhow::Result<String> {
 }
 
 fn logic() -> anyhow::Result<()> {
-    mount_pseudofilesystems()?;
-
     let parts = find_block_devices()?
         .iter()
         .filter_map(|dev| {
@@ -186,20 +184,21 @@ impl Default for Config {
 }
 
 impl Config {
-    pub fn new(args: &Vec<String>) -> Self {
+    pub fn new(args: &[String]) -> Self {
         let mut cfg = Config::default();
 
-        for arg in args {
-            let Some(split) = arg.split_once('=') else { continue; };
-            // TODO(jared): remove when more cmdline options are added
-            #[allow(clippy::single_match)]
-            match split.0 {
-                "tinyboot.log" => {
-                    cfg.log_level = LevelFilter::from_str(split.1).unwrap_or(LevelFilter::Info)
+        args.iter().for_each(|arg| {
+            if let Some(split) = arg.split_once('=') {
+                // TODO(jared): remove when more cmdline options are added
+                #[allow(clippy::single_match)]
+                match split.0 {
+                    "tinyboot.log" => {
+                        cfg.log_level = LevelFilter::from_str(split.1).unwrap_or(LevelFilter::Info)
+                    }
+                    _ => {}
                 }
-                _ => {}
             }
-        }
+        });
 
         cfg
     }
@@ -208,15 +207,15 @@ impl Config {
 fn main() -> Result<(), convert::Infallible> {
     mount_pseudofilesystems().expect("failed to mount pseudofilesystems");
 
-    let args = env::args().collect();
+    let args: Vec<String> = env::args().collect();
 
-    let cfg = Config::new(&args);
+    let cfg = Config::new(args.as_slice());
 
     printk::init("tinyboot", cfg.log_level).expect("failed to setup logger");
 
     info!("started");
-    info!("args: {:?}", args);
-    info!("config: {:?}", cfg);
+    debug!("args: {:?}", args);
+    debug!("config: {:?}", cfg);
 
     if let Err(e) = logic() {
         error!("{e}");

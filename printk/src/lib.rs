@@ -1,10 +1,9 @@
+use log::{Level, LevelFilter, Log, Metadata, Record, SetLoggerError};
 use std::fs::{File, OpenOptions};
 use std::io::{self, Write};
 use std::sync::Mutex;
+use std::{error, fmt};
 
-use log::{Level, LevelFilter, Log, Metadata, Record, SetLoggerError};
-
-/// Kernel logger implementation
 pub struct Printk {
     prefix: String,
     kmsg: Mutex<File>,
@@ -58,8 +57,8 @@ pub enum PrintkInitError {
     Log(SetLoggerError),
 }
 
-impl std::fmt::Display for PrintkInitError {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+impl fmt::Display for PrintkInitError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             PrintkInitError::Io(err) => err.fmt(f),
             PrintkInitError::Log(err) => err.fmt(f),
@@ -67,8 +66,8 @@ impl std::fmt::Display for PrintkInitError {
     }
 }
 
-impl std::error::Error for PrintkInitError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+impl error::Error for PrintkInitError {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match self {
             PrintkInitError::Io(err) => Some(err),
             PrintkInitError::Log(err) => Some(err),
