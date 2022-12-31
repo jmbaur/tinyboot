@@ -60,8 +60,10 @@ impl Display for BootParts {
 
 impl BootParts {
     pub fn kexec(&self) -> io::Result<()> {
-        let kernel = fs::File::open(&self.kernel)?.as_raw_fd() as usize;
-        let initrd = fs::File::open(&self.initrd)?.as_raw_fd();
+        let kernel = fs::File::open(&self.kernel)?;
+        let kernel = kernel.as_raw_fd() as usize;
+        let initrd = fs::File::open(&self.initrd)?;
+        let initrd = initrd.as_raw_fd();
         let cmdline = ffi::CString::new(self.cmdline.as_str())?;
         let cmdline = cmdline.to_bytes_with_nul();
 
@@ -109,6 +111,8 @@ impl BootParts {
             debug!("waiting for kexec_loaded");
             thread::sleep(time::Duration::from_millis(100));
         }
+
+        unsafe { libc::sync() };
 
         let ret = unsafe { libc::reboot(libc::LINUX_REBOOT_CMD_KEXEC) };
         if ret < 0 {
