@@ -174,46 +174,54 @@ fn logic() -> anyhow::Result<()> {
 
 #[derive(Debug)]
 struct Config {
-    log: LevelFilter,
+    log_level: LevelFilter,
 }
 
-impl Config {
-    pub fn new() -> Self {
-        let mut args = env::args();
-        let arg_level_filter = args
-            .find(|arg| arg.starts_with("tinyboot.log="))
-            .map(|arg| arg.trim_start_matches("tinyboot.log=").to_owned())
-            .unwrap_or_else(|| "INFO".to_string());
-        let log = LevelFilter::from_str(&arg_level_filter).unwrap_or(LevelFilter::Info);
-        Config { log }
+impl Default for Config {
+    fn default() -> Self {
+        Config {
+            log_level: LevelFilter::Info,
+        }
     }
 }
 
-fn setup_logger(c: &Config) -> anyhow::Result<()> {
-    Ok(fern::Dispatch::new()
-        .format(|out, message, record| {
-            out.finish(format_args!(
-                "{}[{}]: {}",
-                "tinyboot",
-                record.level(),
-                message
-            ))
-        })
-        .level(c.log)
-        .chain(fern::log_file("/dev/kmsg")?)
-        .apply()?)
+impl Config {
+    pub fn new(args: &Vec<String>) -> Self {
+        let mut cfg = Config::default();
+
+        for arg in args {
+            let Some(split) = arg.split_once('=') else { continue; };
+            // TODO(jared): remove when more cmdline options are added
+            #[allow(clippy::single_match)]
+            match split.0 {
+                "tinyboot.log" => {
+                    cfg.log_level = LevelFilter::from_str(split.1).unwrap_or(LevelFilter::Info)
+                }
+                _ => {}
+            }
+        }
+
+        cfg
+    }
 }
 
 fn main() -> Result<(), convert::Infallible> {
-    let cfg = Config::new();
+    mount_pseudofilesystems().expect("failed to mount pseudofilesystems");
 
-    setup_logger(&cfg).expect("failed to setup logger");
+    let args = env::args().collect();
 
-    info!("tinyboot started ({:#?})", cfg);
+    let cfg = Config::new(&args);
+
+    printk::init("tinyboot", cfg.log_level).expect("failed to setup logger");
+
+    info!("started");
+    info!("args: {:?}", args);
+    info!("config: {:?}", cfg);
 
     if let Err(e) = logic() {
         error!("{e}");
         return shell(option_env!("TINYBOOT_EMERGENCY_SHELL").unwrap_or("/bin/sh"));
     };
+
     unreachable!();
 }

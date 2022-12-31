@@ -1,13 +1,9 @@
 [package]
-name = "tinyboot"
+name = "printk"
 version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-anyhow = "1.0.68"
-boot = { path = "../boot" }
-log = "0.4.17"
-nix = "0.26.1"
-printk = { path = "../printk" }
+log = { version = "0.4.17", features = ["std"] }

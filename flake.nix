@@ -36,7 +36,6 @@
       packages = forAllSystems ({ pkgs, ... }: {
         default = pkgs.tinyboot;
         initramfs = pkgs.tinyboot-initramfs;
-        test = pkgs.callPackage ./test.nix { };
       });
     };
 }
