@@ -1,12 +1,12 @@
 use boot::booter::{BootParts, Booter};
 use boot::syslinux;
+use log::LevelFilter;
 use log::{debug, error, info};
 use nix::mount::{self, MsFlags};
-use simplelog::{ConfigBuilder, LevelFilter, SimpleLogger};
 use std::io::{self, Read, Seek};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use std::{convert, fs, process};
+use std::{convert, env, fs, process};
 
 const NONE: Option<&'static [u8]> = None;
 
@@ -172,37 +172,44 @@ fn logic() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn setup_logging() -> anyhow::Result<()> {
-    let mut args = std::env::args();
-    let arg_level_filter = args
-        .find(|arg| arg.starts_with("tinyboot.log="))
-        .map(|arg| arg.trim_start_matches("tinyboot.log=").to_owned())
-        .unwrap_or_else(|| "INFO".to_string());
+#[derive(Debug)]
+struct Config {
+    log: LevelFilter,
+}
 
-    let config = ConfigBuilder::new()
-        .set_time_level(LevelFilter::Off)
-        .build();
-
-    match LevelFilter::from_str(&arg_level_filter) {
-        Ok(level_filter) => {
-            SimpleLogger::init(level_filter, config).expect("failed to configure logger");
-            Ok(())
-        }
-        Err(e) => {
-            SimpleLogger::init(LevelFilter::Info, config).expect("failed to configure logger");
-            anyhow::bail!(e)
-        }
+impl Config {
+    pub fn new() -> Self {
+        let mut args = env::args();
+        let arg_level_filter = args
+            .find(|arg| arg.starts_with("tinyboot.log="))
+            .map(|arg| arg.trim_start_matches("tinyboot.log=").to_owned())
+            .unwrap_or_else(|| "INFO".to_string());
+        let log = LevelFilter::from_str(&arg_level_filter).unwrap_or(LevelFilter::Info);
+        Config { log }
     }
 }
 
+fn setup_logger(c: &Config) -> anyhow::Result<()> {
+    Ok(fern::Dispatch::new()
+        .format(|out, message, record| {
+            out.finish(format_args!(
+                "{}[{}]: {}",
+                "tinyboot",
+                record.level(),
+                message
+            ))
+        })
+        .level(c.log)
+        .chain(fern::log_file("/dev/kmsg")?)
+        .apply()?)
+}
+
 fn main() -> Result<(), convert::Infallible> {
-    let logging_err = setup_logging().err();
+    let cfg = Config::new();
 
-    info!("tinyboot started");
+    setup_logger(&cfg).expect("failed to setup logger");
 
-    if let Some(e) = logging_err {
-        error!("{e}");
-    }
+    info!("tinyboot started ({:#?})", cfg);
 
     if let Err(e) = logic() {
         error!("{e}");

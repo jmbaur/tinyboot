@@ -8,6 +8,6 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.68"
 boot = { path = "../boot" }
+fern = "0.6.1"
 log = "0.4.17"
 nix = "0.26.1"
-simplelog = "0.12.0"

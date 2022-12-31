@@ -1,7 +1,7 @@
-use std::fmt::Display;
-use std::io;
+use std::fmt::{self, Display};
 use std::os::fd::AsRawFd;
 use std::path::PathBuf;
+use std::{arch, error, ffi, fs, io};
 
 #[derive(Debug)]
 pub enum Error {
@@ -11,12 +11,12 @@ pub enum Error {
 }
 
 impl Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{self:#?}")
     }
 }
 
-impl std::error::Error for Error {}
+impl error::Error for Error {}
 
 impl From<io::Error> for Error {
     fn from(e: io::Error) -> Self {
@@ -39,7 +39,7 @@ pub struct BootParts {
 }
 
 impl Display for BootParts {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.dtb.is_some() {
             write!(
                 f,
@@ -57,10 +57,10 @@ impl Display for BootParts {
 }
 
 impl BootParts {
-    pub fn kexec(&self) -> std::io::Result<()> {
-        let kernel = std::fs::File::open(&self.kernel).unwrap().as_raw_fd() as usize;
-        let initrd = std::fs::File::open(&self.initrd).unwrap().as_raw_fd() as usize;
-        let cmdline = std::ffi::CString::new(self.cmdline.as_str()).unwrap();
+    pub fn kexec(&self) -> io::Result<()> {
+        let kernel = fs::File::open(&self.kernel).unwrap().as_raw_fd() as usize;
+        let initrd = fs::File::open(&self.initrd).unwrap().as_raw_fd() as usize;
+        let cmdline = ffi::CString::new(self.cmdline.as_str()).unwrap();
         let retval: usize;
 
         // TODO(jared): pass dtb
@@ -80,7 +80,7 @@ impl BootParts {
 
         #[cfg(target_arch = "x86_64")]
         unsafe {
-            std::arch::asm!(
+            arch::asm!(
                 "syscall",
                 inout("rax") nix::libc::SYS_kexec_file_load => retval,
                 in("rdi") kernel,
@@ -94,7 +94,7 @@ impl BootParts {
 
         if retval > -4096isize as usize {
             let code = -(retval as isize) as i32;
-            return Err(std::io::Error::from_raw_os_error(code));
+            return Err(io::Error::from_raw_os_error(code));
         }
 
         Ok(())
