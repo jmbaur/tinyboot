@@ -2,9 +2,10 @@ use boot::booter::{BootParts, Booter};
 use boot::syslinux;
 use log::{debug, error, info};
 use nix::mount::{self, MsFlags};
-use simplelog::{Config, LevelFilter, SimpleLogger};
+use simplelog::{ConfigBuilder, LevelFilter, SimpleLogger};
 use std::io::{self, Read, Seek};
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use std::{convert, fs, process};
 
 const NONE: Option<&'static [u8]> = None;
@@ -130,6 +131,8 @@ fn logic() -> anyhow::Result<()> {
                 return None;
             };
 
+            debug!("mounted {} at {}", dev.display(), mountpoint.display());
+
             match syslinux::Syslinux::new(&mountpoint).map(|s| s.get_parts()) {
                 Ok(Ok(p)) => Some(p),
                 e => {
@@ -171,9 +174,38 @@ fn logic() -> anyhow::Result<()> {
     Ok(())
 }
 
+fn setup_logging() -> anyhow::Result<()> {
+    let mut args = std::env::args();
+    let arg_level_filter = args
+        .find(|arg| arg.starts_with("tinyboot.log="))
+        .map(|arg| arg.trim_start_matches("tinyboot.log=").to_owned())
+        .unwrap_or_else(|| "INFO".to_string());
+
+    let config = ConfigBuilder::new()
+        .set_time_level(LevelFilter::Off)
+        .build();
+
+    match LevelFilter::from_str(&arg_level_filter) {
+        Ok(level_filter) => {
+            SimpleLogger::init(level_filter, config).expect("failed to configure logger");
+            Ok(())
+        }
+        Err(e) => {
+            SimpleLogger::init(LevelFilter::Info, config).expect("failed to configure logger");
+            anyhow::bail!(e)
+        }
+    }
+}
+
 fn main() -> Result<(), convert::Infallible> {
-    SimpleLogger::init(LevelFilter::Info, Config::default()).expect("failed to configure logger");
+    let logging_err = setup_logging().err();
+
     info!("tinyboot started");
+
+    if let Some(e) = logging_err {
+        error!("{e}");
+    }
+
     if let Err(e) = logic() {
         error!("{e}");
         return shell(option_env!("TINYBOOT_EMERGENCY_SHELL").unwrap_or("/bin/sh"));

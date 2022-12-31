@@ -1,5 +1,9 @@
 use crate::booter::{BootParts, Booter, Error};
-use std::path::{Path, PathBuf};
+use log::{debug, warn};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 pub struct Syslinux {
     path: PathBuf,
@@ -18,19 +22,26 @@ impl Syslinux {
             "/syslinux.cfg",
         ] {
             let search_path = mount_point.join(path);
-            if std::fs::metadata(&search_path).is_ok() {
+
+            debug!(
+                "searching for syslinux configuration at {}",
+                search_path.display()
+            );
+
+            if let Err(e) = fs::metadata(&search_path) {
+                warn!("{}: {}", search_path.display(), e)
+            } else {
                 return Ok(Syslinux { path: search_path });
             }
         }
+
         Err(Error::NotFound)
     }
 }
 
 impl Booter for Syslinux {
     fn get_parts(&self) -> Result<Vec<BootParts>, Error> {
-        let Ok(contents) = std::fs::read_to_string(&self.path) else {
-            return Err(Error::Unknown);
-        };
+        let contents = fs::read_to_string(&self.path)?;
 
         let mut parts = vec![];
         let mut p = BootParts::default();
@@ -137,15 +148,17 @@ mod tests {
         .unwrap();
         assert_eq!(parts.len(), 6);
         assert_eq!(parts[0].name, "NixOS - Default");
-        assert_eq!(parts[0].cmdline, 
-                   "init=/nix/store/piq69xyzwy9j6fqjl80nx1sxrnpk9zzn-nixos-system-beetroot-23.05.20221229.677ed08/init loglevel=4 zram.num_devices=1" ,
-                   );
+        assert_eq!(
+            parts[0].cmdline,
+            "init=/nix/store/piq69xyzwy9j6fqjl80nx1sxrnpk9zzn-nixos-system-beetroot-23.05.20221229.677ed08/init loglevel=4 zram.num_devices=1",
+        );
         assert_eq!(
             parts[5].name,
             "NixOS - Configuration 17-flashfriendly (2022-12-29 14:52 - 23.05.20221228.e182da8)",
         );
-        assert_eq!(parts[5].cmdline, 
-                   "init=/nix/store/gmppv1gyqzr681n3r0yb20kqchls61gz-nixos-system-beetroot-23.05.20221228.e182da8/init iomem=relaxed loglevel=4 zram.num_devices=1" ,
-                   );
+        assert_eq!(
+            parts[5].cmdline,
+            "init=/nix/store/gmppv1gyqzr681n3r0yb20kqchls61gz-nixos-system-beetroot-23.05.20221228.e182da8/init iomem=relaxed loglevel=4 zram.num_devices=1",
+        );
     }
 }

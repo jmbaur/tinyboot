@@ -1,18 +1,28 @@
 use std::fmt::Display;
+use std::io;
 use std::os::fd::AsRawFd;
 use std::path::PathBuf;
 
 #[derive(Debug)]
 pub enum Error {
     NotFound,
+    IoError(io::Error),
     Unknown,
 }
+
 impl Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{self:#?}")
     }
 }
+
 impl std::error::Error for Error {}
+
+impl From<io::Error> for Error {
+    fn from(e: io::Error) -> Self {
+        Error::IoError(e)
+    }
+}
 
 pub trait Booter {
     fn get_parts(&self) -> Result<Vec<BootParts>, Error>;
