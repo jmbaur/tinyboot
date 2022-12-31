@@ -2,7 +2,8 @@ use log::debug;
 use std::fmt::{self, Display};
 use std::os::fd::AsRawFd;
 use std::path::PathBuf;
-use std::{arch, error, ffi, fs, io};
+use std::time;
+use std::{arch, error, ffi, fs, io, thread};
 
 #[derive(Debug)]
 pub enum Error {
@@ -67,9 +68,9 @@ impl BootParts {
         let cmdline = ffi::CString::new(self.cmdline.as_str()).expect("failed to prepare cmdline");
         let cmdline = cmdline.to_bytes_with_nul();
 
-        debug!("kernel loaded at fd {}", kernel);
-        debug!("initrd loaded at fd {}", initrd);
-        debug!("cmdline loaded as {:?}", cmdline);
+        debug!("kernel loaded from {}", self.kernel.display());
+        debug!("initrd loaded from {}", self.initrd.display());
+        debug!("cmdline loaded as {:?}", self.cmdline);
 
         let retval: usize;
 
@@ -105,6 +106,11 @@ impl BootParts {
         if retval > -4096isize as usize {
             let code = -(retval as isize) as i32;
             return Err(io::Error::from_raw_os_error(code));
+        }
+
+        while std::fs::read("/sys/kernel/kexec_loaded")? != [b'1', b'\n'] {
+            debug!("waiting for kexec_loaded");
+            thread::sleep(time::Duration::from_millis(100));
         }
 
         Ok(())
