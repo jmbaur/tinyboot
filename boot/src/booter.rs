@@ -59,7 +59,7 @@ impl BootParts {
         unsafe {
             asm!(
                 "svc #0",
-                in("w8") libc::SYS_kexec_file_load,
+                in("w8") nix::libc::SYS_kexec_file_load,
                 inout("x0") kernel => retval,
                 in("x1") initrd,
                 in("x2") cmdline.to_bytes_with_nul().len(),
@@ -73,7 +73,7 @@ impl BootParts {
         unsafe {
             std::arch::asm!(
                 "syscall",
-                inout("rax") libc::SYS_kexec_file_load => retval,
+                inout("rax") nix::libc::SYS_kexec_file_load => retval,
                 in("rdi") kernel,
                 in("rsi") initrd,
                 in("rdx") cmdline.to_bytes_with_nul().len(),

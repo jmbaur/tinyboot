@@ -1,14 +1,12 @@
 use boot::booter::{BootParts, Booter};
-use std::path::PathBuf;
-
-use nix::{
-    self,
-    mount::{self, MsFlags},
-};
+use nix::mount::{self, MsFlags};
+use std::io::{Read, Seek};
+use std::path::{Path, PathBuf};
 
 const NONE: Option<&'static [u8]> = None;
 
 fn mount_pseudofilesystems() -> anyhow::Result<()> {
+    std::fs::create_dir_all("/mnt")?;
     std::fs::create_dir_all("/sys")?;
     std::fs::create_dir_all("/tmp")?;
     std::fs::create_dir_all("/dev")?;
@@ -78,6 +76,20 @@ fn shell(sh: &str) -> Result<(), std::convert::Infallible> {
     Ok(())
 }
 
+fn detect_fs_type(p: &Path) -> anyhow::Result<String> {
+    let mut f = std::fs::File::open(p)?;
+    f.seek(std::io::SeekFrom::Start(1080))?;
+    let mut buffer = [0; 2];
+    f.read_exact(&mut buffer)?;
+    let comp_buf = &nix::sys::statfs::EXT4_SUPER_MAGIC.0.to_le_bytes()[0..2];
+
+    if buffer == comp_buf {
+        return Ok(String::from("ext4"));
+    }
+
+    anyhow::bail!("unsupported fs type")
+}
+
 fn logic() -> anyhow::Result<()> {
     println!("tinyboot started");
 
@@ -86,18 +98,24 @@ fn logic() -> anyhow::Result<()> {
     let parts = find_block_devices()?
         .iter()
         .filter_map(|dev| {
-            let mountpoint = PathBuf::from("/tmp")
-                .join(dev.to_str().expect("invalid unicode").replace('/', "-"));
+            let mountpoint = PathBuf::from("/mnt").join(
+                dev.to_str()
+                    .expect("invalid unicode")
+                    .trim_start_matches('/')
+                    .replace('/', "-"),
+            );
 
             if let Err(e) = std::fs::create_dir_all(&mountpoint) {
                 eprintln!("{e}");
                 return None;
             }
 
+            let Ok(fstype) = detect_fs_type(dev) else { return None; };
+
             if let Err(e) = nix::mount::mount(
                 Some(dev.as_path()),
                 &mountpoint,
-                NONE,
+                Some(fstype.as_str()),
                 nix::mount::MsFlags::MS_RDONLY,
                 NONE,
             ) {

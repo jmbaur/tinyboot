@@ -137,5 +137,15 @@ mod tests {
         .unwrap();
         assert_eq!(parts.len(), 6);
         assert_eq!(parts[0].name, "NixOS - Default");
+        assert_eq!(parts[0].cmdline, 
+                   "init=/nix/store/piq69xyzwy9j6fqjl80nx1sxrnpk9zzn-nixos-system-beetroot-23.05.20221229.677ed08/init loglevel=4 zram.num_devices=1" ,
+                   );
+        assert_eq!(
+            parts[5].name,
+            "NixOS - Configuration 17-flashfriendly (2022-12-29 14:52 - 23.05.20221228.e182da8)",
+        );
+        assert_eq!(parts[5].cmdline, 
+                   "init=/nix/store/gmppv1gyqzr681n3r0yb20kqchls61gz-nixos-system-beetroot-23.05.20221228.e182da8/init iomem=relaxed loglevel=4 zram.num_devices=1" ,
+                   );
     }
 }
