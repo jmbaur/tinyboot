@@ -1,3 +1,4 @@
+use log::debug;
 use std::fmt::{self, Display};
 use std::os::fd::AsRawFd;
 use std::path::PathBuf;
@@ -5,14 +6,13 @@ use std::{arch, error, ffi, fs, io};
 
 #[derive(Debug)]
 pub enum Error {
-    NotFound,
+    BootConfigNotFound,
     IoError(io::Error),
-    Unknown,
 }
 
 impl Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{self:#?}")
+        write!(f, "{self:?}")
     }
 }
 
@@ -61,6 +61,11 @@ impl BootParts {
         let kernel = fs::File::open(&self.kernel).unwrap().as_raw_fd() as usize;
         let initrd = fs::File::open(&self.initrd).unwrap().as_raw_fd() as usize;
         let cmdline = ffi::CString::new(self.cmdline.as_str()).unwrap();
+
+        debug!("kernel loaded at fd {}", kernel);
+        debug!("initrd loaded at fd {}", initrd);
+        debug!("cmdline loaded as '{:?}'", cmdline);
+
         let retval: usize;
 
         // TODO(jared): pass dtb

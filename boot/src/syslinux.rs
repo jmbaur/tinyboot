@@ -1,5 +1,5 @@
 use crate::booter::{BootParts, Booter, Error};
-use log::{debug, warn};
+use log::{debug, info, warn};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -31,11 +31,12 @@ impl Syslinux {
             if let Err(e) = fs::metadata(&search_path) {
                 warn!("{}: {}", search_path.display(), e)
             } else {
+                info!("found syslinux configuration at {}", search_path.display());
                 return Ok(Syslinux { path: search_path });
             }
         }
 
-        Err(Error::NotFound)
+        Err(Error::BootConfigNotFound)
     }
 }
 

@@ -164,7 +164,6 @@ fn logic() -> anyhow::Result<()> {
         };
     };
 
-    debug!("{selected}");
     selected.kexec()?;
 
     Ok(())
