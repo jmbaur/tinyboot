@@ -12,14 +12,14 @@ pub struct Syslinux {
 impl Syslinux {
     pub fn new(mount_point: &Path) -> Result<Syslinux, Error> {
         for path in [
-            "/boot/extlinux/extlinux.conf",
-            "/extlinux/extlinux.conf",
-            "/extlinux.conf",
-            "/boot/syslinux/extlinux.conf",
-            "/boot/syslinux/syslinux.cfg",
-            "/syslinux/extlinux.conf",
-            "/syslinux/syslinux.cfg",
-            "/syslinux.cfg",
+            "boot/extlinux/extlinux.conf",
+            "extlinux/extlinux.conf",
+            "extlinux.conf",
+            "boot/syslinux/extlinux.conf",
+            "boot/syslinux/syslinux.cfg",
+            "syslinux/extlinux.conf",
+            "syslinux/syslinux.cfg",
+            "syslinux.cfg",
         ] {
             let search_path = mount_point.join(path);
 
