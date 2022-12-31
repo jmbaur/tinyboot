@@ -86,7 +86,14 @@ fn logic() -> anyhow::Result<()> {
     let parts = find_block_devices()?
         .iter()
         .filter_map(|dev| {
-            let mountpoint = PathBuf::from("/tmp").join(dev);
+            let mountpoint = PathBuf::from("/tmp")
+                .join(dev.to_str().expect("invalid unicode").replace('/', "-"));
+
+            if let Err(e) = std::fs::create_dir_all(&mountpoint) {
+                eprintln!("{e}");
+                return None;
+            }
+
             if let Err(e) = nix::mount::mount(
                 Some(dev.as_path()),
                 &mountpoint,
@@ -97,6 +104,7 @@ fn logic() -> anyhow::Result<()> {
                 eprintln!("{e}");
                 return None;
             };
+
             match boot::syslinux::Syslinux::new(&mountpoint)
                 .map(|s| s.get_parts().ok())
                 .ok()
