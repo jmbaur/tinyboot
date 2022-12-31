@@ -48,7 +48,6 @@ impl Display for BootParts {
 
 impl BootParts {
     pub fn kexec(&self) -> std::io::Result<()> {
-        println!("{self}");
         let kernel = std::fs::File::open(&self.kernel).unwrap().as_raw_fd() as usize;
         let initrd = std::fs::File::open(&self.initrd).unwrap().as_raw_fd() as usize;
         let cmdline = std::ffi::CString::new(self.cmdline.as_str()).unwrap();

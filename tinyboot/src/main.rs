@@ -1,16 +1,20 @@
 use boot::booter::{BootParts, Booter};
+use boot::syslinux;
+use log::{debug, error, info};
 use nix::mount::{self, MsFlags};
-use std::io::{Read, Seek};
+use simplelog::{Config, LevelFilter, SimpleLogger};
+use std::io::{self, Read, Seek};
 use std::path::{Path, PathBuf};
+use std::{convert, fs, process};
 
 const NONE: Option<&'static [u8]> = None;
 
 fn mount_pseudofilesystems() -> anyhow::Result<()> {
-    std::fs::create_dir_all("/mnt")?;
-    std::fs::create_dir_all("/sys")?;
-    std::fs::create_dir_all("/tmp")?;
-    std::fs::create_dir_all("/dev")?;
-    std::fs::create_dir_all("/proc")?;
+    fs::create_dir_all("/mnt")?;
+    fs::create_dir_all("/sys")?;
+    fs::create_dir_all("/tmp")?;
+    fs::create_dir_all("/dev")?;
+    fs::create_dir_all("/proc")?;
     mount::mount(
         NONE,
         "/sys",
@@ -38,7 +42,7 @@ fn mount_pseudofilesystems() -> anyhow::Result<()> {
 }
 
 fn find_block_devices() -> anyhow::Result<Vec<PathBuf>> {
-    Ok(std::fs::read_dir("/sys/class/block")?
+    Ok(fs::read_dir("/sys/class/block")?
         .into_iter()
         .filter_map(|blk_dev| {
             if blk_dev.is_err() {
@@ -47,7 +51,7 @@ fn find_block_devices() -> anyhow::Result<Vec<PathBuf>> {
             let direntry = blk_dev.expect("not err");
             let mut path = direntry.path();
             path.push("uevent");
-            match std::fs::read_to_string(path).map(|uevent| {
+            match fs::read_to_string(path).map(|uevent| {
                 let mut is_partition = false;
                 let mut dev_path = PathBuf::from("/dev");
                 for line in uevent.lines() {
@@ -67,8 +71,8 @@ fn find_block_devices() -> anyhow::Result<Vec<PathBuf>> {
         .collect::<Vec<PathBuf>>())
 }
 
-fn shell(sh: &str) -> Result<(), std::convert::Infallible> {
-    _ = std::process::Command::new(sh)
+fn shell(sh: &str) -> Result<(), convert::Infallible> {
+    _ = process::Command::new(sh)
         .spawn()
         .expect("emergency shell failed to run")
         .wait()
@@ -77,8 +81,8 @@ fn shell(sh: &str) -> Result<(), std::convert::Infallible> {
 }
 
 fn detect_fs_type(p: &Path) -> anyhow::Result<String> {
-    let mut f = std::fs::File::open(p)?;
-    f.seek(std::io::SeekFrom::Start(1080))?;
+    let mut f = fs::File::open(p)?;
+    f.seek(io::SeekFrom::Start(1080))?;
     let mut buffer = [0; 2];
     f.read_exact(&mut buffer)?;
     let comp_buf = &nix::sys::statfs::EXT4_SUPER_MAGIC.0.to_le_bytes()[0..2];
@@ -91,8 +95,6 @@ fn detect_fs_type(p: &Path) -> anyhow::Result<String> {
 }
 
 fn logic() -> anyhow::Result<()> {
-    println!("tinyboot started");
-
     mount_pseudofilesystems()?;
 
     let parts = find_block_devices()?
@@ -105,12 +107,17 @@ fn logic() -> anyhow::Result<()> {
                     .replace('/', "-"),
             );
 
-            if let Err(e) = std::fs::create_dir_all(&mountpoint) {
-                eprintln!("{e}");
+            if let Err(e) = fs::create_dir_all(&mountpoint) {
+                error!("{e}");
                 return None;
             }
 
             let Ok(fstype) = detect_fs_type(dev) else { return None; };
+            debug!(
+                "detected {} fstype on {}",
+                fstype,
+                dev.to_str().expect("invalid unicode")
+            );
 
             if let Err(e) = nix::mount::mount(
                 Some(dev.as_path()),
@@ -119,16 +126,16 @@ fn logic() -> anyhow::Result<()> {
                 nix::mount::MsFlags::MS_RDONLY,
                 NONE,
             ) {
-                eprintln!("{e}");
+                error!("{e}");
                 return None;
             };
 
-            match boot::syslinux::Syslinux::new(&mountpoint)
-                .map(|s| s.get_parts().ok())
-                .ok()
-            {
-                Some(p) => p,
-                _ => None,
+            match syslinux::Syslinux::new(&mountpoint).map(|s| s.get_parts()) {
+                Ok(Ok(p)) => Some(p),
+                e => {
+                    error!("{e:#?}");
+                    None
+                }
             }
         })
         .flatten()
@@ -146,7 +153,7 @@ fn logic() -> anyhow::Result<()> {
     let selected = 'input: loop {
         print!("choose a boot option: ");
         let mut input = String::new();
-        _ = std::io::stdin().read_line(&mut input)?;
+        _ = io::stdin().read_line(&mut input)?;
         let selection = match input.trim().parse::<usize>() {
             Ok(x) if 0 < x || x < parts.len() - 1 => x,
             _ => {
@@ -158,15 +165,18 @@ fn logic() -> anyhow::Result<()> {
         break 'input &parts[selection + 1];
     };
 
+    debug!("{selected}");
     selected.kexec()?;
 
     Ok(())
 }
 
-fn main() -> Result<(), std::convert::Infallible> {
+fn main() -> Result<(), convert::Infallible> {
+    SimpleLogger::init(LevelFilter::Info, Config::default()).expect("failed to configure logger");
+    info!("tinyboot started");
     if let Err(e) = logic() {
-        println!("{e}");
-        return shell(std::option_env!("TINYBOOT_EMERGENCY_SHELL").unwrap_or("/bin/sh"));
+        error!("{e}");
+        return shell(option_env!("TINYBOOT_EMERGENCY_SHELL").unwrap_or("/bin/sh"));
     };
     unreachable!();
 }
