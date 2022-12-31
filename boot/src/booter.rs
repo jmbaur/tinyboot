@@ -63,8 +63,9 @@ impl BootParts {
             .as_raw_fd() as usize;
         let initrd = fs::File::open(&self.initrd)
             .expect("failed to open initrd")
-            .as_raw_fd() as usize;
+            .as_raw_fd();
         let cmdline = ffi::CString::new(self.cmdline.as_str()).expect("failed to prepare cmdline");
+        let cmdline = cmdline.to_bytes_with_nul();
 
         debug!("kernel loaded at fd {}", kernel);
         debug!("initrd loaded at fd {}", initrd);
@@ -80,7 +81,7 @@ impl BootParts {
                 in("w8") nix::libc::SYS_kexec_file_load,
                 inout("x0") kernel => retval,
                 in("x1") initrd,
-                in("x2") cmdline.to_bytes_with_nul().len(),
+                in("x2") cmdline.len(),
                 in("x3") cmdline.as_ptr(),
                 in("x4") 0,
                 in("x5") 0,
@@ -94,8 +95,8 @@ impl BootParts {
                 inout("rax") nix::libc::SYS_kexec_file_load => retval,
                 in("rdi") kernel,
                 in("rsi") initrd,
-                in("rdx") cmdline.to_bytes_with_nul().len(),
-                in("r10") cmdline.to_bytes_with_nul().as_ptr(),
+                in("rdx") cmdline.len(),
+                in("r10") cmdline.as_ptr(),
                 in("r8") 0,
                 in("r9") 0,
             );
