@@ -85,17 +85,17 @@ fn logic() -> anyhow::Result<()> {
                     .replace('/', "-"),
             );
 
-            if let Err(e) = fs::create_dir_all(&mountpoint) {
-                error!("{e}");
-                return None;
-            }
-
             let Ok(fstype) = detect_fs_type(dev) else { return None; };
             debug!(
                 "detected {} fstype on {}",
                 fstype,
                 dev.to_str().expect("invalid unicode")
             );
+
+            if let Err(e) = fs::create_dir_all(&mountpoint) {
+                error!("{e}");
+                return None;
+            }
 
             if let Err(e) = nix::mount::mount(
                 Some(dev.as_path()),
