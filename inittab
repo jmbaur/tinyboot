@@ -1,0 +1,10 @@
+::sysinit:/bin/mount -t devpts devpts /dev/pts
+::sysinit:/bin/mount -t devtmpfs devtmpfs /dev
+::sysinit:/bin/mount -t proc proc /proc
+::sysinit:/bin/mount -t sysfs sysfs /sys
+::sysinit:/bin/mount -t tmpfs tmpfs /tmp
+::ctrlaltdel:/sbin/reboot
+::shutdown:/sbin/swapoff -a
+::shutdown:/bin/umount -a -r
+::restart:/sbin/init
+::respawn:/bin/tinyboot tinyboot.log=debug

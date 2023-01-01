@@ -2,45 +2,13 @@ use boot::booter::{BootParts, Booter};
 use boot::syslinux;
 use log::LevelFilter;
 use log::{debug, error, info};
-use nix::mount::{self, MsFlags};
+use nix::mount;
 use std::io::{self, Read, Seek};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::{convert, env, fs, process};
 
 const NONE: Option<&'static [u8]> = None;
-
-fn mount_pseudofilesystems() -> anyhow::Result<()> {
-    fs::create_dir_all("/mnt")?;
-    fs::create_dir_all("/sys")?;
-    fs::create_dir_all("/tmp")?;
-    fs::create_dir_all("/dev")?;
-    fs::create_dir_all("/proc")?;
-    mount::mount(
-        NONE,
-        "/sys",
-        Some("sysfs"),
-        MsFlags::MS_NOSUID | MsFlags::MS_NODEV | MsFlags::MS_NOEXEC | MsFlags::MS_RELATIME,
-        NONE,
-    )?;
-    mount::mount(
-        NONE,
-        "/tmp",
-        Some("tmpfs"),
-        MsFlags::MS_NOSUID | MsFlags::MS_NODEV,
-        NONE,
-    )?;
-    mount::mount(NONE, "/dev", Some("devtmpfs"), MsFlags::MS_NOSUID, NONE)?;
-    mount::mount(
-        NONE,
-        "/proc",
-        Some("proc"),
-        MsFlags::MS_NOSUID | MsFlags::MS_NODEV | MsFlags::MS_NOEXEC,
-        NONE,
-    )?;
-
-    Ok(())
-}
 
 fn find_block_devices() -> anyhow::Result<Vec<PathBuf>> {
     Ok(fs::read_dir("/sys/class/block")?
@@ -122,7 +90,7 @@ fn logic() -> anyhow::Result<()> {
                 Some(dev.as_path()),
                 &mountpoint,
                 Some(fstype.as_str()),
-                nix::mount::MsFlags::MS_RDONLY,
+                mount::MsFlags::MS_RDONLY,
                 NONE,
             ) {
                 error!("{e}");
@@ -204,8 +172,6 @@ impl Config {
 }
 
 fn main() -> Result<(), convert::Infallible> {
-    mount_pseudofilesystems().expect("failed to mount pseudofilesystems");
-
     let args: Vec<String> = env::args().collect();
 
     let cfg = Config::new(args.as_slice());
@@ -217,7 +183,7 @@ fn main() -> Result<(), convert::Infallible> {
     debug!("config: {:?}", cfg);
 
     if let Err(e) = logic() {
-        error!("failed to boot {e}");
+        error!("failed to boot: {e}");
         return shell(option_env!("TINYBOOT_EMERGENCY_SHELL").unwrap_or("/bin/sh"));
     };
 

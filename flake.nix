@@ -1,5 +1,5 @@
 {
-  description = "A small '/init' for linuxboot";
+  description = "A small initramfs for linuxboot";
   inputs = {
     crane.inputs.nixpkgs.follows = "nixpkgs";
     crane.url = "github:ipetkov/crane";

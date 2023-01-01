@@ -11,9 +11,5 @@ in
   CARGO_BUILD_TARGET = target;
   CARGO_BUILD_RUSTFLAGS = "-C target-feature=+crt-static";
   cargoExtraArgs = "-p tinyboot";
-  postInstall = ''
-    ln -s $out/bin/tinyboot $out/init
-    ln -s $out/bin/tinyboot $out/linuxrc
-  '';
   passthru = { inherit toolchain; };
 }
