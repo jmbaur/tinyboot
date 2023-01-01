@@ -113,7 +113,14 @@ fn logic() -> anyhow::Result<()> {
             match syslinux::Syslinux::new(&mountpoint).map(|s| s.get_parts()) {
                 Ok(Ok(p)) => Some(p),
                 e => {
-                    error!("{e:#?}");
+                    match e {
+                        Ok(Err(e)) => error!("failed to get boot parts: {}", e),
+                        Err(e) => error!("failed to get syslinux config: {}", e),
+                        _ => unreachable!(),
+                    }
+                    if let Err(e) = nix::mount::umount2(&mountpoint, mount::MntFlags::MNT_DETACH) {
+                        error!("umount2: {e}");
+                    }
                     None
                 }
             }
