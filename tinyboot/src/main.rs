@@ -51,13 +51,24 @@ fn shell(sh: &str) -> Result<(), convert::Infallible> {
 
 fn detect_fs_type(p: &Path) -> anyhow::Result<String> {
     let mut f = fs::File::open(p)?;
-    f.seek(io::SeekFrom::Start(1080))?;
-    let mut buffer = [0; 2];
-    f.read_exact(&mut buffer)?;
-    let comp_buf = &nix::sys::statfs::EXT4_SUPER_MAGIC.0.to_le_bytes()[0..2];
 
-    if buffer == comp_buf {
-        return Ok(String::from("ext4"));
+    {
+        f.seek(io::SeekFrom::Start(3))?;
+        let mut buffer = [0; 8];
+        f.read_exact(&mut buffer)?;
+        if let Ok("mkfs.fat") = std::str::from_utf8(&buffer) {
+            return Ok(String::from("fat"));
+        }
+    }
+
+    {
+        f.seek(io::SeekFrom::Start(1080))?;
+        let mut buffer = [0; 2];
+        f.read_exact(&mut buffer)?;
+        let comp_buf = &nix::sys::statfs::EXT4_SUPER_MAGIC.0.to_le_bytes()[0..2];
+        if buffer == comp_buf {
+            return Ok(String::from("ext4"));
+        }
     }
 
     anyhow::bail!("unsupported fs type")
