@@ -9,7 +9,7 @@ let
     CARGO_BUILD_TARGET = target;
     CARGO_BUILD_RUSTFLAGS = "-C target-feature=+crt-static";
     "CARGO_TARGET_${toEnvVar target}_LINKER" = "${stdenv.cc.targetPrefix}cc";
-    "CARGO_TARGET_${toEnvVar target}_RUNNER" = "qemu-aarch64";
+    "CARGO_TARGET_${toEnvVar target}_RUNNER" = "qemu-${stdenv.hostPlatform.qemuArch}";
   };
 in
 (crane.lib.${stdenv.buildPlatform.system}.overrideToolchain
