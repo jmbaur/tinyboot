@@ -28,10 +28,7 @@
         })
       ];
       devShells = forAllSystems ({ pkgs, ... }: {
-        default = pkgs.mkShell {
-          inputsFrom = [ pkgs.tinyboot ];
-          inherit (pkgs.tinyboot) CARGO_BUILD_TARGET CARGO_BUILD_RUSTFLAGS;
-        };
+        default = pkgs.mkShell ({ inputsFrom = [ pkgs.tinyboot ]; } // pkgs.tinyboot.env);
       });
       packages = forAllSystems ({ pkgs, ... }: {
         default = pkgs.tinyboot;

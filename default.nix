@@ -1,23 +1,25 @@
-{ lib, stdenv, pkgsStatic, rust-bin, crane, pkgconfig, qemu, ... }:
+{ lib, stdenv, pkgsBuildHost, pkgsStatic, crane, qemu, ... }:
 let
-  toEnvVar = str: lib.replaceStrings [ "-" ] [ "_" ] (lib.toUpper str);
-  # target = stdenv.hostPlatform.config;
+  toEnvVar = s: lib.replaceStrings [ "-" ] [ "_" ] (lib.toUpper s);
   target = pkgsStatic.stdenv.hostPlatform.config;
-  toolchain = (rust-bin.stable.latest.default.override {
+  toolchain = pkgsBuildHost.rust-bin.stable.latest.default.override {
     targets = [ target ];
-  });
-in
-(crane.lib.${stdenv.buildPlatform.system}.overrideToolchain toolchain).buildPackage
-  {
-    src = ./.;
-    cargoToml = ./tinyboot/Cargo.toml;
-    nativeBuildInputs = [ pkgconfig toolchain ];
+  };
+  env = {
     CARGO_BUILD_TARGET = target;
     CARGO_BUILD_RUSTFLAGS = "-C target-feature=+crt-static";
-    cargoExtraArgs = "-p tinyboot";
-    passthru = { inherit toolchain; };
-  } // lib.optionalAttrs (stdenv.hostPlatform.system != stdenv.buildPlatform.system) {
+    "CARGO_TARGET_${toEnvVar target}_LINKER" = "${stdenv.cc.targetPrefix}cc";
+    "CARGO_TARGET_${toEnvVar target}_RUNNER" = "qemu-aarch64";
+  };
+in
+(crane.lib.${stdenv.buildPlatform.system}.overrideToolchain
+  toolchain
+).buildPackage ({
+  src = ./.;
+  cargoToml = ./tinyboot/Cargo.toml;
   depsBuildBuild = [ qemu ];
-  "CARGO_TARGET_${toEnvVar target}_LINKER" = "${stdenv.cc.targetPrefix}cc";
-  "CARGO_TARGET_${toEnvVar target}_RUNNER" = "qemu-aarch64";
-}
+  nativeBuildInputs = [ toolchain ];
+  HOST_CC = "${stdenv.cc.nativePrefix}cc";
+  cargoExtraArgs = "-p tinyboot";
+  passthru = { inherit env; };
+} // env)
