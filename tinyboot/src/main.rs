@@ -194,7 +194,19 @@ fn main() -> Result<(), convert::Infallible> {
 
     let cfg = Config::new(args.as_slice());
 
-    printk::init("tinyboot", cfg.log_level).expect("failed to setup logger");
+    fern::Dispatch::new()
+        .format(|out, message, record| {
+            out.finish(format_args!(
+                "{}[{}]: {}",
+                "tinyboot",
+                record.level(),
+                message
+            ))
+        })
+        .level(cfg.log_level)
+        .chain(std::io::stdout())
+        .apply()
+        .expect("failed to initialize logger");
 
     info!("started");
     debug!("args: {:?}", args);

@@ -1,16 +1,10 @@
 use log::debug;
 use nix::libc;
-use std::ffi::c_long;
 use std::fmt::{self, Display};
 use std::os::fd::AsRawFd;
 use std::path::PathBuf;
 use std::time;
 use std::{arch, error, ffi, fs, io, thread};
-
-// NOTE: this is not defined in rust's libc crate for musl aarch64, see
-// https://git.musl-libc.org/cgit/musl/tree/arch/aarch64/bits/syscall.h.in#n279 for the definition
-// of aarch64's kexec_file_load.
-const SYS_KEXEC_FILE_LOAD_AARCH64: c_long = 294;
 
 #[derive(Debug)]
 pub enum Error {
@@ -79,12 +73,17 @@ impl BootParts {
 
         let retval: usize;
 
-        // TODO(jared): pass dtb
         #[cfg(target_arch = "aarch64")]
         unsafe {
+            // NOTE: this is not defined in rust's libc crate for musl aarch64, see
+            // https://git.musl-libc.org/cgit/musl/tree/arch/aarch64/bits/syscall.h.in#n279 for the definition
+            // of aarch64's kexec_file_load.
+            const SYS_KEXEC_FILE_LOAD: std::ffi::c_long = 294;
+
+            // TODO(jared): pass dtb
             arch::asm!(
                 "svc #0",
-                in("w8") SYS_KEXEC_FILE_LOAD_AARCH64,
+                in("w8") SYS_KEXEC_FILE_LOAD,
                 inout("x0") kernel => retval,
                 in("x1") initrd,
                 in("x2") cmdline.len(),
