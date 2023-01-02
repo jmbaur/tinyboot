@@ -5,7 +5,7 @@ use log::{debug, error, info};
 use nix::mount;
 use std::io::{self, Read, Seek};
 use std::path::{Path, PathBuf};
-use std::str::FromStr;
+use std::str::{self, FromStr};
 use std::{convert, env, fs, process};
 
 const NONE: Option<&'static [u8]> = None;
@@ -56,7 +56,7 @@ fn detect_fs_type(p: &Path) -> anyhow::Result<String> {
         f.seek(io::SeekFrom::Start(3))?;
         let mut buffer = [0; 8];
         f.read_exact(&mut buffer)?;
-        if let Ok("mkfs.fat") = std::str::from_utf8(&buffer) {
+        if let Ok("mkfs.fat") = str::from_utf8(&buffer) {
             return Ok(String::from("fat"));
         }
     }
@@ -204,7 +204,7 @@ fn main() -> Result<(), convert::Infallible> {
             ))
         })
         .level(cfg.log_level)
-        .chain(std::io::stdout())
+        .chain(io::stderr())
         .apply()
         .expect("failed to initialize logger");
 
