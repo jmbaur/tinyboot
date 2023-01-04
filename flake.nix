@@ -22,9 +22,7 @@
         rust-overlay.overlays.default
         (final: prev: {
           tinyboot = prev.callPackage ./. { inherit crane; };
-          tinyboot-initramfs = prev.callPackage ./initramfs.nix {
-            inherit (final) tinyboot;
-          };
+          tinyboot-initramfs = prev.callPackage ./initramfs.nix { inherit (final) tinyboot; };
         })
       ];
       devShells = forAllSystems ({ pkgs, ... }: {
