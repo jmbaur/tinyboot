@@ -3,10 +3,11 @@ use boot::syslinux;
 use log::LevelFilter;
 use log::{debug, error, info};
 use nix::mount;
+use std::ffi::OsStr;
 use std::io::{self, Read, Seek};
 use std::path::{Path, PathBuf};
 use std::str::{self, FromStr};
-use std::{convert, env, fs, process};
+use std::{env, fs, process};
 
 const NONE: Option<&'static [u8]> = None;
 
@@ -40,16 +41,12 @@ fn find_block_devices() -> anyhow::Result<Vec<PathBuf>> {
         .collect::<Vec<PathBuf>>())
 }
 
-fn shell(sh: &str) -> Result<(), convert::Infallible> {
-    _ = process::Command::new(sh)
-        .spawn()
-        .expect("emergency shell failed to run")
-        .wait()
-        .expect("emergency shell was not running");
+fn shell(sh: impl AsRef<OsStr>) -> io::Result<()> {
+    _ = process::Command::new(sh).spawn()?.wait()?;
     Ok(())
 }
 
-fn detect_fs_type(p: &Path) -> anyhow::Result<String> {
+fn detect_fs_type(p: impl AsRef<Path>) -> anyhow::Result<String> {
     let mut f = fs::File::open(p)?;
 
     {
@@ -169,11 +166,15 @@ impl Default for Config {
 }
 
 impl Config {
-    pub fn new(args: &[String]) -> Self {
+    pub fn new<T, I>(args: T) -> Self
+    where
+        T: IntoIterator<Item = I>,
+        I: Into<String>,
+    {
         let mut cfg = Config::default();
 
-        args.iter().for_each(|arg| {
-            if let Some(split) = arg.split_once('=') {
+        args.into_iter().for_each(|arg| {
+            if let Some(split) = arg.into().split_once('=') {
                 // TODO(jared): remove when more cmdline options are added
                 #[allow(clippy::single_match)]
                 match split.0 {
@@ -189,7 +190,7 @@ impl Config {
     }
 }
 
-fn main() -> Result<(), convert::Infallible> {
+fn main() -> ! {
     let args: Vec<String> = env::args().collect();
 
     let cfg = Config::new(args.as_slice());
@@ -214,7 +215,7 @@ fn main() -> Result<(), convert::Infallible> {
 
     if let Err(e) = logic() {
         error!("failed to boot: {e}");
-        return shell(option_env!("TINYBOOT_EMERGENCY_SHELL").unwrap_or("/bin/sh"));
+        shell(option_env!("TINYBOOT_EMERGENCY_SHELL").unwrap_or("/bin/sh")).expect("shell crashed");
     };
 
     unreachable!();
