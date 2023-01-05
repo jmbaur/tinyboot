@@ -1,13 +1,13 @@
 { lib, stdenv, pkgsBuildHost, pkgsStatic, crane, qemu, ... }:
 let
   toEnvVar = s: lib.replaceStrings [ "-" ] [ "_" ] (lib.toUpper s);
+  isCrossBuild = stdenv.hostPlatform.system != stdenv.buildPlatform.system;
   target = pkgsStatic.stdenv.hostPlatform.config;
-  toolchain = pkgsBuildHost.rust-bin.stable.latest.default.override {
-    targets = [ target ];
-  };
-  env = {
+  toolchain = pkgsBuildHost.rust-bin.stable.latest.default.override { targets = [ target ]; };
+  env = (lib.optionalAttrs isCrossBuild {
     "CARGO_TARGET_${toEnvVar target}_LINKER" = "${stdenv.cc.targetPrefix}cc";
     "CARGO_TARGET_${toEnvVar target}_RUNNER" = "qemu-${stdenv.hostPlatform.qemuArch}";
+  }) // {
     CARGO_BUILD_RUSTFLAGS = "-C target-feature=+crt-static";
     CARGO_BUILD_TARGET = target;
     CARGO_PRIMARY_PACKAGE = "tinyboot";
@@ -17,7 +17,7 @@ in
 (crane.lib.${stdenv.buildPlatform.system}.overrideToolchain toolchain).buildPackage ({
   src = ./.;
   cargoToml = ./tinyboot/Cargo.toml;
-  depsBuildBuild = [ qemu ];
+  depsBuildBuild = lib.optional isCrossBuild qemu;
   nativeBuildInputs = [ toolchain ];
   passthru = { inherit env; };
 } // env)
