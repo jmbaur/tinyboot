@@ -7,7 +7,7 @@ use std::ffi::OsStr;
 use std::io::{self, Read, Seek};
 use std::path::{Path, PathBuf};
 use std::str::{self, FromStr};
-use std::{env, fs, process};
+use std::{env, fs, process, thread, time};
 
 const NONE: Option<&'static [u8]> = None;
 
@@ -136,13 +136,14 @@ fn logic() -> anyhow::Result<()> {
         .for_each(|(i, part)| println!("{}: {part}\n", i + 1));
 
     let selected = 'input: loop {
-        print!("\n\nCHOOSE A BOOT OPTION: ");
+        print!("CHOOSE A BOOT OPTION: ");
         let mut input = String::new();
         _ = io::stdin().read_line(&mut input)?;
         match input.trim().parse::<usize>() {
             Ok(x) if 0 < x || x < parts.len() - 1 => break 'input &parts[x - 1],
             _ => {
                 print!("\n\nBAD SELECTION!\n\n");
+                thread::sleep(time::Duration::from_secs(1));
                 continue;
             }
         };
