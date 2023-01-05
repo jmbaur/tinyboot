@@ -129,19 +129,20 @@ fn logic() -> anyhow::Result<()> {
         anyhow::bail!("no bootable partitions found");
     }
 
+    print!("\n\nBOOT OPTIONS:\n\n");
     parts
         .iter()
         .enumerate()
         .for_each(|(i, part)| println!("{}: {part}\n", i + 1));
 
     let selected = 'input: loop {
-        print!("choose a boot option: ");
+        print!("\n\nCHOOSE A BOOT OPTION: ");
         let mut input = String::new();
         _ = io::stdin().read_line(&mut input)?;
         match input.trim().parse::<usize>() {
             Ok(x) if 0 < x || x < parts.len() - 1 => break 'input &parts[x - 1],
             _ => {
-                println!("bad selection");
+                print!("\n\nBAD SELECTION!\n\n");
                 continue;
             }
         };
