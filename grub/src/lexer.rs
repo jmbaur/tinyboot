@@ -57,6 +57,11 @@ impl<'a> Lexer<'a> {
                     while let Some(next) = self.src.peek() {
                         // Multi-line comments can have all-whitespace in front of the octothorpes.
                         if next.is_ascii_whitespace() {
+                            // Not a multi-line comment since there were two consecutive line feed
+                            // characters.
+                            if next == &LINE_FEED {
+                                break 'outer;
+                            }
                             _ = self.src.next().expect("peek is not None");
                             continue;
                         }
@@ -246,7 +251,22 @@ mod tests {
                 Token::Value("foo".to_string()),
                 Token::Comment("bar".to_string()),
             ]
-        )
+        );
+
+        assert_eq!(
+            tokenize(
+                r#"# foo
+                   # bar
+
+                   # baz"#
+            )
+            .unwrap(),
+            vec![
+                Token::Comment("foo\n bar".to_string()),
+                Token::Newline,
+                Token::Comment("baz".to_string()),
+            ]
+        );
     }
 
     #[test]
