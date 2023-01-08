@@ -885,7 +885,7 @@ mod tests {
         let config = r#"
         "#;
         let mut parser = Parser::new(Lexer::new(config));
-        let ast = parser.parse().expect("no parsing errors");
+        let ast = parser.parse().unwrap();
         let mut evaluator = GrubEvaluator::new(NoopGrubCommands {});
         evaluator.eval(ast).expect("no evaluation errors");
     }
