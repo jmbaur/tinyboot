@@ -2,13 +2,13 @@ use crate::lexer::Lexer;
 use crate::token::Token;
 use std::iter::Peekable;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AssignmentStatement {
     pub name: String,
     pub value: Option<String>,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct IfStatement {
     pub not: bool,
     pub condition: CommandStatement,
@@ -17,14 +17,14 @@ pub struct IfStatement {
     pub alternative: Vec<Statement>,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WhileStatement {
     /// Make the boolean expression evaluate to false in order for the `consequence` to execute.
     pub until: bool,
     pub consequence: Vec<Statement>,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CommandArgument {
     /// A `Value` is one that can have embedded values inside of it, i.e. "${foo}bar" where the value
     /// of `$foo` is embedded inside the string with extra characters. The final value of a value
@@ -36,19 +36,19 @@ pub enum CommandArgument {
     Scope(Vec<Statement>),
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CommandStatement {
     pub command: String,
     pub args: Vec<CommandArgument>,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FunctionStatement {
-    name: String,
-    body: Vec<Statement>,
+    pub name: String,
+    pub body: Vec<Statement>,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Statement {
     Assignment(AssignmentStatement),
     Command(CommandStatement),
@@ -72,7 +72,6 @@ fn matches_command(s: &str) -> bool {
             | "badram"
             | "blocklist"
             | "boot"
-            | "case"
             | "cat"
             | "chainloader"
             | "clear"
@@ -88,26 +87,16 @@ fn matches_command(s: &str) -> bool {
             | "date"
             | "devicetree"
             | "distrust"
-            | "do"
-            | "done"
             | "drivemap"
             | "echo"
-            | "elif"
-            | "else"
-            | "esac"
             | "eval"
             | "export"
             | "false"
-            | "fi"
-            | "for"
-            | "function"
             | "gettext"
             | "gptsync"
             | "halt"
             | "hashsum"
             | "help"
-            | "if"
-            | "in"
             | "initrd"
             | "initrd16"
             | "insmod"
@@ -141,7 +130,6 @@ fn matches_command(s: &str) -> bool {
             | "rmmod"
             | "save_env"
             | "search"
-            | "select"
             | "sendkey"
             | "serial"
             | "set"
@@ -156,15 +144,11 @@ fn matches_command(s: &str) -> bool {
             | "terminal_output"
             | "terminfo"
             | "test"
-            | "then"
-            | "time"
             | "true"
             | "trust"
             | "unset"
-            | "until"
             | "verify_detached"
             | "videoinfo"
-            | "while"
             | "wrmsr"
             | "xen_hypervisor"
             | "xen_module"
