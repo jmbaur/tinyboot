@@ -1,10 +1,18 @@
-{ lib, buildEnv, runCommand, rsync, cpio, xz, pkgsStatic, tinyboot, compressed ? true, ... }:
-runCommand "tinyboot-initramfs" { nativeBuildInputs = [ cpio rsync ] ++ (lib.optional compressed xz); } ''
-  mkdir -p root/{etc,sbin,bin,mnt,dev/pts,proc,sys,tmp}
-  cp ${./inittab} root/etc/inittab
-  rsync -aP ${pkgsStatic.busybox}/ ${tinyboot}/ root/
-  pushd root &&
-    find . -print0 | cpio --null --create --format=newc >../initramfs.cpio &&
-    popd
-  ${if compressed then "xz --check=crc32 --lzma2=dict=512KiB <initramfs.cpio >$out" else "cp initramfs.cpio $out"}
-''
+{ lib, makeInitrdNG, buildEnv, pkgsStatic, busybox, tinyboot, ... }:
+let
+  initrdEnv = buildEnv {
+    name = "initrd-env";
+    paths = [ pkgsStatic.busybox tinyboot ];
+  };
+  initrd = makeInitrdNG {
+    compressor = "xz";
+    contents = [
+      { object = "${initrdEnv}/bin"; symlink = "/bin"; }
+      { object = "${initrdEnv}/sbin"; symlink = "/sbin"; }
+      { object = "${initrdEnv}/linuxrc"; symlink = "/init"; }
+      { object = "${./inittab/inittab}"; symlink = "/etc/inittab"; }
+      { object = "${./inittab/rcS}"; symlink = "/etc/init.d/rcS"; }
+    ];
+  };
+in
+initrd
