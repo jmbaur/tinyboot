@@ -1,4 +1,4 @@
-{ lib, makeInitrdNG, buildEnv, pkgsStatic, busybox, tinyboot, ... }:
+{ makeInitrdNG, buildEnv, pkgsStatic, tinyboot, ... }:
 let
   initrdEnv = buildEnv {
     name = "initrd-env";
