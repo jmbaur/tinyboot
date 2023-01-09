@@ -33,7 +33,7 @@ pub enum CommandArgument {
     /// A `Literal` is one that must be interpreted literally, oppposed to a value expression whose
     /// final value must be expanded. A literal expressions final value is it's initial value.
     Literal(String),
-    Scope(Vec<Statement>),
+    Block(Vec<Statement>),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -54,6 +54,7 @@ pub enum Statement {
     Command(CommandStatement),
     Function(FunctionStatement),
     If(IfStatement),
+    #[allow(dead_code)]
     While(WhileStatement),
 }
 
@@ -239,7 +240,7 @@ impl<'a> Parser<'a> {
                         continue;
                     }
                 }
-                Token::OpenBrace => args.push(CommandArgument::Scope(self.parse_scope()?)),
+                Token::OpenBrace => args.push(CommandArgument::Block(self.parse_scope()?)),
                 _ => return Err(format!("invalid syntax: {:?}", token)),
             };
         }

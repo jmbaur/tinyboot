@@ -5,126 +5,73 @@ use crate::parser::{
     Statement,
 };
 
-pub type GrubEnvironment = HashMap<String, String>;
+pub type GrubEnvironment = HashMap<String, Option<String>>;
 
 pub type ExitCode = u8;
 
 pub type CommandReturn = (GrubEnvironment, ExitCode);
 
-pub trait GrubCommands {
-    fn run(&self, command: String, args: Vec<String>, env: GrubEnvironment) -> CommandReturn;
-}
-
-#[derive(Debug)]
-struct GrubScopedEnvironment {
-    /// The child scopes of the current scope.
-    scopes: HashMap<String, GrubEnvironment>,
-    /// The mapping of a scope to its parent scope.
-    relationships: HashMap<String, Option<String>>,
-}
-
-impl Default for GrubScopedEnvironment {
-    fn default() -> Self {
-        let mut scopes = HashMap::new();
-        scopes.insert("root".to_string(), HashMap::new());
-        let mut relationships = HashMap::new();
-        relationships.insert("root".to_string(), None);
-
-        Self {
-            scopes,
-            relationships,
-        }
-    }
-}
-
-impl GrubScopedEnvironment {
-    pub fn add_scope(&mut self, scope: impl Into<String>, parent: String) -> Result<(), String> {
-        let scope = scope.into();
-        if self.scopes.contains_key(&scope) && self.relationships.contains_key(&scope) {
-            return Err("scope already exists".to_string());
-        }
-        _ = self.scopes.insert(scope.clone(), HashMap::new());
-        _ = self.relationships.insert(scope, Some(parent));
-        Ok(())
-    }
-
-    /// Gets the grub environment for a given scope. The magic scope name "root" obtains the
-    /// top-level grub environment.
-    pub fn get_environment(&self, scope: impl Into<String>) -> Result<GrubEnvironment, String> {
-        let scope = scope.into();
-        let mut entire_env = HashMap::new();
-        let scope_env = self
-            .scopes
-            .get(&scope)
-            .ok_or_else(|| "scope not found".to_string())?;
-
-        entire_env.extend(scope_env.to_owned());
-
-        let mut current = &scope;
-        loop {
-            match self.relationships.get(current) {
-                Some(Some(parent)) => {
-                    let Some(scope) = self.scopes.get(parent) else {
-                        return Err("scope not found".to_string());
-                    };
-                    entire_env.extend(scope.to_owned());
-                    current = parent;
-                }
-                Some(None) => break,
-                None => return Err("scope not found".to_string()),
-            }
-        }
-
-        Ok(entire_env)
-    }
-
-    /// Returns the same value as HashMap's `insert()` method.
-    pub fn set_environment(
-        &mut self,
-        scope: impl Into<String>,
-        key: impl Into<String>,
-        val: Option<impl Into<String>>,
-    ) -> Option<String> {
-        if let Some(env) = self.scopes.get_mut(&scope.into()) {
-            if let Some(val) = val {
-                env.insert(key.into(), val.into())
-            } else {
-                env.remove(&key.into())
-            }
-        } else {
-            None
-        }
-    }
-
-    /// Returns the same value as HashMap's `insert()` method.
-    pub fn overwrite_environment(
-        &mut self,
-        scope: impl Into<String>,
+pub trait Grub {
+    fn run_command(
+        &self,
+        command: String,
+        args: Vec<String>,
         env: GrubEnvironment,
-    ) -> Option<GrubEnvironment> {
-        self.scopes.insert(scope.into(), env)
+    ) -> CommandReturn;
+
+    /// Selects a single entry to boot into from a map of menu/submenu names to the list of entries
+    /// in that menu. The special menu name "default" in the `menus` HashMap is the top-level menu.
+    /// All other entries in the HashMap are submenus.
+    fn select_menuentry(&self, menus: HashMap<String, Vec<MenuEntry>>) -> MenuEntry;
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum MenuType {
+    /// Menuentry contains statements to execute along with arguments to those statements.
+    Menuentry((Vec<Statement>, Vec<String>)),
+    Submenu(Vec<MenuEntry>),
+}
+
+impl Default for MenuType {
+    fn default() -> Self {
+        Self::Submenu(Vec::new())
     }
+}
+
+/// MenuEntry is a target that can be selected by a user to boot into or expand into more entries
+/// (i.e. a submenu).
+/// Menuentry docs: https://www.gnu.org/software/grub/manual/grub/html_node/menuentry.html
+/// Submenu docs: https://www.gnu.org/software/grub/manual/grub/html_node/submenu.html#submenu
+#[derive(Debug, PartialEq, Eq, Default)]
+pub struct MenuEntry {
+    title: String,
+    consequence: MenuType,
+    id: Option<String>,
+    class: Option<String>,
+    users: Option<String>,
+    unrestricted: Option<bool>,
+    hotkey: Option<String>,
 }
 
 pub struct GrubEvaluator<T> {
     commands: T,
-    current_scope: String,
     last_exit_code: u8,
-    environment: GrubScopedEnvironment,
+    environment: GrubEnvironment,
     functions: HashMap<String, Vec<Statement>>,
+    menus: HashMap<String, Vec<MenuEntry>>,
 }
 
 impl<T> GrubEvaluator<T>
 where
-    T: GrubCommands,
+    T: Grub,
 {
     pub fn new(commands: T) -> Self {
         GrubEvaluator {
             commands,
-            current_scope: "root".to_string(),
             last_exit_code: 0,
-            environment: GrubScopedEnvironment::default(),
+            environment: HashMap::new(),
             functions: HashMap::new(),
+            menus: HashMap::new(),
         }
     }
 
@@ -152,10 +99,7 @@ where
                     if interpolating && needs_closing_brace {
                         interpolating = false;
                         needs_closing_brace = false;
-                        let Ok(env) = self.environment.get_environment(self.current_scope.clone()) else {
-                            continue;
-                        };
-                        let Some(interpolated_value) = env
+                        let Some(Some(interpolated_value)) = self.environment
                             .get(&interpolated_identifier)
                             else { continue; };
                         final_value.push_str(interpolated_value);
@@ -163,7 +107,20 @@ where
                 }
                 _ => {
                     if interpolating {
-                        interpolated_identifier.push(char);
+                        if needs_closing_brace {
+                            interpolated_identifier.push(char);
+                        } else if
+                        // Stop interpolating if the character is not alphanumeric or is one of the
+                        // special characters that cannot be in an identifier.
+                        // TODO(jared): The `matches!()` args are just ones that work with
+                        // ../testdata/grub.cfg. Fill in further when more examples are discovered.
+                        matches!(char, '/') || !char.is_ascii_alphanumeric() {
+                            interpolating = false;
+                            let Some(Some(interpolated_value)) = self.environment
+                                .get(&interpolated_identifier)
+                                else { continue; };
+                            final_value.push_str(interpolated_value);
+                        }
                     } else {
                         final_value.push(char);
                     }
@@ -174,34 +131,134 @@ where
         final_value
     }
 
+    fn get_menuentry(&self, menuentry: &CommandStatement) -> Result<MenuEntry, String> {
+        let mut entry = MenuEntry::default();
+
+        let CommandArgument::Value(title) = menuentry
+                .args
+                .get(0)
+                .ok_or_else(|| "menuentry title not present".to_string())? else {
+                    return Err("menuentry title is not a CommandArgument::Value".to_string());
+                };
+        entry.title = self.interpolate_value(title.to_string());
+
+        // only valid with menuentry
+        let mut menuentry_consequence = (Vec::new(), Vec::new());
+        let mut submenu_consequence = Vec::new();
+        for arg in &menuentry.args[1..] {
+            match arg {
+                CommandArgument::Value(value) => {
+                    match value.split_once('=') {
+                        Some(("--class", class)) => entry.class = Some(class.to_string()),
+                        Some(("--users", users)) => entry.users = Some(users.to_string()),
+                        Some(("--hotkey", hotkey)) => entry.hotkey = Some(hotkey.to_string()),
+                        Some(("--id", id)) => entry.id = Some(id.to_string()),
+                        _ => {
+                            if value.as_str() == "--unrestricted" {
+                                entry.unrestricted = Some(true);
+                            } else if menuentry.command.as_str() == "menuentry" {
+                                menuentry_consequence
+                                    .1
+                                    .push(self.interpolate_value(value.to_string()));
+                            }
+                        }
+                    };
+                    if menuentry.command.as_str() == "menuentry" {
+                        menuentry_consequence
+                            .1
+                            .push(self.interpolate_value(value.to_string()));
+                    }
+                }
+                CommandArgument::Literal(literal) => {
+                    if menuentry.command.as_str() == "menuentry" {
+                        menuentry_consequence.1.push(literal.to_string());
+                    }
+                }
+                CommandArgument::Block(block) => {
+                    if menuentry.command.as_str() == "menuentry" {
+                        menuentry_consequence.0.extend(block.to_vec());
+                    } else if menuentry.command.as_str() == "submenu" {
+                        let entries = block
+                            .iter()
+                            .filter_map(|stmt| {
+                                let Statement::Command(cmd) = stmt else { return None; };
+                                if cmd.command != "menuentry" {
+                                    return None;
+                                }
+                                self.get_menuentry(cmd).ok()
+                            })
+                            .collect::<Vec<MenuEntry>>();
+                        submenu_consequence.extend(entries);
+                    }
+                }
+            };
+        }
+
+        if menuentry.command.as_str() == "menuentry" {
+            entry.consequence = MenuType::Menuentry(menuentry_consequence);
+        } else if menuentry.command.as_str() == "submenu" {
+            entry.consequence = MenuType::Submenu(submenu_consequence);
+        }
+
+        Ok(entry)
+    }
+
+    fn add_menuentry(
+        &mut self,
+        menuentry: CommandStatement,
+        submenu_name: Option<&str>,
+    ) -> Result<(), String> {
+        let entry = self.get_menuentry(&menuentry)?;
+
+        let submenu_name = submenu_name.unwrap_or("default");
+        if !self.menus.contains_key(submenu_name) {
+            self.menus.insert(submenu_name.to_string(), vec![]);
+        }
+
+        let menu = self
+            .menus
+            .get_mut(submenu_name)
+            .ok_or_else(|| "menu does not exist".to_string())?;
+
+        menu.push(entry);
+        Ok(())
+    }
+
     fn run_command(&mut self, command: CommandStatement) -> Result<(), String> {
-        let env = self
-            .environment
-            .get_environment(self.current_scope.clone())?;
+        match command.command.as_str() {
+            "menuentry" => self.add_menuentry(command, None)?,
+            "submenu" => self.add_menuentry(command, None)?,
+            _ => {
+                let args = command
+                    .args
+                    .iter()
+                    .filter_map(|arg| match arg {
+                        CommandArgument::Value(value) => {
+                            Some(self.interpolate_value(value.to_string()))
+                        }
+                        CommandArgument::Literal(literal) => Some(literal.to_string()),
+                        CommandArgument::Block(_) => {
+                            // TODO(jared): blocks are invalid here, return an error?
+                            None
+                        }
+                    })
+                    .collect();
 
-        let args = /*vec![]*/
-            command.args.iter().map(|arg| match arg {
-                CommandArgument::Value(value) => self.interpolate_value(value.to_string()),
-                CommandArgument::Literal(literal) => literal.to_string(),
-                CommandArgument::Scope(_scope) => todo!()
-            }).collect();
+                let (new_env, exit_code) =
+                    self.commands
+                        .run_command(command.command, args, self.environment.clone());
 
-        let (new_env, exit_code) = self.commands.run(command.command, args, env);
+                self.environment = new_env;
 
-        self.environment
-            .overwrite_environment(self.current_scope.clone(), new_env);
-
-        self.last_exit_code = exit_code;
+                self.last_exit_code = exit_code;
+            }
+        }
 
         Ok(())
     }
 
     fn run_variable_assignment(&mut self, assignment: AssignmentStatement) {
-        self.environment.set_environment(
-            self.current_scope.clone(),
-            assignment.name,
-            assignment.value,
-        );
+        self.environment.insert(assignment.name, assignment.value);
     }
 
     fn run_if_statement(&mut self, stmt: IfStatement) -> Result<(), String> {
@@ -227,8 +284,6 @@ where
     }
 
     fn add_function(&mut self, function: FunctionStatement) -> Result<(), String> {
-        self.environment
-            .add_scope(function.name.clone(), self.current_scope.clone())?;
         _ = self.functions.insert(function.name, function.body);
         Ok(())
     }
@@ -258,63 +313,19 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn test_grub_scoped_environment() {
-        let mut env = GrubScopedEnvironment::default();
-
-        // set variables are reflected correctly
-        _ = env.set_environment("root", "hello", Some("world".to_string()));
-        assert_eq!(
-            env.get_environment("root").unwrap(),
-            HashMap::from([("hello".to_string(), "world".to_string())])
-        );
-
-        // singly-nested scope is correctly retrieved
-        env.add_scope("foo", "root".to_string()).unwrap();
-        _ = env.set_environment("foo", "foohello".to_string(), Some("fooworld".to_string()));
-        assert_eq!(
-            env.get_environment("foo").unwrap(),
-            HashMap::from([
-                ("hello".to_string(), "world".to_string()),
-                ("foohello".to_string(), "fooworld".to_string())
-            ])
-        );
-
-        // overwriting the environment is reflected correctly
-        _ = env.overwrite_environment(
-            "foo",
-            HashMap::from([("bar".to_string(), "baz".to_string())]),
-        );
-        assert_eq!(
-            env.get_environment("foo").unwrap(),
-            HashMap::from([
-                ("hello".to_string(), "world".to_string()),
-                ("bar".to_string(), "baz".to_string())
-            ])
-        );
-
-        // doubly-nested scope is correctly retrieved
-        env.add_scope("bar", "foo".to_string()).unwrap();
-        assert_eq!(
-            env.get_environment("bar").unwrap(),
-            HashMap::from([
-                ("hello".to_string(), "world".to_string()),
-                ("bar".to_string(), "baz".to_string())
-            ]),
-        );
-
-        // unset variables are reflected correctly
-        _ = env.set_environment("foo", "bar".to_string(), None::<String>);
-        assert_eq!(
-            env.get_environment("foo").unwrap(),
-            HashMap::from([("hello".to_string(), "world".to_string()),])
-        );
-    }
-
-    struct NoopGrubCommands;
-    impl GrubCommands for NoopGrubCommands {
-        fn run(&self, _name: String, _args: Vec<String>, env: GrubEnvironment) -> CommandReturn {
+    struct SimpleGrubCommands;
+    impl Grub for SimpleGrubCommands {
+        fn run_command(
+            &self,
+            _name: String,
+            _args: Vec<String>,
+            env: GrubEnvironment,
+        ) -> CommandReturn {
             (env, 0)
+        }
+
+        fn select_menuentry(&self, _menus: HashMap<String, Vec<MenuEntry>>) -> MenuEntry {
+            todo!()
         }
     }
 
@@ -322,7 +333,7 @@ mod tests {
     fn test_full_example() {
         let mut parser = Parser::new(Lexer::new(include_str!("../testdata/grub.cfg")));
         let ast = parser.parse().unwrap();
-        let mut evaluator = GrubEvaluator::new(NoopGrubCommands {});
+        let mut evaluator = GrubEvaluator::new(SimpleGrubCommands {});
         evaluator.eval(ast).expect("no evaluation errors");
     }
 }

@@ -5,11 +5,11 @@ pub(crate) mod lexer;
 pub(crate) mod parser;
 pub(crate) mod token;
 
-pub use eval::{CommandReturn, ExitCode, GrubCommands, GrubEnvironment};
+pub use eval::{CommandReturn, ExitCode, Grub, GrubEnvironment};
 
 pub fn evaluate_config(
     mut config: impl io::Read,
-    commands: impl eval::GrubCommands,
+    commands: impl eval::Grub,
 ) -> Result<(), String> {
     let mut input = String::new();
     _ = config
