@@ -498,7 +498,12 @@ mod tests {
 
     #[test]
     fn test_function() {
-        let mut p = Parser::new(Lexer::new("function foobar { load_env; }"));
+        // TODO(jared): implement function calls
+        let src = r#"
+            function foobar { load_env; }
+            # foobar "foo" "bar"
+        "#;
+        let mut p = Parser::new(Lexer::new(src));
         let root = p.parse().unwrap();
         assert!(root.statements.len() == 1);
         assert_function_statement(
