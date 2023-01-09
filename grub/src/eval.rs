@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
 use crate::parser::{
-    self, AssignmentStatement, CommandStatement, FunctionStatement, IfStatement, Statement,
+    self, AssignmentStatement, CommandArgument, CommandStatement, FunctionStatement, IfStatement,
+    Statement,
 };
 
 pub type GrubEnvironment = HashMap<String, String>;
@@ -127,11 +128,65 @@ where
         }
     }
 
+    fn interpolate_value(&self, value: String) -> String {
+        let mut final_value = String::new();
+
+        let mut peeker = value.chars().peekable();
+        let mut interpolating = false;
+        let mut needs_closing_brace = false;
+        let mut interpolated_identifier = String::new();
+        while let Some(char) = peeker.next() {
+            match char {
+                '$' => {
+                    interpolating = true;
+                    if peeker.peek().map(|&c| c == '{').unwrap_or_default() {
+                        _ = peeker.next().expect("peek is not None");
+                        // look until closing brace
+                        needs_closing_brace = true;
+                    } else {
+                        // look until non ascii alphanumeric character
+                        needs_closing_brace = false;
+                    }
+                }
+                '}' => {
+                    if interpolating && needs_closing_brace {
+                        interpolating = false;
+                        needs_closing_brace = false;
+                        let Ok(env) = self.environment.get_environment(self.current_scope.clone()) else {
+                            continue;
+                        };
+                        let Some(interpolated_value) = env
+                            .get(&interpolated_identifier)
+                            else { continue; };
+                        final_value.push_str(interpolated_value);
+                    }
+                }
+                _ => {
+                    if interpolating {
+                        interpolated_identifier.push(char);
+                    } else {
+                        final_value.push(char);
+                    }
+                }
+            }
+        }
+
+        final_value
+    }
+
     fn run_command(&mut self, command: CommandStatement) -> Result<(), String> {
         let env = self
             .environment
             .get_environment(self.current_scope.clone())?;
-        let (new_env, exit_code) = self.commands.run(command.command, vec![], env);
+
+        let args = /*vec![]*/
+            command.args.iter().map(|arg| match arg {
+                CommandArgument::Value(value) => self.interpolate_value(value.to_string()),
+                CommandArgument::Literal(literal) => literal.to_string(),
+                CommandArgument::Scope(_scope) => todo!()
+            }).collect();
+
+        let (new_env, exit_code) = self.commands.run(command.command, args, env);
 
         self.environment
             .overwrite_environment(self.current_scope.clone(), new_env);
