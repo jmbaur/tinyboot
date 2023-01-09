@@ -8,6 +8,7 @@ use std::{arch, error, ffi, fs, io, thread};
 
 #[derive(Debug)]
 pub enum Error {
+    Many(Vec<Error>),
     BootConfigNotFound,
     IoError(io::Error),
 }

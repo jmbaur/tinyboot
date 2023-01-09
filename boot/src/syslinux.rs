@@ -1,4 +1,5 @@
 use crate::booter::{BootParts, Booter, Error};
+use itertools::{Either, Itertools};
 use log::{debug, info, warn};
 use std::{
     fs,
@@ -38,10 +39,8 @@ impl Syslinux {
 
         Err(Error::BootConfigNotFound)
     }
-}
 
-impl Booter for Syslinux {
-    fn get_parts(&self) -> Result<Vec<BootParts>, Error> {
+    fn get_parts_raw(&self) -> Result<Vec<BootParts>, Error> {
         let contents = fs::read_to_string(&self.path)?;
 
         let mut parts = vec![];
@@ -136,6 +135,34 @@ impl Booter for Syslinux {
     }
 }
 
+impl Booter for Syslinux {
+    fn get_parts(&self) -> Result<Vec<BootParts>, Error> {
+        let parts = self.get_parts_raw()?;
+        let (parts, errs): (Vec<_>, Vec<_>) = parts
+            .iter()
+            .map(|part| -> Result<BootParts, Error> {
+                Ok(BootParts {
+                    initrd: fs::canonicalize(&part.initrd)?,
+                    kernel: fs::canonicalize(&part.kernel)?,
+                    dtb: part.dtb.as_ref().map(fs::canonicalize).transpose()?,
+                    name: part.name.clone(),
+                    default: part.default,
+                    cmdline: part.cmdline.clone(),
+                })
+            })
+            .partition_map(|b| match b {
+                Ok(b) => Either::Left(b),
+                Err(e) => Either::Right(e),
+            });
+
+        if !errs.is_empty() {
+            return Err(Error::Many(errs));
+        }
+
+        Ok(parts)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -145,7 +172,7 @@ mod tests {
         let parts = (Syslinux {
             path: PathBuf::from("testdata/extlinux.conf"),
         })
-        .get_parts()
+        .get_parts_raw()
         .unwrap();
         assert_eq!(parts.len(), 6);
         assert_eq!(parts[0].name, "NixOS - Default");
