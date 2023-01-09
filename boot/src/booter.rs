@@ -43,19 +43,19 @@ pub struct BootParts {
 
 impl Display for BootParts {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.dtb.is_some() {
-            write!(
-                f,
-                "{}\n\tkernel={:#?}\n\tinitrd={:#?}\n\tparams={:#?}\n\tdtb={:#?}\n",
-                self.name, self.kernel, self.initrd, self.cmdline, self.dtb
-            )
-        } else {
-            write!(
-                f,
-                "{}\n\tkernel={:#?}\n\tinitrd={:#?}\n\tparams={:#?}\n",
-                self.name, self.kernel, self.initrd, self.cmdline
-            )
-        }
+        write!(
+            f,
+            "{}\n\tkernel={:?}\n\tinitrd={:?}\n\tparams={:?}\n\t{}\n",
+            self.name,
+            self.kernel,
+            self.initrd,
+            self.cmdline,
+            self.dtb
+                .as_ref()
+                .map(|dtb| format!("dtb={:?}", dtb))
+                .as_deref()
+                .unwrap_or_default()
+        )
     }
 }
 
