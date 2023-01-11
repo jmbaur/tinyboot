@@ -135,13 +135,13 @@ fn ui<B: Backend>(f: &mut Frame<B>, boot_parts: &mut StatefulList<BootParts>) {
         .iter()
         .map(|i| {
             let lines = vec![Spans::from(i.name.clone())];
-            ListItem::new(lines).style(Style::default().bg(Color::Black).fg(Color::White))
+            ListItem::new(lines)
         })
         .collect();
 
     let items = List::new(items)
         .block(Block::default().borders(Borders::ALL).title("tinyboot"))
-        .highlight_style(Style::default().bg(Color::LightGreen))
+        .highlight_style(Style::default().bg(Color::White).fg(Color::Black))
         .highlight_symbol(">>");
 
     f.render_stateful_widget(items, chunks[0], &mut boot_parts.state);
@@ -203,7 +203,18 @@ fn logic() -> anyhow::Result<()> {
 
     let (tx, rx) = mpsc::channel::<anyhow::Result<Option<usize>>>();
 
-    let mut boot_parts = StatefulList::with_items(parts.to_vec());
+    let mut boot_parts = StatefulList::with_items(
+        vec![
+            BootParts {
+                name: "first".to_string(),
+                ..Default::default()
+            },
+            BootParts {
+                name: "second".to_string(),
+                ..Default::default()
+            },
+        ], // parts.to_vec()
+    );
 
     thread::spawn(move || {
         tx.send((|| {
