@@ -7,9 +7,61 @@ use std::ffi::OsStr;
 use std::io::{self, Read, Seek};
 use std::path::{Path, PathBuf};
 use std::str::{self, FromStr};
-use std::{env, fs, process, thread, time};
+use std::{env, fs, process};
+use termion::event::Key;
+use termion::input::TermRead;
+use termion::raw::IntoRawMode;
+use termion::screen::IntoAlternateScreen;
+use tui::backend::{Backend, TermionBackend};
+use tui::layout::{Constraint, Direction, Layout};
+use tui::style::{Color, Modifier, Style};
+use tui::text::Spans;
+use tui::widgets::{Block, Borders, List, ListItem, ListState};
+use tui::{Frame, Terminal};
 
 const NONE: Option<&'static [u8]> = None;
+
+struct StatefulList<T> {
+    state: ListState,
+    items: Vec<T>,
+}
+
+impl<T> StatefulList<T> {
+    fn with_items(items: Vec<T>) -> StatefulList<T> {
+        StatefulList {
+            state: ListState::default(),
+            items,
+        }
+    }
+
+    fn next(&mut self) {
+        let i = match self.state.selected() {
+            Some(i) => {
+                if i >= self.items.len() - 1 {
+                    0
+                } else {
+                    i + 1
+                }
+            }
+            None => 0,
+        };
+        self.state.select(Some(i));
+    }
+
+    fn previous(&mut self) {
+        let i = match self.state.selected() {
+            Some(i) => {
+                if i == 0 {
+                    self.items.len() - 1
+                } else {
+                    i - 1
+                }
+            }
+            None => 0,
+        };
+        self.state.select(Some(i));
+    }
+}
 
 fn find_block_devices() -> anyhow::Result<Vec<PathBuf>> {
     Ok(fs::read_dir("/sys/class/block")?
@@ -71,7 +123,36 @@ fn detect_fs_type(p: impl AsRef<Path>) -> anyhow::Result<String> {
     anyhow::bail!("unsupported fs type")
 }
 
-fn logic() -> anyhow::Result<()> {
+fn ui<B: Backend>(f: &mut Frame<B>, boot_parts: &mut StatefulList<BootParts>) {
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(100), Constraint::Percentage(100)].as_ref())
+        .split(f.size());
+
+    let items: Vec<ListItem> = boot_parts
+        .items
+        .iter()
+        .map(|i| {
+            let lines = vec![Spans::from(i.name.clone())];
+            ListItem::new(lines).style(Style::default().bg(Color::Black).fg(Color::White))
+        })
+        .collect();
+
+    let items = List::new(items)
+        .block(Block::default().borders(Borders::ALL).title("tinyboot"))
+        .highlight_style(
+            Style::default()
+                .bg(Color::LightGreen)
+                .add_modifier(Modifier::BOLD),
+        )
+        .highlight_symbol(">> ");
+
+    f.render_stateful_widget(items, chunks[0], &mut boot_parts.state);
+}
+
+fn logic<B: Backend>(terminal: &mut Terminal<B>, stdin: impl io::Read) -> anyhow::Result<()> {
+    terminal.clear()?;
+
     let parts = find_block_devices()?
         .iter()
         .filter_map(|dev| {
@@ -125,33 +206,33 @@ fn logic() -> anyhow::Result<()> {
         .flatten()
         .collect::<Vec<BootParts>>();
 
-    if parts.is_empty() {
-        anyhow::bail!("no bootable partitions found");
-    }
+    let mut boot_parts = StatefulList::with_items(parts);
 
-    print!("\n\nBOOT OPTIONS:\n\n");
-    parts
-        .iter()
-        .enumerate()
-        .for_each(|(i, part)| println!("{}: {part}\n", i + 1));
+    let mut keys = stdin.keys();
+    let selected: &BootParts = loop {
+        terminal.draw(|f| ui(f, &mut boot_parts))?;
 
-    let selected = 'input: loop {
-        print!("CHOOSE A BOOT OPTION: ");
-        let mut input = String::new();
-        _ = io::stdin().read_line(&mut input)?;
-        match input.trim().parse::<usize>() {
-            Ok(x) if 0 < x || x < parts.len() - 1 => break 'input &parts[x - 1],
-            _ => {
-                print!("\n\nBAD SELECTION!\n\n");
-                thread::sleep(time::Duration::from_secs(1));
-                continue;
+        let Some(Ok(key)) = keys.next() else {
+            anyhow::bail!("could not get next keypress");
+        };
+        match key {
+            Key::Down | Key::Char('j') => boot_parts.next(),
+            Key::Up | Key::Char('k') => boot_parts.previous(),
+            Key::Char('\n') => {
+                if let Some(boot_parts) = boot_parts
+                    .state
+                    .selected()
+                    .and_then(|idx| boot_parts.items.get(idx))
+                {
+                    break boot_parts;
+                }
             }
+            Key::Char('r') => terminal.clear()?,
+            _ => {}
         };
     };
 
-    selected.kexec()?;
-
-    Ok(())
+    Ok(selected.kexec()?)
 }
 
 #[derive(Debug)]
@@ -192,7 +273,7 @@ impl Config {
     }
 }
 
-fn main() -> ! {
+fn main() -> anyhow::Result<()> {
     let args: Vec<String> = env::args().collect();
 
     let cfg = Config::new(args.as_slice());
@@ -208,17 +289,27 @@ fn main() -> ! {
         })
         .level(cfg.log_level)
         .chain(io::stderr())
-        .apply()
-        .expect("failed to initialize logger");
+        .apply()?;
 
     info!("started");
     debug!("args: {:?}", args);
     debug!("config: {:?}", cfg);
 
-    if let Err(e) = logic() {
-        error!("failed to boot: {e}");
-        shell(option_env!("TINYBOOT_EMERGENCY_SHELL").unwrap_or("/bin/sh")).expect("shell crashed");
-    };
+    let stdin = io::stdin().lock();
+    let stdout = io::stdout().lock();
+    let stdout = stdout.into_raw_mode()?.into_alternate_screen()?;
+    let backend = TermionBackend::new(stdout);
+    let mut terminal = Terminal::new(backend)?;
 
-    unreachable!();
+    let res = logic(&mut terminal, stdin);
+
+    terminal.show_cursor()?;
+
+    if let Err(e) = res {
+        error!("{e}");
+        shell(option_env!("TINYBOOT_EMERGENCY_SHELL").unwrap_or("/bin/sh"))?;
+    }
+
+    info!("exiting tinyboot");
+    Ok(())
 }

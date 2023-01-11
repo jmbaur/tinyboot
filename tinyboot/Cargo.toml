@@ -11,3 +11,5 @@ boot = { path = "../boot" }
 fern = "0.6.1"
 log = "0.4.17"
 nix = "0.26.1"
+termion = "2.0.1"
+tui = { version = "0.19", default-features = false, features = ["termion"] }
