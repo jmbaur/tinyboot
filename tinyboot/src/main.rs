@@ -12,7 +12,6 @@ use std::{env, fs, thread};
 use termion::event::Key;
 use termion::input::TermRead;
 use termion::raw::IntoRawMode;
-use termion::screen::IntoAlternateScreen;
 use tui::backend::{Backend, TermionBackend};
 use tui::layout::{Constraint, Direction, Layout};
 use tui::style::{Color, Style};
@@ -203,23 +202,12 @@ fn logic() -> anyhow::Result<()> {
 
     let (tx, rx) = mpsc::channel::<anyhow::Result<Option<usize>>>();
 
-    let mut boot_parts = StatefulList::with_items(
-        vec![
-            BootParts {
-                name: "first".to_string(),
-                ..Default::default()
-            },
-            BootParts {
-                name: "second".to_string(),
-                ..Default::default()
-            },
-        ], // parts.to_vec()
-    );
+    let mut boot_parts = StatefulList::with_items(parts.to_vec());
 
     thread::spawn(move || {
         tx.send((|| {
             let stdout = io::stdout().lock();
-            let stdout = stdout.into_raw_mode()?.into_alternate_screen()?;
+            let stdout = stdout.into_raw_mode()?;
             let backend = TermionBackend::new(stdout);
             let mut terminal = Terminal::new(backend)?;
 
