@@ -6,7 +6,7 @@ use nix::mount;
 use std::io::{self, Read, Seek};
 use std::path::{Path, PathBuf};
 use std::str::{self, FromStr};
-use std::sync::mpsc;
+use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::Duration;
 use std::{env, fs, thread};
 use termion::event::Key;
@@ -15,7 +15,7 @@ use termion::raw::IntoRawMode;
 use termion::screen::IntoAlternateScreen;
 use tui::backend::{Backend, TermionBackend};
 use tui::layout::{Constraint, Direction, Layout};
-use tui::style::{Color, Modifier, Style};
+use tui::style::{Color, Style};
 use tui::text::Spans;
 use tui::widgets::{Block, Borders, List, ListItem, ListState};
 use tui::{Frame, Terminal};
@@ -141,11 +141,7 @@ fn ui<B: Backend>(f: &mut Frame<B>, boot_parts: &mut StatefulList<BootParts>) {
 
     let items = List::new(items)
         .block(Block::default().borders(Borders::ALL).title("tinyboot"))
-        .highlight_style(
-            Style::default()
-                .bg(Color::LightGreen)
-                .add_modifier(Modifier::BOLD),
-        )
+        .highlight_style(Style::default().bg(Color::LightGreen))
         .highlight_symbol(">>");
 
     f.render_stateful_widget(items, chunks[0], &mut boot_parts.state);
@@ -220,12 +216,19 @@ fn logic() -> anyhow::Result<()> {
 
             let mut keys = io::stdin().lock().keys();
 
+            let mut first_interaction = true;
             let selected: Option<usize> = loop {
                 terminal.draw(|f| ui(f, &mut boot_parts))?;
 
                 let key = keys
                     .next()
                     .ok_or_else(|| anyhow::anyhow!("no more keys"))??;
+
+                if first_interaction {
+                    tx.send(Ok(None)).expect("send failed");
+                    first_interaction = false;
+                }
+
                 match key {
                     Key::Down | Key::Char('j') => boot_parts.next(),
                     Key::Up | Key::Char('k') => boot_parts.previous(),
@@ -238,7 +241,7 @@ fn logic() -> anyhow::Result<()> {
 
             Ok(selected)
         })())
-        .expect("failed to send boot selection")
+        .expect("send failed")
     });
 
     let default = {
@@ -255,10 +258,11 @@ fn logic() -> anyhow::Result<()> {
     // TODO(jared): read timeout value from boot configuration
     let timeout = Duration::from_secs(10);
 
-    let idx = rx
-        .recv_timeout(timeout)
-        .unwrap_or(Ok(default))?
-        .ok_or_else(|| anyhow::anyhow!("no selection"))?;
+    let idx = (match rx.recv_timeout(timeout) {
+        Err(RecvTimeoutError::Timeout) => default,
+        _ => rx.recv()??,
+    })
+    .ok_or_else(|| anyhow::anyhow!("no selection"))?;
 
     let selected = parts
         .get(idx)
