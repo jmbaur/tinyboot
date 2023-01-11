@@ -23,6 +23,7 @@
         (final: prev: {
           tinyboot = prev.callPackage ./. { inherit crane; };
           tinyboot-initramfs = prev.callPackage ./initramfs.nix { inherit (final) tinyboot; };
+          tinyboot-kernel = prev.callPackage ./kernel.nix { };
         })
       ];
       devShells = forAllSystems ({ pkgs, ... }: {
@@ -34,41 +35,12 @@
       packages = forAllSystems ({ pkgs, ... }: {
         default = pkgs.tinyboot;
         initramfs = pkgs.tinyboot-initramfs;
+        kernel = pkgs.tinyboot-kernel;
       });
       apps = forAllSystems ({ pkgs, system, ... }: {
         default = {
           type = "app";
-          program =
-            let
-              console = if pkgs.stdenv.hostPlatform.system == "aarch64-linux" then "ttyAMA0" else "ttyS0";
-            in
-            toString (pkgs.substituteAll {
-              src = ./run.bash;
-              isExecutable = true;
-              path = [ pkgs.zstd pkgs.qemu ];
-              qemu = "${pkgs.qemu}/bin/qemu-system-${pkgs.stdenv.hostPlatform.qemuArch}";
-              inherit (pkgs) bash;
-              inherit console;
-              kernel = "${pkgs.linuxPackages_latest.kernel}/${pkgs.stdenv.hostPlatform.linux-kernel.target}";
-              initrd = "${pkgs.tinyboot-initramfs}/initrd";
-              drive = toString (
-                (nixpkgs.lib.nixosSystem {
-                  inherit system;
-                  modules = [
-                    ({ modulesPath, ... }: {
-                      imports = [
-                        (if system == "aarch64-linux" then
-                          "${modulesPath}/installer/sd-card/sd-image-aarch64.nix"
-                        else if system == "x86_64-linux" then
-                          "${modulesPath}/installer/sd-card/sd-image-x86_64.nix"
-                        else throw "unsupported system")
-                      ];
-                      system.stateVersion = "23.05";
-                    })
-                  ];
-                }).config.system.build.sdImage
-              );
-            });
+          program = toString (pkgs.callPackage ./run.nix { inherit nixpkgs; });
         };
       });
     };
