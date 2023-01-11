@@ -228,6 +228,7 @@ fn logic<B: Backend>(terminal: &mut Terminal<B>, stdin: impl io::Read) -> anyhow
                 }
             }
             Key::Char('r') => terminal.clear()?,
+            Key::Char('q') | Key::Esc => return Ok(()),
             _ => {}
         };
     };
