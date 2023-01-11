@@ -314,22 +314,15 @@ fn main() -> anyhow::Result<()> {
 
     let cfg = Config::new(args.as_slice());
 
-    fern::Dispatch::new()
-        .format(|out, message, record| {
-            out.finish(format_args!(
-                "{}[{}]: {}",
-                "tinyboot",
-                record.level(),
-                message
-            ))
-        })
-        .level(cfg.log_level)
-        .chain(io::stderr())
-        .apply()?;
+    printk::init("tinyboot", cfg.log_level)?;
 
     info!("started");
     debug!("args: {:?}", args);
     debug!("config: {:?}", cfg);
 
-    logic()
+    if let Err(e) = logic() {
+        error!("{e}");
+    }
+
+    Ok(())
 }
