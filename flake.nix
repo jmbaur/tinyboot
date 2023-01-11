@@ -39,8 +39,7 @@
       });
       apps = forAllSystems ({ pkgs, system, ... }: {
         default = { type = "app"; program = toString (pkgs.callPackage ./test { inherit nixpkgs; }); };
-        x86_64 = { type = "app"; program = toString (pkgs.pkgsCross.x86_64-embedded.callPackage ./test { inherit nixpkgs; }); };
-        arm64 = { type = "app"; program = toString (pkgs.pkgsCross.aarch64-multiplatform.callPackage ./test { inherit nixpkgs; }); };
+        aarch64 = { type = "app"; program = toString (pkgs.pkgsCross.aarch64-multiplatform.callPackage ./test { inherit nixpkgs; }); };
       });
     };
 }

@@ -2,14 +2,16 @@
 
 # shellcheck shell=bash
 
-if [ ! -f nixos.img ]; then
-	zstd -d <@drive@/sd-image/* >nixos.img
+img=nixos-@system@.img
+
+if [ ! -f $img ]; then
+	zstd -d <@drive@/sd-image/* >$img
 fi
 
-qemu-kvm @qemuFlags@ \
+@qemu@ @qemuFlags@ \
 	-serial stdio \
 	-m 1G \
 	-kernel @kernel@ \
 	-initrd @initrd@ \
 	-append console=@console@ \
-	-drive if=virtio,file=nixos.img,format=raw
+	-drive if=virtio,file=$img,format=raw
