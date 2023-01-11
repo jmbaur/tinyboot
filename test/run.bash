@@ -6,7 +6,7 @@ if [ ! -f nixos.img ]; then
 	zstd -d <@drive@/sd-image/* >nixos.img
 fi
 
-@qemu@ -enable-kvm \
+qemu-kvm @qemuFlags@ \
 	-serial stdio \
 	-m 1G \
 	-kernel @kernel@ \

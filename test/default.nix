@@ -1,14 +1,24 @@
-{ nixpkgs, system, stdenv, substituteAll, zstd, qemu, bash, tinyboot-initramfs, tinyboot-kernel, ... }:
+{ nixpkgs, system, pkgsBuildBuild, stdenv, substituteAll, tinyboot-initramfs, tinyboot-kernel, ... }:
 let
-  console = if stdenv.hostPlatform.system == "aarch64-linux" then "ttyAMA0" else "ttyS0";
+  config = builtins.getAttr stdenv.hostPlatform.system {
+    x86_64-linux = {
+      qemuFlags = "";
+      console = "ttyS0";
+      module = modulesPath: "${modulesPath}/installer/sd-card/sd-image-x86_64.nix";
+    };
+    aarch64-linux = {
+      qemuFlags = "-M virt";
+      console = "ttyAMA0";
+      module = modulesPath: "${modulesPath}/installer/sd-card/sd-image-aarch64.nix";
+    };
+  };
 in
 substituteAll {
   src = ./run.bash;
   isExecutable = true;
-  path = [ zstd qemu ];
-  qemu = "${qemu}/bin/qemu-system-${stdenv.hostPlatform.qemuArch}";
-  inherit bash;
-  inherit console;
+  path = with pkgsBuildBuild; [ zstd qemu ];
+  inherit (pkgsBuildBuild) bash;
+  inherit (config) console qemuFlags;
   kernel = "${tinyboot-kernel}/${stdenv.hostPlatform.linux-kernel.target}";
   initrd = "${tinyboot-initramfs}/initrd";
   drive = toString (
@@ -16,13 +26,7 @@ substituteAll {
       inherit system;
       modules = [
         ({ modulesPath, ... }: {
-          imports = [
-            (if system == "aarch64-linux" then
-              "${modulesPath}/installer/sd-card/sd-image-aarch64.nix"
-            else if system == "x86_64-linux" then
-              "${modulesPath}/installer/sd-card/sd-image-x86_64.nix"
-            else throw "unsupported system")
-          ];
+          imports = [ (config.module modulesPath) ];
           specialisation.other.configuration.boot.kernelParams = [ "console=tty" ];
           system.stateVersion = "23.05";
         })
