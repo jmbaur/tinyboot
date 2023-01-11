@@ -3,4 +3,4 @@
 ::shutdown:/sbin/swapoff -a
 ::shutdown:/bin/umount -a -r
 ::restart:/init
-::respawn:/bin/tinyboot tinyboot.log=debug
+@tty@::respawn:/bin/tinyboot tinyboot.log=debug
