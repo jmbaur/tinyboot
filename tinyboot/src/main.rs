@@ -3,13 +3,12 @@ use boot::syslinux;
 use log::LevelFilter;
 use log::{debug, error, info};
 use nix::mount;
-use std::ffi::OsStr;
 use std::io::{self, Read, Seek};
 use std::path::{Path, PathBuf};
 use std::str::{self, FromStr};
 use std::sync::mpsc;
 use std::time::Duration;
-use std::{env, fs, process, thread};
+use std::{env, fs, thread};
 use termion::event::Key;
 use termion::input::TermRead;
 use termion::raw::IntoRawMode;
@@ -98,11 +97,6 @@ fn find_block_devices() -> anyhow::Result<Vec<PathBuf>> {
             }
         })
         .collect::<Vec<PathBuf>>())
-}
-
-fn shell(sh: impl AsRef<OsStr>) -> io::Result<()> {
-    _ = process::Command::new(sh).spawn()?.wait()?;
-    Ok(())
 }
 
 fn detect_fs_type(p: impl AsRef<Path>) -> anyhow::Result<String> {
@@ -333,13 +327,5 @@ fn main() -> anyhow::Result<()> {
     debug!("args: {:?}", args);
     debug!("config: {:?}", cfg);
 
-    let res = logic();
-
-    if let Err(e) = res {
-        error!("{e}");
-        shell(option_env!("TINYBOOT_EMERGENCY_SHELL").unwrap_or("/bin/sh"))?;
-    }
-
-    info!("exiting tinyboot");
-    Ok(())
+    logic()
 }

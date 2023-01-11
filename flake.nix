@@ -41,7 +41,6 @@
           program =
             let
               console = if pkgs.stdenv.hostPlatform.system == "aarch64-linux" then "ttyAMA0" else "ttyS0";
-              initrd = pkgs.tinyboot-initramfs.override { tty = console; };
             in
             toString (pkgs.substituteAll {
               src = ./run.bash;
@@ -51,7 +50,7 @@
               inherit (pkgs) bash;
               inherit console;
               kernel = "${pkgs.linuxPackages_latest.kernel}/${pkgs.stdenv.hostPlatform.linux-kernel.target}";
-              initrd = "${initrd}/initrd";
+              initrd = "${pkgs.tinyboot-initramfs}/initrd";
               drive = toString (
                 (nixpkgs.lib.nixosSystem {
                   inherit system;
