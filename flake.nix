@@ -40,7 +40,7 @@
       apps = forAllSystems ({ pkgs, system, ... }: {
         default = {
           type = "app";
-          program = toString (pkgs.callPackage ./run.nix { inherit nixpkgs; });
+          program = toString (pkgs.callPackage ./test { inherit nixpkgs; });
         };
       });
     };

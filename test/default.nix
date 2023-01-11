@@ -23,6 +23,7 @@ substituteAll {
               "${modulesPath}/installer/sd-card/sd-image-x86_64.nix"
             else throw "unsupported system")
           ];
+          specialisation.other.configuration.boot.kernelParams = [ "console=tty" ];
           system.stateVersion = "23.05";
         })
       ];
