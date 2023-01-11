@@ -31,7 +31,7 @@ pub trait Booter {
     fn get_parts(&self) -> Result<Vec<BootParts>, Error>;
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct BootParts {
     pub default: bool,
     pub name: String,
