@@ -12,4 +12,4 @@ fi
 	-kernel @kernel@ \
 	-initrd @initrd@ \
 	-append console=@console@ \
-	-drive file=nixos.img,format=raw
+	-drive if=virtio,file=nixos.img,format=raw
