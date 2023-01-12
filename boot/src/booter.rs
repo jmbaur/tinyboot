@@ -1,5 +1,4 @@
 use log::debug;
-use nix::libc;
 use std::fmt::{self, Display};
 use std::os::fd::AsRawFd;
 use std::path::PathBuf;

@@ -8,4 +8,4 @@ edition = "2021"
 [dependencies]
 itertools = "0.10.5"
 log = "0.4.17"
-nix = "0.26.1"
+libc = "0.2.139"
