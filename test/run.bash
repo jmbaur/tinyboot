@@ -10,7 +10,7 @@ fi
 
 @qemu@ @qemuFlags@ \
 	-serial stdio \
-	-m 1G \
+	-m 2G \
 	-kernel @kernel@ \
 	-initrd @initrd@ \
 	-append console=@console@ \
