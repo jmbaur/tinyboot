@@ -1,4 +1,4 @@
-{ makeInitrdNG, pkgsStatic, buildEnv, tinyboot, ... }:
+{ lib, makeInitrdNG, pkgsStatic, buildEnv, tinyboot, substituteAll, tinybootTTY ? "tty1", shellTTY ? "tty2", ... }:
 let
   initrdEnv = buildEnv {
     name = "initrd-env";
@@ -11,6 +11,10 @@ makeInitrdNG {
     { object = "${initrdEnv}/bin"; symlink = "/bin"; }
     { object = "${initrdEnv}/sbin"; symlink = "/sbin"; }
     { object = "${initrdEnv}/linuxrc"; symlink = "/init"; }
-    { object = ./etc; symlink = "/etc"; }
+    { object = ./etc/init.d/rcS; symlink = "/etc/init.d/rcS"; }
+    {
+      object = substituteAll { src = ./etc/inittab; inherit tinybootTTY shellTTY; };
+      symlink = "/etc/inittab";
+    }
   ];
 }
