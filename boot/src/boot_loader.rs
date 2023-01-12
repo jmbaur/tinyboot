@@ -2,7 +2,7 @@ use log::debug;
 use std::fmt::{self, Display};
 use std::os::fd::AsRawFd;
 use std::path::PathBuf;
-use std::time;
+use std::time::{self, Duration};
 use std::{arch, error, ffi, fs, io, thread};
 
 #[derive(Debug)]
@@ -26,12 +26,12 @@ impl From<io::Error> for Error {
     }
 }
 
-pub trait Booter {
-    fn get_parts(&self) -> Result<Vec<BootParts>, Error>;
+pub trait BootLoader {
+    fn get_boot_configuration(&self) -> Result<BootConfiguration, Error>;
 }
 
-#[derive(Debug, Default, Clone)]
-pub struct BootParts {
+#[derive(Debug, Default, PartialEq, Eq, Clone)]
+pub struct BootEntry {
     pub default: bool,
     pub name: String,
     pub kernel: PathBuf,
@@ -40,7 +40,7 @@ pub struct BootParts {
     pub dtb: Option<PathBuf>,
 }
 
-impl Display for BootParts {
+impl Display for BootEntry {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
@@ -58,7 +58,7 @@ impl Display for BootParts {
     }
 }
 
-impl BootParts {
+impl BootEntry {
     pub fn kexec(&self) -> io::Result<()> {
         let kernel = fs::File::open(&self.kernel)?;
         let kernel = kernel.as_raw_fd() as usize;
@@ -126,4 +126,16 @@ impl BootParts {
 
         Ok(())
     }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum MenuEntry {
+    BootEntry(BootEntry),
+    Submenu((String, Vec<MenuEntry>)),
+}
+
+#[derive(Debug)]
+pub struct BootConfiguration {
+    pub timeout: Duration,
+    pub entries: Vec<MenuEntry>,
 }

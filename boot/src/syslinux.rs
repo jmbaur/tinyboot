@@ -1,9 +1,9 @@
-use crate::booter::{BootParts, Booter, Error};
-use itertools::{Either, Itertools};
+use crate::boot_loader::{BootConfiguration, BootEntry, BootLoader, Error, MenuEntry};
 use log::{debug, info, warn};
 use std::{
     fs,
     path::{Path, PathBuf},
+    time::Duration,
 };
 
 pub struct Syslinux {
@@ -39,16 +39,30 @@ impl Syslinux {
 
         Err(Error::BootConfigNotFound)
     }
+}
 
-    fn get_parts_raw(&self) -> Result<Vec<BootParts>, Error> {
+impl BootLoader for Syslinux {
+    fn get_boot_configuration(&self) -> Result<BootConfiguration, Error> {
         let contents = fs::read_to_string(&self.path)?;
 
-        let mut parts = vec![];
-        let mut p = BootParts::default();
+        let mut entries = vec![];
+        let mut p = BootEntry::default();
         let mut default = String::new();
         let mut in_entry: Option<bool> = None;
+        let mut timeout = Duration::from_secs(10);
 
         for line in contents.lines() {
+            if !in_entry.unwrap_or_default() && line.starts_with("TIMEOUT") {
+                timeout = Duration::from_secs(
+                    line.split_once("TIMEOUT ")
+                        .expect("bad syslinux format")
+                        .1
+                        .parse()
+                        .unwrap_or(10),
+                );
+                continue;
+            }
+
             if !in_entry.unwrap_or_default() && line.starts_with("DEFAULT") {
                 default = String::from(line.split_once("DEFAULT ").expect("bad syslinux format").1);
                 continue;
@@ -58,8 +72,8 @@ impl Syslinux {
                 // We have already seen at least one entry, push the previous one into boot parts
                 // and start a new one.
                 if in_entry.is_some() {
-                    parts.push(p);
-                    p = BootParts::default();
+                    entries.push(MenuEntry::BootEntry(p));
+                    p = BootEntry::default();
                 }
 
                 if default == line.split_once("LABEL ").expect("bad syslinux format").1 {
@@ -129,37 +143,9 @@ impl Syslinux {
         }
 
         // Include the last entry in boot parts.
-        parts.push(p);
+        entries.push(MenuEntry::BootEntry(p));
 
-        Ok(parts)
-    }
-}
-
-impl Booter for Syslinux {
-    fn get_parts(&self) -> Result<Vec<BootParts>, Error> {
-        let parts = self.get_parts_raw()?;
-        let (parts, errs): (Vec<_>, Vec<_>) = parts
-            .iter()
-            .map(|part| -> Result<BootParts, Error> {
-                Ok(BootParts {
-                    initrd: fs::canonicalize(&part.initrd)?,
-                    kernel: fs::canonicalize(&part.kernel)?,
-                    dtb: part.dtb.as_ref().map(fs::canonicalize).transpose()?,
-                    name: part.name.clone(),
-                    default: part.default,
-                    cmdline: part.cmdline.clone(),
-                })
-            })
-            .partition_map(|b| match b {
-                Ok(b) => Either::Left(b),
-                Err(e) => Either::Right(e),
-            });
-
-        if !errs.is_empty() {
-            return Err(Error::Many(errs));
-        }
-
-        Ok(parts)
+        Ok(BootConfiguration { timeout, entries })
     }
 }
 
@@ -169,23 +155,28 @@ mod tests {
 
     #[test]
     fn test_syslinux_get_parts() {
-        let parts = (Syslinux {
+        let config = (Syslinux {
             path: PathBuf::from("testdata/extlinux.conf"),
         })
-        .get_parts_raw()
+        .get_boot_configuration()
         .unwrap();
-        assert_eq!(parts.len(), 6);
-        assert_eq!(parts[0].name, "NixOS - Default");
+        assert_eq!(config.timeout, Duration::from_secs(50));
+        assert_eq!(config.entries.len(), 6);
+
+        let MenuEntry::BootEntry(first) = &config.entries[0] else {panic!("first entry is not a boot entry");};
+        let MenuEntry::BootEntry(last) = &config.entries[5] else {panic!("last entry is not a boot entry");};
+
+        assert_eq!(first.name, "NixOS - Default");
         assert_eq!(
-            parts[0].cmdline,
+            first.cmdline,
             "init=/nix/store/piq69xyzwy9j6fqjl80nx1sxrnpk9zzn-nixos-system-beetroot-23.05.20221229.677ed08/init loglevel=4 zram.num_devices=1",
         );
         assert_eq!(
-            parts[5].name,
+            last.name,
             "NixOS - Configuration 17-flashfriendly (2022-12-29 14:52 - 23.05.20221228.e182da8)",
         );
         assert_eq!(
-            parts[5].cmdline,
+            last.cmdline,
             "init=/nix/store/gmppv1gyqzr681n3r0yb20kqchls61gz-nixos-system-beetroot-23.05.20221228.e182da8/init iomem=relaxed loglevel=4 zram.num_devices=1",
         );
     }

@@ -1,4 +1,4 @@
-use boot::booter::{BootParts, Booter};
+use boot::boot_loader::{BootConfiguration, BootEntry, BootLoader, MenuEntry};
 use boot::syslinux;
 use log::LevelFilter;
 use log::{debug, error, info};
@@ -13,15 +13,16 @@ use termion::event::Key;
 use termion::input::TermRead;
 use termion::raw::IntoRawMode;
 use tui::backend::{Backend, TermionBackend};
-use tui::layout::{Constraint, Direction, Layout};
+use tui::layout::{Alignment, Constraint, Direction, Layout};
 use tui::style::{Color, Style};
 use tui::text::Spans;
-use tui::widgets::{Block, Borders, List, ListItem, ListState};
+use tui::widgets::{Block, List, ListItem, ListState, Paragraph};
 use tui::{Frame, Terminal};
 
 const NONE: Option<&'static [u8]> = None;
 
 struct StatefulList<T> {
+    chosen: Option<usize>,
     state: ListState,
     items: Vec<T>,
 }
@@ -30,6 +31,7 @@ impl<T> StatefulList<T> {
     fn with_items(items: Vec<T>) -> StatefulList<T> {
         let non_empty = !items.is_empty();
         let mut s = StatefulList {
+            chosen: None,
             state: ListState::default(),
             items,
         };
@@ -65,6 +67,16 @@ impl<T> StatefulList<T> {
             None => 0,
         };
         self.state.select(Some(i));
+    }
+
+    fn choose_currently_selected(&mut self) {
+        if let Some(selected) = self.state.selected() {
+            self.chosen = Some(selected);
+        }
+    }
+
+    fn clear_chosen(&mut self) {
+        self.chosen = None;
     }
 }
 
@@ -123,31 +135,84 @@ fn detect_fs_type(p: impl AsRef<Path>) -> anyhow::Result<String> {
     anyhow::bail!("unsupported fs type")
 }
 
-fn ui<B: Backend>(f: &mut Frame<B>, boot_parts: &mut StatefulList<BootParts>) {
+fn ui<B: Backend>(
+    f: &mut Frame<B>,
+    boot_entries: &mut StatefulList<MenuEntry>,
+    (has_user_interaction, elapsed, timeout): (bool, Duration, Duration),
+) {
     let chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(100), Constraint::Percentage(100)].as_ref())
+        .direction(Direction::Vertical)
+        .constraints(if has_user_interaction {
+            vec![Constraint::Percentage(100)]
+        } else {
+            vec![Constraint::Percentage(90), Constraint::Percentage(10)]
+        })
         .split(f.size());
 
-    let items: Vec<ListItem> = boot_parts
-        .items
-        .iter()
-        .map(|i| {
-            let lines = vec![Spans::from(i.name.clone())];
-            ListItem::new(lines)
-        })
-        .collect();
+    let (title, items): (String, Vec<ListItem>) = {
+        if let Some(MenuEntry::Submenu(submenu)) = boot_entries
+            .chosen
+            .and_then(|chosen| boot_entries.items.get(chosen))
+        {
+            (
+                format!("tinyboot->{}", submenu.0,),
+                submenu
+                    .1
+                    .iter()
+                    .filter_map(|i| match i {
+                        MenuEntry::BootEntry(boot_entry) => {
+                            let lines = vec![Spans::from(boot_entry.name.clone())];
+                            Some(ListItem::new(lines))
+                        }
+                        _ => None, // nested submenus are not valid
+                    })
+                    .collect(),
+            )
+        } else {
+            (
+                String::from("tinyboot"),
+                boot_entries
+                    .items
+                    .iter()
+                    .map(|i| match i {
+                        MenuEntry::BootEntry(boot_entry) => {
+                            let lines = vec![Spans::from(boot_entry.name.clone())];
+                            ListItem::new(lines)
+                        }
+                        MenuEntry::Submenu(submenu) => {
+                            let lines = vec![Spans::from(format!("<->{}", submenu.0))];
+                            ListItem::new(lines)
+                        }
+                    })
+                    .collect(),
+            )
+        }
+    };
 
     let items = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title("tinyboot"))
+        .block(
+            Block::default()
+                .title(title)
+                .title_alignment(Alignment::Center),
+        )
         .highlight_style(Style::default().bg(Color::White).fg(Color::Black))
         .highlight_symbol(">>");
 
-    f.render_stateful_widget(items, chunks[0], &mut boot_parts.state);
+    f.render_stateful_widget(items, chunks[0], &mut boot_entries.state);
+
+    if !has_user_interaction {
+        let time_left = (timeout - elapsed).as_secs();
+        let text = vec![Spans::from(format!(
+            "Will boot automatically in {:?}s",
+            time_left
+        ))];
+        let paragraph = Paragraph::new(text).alignment(Alignment::Center);
+        f.render_widget(paragraph, chunks[1]);
+    }
 }
 
 fn logic<B: Backend>(terminal: &mut Terminal<B>) -> anyhow::Result<()> {
-    let parts = find_block_devices()?
+    let mut configurations = find_block_devices()?
         .iter()
         .filter_map(|dev| {
             let mountpoint = PathBuf::from("/mnt").join(
@@ -182,7 +247,7 @@ fn logic<B: Backend>(terminal: &mut Terminal<B>) -> anyhow::Result<()> {
 
             debug!("mounted {} at {}", dev.display(), mountpoint.display());
 
-            match syslinux::Syslinux::new(&mountpoint).map(|s| s.get_parts()) {
+            match syslinux::Syslinux::new(&mountpoint).map(|s| s.get_boot_configuration()) {
                 Ok(Ok(p)) => Some(p),
                 e => {
                     match e {
@@ -197,8 +262,16 @@ fn logic<B: Backend>(terminal: &mut Terminal<B>) -> anyhow::Result<()> {
                 }
             }
         })
-        .flatten()
-        .collect::<Vec<BootParts>>();
+        .collect::<Vec<BootConfiguration>>();
+
+    let configuration = {
+        if configurations.is_empty() {
+            anyhow::bail!("no boot configurations");
+        } else {
+            // TODO(jared): provide menu for picking device configuration
+            configurations.swap_remove(0)
+        }
+    };
 
     enum Msg {
         Key(Key),
@@ -206,8 +279,6 @@ fn logic<B: Backend>(terminal: &mut Terminal<B>) -> anyhow::Result<()> {
     }
 
     let (tx, rx) = mpsc::channel::<Msg>();
-
-    let mut boot_parts = StatefulList::with_items(parts);
 
     let tick_tx = tx.clone();
     thread::spawn(move || {
@@ -231,28 +302,38 @@ fn logic<B: Backend>(terminal: &mut Terminal<B>) -> anyhow::Result<()> {
 
     terminal.clear()?;
 
-    // TODO(jared): read timeout value from boot configuration
-    let timeout = Duration::from_secs(10);
-
     let start_instant = Instant::now();
 
     let mut has_user_interaction = false;
 
-    let selected: Option<&BootParts> = 'outer: loop {
-        terminal.draw(|f| ui(f, &mut boot_parts))?;
+    let timeout = configuration.timeout;
+    let mut boot_entries = StatefulList::with_items(configuration.entries);
+    let selected: &BootEntry = 'outer: loop {
+        terminal.draw(|f| {
+            ui(
+                f,
+                &mut boot_entries,
+                (has_user_interaction, start_instant.elapsed(), timeout),
+            )
+        })?;
         match rx.recv()? {
             Msg::Key(key) => {
                 has_user_interaction = true;
                 match key {
-                    Key::Down | Key::Char('j') => boot_parts.next(),
-                    Key::Up | Key::Char('k') => boot_parts.previous(),
-                    Key::Char('\n') => {
-                        if let Some(idx) = boot_parts.state.selected() {
-                            break 'outer boot_parts.items.get(idx);
-                        }
+                    Key::Char('l') | Key::Char('\n') => {
+                        let Some(entry) = boot_entries
+                            .state
+                            .selected()
+                            .and_then(|idx| boot_entries.items.get(idx)) else { continue; };
+                        match entry {
+                            MenuEntry::BootEntry(entry) => break 'outer entry,
+                            MenuEntry::Submenu(_) => boot_entries.choose_currently_selected(),
+                        };
                     }
+                    Key::Left | Key::Char('h') => boot_entries.clear_chosen(),
+                    Key::Down | Key::Char('j') => boot_entries.next(),
+                    Key::Up | Key::Char('k') => boot_entries.previous(),
                     Key::Char('r') => terminal.clear()?,
-                    Key::Char('q') | Key::Esc => break None,
                     _ => {}
                 };
             }
@@ -260,20 +341,26 @@ fn logic<B: Backend>(terminal: &mut Terminal<B>) -> anyhow::Result<()> {
                 if !has_user_interaction && start_instant.elapsed() >= timeout {
                     // Timeout has occurred without any user interaction, select the default boot
                     // selection.
-                    for part in boot_parts.items.iter() {
-                        if part.default {
-                            break 'outer Some(part);
+                    for entry in boot_entries.items.iter() {
+                        let MenuEntry::BootEntry(boot_entry) = entry else { continue; };
+                        if boot_entry.default {
+                            break 'outer boot_entry;
                         }
                     }
-                    break boot_parts.items.get(0);
+                    break 'outer boot_entries
+                        .items
+                        .iter()
+                        .find_map(|entry| match entry {
+                            MenuEntry::BootEntry(boot_entry) => Some(boot_entry),
+                            _ => None,
+                        })
+                        .ok_or_else(|| anyhow::anyhow!("no boot entries"))?;
                 }
             }
         }
     };
 
-    Ok(selected
-        .ok_or_else(|| anyhow::anyhow!("no selection"))?
-        .kexec()?)
+    Ok(selected.kexec()?)
 }
 
 #[derive(Debug)]
