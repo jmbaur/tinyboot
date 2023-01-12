@@ -6,8 +6,8 @@ use nix::mount;
 use std::io::{self, Read, Seek};
 use std::path::{Path, PathBuf};
 use std::str::{self, FromStr};
-use std::sync::mpsc::{self, RecvTimeoutError};
-use std::time::Duration;
+use std::sync::mpsc;
+use std::time::{Duration, Instant};
 use std::{env, fs, thread};
 use termion::event::Key;
 use termion::input::TermRead;
@@ -146,7 +146,7 @@ fn ui<B: Backend>(f: &mut Frame<B>, boot_parts: &mut StatefulList<BootParts>) {
     f.render_stateful_widget(items, chunks[0], &mut boot_parts.state);
 }
 
-fn logic() -> anyhow::Result<()> {
+fn logic<B: Backend>(terminal: &mut Terminal<B>) -> anyhow::Result<()> {
     let parts = find_block_devices()?
         .iter()
         .filter_map(|dev| {
@@ -200,74 +200,80 @@ fn logic() -> anyhow::Result<()> {
         .flatten()
         .collect::<Vec<BootParts>>();
 
-    let (tx, rx) = mpsc::channel::<anyhow::Result<Option<usize>>>();
+    enum Msg {
+        Key(Key),
+        Tick,
+    }
 
-    let mut boot_parts = StatefulList::with_items(parts.to_vec());
+    let (tx, rx) = mpsc::channel::<Msg>();
 
+    let mut boot_parts = StatefulList::with_items(parts);
+
+    let tick_tx = tx.clone();
     thread::spawn(move || {
-        tx.send((|| {
-            let stdout = io::stdout().lock();
-            let stdout = stdout.into_raw_mode()?;
-            let backend = TermionBackend::new(stdout);
-            let mut terminal = Terminal::new(backend)?;
-
-            terminal.clear()?;
-
-            let mut keys = io::stdin().lock().keys();
-
-            let mut first_interaction = true;
-            let selected: Option<usize> = loop {
-                terminal.draw(|f| ui(f, &mut boot_parts))?;
-
-                let key = keys
-                    .next()
-                    .ok_or_else(|| anyhow::anyhow!("no more keys"))??;
-
-                if first_interaction {
-                    tx.send(Ok(None)).expect("send failed");
-                    first_interaction = false;
-                }
-
-                match key {
-                    Key::Down | Key::Char('j') => boot_parts.next(),
-                    Key::Up | Key::Char('k') => boot_parts.previous(),
-                    Key::Char('\n') => break boot_parts.state.selected(),
-                    Key::Char('r') => terminal.clear()?,
-                    Key::Char('q') | Key::Esc => break None,
-                    _ => {}
-                };
-            };
-
-            Ok(selected)
-        })())
-        .expect("send failed")
-    });
-
-    let default = {
-        let mut default = if parts.is_empty() { None } else { Some(0usize) };
-        for (i, part) in parts.iter().enumerate() {
-            if part.default {
-                default = Some(i);
+        let tick_duration = Duration::from_secs(1);
+        loop {
+            thread::sleep(tick_duration);
+            if tick_tx.send(Msg::Tick).is_err() {
                 break;
             }
         }
-        default
-    };
+    });
+
+    thread::spawn(move || {
+        let mut keys = io::stdin().lock().keys();
+        while let Some(Ok(key)) = keys.next() {
+            if tx.send(Msg::Key(key)).is_err() {
+                break;
+            }
+        }
+    });
+
+    terminal.clear()?;
 
     // TODO(jared): read timeout value from boot configuration
     let timeout = Duration::from_secs(10);
 
-    let idx = (match rx.recv_timeout(timeout) {
-        Err(RecvTimeoutError::Timeout) => default,
-        _ => rx.recv()??,
-    })
-    .ok_or_else(|| anyhow::anyhow!("no selection"))?;
+    let start_instant = Instant::now();
 
-    let selected = parts
-        .get(idx)
-        .ok_or_else(|| anyhow::anyhow!("selection does not exist"))?;
+    let mut has_user_interaction = false;
 
-    Ok(selected.kexec()?)
+    let selected: Option<&BootParts> = 'outer: loop {
+        terminal.draw(|f| ui(f, &mut boot_parts))?;
+        match rx.recv()? {
+            Msg::Key(key) => {
+                has_user_interaction = true;
+                match key {
+                    Key::Down | Key::Char('j') => boot_parts.next(),
+                    Key::Up | Key::Char('k') => boot_parts.previous(),
+                    Key::Char('\n') => {
+                        if let Some(idx) = boot_parts.state.selected() {
+                            break 'outer boot_parts.items.get(idx);
+                        }
+                    }
+                    Key::Char('r') => terminal.clear()?,
+                    Key::Char('q') | Key::Esc => break None,
+                    _ => {}
+                };
+            }
+            Msg::Tick => {
+                if !has_user_interaction && start_instant.elapsed() >= timeout {
+                    // Timeout has occurred without any user interaction, select the default boot
+                    // selection.
+                    for part in boot_parts.items.iter() {
+                        if part.default {
+                            break 'outer Some(part);
+                        }
+                    }
+                    break boot_parts.items.get(0);
+                }
+            }
+        }
+    };
+
+    Ok(selected
+        .ok_or_else(|| anyhow::anyhow!("no selection"))?
+        .kexec()?)
 }
 
 #[derive(Debug)]
@@ -319,9 +325,15 @@ fn main() -> anyhow::Result<()> {
     debug!("args: {:?}", args);
     debug!("config: {:?}", cfg);
 
-    if let Err(e) = logic() {
+    let stdout = io::stdout().lock().into_raw_mode()?;
+    let backend = TermionBackend::new(stdout);
+    let mut terminal = Terminal::new(backend)?;
+
+    if let Err(e) = logic(&mut terminal) {
         error!("{e}");
     }
+
+    terminal.show_cursor()?;
 
     Ok(())
 }
