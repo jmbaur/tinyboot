@@ -18,10 +18,9 @@ substituteAll {
   isExecutable = true;
   path = with pkgsBuildBuild; [ zstd ];
   qemu = "${pkgsBuildBuild.qemu}/bin/qemu-system-${stdenv.hostPlatform.qemuArch}";
-  qemuFlags = lib.escapeShellArgs (config.qemuFlags ++ lib.optional (stdenv.hostPlatform.system == stdenv.buildPlatform.system) "-enable-kvm");
   inherit (stdenv.hostPlatform) system;
   inherit (pkgsBuildBuild) bash;
-  inherit (config) console;
+  inherit (config) console qemuFlags;
   kernel = "${tinyboot-kernel}/${stdenv.hostPlatform.linux-kernel.target}";
   initrd = "${tinyboot-initramfs}/initrd";
   drive = toString (
