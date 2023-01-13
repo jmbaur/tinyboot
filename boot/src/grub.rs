@@ -1,9 +1,10 @@
-use std::{collections::HashMap, fs, path::Path};
-
 use crate::boot_loader::{BootConfiguration, BootLoader, Error};
 use crate::util::*;
 use grub::{GrubEvaluator, MenuEntry};
 use log::{debug, info, warn};
+use std::io::Read;
+use std::path::PathBuf;
+use std::{collections::HashMap, fs, path::Path};
 
 #[derive(Default, Debug)]
 pub struct Grub {
@@ -37,7 +38,68 @@ impl Grub {
         todo!()
     }
 
-    fn run_save_env(&self, _args: Vec<String>) -> u8 {
+    fn run_load_env(&mut self, args: Vec<String>) -> u8 {
+        let mut file = "grubenv";
+        let mut args = args.iter();
+        let mut whitelisted_vars = Vec::new();
+        while let Some(next) = args.next() {
+            match next.as_str() {
+                "--file" => {
+                    let Some(next) = args.next() else { return 1; };
+                    file = next;
+                }
+                "--skip-sig" => todo!(),
+                _ => whitelisted_vars.push(next.to_string()),
+            };
+        }
+
+        // TODO(jared): fill out grub config file prefix
+        let prefix = PathBuf::from("TODO_prefix");
+        let Ok(mut file) = fs::File::open(prefix.join(file)) else { return 1; };
+        let mut contents = String::new();
+        if file.read_to_string(&mut contents).is_err() {
+            return 1;
+        };
+
+        let loaded_env = contents.lines().filter(|line| !line.starts_with('#')).fold(
+            HashMap::new(),
+            |mut acc, curr| {
+                if let Some(split) = curr.split_once('=') {
+                    if !whitelisted_vars.is_empty() && whitelisted_vars.iter().any(|a| a == split.0)
+                    {
+                        acc.insert(split.0.to_string(), split.1.to_string());
+                    }
+                }
+                acc
+            },
+        );
+
+        self.env = loaded_env;
+        0
+    }
+
+    fn run_save_env(&self, args: Vec<String>) -> u8 {
+        let mut _file = "grubenv";
+        let mut args = args.iter();
+        let mut _vars_to_save = Vec::new();
+        let Some(next) = args.next() else { return 1; };
+        if next == "--file" {
+            let Some(next) = args.next() else { return 1; };
+            _file = next;
+        } else {
+            _vars_to_save.push(next);
+        }
+
+        for next in args {
+            _vars_to_save.push(next);
+        }
+
+        if _vars_to_save.is_empty() {
+            return 0;
+        }
+
+        // TODO(jared): must implement grub environment block:
+        // https://www.gnu.org/software/grub/manual/grub/html_node/Environment-block.html#Environment-block
         todo!()
     }
 
@@ -153,6 +215,7 @@ impl GrubEvaluator for Grub {
         match command.as_str() {
             "initrd" => self.run_initrd(args),
             "linux" => self.run_linux(args),
+            "load_env" => self.run_load_env(args),
             "save_env" => self.run_save_env(args),
             "search" => self.run_search(args),
             "set" => self.run_set(args),
