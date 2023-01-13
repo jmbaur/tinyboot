@@ -30,12 +30,27 @@ impl Grub {
         Self::default()
     }
 
-    fn run_initrd(&self, _args: Vec<String>) -> u8 {
-        todo!()
+    // TODO(jared): the docs mention being able to load multiple initrds, but what is the use case
+    // for that?
+    // https://www.gnu.org/software/grub/manual/grub/html_node/initrd.html#initrd
+    fn run_initrd(&mut self, args: Vec<String>) -> u8 {
+        let mut args = args.iter();
+        let Some(initrd) = args.next() else { return 1; };
+        self.env.insert("initrd".to_string(), initrd.to_string());
+        0
     }
 
-    fn run_linux(&self, _args: Vec<String>) -> u8 {
-        todo!()
+    fn run_linux(&mut self, args: Vec<String>) -> u8 {
+        let mut args = args.iter();
+        let Some(kernel) = args.next() else { return 1; };
+        let mut cmdline = String::new();
+        for next in args {
+            cmdline.push_str(next);
+            cmdline.push(' ');
+        }
+        self.env.insert("linux".to_string(), kernel.to_string());
+        self.env.insert("linux_cmdline".to_string(), cmdline);
+        0
     }
 
     fn run_load_env(&mut self, args: Vec<String>) -> u8 {
