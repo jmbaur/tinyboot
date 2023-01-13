@@ -159,7 +159,7 @@ mod tests {
     }
 
     #[test]
-    fn test_whitespace() {
+    fn whitespace() {
         assert_eq!(
             tokenize(
                 r#"
@@ -171,7 +171,7 @@ mod tests {
     }
 
     #[test]
-    fn test_test_expressions() {
+    fn expressions() {
         assert_eq!(
             tokenize("string1 == string2").unwrap(),
             vec![
@@ -191,7 +191,7 @@ mod tests {
     }
 
     #[test]
-    fn test_set_command() {
+    fn set_command() {
         assert_eq!(
             tokenize("set foo=bar").unwrap(),
             vec![
@@ -202,7 +202,7 @@ mod tests {
     }
 
     #[test]
-    fn test_simple_expression() {
+    fn simple_expression() {
         assert_eq!(
             tokenize(
                 r#"if [ $default -ne 0 ]; then
@@ -229,7 +229,7 @@ mod tests {
     }
 
     #[test]
-    fn test_menuentry() {
+    fn menuentry() {
         assert_eq!(
             tokenize("menuentry { linux /path/to/linux; }").unwrap(),
             vec![
@@ -244,7 +244,7 @@ mod tests {
     }
 
     #[test]
-    fn test_comment() {
+    fn comment() {
         assert_eq!(
             tokenize("foo # bar").unwrap(),
             vec![
@@ -270,7 +270,7 @@ mod tests {
     }
 
     #[test]
-    fn test_device_syntax() {
+    fn device_syntax() {
         assert_eq!(
             tokenize("(hd0,1)").unwrap(),
             vec![Token::Value("(hd0,1)".to_string()),]
@@ -278,7 +278,7 @@ mod tests {
     }
 
     #[test]
-    fn test_full_example() {
+    fn full_example() {
         let tokens = tokenize(include_str!("../testdata/grub.cfg")).unwrap();
         assert!(!tokens.iter().any(|tok| matches!(tok, Token::Illegal(_))));
     }

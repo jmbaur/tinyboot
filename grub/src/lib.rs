@@ -5,11 +5,11 @@ pub(crate) mod lexer;
 pub(crate) mod parser;
 pub(crate) mod token;
 
-pub use eval::{CommandReturn, ExitCode, Grub, GrubEnvironment};
+pub use eval::{GrubEnvironment, GrubEvaluator, MenuEntry};
 
 pub fn evaluate_config(
     mut config: impl io::Read,
-    commands: impl eval::Grub,
+    commands: impl eval::GrubEvaluator,
 ) -> Result<(), String> {
     let mut input = String::new();
     _ = config
@@ -17,6 +17,6 @@ pub fn evaluate_config(
         .map_err(|err| err.to_string())?;
     let mut parser = parser::Parser::new(lexer::Lexer::new(&input));
     let ast = parser.parse()?;
-    let mut evaluator = eval::GrubEvaluator::new(commands);
+    let mut evaluator = eval::GrubEvaluation::new(commands);
     evaluator.eval(ast)
 }

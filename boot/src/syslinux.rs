@@ -11,7 +11,7 @@ pub struct Syslinux {
 }
 
 impl Syslinux {
-    pub fn new(mount_point: &Path) -> Result<Syslinux, Error> {
+    pub fn new(mount_point: &Path) -> Result<Self, Error> {
         for path in [
             "boot/extlinux/extlinux.conf",
             "extlinux/extlinux.conf",
@@ -33,7 +33,7 @@ impl Syslinux {
                 warn!("{}: {}", search_path.display(), e)
             } else {
                 info!("found syslinux configuration at {}", search_path.display());
-                return Ok(Syslinux { path: search_path });
+                return Ok(Self { path: search_path });
             }
         }
 
@@ -154,7 +154,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_syslinux_get_parts() {
+    fn syslinux_get_parts() {
         let config = (Syslinux {
             path: PathBuf::from("testdata/extlinux.conf"),
         })
@@ -163,8 +163,8 @@ mod tests {
         assert_eq!(config.timeout, Duration::from_secs(50));
         assert_eq!(config.entries.len(), 6);
 
-        let MenuEntry::BootEntry(first) = &config.entries[0] else {panic!("first entry is not a boot entry");};
-        let MenuEntry::BootEntry(last) = &config.entries[5] else {panic!("last entry is not a boot entry");};
+        let MenuEntry::BootEntry(first) = &config.entries[0] else { panic!("first entry is not a boot entry"); };
+        let MenuEntry::BootEntry(last) = &config.entries[5] else { panic!("last entry is not a boot entry"); };
 
         assert_eq!(first.name, "NixOS - Default");
         assert_eq!(

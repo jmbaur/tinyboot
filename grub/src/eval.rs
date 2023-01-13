@@ -7,22 +7,19 @@ use crate::parser::{
 
 pub type GrubEnvironment = HashMap<String, Option<String>>;
 
-pub type ExitCode = u8;
-
-pub type CommandReturn = (GrubEnvironment, ExitCode);
-
-pub trait Grub {
-    fn run_command(
-        &self,
-        command: String,
-        args: Vec<String>,
-        env: GrubEnvironment,
-    ) -> CommandReturn;
+pub trait GrubEvaluator {
+    fn run_command(&mut self, command: String, args: Vec<String>) -> u8;
 
     /// Selects a single entry to boot into from a map of menu/submenu names to the list of entries
     /// in that menu. The special menu name "default" in the `menus` HashMap is the top-level menu.
     /// All other entries in the HashMap are submenus.
     fn select_menuentry(&self, menus: HashMap<String, Vec<MenuEntry>>) -> MenuEntry;
+
+    /// Set an environment variable
+    fn set_env(&mut self, key: String, val: Option<String>);
+
+    /// Get an enviroment variable (Mostly for being able to expand interpolated values).
+    fn get_env(&self, key: &str) -> Option<&String>;
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -53,23 +50,21 @@ pub struct MenuEntry {
     hotkey: Option<String>,
 }
 
-pub struct GrubEvaluator<T> {
-    commands: T,
+pub struct GrubEvaluation<T: GrubEvaluator> {
+    evaluator: T,
     last_exit_code: u8,
-    environment: GrubEnvironment,
     functions: HashMap<String, Vec<Statement>>,
     menus: HashMap<String, Vec<MenuEntry>>,
 }
 
-impl<T> GrubEvaluator<T>
+impl<T> GrubEvaluation<T>
 where
-    T: Grub,
+    T: GrubEvaluator,
 {
-    pub fn new(commands: T) -> Self {
-        GrubEvaluator {
-            commands,
+    pub fn new(evaluator: T) -> Self {
+        GrubEvaluation {
+            evaluator,
             last_exit_code: 0,
-            environment: HashMap::new(),
             functions: HashMap::new(),
             menus: HashMap::new(),
         }
@@ -99,9 +94,7 @@ where
                     if interpolating && needs_closing_brace {
                         interpolating = false;
                         needs_closing_brace = false;
-                        let Some(Some(interpolated_value)) = self.environment
-                            .get(&interpolated_identifier)
-                            else { continue; };
+                        let Some(interpolated_value) = self.evaluator.get_env(&interpolated_identifier) else { continue; };
                         final_value.push_str(interpolated_value);
                     }
                 }
@@ -116,9 +109,7 @@ where
                         // ../testdata/grub.cfg. Fill in further when more examples are discovered.
                         matches!(char, '/') || !char.is_ascii_alphanumeric() {
                             interpolating = false;
-                            let Some(Some(interpolated_value)) = self.environment
-                                .get(&interpolated_identifier)
-                                else { continue; };
+                            let Some(interpolated_value) = self.evaluator.get_env(&interpolated_identifier) else { continue; };
                             final_value.push_str(interpolated_value);
                         }
                     } else {
@@ -244,11 +235,7 @@ where
                     })
                     .collect();
 
-                let (new_env, exit_code) =
-                    self.commands
-                        .run_command(command.command, args, self.environment.clone());
-
-                self.environment = new_env;
+                let exit_code = self.evaluator.run_command(command.command, args);
 
                 self.last_exit_code = exit_code;
             }
@@ -258,7 +245,7 @@ where
     }
 
     fn run_variable_assignment(&mut self, assignment: AssignmentStatement) {
-        self.environment.insert(assignment.name, assignment.value);
+        self.evaluator.set_env(assignment.name, assignment.value);
     }
 
     fn run_if_statement(&mut self, stmt: IfStatement) -> Result<(), String> {
@@ -314,26 +301,27 @@ mod tests {
     use super::*;
 
     struct SimpleGrubCommands;
-    impl Grub for SimpleGrubCommands {
-        fn run_command(
-            &self,
-            _name: String,
-            _args: Vec<String>,
-            env: GrubEnvironment,
-        ) -> CommandReturn {
-            (env, 0)
+    impl GrubEvaluator for SimpleGrubCommands {
+        fn run_command(&mut self, _name: String, _args: Vec<String>) -> u8 {
+            0
         }
 
         fn select_menuentry(&self, _menus: HashMap<String, Vec<MenuEntry>>) -> MenuEntry {
             todo!()
         }
+
+        fn set_env(&mut self, _key: String, _val: Option<String>) {}
+
+        fn get_env(&self, _key: &str) -> Option<&String> {
+            None
+        }
     }
 
     #[test]
-    fn test_full_example() {
+    fn full_example() {
         let mut parser = Parser::new(Lexer::new(include_str!("../testdata/grub.cfg")));
         let ast = parser.parse().unwrap();
-        let mut evaluator = GrubEvaluator::new(SimpleGrubCommands {});
+        let mut evaluator = GrubEvaluation::new(SimpleGrubCommands {});
         evaluator.eval(ast).expect("no evaluation errors");
     }
 }

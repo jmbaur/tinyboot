@@ -424,7 +424,7 @@ mod tests {
     }
 
     #[test]
-    fn test_assignment_statement() {
+    fn assignment_statement() {
         let l = Lexer::new(
             r#"foo=bar
                bar="#,
@@ -437,7 +437,7 @@ mod tests {
     }
 
     #[test]
-    fn test_command_statement() {
+    fn command_statement() {
         let mut p = Parser::new(Lexer::new(r#"[ "${grub_platform}" = "efi" ]"#));
         let root = p.parse().unwrap();
         assert!(root.statements.len() == 1);
@@ -453,7 +453,7 @@ mod tests {
     }
 
     #[test]
-    fn test_multiple_command_statements() {
+    fn multiple_command_statements() {
         let mut p = Parser::new(Lexer::new("load_env; insmod foo 'bar'"));
         let root = p.parse().unwrap();
         assert!(root.statements.len() == 2);
@@ -469,7 +469,7 @@ mod tests {
     }
 
     #[test]
-    fn test_full_if_statement() {
+    fn full_if_statement() {
         let mut p = Parser::new(Lexer::new(
             r#"if [ "foo" ]; then; elif test "bar"; then; else; fi"#,
         ));
@@ -498,7 +498,7 @@ mod tests {
     }
 
     #[test]
-    fn test_function() {
+    fn function() {
         // TODO(jared): implement function calls
         let src = r#"
             function foobar { load_env; }
@@ -518,7 +518,7 @@ mod tests {
     }
 
     #[test]
-    fn test_full_example() {
+    fn full_example() {
         let mut p = Parser::new(Lexer::new(include_str!("../testdata/grub.cfg")));
         p.parse().expect("no parsing errors");
     }
