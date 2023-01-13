@@ -1,5 +1,5 @@
-use boot::boot_loader::{BootConfiguration, BootEntry, BootLoader, MenuEntry};
-use boot::syslinux;
+use boot::boot_loader::{kexec_execute, kexec_load, BootLoader, MenuEntry};
+use boot::syslinux::Syslinux;
 use log::LevelFilter;
 use log::{debug, error, info};
 use nix::mount;
@@ -84,10 +84,7 @@ fn find_block_devices() -> anyhow::Result<Vec<PathBuf>> {
     Ok(fs::read_dir("/sys/class/block")?
         .into_iter()
         .filter_map(|blk_dev| {
-            if blk_dev.is_err() {
-                return None;
-            }
-            let direntry = blk_dev.expect("not err");
+            let direntry = blk_dev.ok()?;
             let mut path = direntry.path();
             path.push("uevent");
             match fs::read_to_string(path).map(|uevent| {
@@ -150,7 +147,7 @@ fn ui<B: Backend>(
         .split(f.size());
 
     let (title, items): (String, Vec<ListItem>) = {
-        if let Some(MenuEntry::Submenu(submenu)) = boot_entries
+        if let Some(MenuEntry::SubMenu(submenu)) = boot_entries
             .chosen
             .and_then(|chosen| boot_entries.items.get(chosen))
         {
@@ -161,7 +158,7 @@ fn ui<B: Backend>(
                     .iter()
                     .filter_map(|i| match i {
                         MenuEntry::BootEntry(boot_entry) => {
-                            let lines = vec![Spans::from(boot_entry.name.clone())];
+                            let lines = vec![Spans::from(boot_entry.1)];
                             Some(ListItem::new(lines))
                         }
                         _ => None, // nested submenus are not valid
@@ -176,10 +173,10 @@ fn ui<B: Backend>(
                     .iter()
                     .map(|i| match i {
                         MenuEntry::BootEntry(boot_entry) => {
-                            let lines = vec![Spans::from(boot_entry.name.clone())];
+                            let lines = vec![Spans::from(boot_entry.1)];
                             ListItem::new(lines)
                         }
-                        MenuEntry::Submenu(submenu) => {
+                        MenuEntry::SubMenu(submenu) => {
                             let lines = vec![Spans::from(format!("<->{}", submenu.0))];
                             ListItem::new(lines)
                         }
@@ -211,8 +208,14 @@ fn ui<B: Backend>(
     }
 }
 
+fn unmount(path: &Path) {
+    if let Err(e) = nix::mount::umount2(path, mount::MntFlags::MNT_DETACH) {
+        error!("umount2: {e}");
+    }
+}
+
 fn logic<B: Backend>(terminal: &mut Terminal<B>) -> anyhow::Result<()> {
-    let mut configurations = find_block_devices()?
+    let mut boot_loaders = find_block_devices()?
         .iter()
         .filter_map(|dev| {
             let mountpoint = PathBuf::from("/mnt").join(
@@ -223,11 +226,7 @@ fn logic<B: Backend>(terminal: &mut Terminal<B>) -> anyhow::Result<()> {
             );
 
             let Ok(fstype) = detect_fs_type(dev) else { return None; };
-            debug!(
-                "detected {} fstype on {}",
-                fstype,
-                dev.to_str().expect("invalid unicode")
-            );
+            debug!("detected {} fstype on {}", fstype, dev.to_str()?);
 
             if let Err(e) = fs::create_dir_all(&mountpoint) {
                 error!("{e}");
@@ -247,31 +246,42 @@ fn logic<B: Backend>(terminal: &mut Terminal<B>) -> anyhow::Result<()> {
 
             debug!("mounted {} at {}", dev.display(), mountpoint.display());
 
-            match syslinux::Syslinux::new(&mountpoint).map(|s| s.get_boot_configuration()) {
-                Ok(Ok(p)) => Some(p),
-                e => {
-                    match e {
-                        Ok(Err(e)) => error!("failed to get boot parts: {}", e),
-                        Err(e) => error!("failed to get syslinux config: {}", e),
-                        _ => unreachable!(),
-                    }
-                    if let Err(e) = nix::mount::umount2(&mountpoint, mount::MntFlags::MNT_DETACH) {
-                        error!("umount2: {e}");
-                    }
-                    None
+            let boot_loader: Box<dyn BootLoader> = 'loader: {
+                // TODO(jared): enable grub boot loader
+                // if let Ok(grub) = Grub::new(&mountpoint) {
+                //     break 'loader Box::new(grub);
+                // }
+                if let Ok(syslinux) = Syslinux::new(&mountpoint) {
+                    break 'loader Box::new(syslinux);
                 }
-            }
-        })
-        .collect::<Vec<BootConfiguration>>();
+                unmount(&mountpoint);
+                return None;
+            };
 
-    let configuration = {
-        if configurations.is_empty() {
+            Some(boot_loader)
+        })
+        .collect::<Vec<Box<dyn BootLoader>>>();
+
+    let boot_loader = {
+        if boot_loaders.is_empty() {
             anyhow::bail!("no boot configurations");
         } else {
             // TODO(jared): provide menu for picking device configuration
-            configurations.swap_remove(0)
+            let chosen_loader = boot_loaders.swap_remove(0);
+
+            // unmount non-chosen devices
+            for loader in boot_loaders {
+                unmount(loader.mountpoint());
+            }
+
+            chosen_loader
         }
     };
+
+    info!(
+        "using boot loader from device mounted at {}",
+        boot_loader.mountpoint().display()
+    );
 
     enum Msg {
         Key(Key),
@@ -306,14 +316,17 @@ fn logic<B: Backend>(terminal: &mut Terminal<B>) -> anyhow::Result<()> {
 
     let mut has_user_interaction = false;
 
-    let timeout = configuration.timeout;
-    let mut boot_entries = StatefulList::with_items(configuration.entries);
-    let selected: &BootEntry = 'outer: loop {
+    let mut boot_entries = StatefulList::with_items(boot_loader.menu_entries()?);
+    let selected: Option<&(&str, &str)> = 'selection: loop {
         terminal.draw(|f| {
             ui(
                 f,
                 &mut boot_entries,
-                (has_user_interaction, start_instant.elapsed(), timeout),
+                (
+                    has_user_interaction,
+                    start_instant.elapsed(),
+                    boot_loader.timeout(),
+                ),
             )
         })?;
         match rx.recv()? {
@@ -326,8 +339,8 @@ fn logic<B: Backend>(terminal: &mut Terminal<B>) -> anyhow::Result<()> {
                             .selected()
                             .and_then(|idx| boot_entries.items.get(idx)) else { continue; };
                         match entry {
-                            MenuEntry::BootEntry(entry) => break 'outer entry,
-                            MenuEntry::Submenu(_) => boot_entries.choose_currently_selected(),
+                            MenuEntry::BootEntry(entry) => break 'selection Some(entry),
+                            MenuEntry::SubMenu(_) => boot_entries.choose_currently_selected(),
                         };
                     }
                     Key::Left | Key::Char('h') => boot_entries.clear_chosen(),
@@ -338,29 +351,20 @@ fn logic<B: Backend>(terminal: &mut Terminal<B>) -> anyhow::Result<()> {
                 };
             }
             Msg::Tick => {
-                if !has_user_interaction && start_instant.elapsed() >= timeout {
-                    // Timeout has occurred without any user interaction, select the default boot
-                    // selection.
-                    for entry in boot_entries.items.iter() {
-                        let MenuEntry::BootEntry(boot_entry) = entry else { continue; };
-                        if boot_entry.default {
-                            break 'outer boot_entry;
-                        }
-                    }
-                    break 'outer boot_entries
-                        .items
-                        .iter()
-                        .find_map(|entry| match entry {
-                            MenuEntry::BootEntry(boot_entry) => Some(boot_entry),
-                            _ => None,
-                        })
-                        .ok_or_else(|| anyhow::anyhow!("no boot entries"))?;
+                if !has_user_interaction && start_instant.elapsed() >= boot_loader.timeout() {
+                    // Timeout has occurred without any user interaction
+                    break 'selection None;
                 }
             }
         }
     };
 
-    Ok(selected.kexec()?)
+    let (kernel, initrd, cmdline, _dtb) = boot_loader.boot_info(selected.map(|s| s.0))?;
+    kexec_load(kernel, initrd, cmdline)?;
+
+    unmount(boot_loader.mountpoint());
+
+    Ok(kexec_execute()?)
 }
 
 #[derive(Debug)]
@@ -386,7 +390,6 @@ impl Config {
 
         args.into_iter().for_each(|arg| {
             if let Some(split) = arg.into().split_once('=') {
-                // TODO(jared): remove when more cmdline options are added
                 #[allow(clippy::single_match)]
                 match split.0 {
                     "tinyboot.log" => {

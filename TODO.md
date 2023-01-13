@@ -1,0 +1,3 @@
+- finish grub evaluator
+- allow for picking of boot device (currently just choosing the first device)
+- support boot menu over serial console

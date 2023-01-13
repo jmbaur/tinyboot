@@ -6,6 +6,9 @@
     nixpkgs.url = "nixpkgs/nixos-unstable";
     rust-overlay.inputs.nixpkgs.follows = "nixpkgs";
     rust-overlay.url = "github:oxalica/rust-overlay";
+
+    # TODO(jared): delete if/when merged
+    nixpkgs-extlinux-specialisation.url = "github:jmbaur/nixpkgs/extlinux-specialisation";
   };
   outputs = inputs: with inputs;
     let
@@ -18,6 +21,17 @@
       });
     in
     {
+      nixosConfigurations = forAllSystems ({ system, ... }: nixpkgs.lib.nixosSystem {
+        inherit system;
+        modules = [
+          ({ modulesPath, ... }: {
+            disabledModules = [ "${modulesPath}/system/boot/loader/generic-extlinux-compatible" ];
+            imports = [ "${nixpkgs-extlinux-specialisation}/nixos/modules/system/boot/loader/generic-extlinux-compatible" ];
+            specialisation.tty-console.configuration.boot.kernelParams = [ "console=tty0" ];
+            system.stateVersion = "23.05";
+          })
+        ];
+      });
       overlays.default = nixpkgs.lib.composeManyExtensions [
         rust-overlay.overlays.default
         (final: prev: {
@@ -38,9 +52,9 @@
         kernel = pkgs.tinyboot-kernel;
       });
       apps = forAllSystems ({ pkgs, system, ... }: {
-        default = { type = "app"; program = toString (pkgs.callPackage ./test { inherit nixpkgs; }); };
-        x86_64 = { type = "app"; program = toString (pkgs.pkgsCross.gnu64.callPackage ./test { inherit nixpkgs; }); };
-        aarch64 = { type = "app"; program = toString (pkgs.pkgsCross.aarch64-multiplatform.callPackage ./test { inherit nixpkgs; }); };
+        default = { type = "app"; program = toString (pkgs.callPackage ./test { inherit (self) nixosConfigurations; }); };
+        x86_64 = { type = "app"; program = toString (pkgs.pkgsCross.gnu64.callPackage ./test { inherit (self) nixosConfigurations; }); };
+        aarch64 = { type = "app"; program = toString (pkgs.pkgsCross.aarch64-multiplatform.callPackage ./test { inherit (self) nixosConfigurations; }); };
       });
     };
 }

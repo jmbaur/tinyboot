@@ -1,4 +1,4 @@
-{ nixpkgs, lib, pkgsBuildBuild, stdenv, substituteAll, tinyboot-initramfs, tinyboot-kernel, ... }:
+{ nixosConfigurations, lib, pkgsBuildBuild, stdenv, substituteAll, tinyboot-initramfs, tinyboot-kernel, ... }:
 let
   config = builtins.getAttr stdenv.hostPlatform.system {
     x86_64-linux = {
@@ -23,16 +23,12 @@ substituteAll {
   inherit (config) console qemuFlags;
   kernel = "${tinyboot-kernel}/${stdenv.hostPlatform.linux-kernel.target}";
   initrd = "${tinyboot-initramfs}/initrd";
-  drive = toString (
-    (nixpkgs.lib.nixosSystem {
-      inherit (stdenv.hostPlatform) system;
-      modules = [
-        ({ modulesPath, ... }: {
-          imports = [ (config.module modulesPath) ];
-          specialisation.other.configuration.boot.kernelParams = [ "console=tty" ];
-          system.stateVersion = "23.05";
-        })
-      ];
-    }).config.system.build.sdImage
-  );
+  drive = toString (nixosConfigurations.${stdenv.hostPlatform.system}.extendModules {
+    modules = [
+      ({ modulesPath, ... }: {
+        imports = [ (config.module modulesPath) ];
+        boot.kernelParams = [ "console=${config.console}" ];
+      })
+    ];
+  }).config.system.build.sdImage;
 }

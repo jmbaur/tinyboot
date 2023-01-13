@@ -1,4 +1,4 @@
-use crate::boot_loader::{BootConfiguration, BootLoader, Error};
+use crate::boot_loader::{BootLoader, Error};
 use crate::util::*;
 use grub::{GrubEvaluator, MenuEntry};
 use log::{debug, info, warn};
@@ -260,7 +260,22 @@ impl GrubEvaluator for Grub {
 }
 
 impl BootLoader for Grub {
-    fn get_boot_configuration(&self) -> Result<BootConfiguration, Error> {
+    fn timeout(&self) -> std::time::Duration {
+        todo!()
+    }
+
+    fn mountpoint(&self) -> &Path {
+        todo!()
+    }
+
+    fn menu_entries(&self) -> Result<Vec<crate::boot_loader::MenuEntry>, Error> {
+        todo!()
+    }
+
+    fn boot_info(
+        &self,
+        _entry_id: Option<&str>,
+    ) -> Result<(&Path, &Path, &str, Option<&Path>), Error> {
         todo!()
     }
 }
