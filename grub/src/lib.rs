@@ -5,7 +5,7 @@ pub(crate) mod lexer;
 pub(crate) mod parser;
 pub(crate) mod token;
 
-pub use eval::{GrubEnvironment, GrubEvaluator, MenuEntry};
+pub use eval::{GrubEvaluator, MenuEntry};
 
 pub fn evaluate_config(
     mut config: impl io::Read,

@@ -5,8 +5,6 @@ use crate::parser::{
     Statement,
 };
 
-pub type GrubEnvironment = HashMap<String, Option<String>>;
-
 pub trait GrubEvaluator {
     fn run_command(&mut self, command: String, args: Vec<String>) -> u8;
 
