@@ -4,30 +4,37 @@ use grub::{GrubEvaluator, MenuEntry};
 use log::{debug, info, warn};
 use std::io::Read;
 use std::path::PathBuf;
+use std::time::Duration;
 use std::{collections::HashMap, fs, path::Path};
 
-#[derive(Default, Debug)]
 pub struct Grub {
     env: HashMap<String, String>,
+    mountpoint: PathBuf,
 }
 
 impl Grub {
-    pub fn new(mount_point: &Path) -> Result<Self, Error> {
-        let search_path = mount_point.join("boot/grub/grub.cfg");
+    pub fn new(mountpoint: &Path) -> Result<Self, Error> {
+        let search_path = mountpoint.join("boot/grub/grub.cfg");
 
         if let Err(e) = fs::metadata(&search_path) {
             warn!("{}: {}", search_path.display(), e)
         } else {
             info!("found grub configuration at {}", search_path.display());
-            return Ok(Self::default());
+            return Ok(Self {
+                env: HashMap::new(),
+                mountpoint: mountpoint.to_path_buf(),
+            });
         }
 
         Err(Error::BootConfigNotFound)
     }
 
     /// Doesn't check if config file exists on mount path
-    pub fn new_unchecked(_mount_point: &Path) -> Self {
-        Self::default()
+    pub fn new_unchecked(mountpoint: &Path) -> Self {
+        Self {
+            env: HashMap::new(),
+            mountpoint: mountpoint.to_path_buf(),
+        }
     }
 
     // TODO(jared): the docs mention being able to load multiple initrds, but what is the use case
@@ -261,11 +268,15 @@ impl GrubEvaluator for Grub {
 
 impl BootLoader for Grub {
     fn timeout(&self) -> std::time::Duration {
-        todo!()
+        let Some(timeout) = self.env.get("timeout") else {
+            return Duration::from_secs(10);
+        };
+        let timeout: u64 = timeout.parse().unwrap_or(10);
+        Duration::from_secs(timeout)
     }
 
     fn mountpoint(&self) -> &Path {
-        todo!()
+        &self.mountpoint
     }
 
     fn menu_entries(&self) -> Result<Vec<crate::boot_loader::MenuEntry>, Error> {
