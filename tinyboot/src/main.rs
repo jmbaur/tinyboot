@@ -210,7 +210,7 @@ fn ui<B: Backend>(
 
 fn unmount(path: &Path) {
     if let Err(e) = nix::mount::umount2(path, mount::MntFlags::MNT_DETACH) {
-        error!("umount2: {e}");
+        error!("umount2({}): {e}", path.display());
     }
 }
 
@@ -229,7 +229,7 @@ fn logic<B: Backend>(terminal: &mut Terminal<B>) -> anyhow::Result<()> {
             debug!("detected {} fstype on {}", fstype, dev.to_str()?);
 
             if let Err(e) = fs::create_dir_all(&mountpoint) {
-                error!("{e}");
+                error!("failed to create mountpoint: {e}");
                 return None;
             }
 
@@ -240,7 +240,7 @@ fn logic<B: Backend>(terminal: &mut Terminal<B>) -> anyhow::Result<()> {
                 mount::MsFlags::MS_RDONLY,
                 NONE,
             ) {
-                error!("{e}");
+                error!("mount({}): {e}", dev.display());
                 return None;
             };
 
