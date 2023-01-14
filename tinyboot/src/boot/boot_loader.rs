@@ -11,8 +11,8 @@ pub enum Error {
     BootConfigNotFound,
     BootEntryNotFound,
     InvalidConfigFormat,
-    IoError(io::Error),
-    Many(Vec<Error>),
+    Io(io::Error),
+    Evaluation(String),
 }
 
 impl Display for Error {
@@ -25,7 +25,7 @@ impl error::Error for Error {}
 
 impl From<io::Error> for Error {
     fn from(e: io::Error) -> Self {
-        Error::IoError(e)
+        Error::Io(e)
     }
 }
 

@@ -1,13 +1,20 @@
-use crate::parser::{
-    AssignmentStatement, CommandArgument, CommandStatement, FunctionStatement, IfStatement,
-    Statement,
+use crate::{
+    lexer::Lexer,
+    parser::{
+        AssignmentStatement, CommandArgument, CommandStatement, FunctionStatement, IfStatement,
+        Parser, Statement,
+    },
 };
-use std::collections::HashMap;
+use std::{collections::HashMap, io, time::Duration};
 
+/// GrubEnvironment is the implementation of grub on an actual machine. It interacts with the
+/// filesystem and stores state within the evaluation of a Grub configuration file.
 pub trait GrubEnvironment {
+    /// All grub commands documented at
+    /// https://www.gnu.org/software/grub/manual/grub/grub.html#Commands should be implemented
+    /// besides menuentry and submenu. The command `[` will be sent as `test` and will not include
+    /// the trailing `]` character as an argument.
     fn run_command(&mut self, command: String, args: Vec<String>) -> u8;
-
-    fn add_entry(&mut self, menu_name: &str, entry: MenuEntry) -> Result<(), String>;
 
     /// Set an environment variable
     fn set_env(&mut self, key: String, val: Option<String>);
@@ -16,50 +23,61 @@ pub trait GrubEnvironment {
     fn get_env(&self, key: &str) -> Option<&String>;
 }
 
-#[derive(Debug, PartialEq, Eq)]
-pub enum MenuType {
-    /// Menuentry contains statements to execute along with arguments to those statements.
-    Menuentry((Vec<Statement>, Vec<String>)),
-    Submenu(Vec<MenuEntry>),
-}
-
-impl Default for MenuType {
-    fn default() -> Self {
-        Self::Submenu(Vec::new())
-    }
-}
-
 /// MenuEntry is a target that can be selected by a user to boot into or expand into more entries
 /// (i.e. a submenu).
 /// Menuentry docs: https://www.gnu.org/software/grub/manual/grub/html_node/menuentry.html
 /// Submenu docs: https://www.gnu.org/software/grub/manual/grub/html_node/submenu.html#submenu
-#[derive(Debug, PartialEq, Eq, Default)]
-pub struct MenuEntry {
+#[derive(Debug, Default)]
+pub struct GrubEntry {
     pub title: String,
-    pub consequence: MenuType,
     pub id: Option<String>,
     pub class: Option<String>,
     pub users: Option<String>,
     pub unrestricted: Option<bool>,
     pub hotkey: Option<String>,
+
+    /// Only valid for `menuentry` commands. Will be `None` for submenus.
+    pub consequence: Option<Vec<Statement>>,
+    /// Only valid for `menuentry` commands. Will be `None` for submenus.
+    pub extra_args: Option<Vec<String>>,
+
+    /// Only valid for `submenu` commands. Will be `None` for menuentries.
+    pub menuentries: Option<Vec<GrubEntry>>,
 }
 
-pub struct GrubEvaluation<'a, T: GrubEnvironment> {
-    evaluator: &'a mut T,
-    last_exit_code: u8,
+pub struct GrubEvaluator<T: GrubEnvironment> {
+    source: String,
+    env: T,
     functions: HashMap<String, Vec<Statement>>,
+    pub last_exit_code: u8,
+    pub menu: Vec<GrubEntry>,
 }
 
-impl<'a, T> GrubEvaluation<'a, T>
+impl<T> GrubEvaluator<T>
 where
     T: GrubEnvironment,
 {
-    pub fn new(evaluator: &'a mut T) -> Self {
-        GrubEvaluation {
-            evaluator,
+    pub fn new(config_file: impl io::Read, env: T) -> Result<Self, io::Error> {
+        let source = io::read_to_string(config_file)?;
+        Ok(Self::new_from_source(source, env))
+    }
+
+    pub fn new_from_source(source: String, env: T) -> Self {
+        GrubEvaluator {
+            source,
             last_exit_code: 0,
+            env,
             functions: HashMap::new(),
+            menu: Vec::new(),
         }
+    }
+
+    pub fn timeout(&self) -> Duration {
+        let Some(timeout) = self.env.get_env("timeout") else {
+            return Duration::from_secs(10);
+        };
+        let timeout: u64 = timeout.parse().unwrap_or(10);
+        Duration::from_secs(timeout)
     }
 
     fn interpolate_value(&self, value: String) -> String {
@@ -86,7 +104,7 @@ where
                     if interpolating && needs_closing_brace {
                         interpolating = false;
                         needs_closing_brace = false;
-                        let Some(interpolated_value) = self.evaluator.get_env(&interpolated_identifier) else { continue; };
+                        let Some(interpolated_value) = self.env.get_env(&interpolated_identifier) else { continue; };
                         final_value.push_str(interpolated_value);
                     }
                 }
@@ -101,7 +119,7 @@ where
                         // ../testdata/grub.cfg. Fill in further when more examples are discovered.
                         matches!(char, '/') || !char.is_ascii_alphanumeric() {
                             interpolating = false;
-                            let Some(interpolated_value) = self.evaluator.get_env(&interpolated_identifier) else { continue; };
+                            let Some(interpolated_value) = self.env.get_env(&interpolated_identifier) else { continue; };
                             final_value.push_str(interpolated_value);
                         }
                     } else {
@@ -114,53 +132,55 @@ where
         final_value
     }
 
-    fn get_menuentry(&self, menuentry: &CommandStatement) -> Result<MenuEntry, String> {
-        let mut entry = MenuEntry::default();
+    fn get_entry(&self, command: &CommandStatement) -> Result<GrubEntry, String> {
+        let mut entry = GrubEntry::default();
 
-        let CommandArgument::Value(title) = menuentry
-                .args
-                .get(0)
-                .ok_or_else(|| "menuentry title not present".to_string())? else {
-                    return Err("menuentry title is not a CommandArgument::Value".to_string());
-                };
-        entry.title = self.interpolate_value(title.to_string());
+        let mut args = command.args.iter().peekable();
 
-        // only valid with menuentry
-        let mut menuentry_consequence = (Vec::new(), Vec::new());
-        let mut submenu_consequence = Vec::new();
-        for arg in &menuentry.args[1..] {
+        let destructure_value = |cmd_arg: Option<&CommandArgument>| -> Result<String, String> {
+            let CommandArgument::Value(val) = cmd_arg
+                    .ok_or_else(|| "command argument is None".to_string())? else {
+                        return Err("not a CommandArgument::Value".to_string());
+                    };
+            Ok(val.to_string())
+        };
+
+        entry.title = self.interpolate_value(destructure_value(args.next())?);
+
+        let mut menuentry_consequence = Vec::new();
+        let mut menuentry_extra_args = Vec::new();
+
+        let mut submenu_entries = Vec::new();
+
+        while let Some(arg) = args.next() {
             match arg {
                 CommandArgument::Value(value) => {
-                    match value.split_once('=') {
-                        Some(("--class", class)) => entry.class = Some(class.to_string()),
-                        Some(("--users", users)) => entry.users = Some(users.to_string()),
-                        Some(("--hotkey", hotkey)) => entry.hotkey = Some(hotkey.to_string()),
-                        Some(("--id", id)) => entry.id = Some(id.to_string()),
+                    match value.as_str() {
+                        "--class" => entry.class = Some(destructure_value(args.next())?),
+                        "--users" => entry.users = Some(destructure_value(args.next())?),
+                        "--hotkey" => entry.hotkey = Some(destructure_value(args.next())?),
+                        "--id" => entry.id = Some(destructure_value(args.next())?),
+                        "--unrestricted" => entry.unrestricted = Some(true),
                         _ => {
-                            if value.as_str() == "--unrestricted" {
-                                entry.unrestricted = Some(true);
-                            } else if menuentry.command.as_str() == "menuentry" {
-                                menuentry_consequence
-                                    .1
+                            // menuentry can have extra args that are passed to the consequence
+                            // commands
+                            if command.command == "menuentry" {
+                                menuentry_extra_args
                                     .push(self.interpolate_value(value.to_string()));
                             }
                         }
-                    };
-                    if menuentry.command.as_str() == "menuentry" {
-                        menuentry_consequence
-                            .1
-                            .push(self.interpolate_value(value.to_string()));
                     }
                 }
                 CommandArgument::Literal(literal) => {
-                    if menuentry.command.as_str() == "menuentry" {
-                        menuentry_consequence.1.push(literal.to_string());
+                    if command.command == "menuentry" {
+                        menuentry_extra_args.push(literal.to_string());
                     }
                 }
-                CommandArgument::Block(block) => {
-                    if menuentry.command.as_str() == "menuentry" {
-                        menuentry_consequence.0.extend(block.to_vec());
-                    } else if menuentry.command.as_str() == "submenu" {
+                CommandArgument::Block(block) => match command.command.as_str() {
+                    "menuentry" => {
+                        menuentry_consequence.extend(block.to_vec());
+                    }
+                    "submenu" => {
                         let entries = block
                             .iter()
                             .filter_map(|stmt| {
@@ -168,37 +188,36 @@ where
                                 if cmd.command != "menuentry" {
                                     return None;
                                 }
-                                self.get_menuentry(cmd).ok()
+                                self.get_entry(cmd).ok()
                             })
-                            .collect::<Vec<MenuEntry>>();
-                        submenu_consequence.extend(entries);
+                            .collect::<Vec<GrubEntry>>();
+                        submenu_entries.extend(entries);
                     }
-                }
+                    _ => {}
+                },
             };
         }
 
-        if menuentry.command.as_str() == "menuentry" {
-            entry.consequence = MenuType::Menuentry(menuentry_consequence);
-        } else if menuentry.command.as_str() == "submenu" {
-            entry.consequence = MenuType::Submenu(submenu_consequence);
-        }
+        match command.command.as_str() {
+            "menuentry" => {
+                entry.consequence = Some(menuentry_consequence);
+                entry.extra_args = Some(menuentry_extra_args);
+            }
+            "submenu" => entry.menuentries = Some(submenu_entries),
+            _ => {}
+        };
 
         Ok(entry)
     }
 
-    fn add_menuentry(
-        &mut self,
-        menuentry: CommandStatement,
-        submenu_name: Option<&str>,
-    ) -> Result<(), String> {
-        let entry = self.get_menuentry(&menuentry)?;
-        self.evaluator
-            .add_entry(submenu_name.unwrap_or("default"), entry)
+    fn add_entry(&mut self, command: CommandStatement) -> Result<(), String> {
+        self.menu.push(self.get_entry(&command)?);
+        Ok(())
     }
 
     fn run_command(&mut self, command: CommandStatement) -> Result<(), String> {
         match command.command.as_str() {
-            "menuentry" | "submenu" => self.add_menuentry(command, None)?,
+            "menuentry" | "submenu" => self.add_entry(command)?,
             _ => {
                 let args = command
                     .args
@@ -215,7 +234,7 @@ where
                     })
                     .collect();
 
-                let exit_code = self.evaluator.run_command(command.command, args);
+                let exit_code = self.env.run_command(command.command, args);
 
                 self.last_exit_code = exit_code;
             }
@@ -225,7 +244,7 @@ where
     }
 
     fn run_variable_assignment(&mut self, assignment: AssignmentStatement) {
-        self.evaluator.set_env(assignment.name, assignment.value);
+        self.env.set_env(assignment.name, assignment.value);
     }
 
     fn run_if_statement(&mut self, stmt: IfStatement) -> Result<(), String> {
@@ -255,7 +274,7 @@ where
         Ok(())
     }
 
-    pub fn eval_statements(&mut self, statements: Vec<Statement>) -> Result<(), String> {
+    fn eval_statements(&mut self, statements: Vec<Statement>) -> Result<(), String> {
         for stmt in statements {
             match stmt {
                 Statement::Assignment(assignment) => self.run_variable_assignment(assignment),
@@ -268,15 +287,20 @@ where
 
         Ok(())
     }
+
+    pub fn eval(&mut self) -> Result<(), String> {
+        let mut parser = Parser::new(Lexer::new(&self.source));
+        let ast = parser.parse()?;
+        self.eval_statements(ast.statements)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{lexer::Lexer, parser::Parser};
 
-    struct SimpleGrubCommands;
-    impl GrubEnvironment for SimpleGrubCommands {
+    struct SimpleGrubEnvironment;
+    impl GrubEnvironment for SimpleGrubEnvironment {
         fn run_command(&mut self, _name: String, _args: Vec<String>) -> u8 {
             0
         }
@@ -286,20 +310,15 @@ mod tests {
         fn get_env(&self, _key: &str) -> Option<&String> {
             None
         }
-
-        fn add_entry(&mut self, _menu_name: &str, _entry: MenuEntry) -> Result<(), String> {
-            Ok(())
-        }
     }
 
     #[test]
     fn full_example() {
-        let mut parser = Parser::new(Lexer::new(include_str!("../testdata/grub.cfg")));
-        let ast = parser.parse().unwrap();
-        let mut evaluator = SimpleGrubCommands {};
-        let mut evaluation = GrubEvaluation::new(&mut evaluator);
-        evaluation
-            .eval_statements(ast.statements)
-            .expect("no evaluation errors");
+        let grub_env = SimpleGrubEnvironment {};
+        let mut evaluator = GrubEvaluator::new_from_source(
+            include_str!("../testdata/grub.cfg").to_string(),
+            grub_env,
+        );
+        evaluator.eval().expect("no evaluation errors");
     }
 }

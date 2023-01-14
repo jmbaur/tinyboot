@@ -3,4 +3,4 @@ pub(crate) mod lexer;
 pub(crate) mod parser;
 pub(crate) mod token;
 
-pub use eval::{GrubEvaluation, GrubEnvironment, MenuEntry, MenuType};
+pub use eval::{GrubEntry, GrubEnvironment, GrubEvaluator};
