@@ -1,42 +1,19 @@
-use crate::boot_loader::{BootLoader, Error};
-use crate::util::*;
-use grub::{GrubEvaluator, MenuEntry};
+use crate::boot::boot_loader::{BootLoader, Error};
+use crate::boot::util::*;
+use grub::{GrubEnvironment, MenuEntry};
 use log::{debug, info, warn};
 use std::io::Read;
 use std::path::PathBuf;
 use std::time::Duration;
 use std::{collections::HashMap, fs, path::Path};
 
-pub struct Grub {
+#[derive(Default)]
+struct TinybootGrubEnvironment {
     env: HashMap<String, String>,
-    mountpoint: PathBuf,
+    menu: HashMap<String, Vec<MenuEntry>>,
 }
 
-impl Grub {
-    pub fn new(mountpoint: &Path) -> Result<Self, Error> {
-        let search_path = mountpoint.join("boot/grub/grub.cfg");
-
-        if let Err(e) = fs::metadata(&search_path) {
-            warn!("{}: {}", search_path.display(), e)
-        } else {
-            info!("found grub configuration at {}", search_path.display());
-            return Ok(Self {
-                env: HashMap::new(),
-                mountpoint: mountpoint.to_path_buf(),
-            });
-        }
-
-        Err(Error::BootConfigNotFound)
-    }
-
-    /// Doesn't check if config file exists on mount path
-    pub fn new_unchecked(mountpoint: &Path) -> Self {
-        Self {
-            env: HashMap::new(),
-            mountpoint: mountpoint.to_path_buf(),
-        }
-    }
-
+impl TinybootGrubEnvironment {
     // TODO(jared): the docs mention being able to load multiple initrds, but what is the use case
     // for that?
     // https://www.gnu.org/software/grub/manual/grub/html_node/initrd.html#initrd
@@ -232,7 +209,7 @@ impl Grub {
     }
 }
 
-impl GrubEvaluator for Grub {
+impl GrubEnvironment for TinybootGrubEnvironment {
     fn run_command(&mut self, command: String, args: Vec<String>) -> u8 {
         match command.as_str() {
             "initrd" => self.run_initrd(args),
@@ -249,10 +226,6 @@ impl GrubEvaluator for Grub {
         }
     }
 
-    fn select_menuentry(&self, _menus: HashMap<String, Vec<MenuEntry>>) -> MenuEntry {
-        todo!()
-    }
-
     fn set_env(&mut self, key: String, val: Option<String>) {
         if let Some(val) = val {
             self.env.insert(key, val);
@@ -264,11 +237,46 @@ impl GrubEvaluator for Grub {
     fn get_env(&self, _key: &str) -> Option<&String> {
         self.env.get(_key)
     }
+
+    fn add_entry(&mut self, menu_name: &str, entry: MenuEntry) -> Result<(), String> {
+        if !self.menu.contains_key(menu_name) {
+            self.menu.insert(menu_name.to_string(), Vec::new());
+        }
+        let entries = self
+            .menu
+            .get_mut(menu_name)
+            .ok_or_else(|| "submenu does not exist".to_string())?;
+        entries.push(entry);
+        Ok(())
+    }
 }
 
-impl BootLoader for Grub {
+pub struct GrubBootLoader {
+    mountpoint: PathBuf,
+    evaluator: TinybootGrubEnvironment,
+}
+
+impl GrubBootLoader {
+    pub fn new(mountpoint: &Path) -> Result<Self, Error> {
+        let search_path = mountpoint.join("boot/grub/grub.cfg");
+
+        if let Err(e) = fs::metadata(&search_path) {
+            warn!("{}: {}", search_path.display(), e)
+        } else {
+            info!("found grub configuration at {}", search_path.display());
+            return Ok(Self {
+                mountpoint: mountpoint.to_path_buf(),
+                evaluator: TinybootGrubEnvironment::default(),
+            });
+        }
+
+        Err(Error::BootConfigNotFound)
+    }
+}
+
+impl BootLoader for GrubBootLoader {
     fn timeout(&self) -> std::time::Duration {
-        let Some(timeout) = self.env.get("timeout") else {
+        let Some(timeout) = self.evaluator.get_env("timeout") else {
             return Duration::from_secs(10);
         };
         let timeout: u64 = timeout.parse().unwrap_or(10);
@@ -279,27 +287,81 @@ impl BootLoader for Grub {
         &self.mountpoint
     }
 
-    fn menu_entries(&self) -> Result<Vec<crate::boot_loader::MenuEntry>, Error> {
-        todo!()
+    fn menu_entries(&self) -> Result<Vec<crate::boot::boot_loader::MenuEntry>, Error> {
+        let mut entries = Vec::new();
+        for (menu_name, menu_entries) in &self.evaluator.menu {
+            entries.extend(menu_entries.iter().map(|entry| {
+                if menu_name == "default" {
+                    crate::boot::boot_loader::MenuEntry::BootEntry((
+                        entry.id.as_deref().unwrap_or(entry.title.as_str()),
+                        &entry.title,
+                    ))
+                } else {
+                    crate::boot::boot_loader::MenuEntry::SubMenu((
+                        entry.id.as_deref().unwrap_or(entry.title.as_str()),
+                        menu_entries
+                            .iter()
+                            .map(|entry| {
+                                crate::boot::boot_loader::MenuEntry::BootEntry((
+                                    entry.id.as_deref().unwrap_or(entry.title.as_str()),
+                                    &entry.title,
+                                ))
+                            })
+                            .collect(),
+                    ))
+                }
+            }));
+        }
+        Ok(entries)
     }
 
+    /// The entry ID could be the ID or name of a boot entry, submenu, or boot entry nested within
+    /// a submenu.
     fn boot_info(
         &self,
-        _entry_id: Option<&str>,
+        entry_id: Option<&str>,
     ) -> Result<(&Path, &Path, &str, Option<&Path>), Error> {
+        let _entry_to_boot: &MenuEntry = 'entry: {
+            if let Some(entry_id) = entry_id {
+                for entries in self.evaluator.menu.values() {
+                    for entry in entries {
+                        if entry.id.as_ref().unwrap_or(&entry.title) == entry_id {
+                            break 'entry entry;
+                        }
+                    }
+                }
+                return Err(Error::BootEntryNotFound);
+            } else {
+                let entry_idx: usize = entry_id
+                    .unwrap_or_else(|| {
+                        self.evaluator
+                            .get_env("default")
+                            .map(|s| s.as_str())
+                            .unwrap_or("0")
+                    })
+                    .parse()
+                    .unwrap_or_default();
+
+                let entries: Vec<&MenuEntry> = self.evaluator.menu.values().flatten().collect();
+                entries.get(entry_idx).ok_or(Error::BootEntryNotFound)?
+            }
+        };
+
+        // TODO(jared): run statements to get linux, initrd, and cmdline values
+        // let MenuType::Menuentry((_statements, _todo)) = entry_to_boot.consequence else {
+        //     return Err(Error::BootEntryNotFound);
+        // };
         todo!()
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-
     use super::*;
 
     #[test]
     fn grub_run_test() {
-        let g = Grub::new_unchecked(&PathBuf::from("/"));
+        let g = TinybootGrubEnvironment::default();
         assert_eq!(g.run_test(vec!["-d".to_string(), "/dev".to_string()]), 0);
         assert_eq!(g.run_test(vec!["-f".to_string(), "/dev".to_string()]), 1);
         assert_eq!(g.run_test(vec!["-e".to_string(), "/dev".to_string()]), 0);

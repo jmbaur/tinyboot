@@ -1,17 +1,13 @@
-use std::collections::HashMap;
-
 use crate::parser::{
-    self, AssignmentStatement, CommandArgument, CommandStatement, FunctionStatement, IfStatement,
+    AssignmentStatement, CommandArgument, CommandStatement, FunctionStatement, IfStatement,
     Statement,
 };
+use std::collections::HashMap;
 
-pub trait GrubEvaluator {
+pub trait GrubEnvironment {
     fn run_command(&mut self, command: String, args: Vec<String>) -> u8;
 
-    /// Selects a single entry to boot into from a map of menu/submenu names to the list of entries
-    /// in that menu. The special menu name "default" in the `menus` HashMap is the top-level menu.
-    /// All other entries in the HashMap are submenus.
-    fn select_menuentry(&self, menus: HashMap<String, Vec<MenuEntry>>) -> MenuEntry;
+    fn add_entry(&mut self, menu_name: &str, entry: MenuEntry) -> Result<(), String>;
 
     /// Set an environment variable
     fn set_env(&mut self, key: String, val: Option<String>);
@@ -39,32 +35,30 @@ impl Default for MenuType {
 /// Submenu docs: https://www.gnu.org/software/grub/manual/grub/html_node/submenu.html#submenu
 #[derive(Debug, PartialEq, Eq, Default)]
 pub struct MenuEntry {
-    title: String,
-    consequence: MenuType,
-    id: Option<String>,
-    class: Option<String>,
-    users: Option<String>,
-    unrestricted: Option<bool>,
-    hotkey: Option<String>,
+    pub title: String,
+    pub consequence: MenuType,
+    pub id: Option<String>,
+    pub class: Option<String>,
+    pub users: Option<String>,
+    pub unrestricted: Option<bool>,
+    pub hotkey: Option<String>,
 }
 
-pub struct GrubEvaluation<T: GrubEvaluator> {
-    evaluator: T,
+pub struct GrubEvaluation<'a, T: GrubEnvironment> {
+    evaluator: &'a mut T,
     last_exit_code: u8,
     functions: HashMap<String, Vec<Statement>>,
-    menus: HashMap<String, Vec<MenuEntry>>,
 }
 
-impl<T> GrubEvaluation<T>
+impl<'a, T> GrubEvaluation<'a, T>
 where
-    T: GrubEvaluator,
+    T: GrubEnvironment,
 {
-    pub fn new(evaluator: T) -> Self {
+    pub fn new(evaluator: &'a mut T) -> Self {
         GrubEvaluation {
             evaluator,
             last_exit_code: 0,
             functions: HashMap::new(),
-            menus: HashMap::new(),
         }
     }
 
@@ -198,25 +192,13 @@ where
         submenu_name: Option<&str>,
     ) -> Result<(), String> {
         let entry = self.get_menuentry(&menuentry)?;
-
-        let submenu_name = submenu_name.unwrap_or("default");
-        if !self.menus.contains_key(submenu_name) {
-            self.menus.insert(submenu_name.to_string(), vec![]);
-        }
-
-        let menu = self
-            .menus
-            .get_mut(submenu_name)
-            .ok_or_else(|| "menu does not exist".to_string())?;
-
-        menu.push(entry);
-        Ok(())
+        self.evaluator
+            .add_entry(submenu_name.unwrap_or("default"), entry)
     }
 
     fn run_command(&mut self, command: CommandStatement) -> Result<(), String> {
         match command.command.as_str() {
-            "menuentry" => self.add_menuentry(command, None)?,
-            "submenu" => self.add_menuentry(command, None)?,
+            "menuentry" | "submenu" => self.add_menuentry(command, None)?,
             _ => {
                 let args = command
                     .args
@@ -273,7 +255,7 @@ where
         Ok(())
     }
 
-    fn eval_statements(&mut self, statements: Vec<Statement>) -> Result<(), String> {
+    pub fn eval_statements(&mut self, statements: Vec<Statement>) -> Result<(), String> {
         for stmt in statements {
             match stmt {
                 Statement::Assignment(assignment) => self.run_variable_assignment(assignment),
@@ -286,26 +268,17 @@ where
 
         Ok(())
     }
-
-    pub fn eval(&mut self, ast: parser::Root) -> Result<(), String> {
-        self.eval_statements(ast.statements)
-    }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::{lexer::Lexer, parser::Parser};
 
-    use super::*;
-
     struct SimpleGrubCommands;
-    impl GrubEvaluator for SimpleGrubCommands {
+    impl GrubEnvironment for SimpleGrubCommands {
         fn run_command(&mut self, _name: String, _args: Vec<String>) -> u8 {
             0
-        }
-
-        fn select_menuentry(&self, _menus: HashMap<String, Vec<MenuEntry>>) -> MenuEntry {
-            todo!()
         }
 
         fn set_env(&mut self, _key: String, _val: Option<String>) {}
@@ -313,13 +286,20 @@ mod tests {
         fn get_env(&self, _key: &str) -> Option<&String> {
             None
         }
+
+        fn add_entry(&mut self, _menu_name: &str, _entry: MenuEntry) -> Result<(), String> {
+            Ok(())
+        }
     }
 
     #[test]
     fn full_example() {
         let mut parser = Parser::new(Lexer::new(include_str!("../testdata/grub.cfg")));
         let ast = parser.parse().unwrap();
-        let mut evaluator = GrubEvaluation::new(SimpleGrubCommands {});
-        evaluator.eval(ast).expect("no evaluation errors");
+        let mut evaluator = SimpleGrubCommands {};
+        let mut evaluation = GrubEvaluation::new(&mut evaluator);
+        evaluation
+            .eval_statements(ast.statements)
+            .expect("no evaluation errors");
     }
 }

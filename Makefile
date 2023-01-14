@@ -2,10 +2,13 @@
 
 default: build
 
-build:
+check:
+	cargo clippy
+
+build: check
 	cargo build
 
-test:
+test: check
 	cargo test --workspace
 
 run:

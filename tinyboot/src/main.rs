@@ -1,5 +1,7 @@
+mod boot;
+
 use boot::boot_loader::{kexec_execute, kexec_load, BootLoader, MenuEntry};
-use boot::syslinux::Syslinux;
+use boot::syslinux::SyslinuxBootLoader;
 use log::LevelFilter;
 use log::{debug, error, info};
 use nix::mount;
@@ -251,7 +253,7 @@ fn logic<B: Backend>(terminal: &mut Terminal<B>) -> anyhow::Result<()> {
                 // if let Ok(grub) = Grub::new(&mountpoint) {
                 //     break 'loader Box::new(grub);
                 // }
-                if let Ok(syslinux) = Syslinux::new(&mountpoint) {
+                if let Ok(syslinux) = SyslinuxBootLoader::new(&mountpoint) {
                     break 'loader Box::new(syslinux);
                 }
                 unmount(&mountpoint);

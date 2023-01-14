@@ -1,4 +1,4 @@
-use crate::boot_loader::{BootLoader, Error, MenuEntry};
+use crate::boot::boot_loader::{BootLoader, Error, MenuEntry};
 use log::{debug, info, warn};
 use std::{
     fs,
@@ -16,7 +16,7 @@ struct BootEntry {
     dtb: Option<PathBuf>,
 }
 
-pub struct Syslinux {
+pub struct SyslinuxBootLoader {
     mountpoint: PathBuf,
     config_file: PathBuf,
     entries: Vec<BootEntry>,
@@ -145,7 +145,7 @@ fn syslinux_parse(config_file: &Path) -> Result<(Vec<BootEntry>, Duration), Erro
     Ok((entries, timeout))
 }
 
-impl Syslinux {
+impl SyslinuxBootLoader {
     pub fn new(mountpoint: &Path) -> Result<Self, Error> {
         for path in [
             "boot/extlinux/extlinux.conf",
@@ -190,7 +190,7 @@ impl Syslinux {
     }
 }
 
-impl BootLoader for Syslinux {
+impl BootLoader for SyslinuxBootLoader {
     fn timeout(&self) -> Duration {
         self.timeout
     }
