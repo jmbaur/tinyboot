@@ -10,9 +10,10 @@ use std::{arch, error, ffi, fs, io, thread};
 pub enum Error {
     BootConfigNotFound,
     BootEntryNotFound,
-    InvalidConfigFormat,
-    Io(io::Error),
     Evaluation(String),
+    InvalidConfigFormat,
+    InvalidMountpoint,
+    Io(io::Error),
 }
 
 impl Display for Error {
