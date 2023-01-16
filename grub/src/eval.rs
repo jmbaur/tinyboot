@@ -220,27 +220,50 @@ where
     }
 
     fn run_command(&mut self, command: CommandStatement) -> Result<(), String> {
+        let args = command
+            .args
+            .iter()
+            .filter_map(|arg| match arg {
+                CommandArgument::Value(value) => Some(self.interpolate_value(value.to_string())),
+                CommandArgument::Literal(literal) => Some(literal.to_string()),
+                CommandArgument::Block(_) => {
+                    // TODO(jared): blocks are invalid here, return an error?
+                    None
+                }
+            })
+            .collect::<Vec<String>>();
+        let args_len = args.len();
+
+        // setup command-scoped environment variables
+        {
+            self.env
+                .set_env("#".to_string(), Some(args.len().to_string()));
+            self.env.set_env("*".to_string(), Some(args.join(" ")));
+            self.env.set_env("@".to_string(), Some(args.join(" ")));
+            self.env
+                .set_env(0.to_string(), Some(command.command.clone()));
+            for (i, arg) in args.iter().enumerate() {
+                self.env.set_env((i + 1).to_string(), Some(arg.to_string()));
+            }
+        }
+
         match command.command.as_str() {
             "menuentry" | "submenu" => self.add_entry(command)?,
             _ => {
-                let args = command
-                    .args
-                    .iter()
-                    .filter_map(|arg| match arg {
-                        CommandArgument::Value(value) => {
-                            Some(self.interpolate_value(value.to_string()))
-                        }
-                        CommandArgument::Literal(literal) => Some(literal.to_string()),
-                        CommandArgument::Block(_) => {
-                            // TODO(jared): blocks are invalid here, return an error?
-                            None
-                        }
-                    })
-                    .collect();
-
                 let exit_code = self.env.run_command(command.command, args);
-
                 self.last_exit_code = exit_code;
+                self.env
+                    .set_env("?".to_string(), Some(self.last_exit_code.to_string()));
+            }
+        }
+
+        // teardown command-scoped environment variables
+        {
+            self.env.set_env("#".to_string(), None);
+            self.env.set_env("*".to_string(), None);
+            self.env.set_env("@".to_string(), None);
+            for i in 0..args_len {
+                self.env.set_env(i.to_string(), None);
             }
         }
 
