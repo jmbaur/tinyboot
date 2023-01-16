@@ -264,7 +264,7 @@ fn logic<B: Backend>(terminal: &mut Terminal<B>) -> anyhow::Result<()> {
         })
         .collect::<Vec<Box<dyn BootLoader>>>();
 
-    let boot_loader = {
+    let mut boot_loader = {
         if boot_loaders.is_empty() {
             anyhow::bail!("no boot configurations");
         } else {
@@ -318,17 +318,15 @@ fn logic<B: Backend>(terminal: &mut Terminal<B>) -> anyhow::Result<()> {
 
     let mut has_user_interaction = false;
 
-    let mut boot_entries = StatefulList::with_items(boot_loader.menu_entries()?);
-    let selected: Option<&(&str, &str)> = 'selection: loop {
+    let timeout = boot_loader.timeout();
+    let menu_entries = boot_loader.menu_entries()?;
+    let mut boot_entries = StatefulList::with_items(menu_entries);
+    let selected_entry_id: Option<String> = 'selection: loop {
         terminal.draw(|f| {
             ui(
                 f,
                 &mut boot_entries,
-                (
-                    has_user_interaction,
-                    start_instant.elapsed(),
-                    boot_loader.timeout(),
-                ),
+                (has_user_interaction, start_instant.elapsed(), timeout),
             )
         })?;
         match rx.recv()? {
@@ -341,7 +339,9 @@ fn logic<B: Backend>(terminal: &mut Terminal<B>) -> anyhow::Result<()> {
                             .selected()
                             .and_then(|idx| boot_entries.items.get(idx)) else { continue; };
                         match entry {
-                            MenuEntry::BootEntry(entry) => break 'selection Some(entry),
+                            MenuEntry::BootEntry(entry) => {
+                                break 'selection Some(entry.0.to_string())
+                            }
                             MenuEntry::SubMenu(_) => boot_entries.choose_currently_selected(),
                         };
                     }
@@ -353,18 +353,19 @@ fn logic<B: Backend>(terminal: &mut Terminal<B>) -> anyhow::Result<()> {
                 };
             }
             Msg::Tick => {
-                if !has_user_interaction && start_instant.elapsed() >= boot_loader.timeout() {
-                    // Timeout has occurred without any user interaction
+                // Timeout has occurred without any user interaction
+                if !has_user_interaction && start_instant.elapsed() >= timeout {
                     break 'selection None;
                 }
             }
         }
     };
 
-    let (kernel, initrd, cmdline, _dtb) = boot_loader.boot_info(selected.map(|s| s.0))?;
+    let (kernel, initrd, cmdline, _dtb) = boot_loader.boot_info(selected_entry_id)?;
     kexec_load(kernel, initrd, cmdline)?;
 
-    unmount(boot_loader.mountpoint());
+    let mountpoint = boot_loader.mountpoint();
+    unmount(mountpoint);
 
     Ok(kexec_execute()?)
 }

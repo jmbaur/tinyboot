@@ -41,15 +41,15 @@ pub enum MenuEntry<'a> {
 pub trait BootLoader {
     fn timeout(&self) -> Duration;
 
-    fn menu_entries(&self) -> Result<Vec<MenuEntry>, Error>;
-
     fn mountpoint(&self) -> &Path;
+
+    fn menu_entries(&self) -> Result<Vec<MenuEntry>, Error>;
 
     /// If the entry ID is None, the boot loader should choose the default boot entry.
     /// The Ok() result tuple looks like: (kernel, initrd, cmdline, Option<dtb>)
     fn boot_info(
-        &self,
-        entry_id: Option<&str>,
+        &mut self,
+        entry_id: Option<String>,
     ) -> Result<(&Path, &Path, &str, Option<&Path>), Error>;
 }
 
