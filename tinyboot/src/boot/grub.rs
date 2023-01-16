@@ -192,14 +192,14 @@ impl TinybootGrubEnvironment {
             (false, true, false) => {
                 crate::boot::fs::find_block_device(|p| match crate::boot::fs::detect_fs_type(p) {
                     Ok(FsType::Ext4(uuid, ..)) => uuid == args.name,
-                    Ok(FsType::Fat(uuid, ..)) => uuid == args.name,
+                    Ok(FsType::Vfat(uuid, ..)) => uuid == args.name,
                     _ => false,
                 })
             }
             (false, false, true) => {
                 crate::boot::fs::find_block_device(|p| match crate::boot::fs::detect_fs_type(p) {
                     Ok(FsType::Ext4(_, label, ..)) => label == args.name,
-                    Ok(FsType::Fat(_, label, ..)) => label == args.name,
+                    Ok(FsType::Vfat(_, label, ..)) => label == args.name,
                     _ => false,
                 })
             }

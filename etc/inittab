@@ -1,6 +1,5 @@
 ::sysinit:/etc/init.d/rcS
 ::ctrlaltdel:/sbin/reboot
-::shutdown:/sbin/swapoff -a
 ::shutdown:/bin/umount -a -r
 ::restart:/init
 @tinybootTTY@::respawn:/bin/tinyboot tinyboot.log=debug

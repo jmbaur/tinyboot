@@ -13,14 +13,14 @@ use uuid::Uuid;
 #[derive(Debug, PartialEq, Eq)]
 pub enum FsType {
     Ext4(String, String),
-    Fat(String, String),
+    Vfat(String, String),
 }
 
 const FAT32_MAGIC_SIGNATURE_START: u64 = 82; // 82 to 89
 const FAT32_LABEL_START: u64 = 71; // 71 to 81
 const FAT32_UUID_START: u64 = 67; // 67 to 70
 
-const EXT4_SUPERBLOCK_START: u64 = 1024;
+const EXT4_SUPERBLOCK_START: u64 = 0x400;
 const EXT4_MAGIC_SIGNATURE_START: u64 = EXT4_SUPERBLOCK_START + 0x38;
 const EXT4_UUID_START: u64 = EXT4_SUPERBLOCK_START + 0x68;
 const EXT4_LABEL_START: u64 = EXT4_SUPERBLOCK_START + 0x78;
@@ -55,7 +55,7 @@ pub fn detect_fs_type(p: impl AsRef<Path>) -> anyhow::Result<FsType> {
                 f.read_exact(&mut buffer)?;
                 label = String::from_utf8(buffer.to_vec())?.trim_end().to_string();
             }
-            return Ok(FsType::Fat(uuid, label));
+            return Ok(FsType::Vfat(uuid, label));
         }
     }
 

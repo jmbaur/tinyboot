@@ -184,7 +184,7 @@ fn logic<B: Backend>(terminal: &mut Terminal<B>) -> anyhow::Result<()> {
                 &mountpoint,
                 Some(match fstype {
                     FsType::Ext4(..) => "ext4",
-                    FsType::Fat(..) => "fat",
+                    FsType::Vfat(..) => "vfat",
                 }),
                 mount::MsFlags::MS_RDONLY,
                 NONE,
