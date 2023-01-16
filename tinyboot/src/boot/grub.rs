@@ -1,6 +1,7 @@
 use super::boot_loader::MenuEntry;
 use crate::boot::boot_loader::{BootLoader, Error};
 use crate::boot::util::*;
+use clap::Parser;
 use grub::{GrubEntry, GrubEnvironment, GrubEvaluator};
 use log::debug;
 use std::io::Read;
@@ -45,6 +46,22 @@ fn load_env(contents: impl Into<String>, whitelisted_vars: Vec<String>) -> Vec<(
 
 struct TinybootGrubEnvironment {
     env: HashMap<String, String>,
+}
+
+// https://www.gnu.org/software/grub/manual/grub/grub.html#search
+#[derive(Parser)]
+struct SearchArgs {
+    #[arg(short = 'f', long, default_value_t = false)]
+    file: bool,
+    #[arg(short = 'l', long, default_value_t = false)]
+    label: bool,
+    #[arg(short = 'u', long, default_value_t = false)]
+    fs_uuid: bool,
+    #[arg(long, default_value = None)]
+    set: Option<String>,
+    #[arg(long, default_value_t = false)]
+    no_floppy: bool,
+    name: String,
 }
 
 impl TinybootGrubEnvironment {
@@ -172,8 +189,28 @@ impl TinybootGrubEnvironment {
         0
     }
 
-    fn run_search(&mut self, _args: Vec<String>) -> u8 {
-        todo!("implement search grub command")
+    fn run_search(&mut self, args: Vec<String>) -> u8 {
+        let args = SearchArgs::parse_from(args);
+        let var = args.set.unwrap_or_else(|| String::from("root"));
+        let value = match (args.file, args.fs_uuid, args.label) {
+            (true, false, false) => {
+                let file = Path::new(&args.name);
+                if fs::metadata(file).is_err() {
+                    return 1;
+                };
+                file.to_str().unwrap().to_string()
+            }
+            (false, true, false) => {
+                todo!("search for drive path from filesystem UUID")
+            }
+            (false, false, true) => {
+                todo!("search for drive path from filesystem label")
+            }
+            _ => return 1,
+        };
+
+        self.env.insert(var, value);
+        0
     }
 
     fn run_set(&mut self, args: Vec<String>) -> u8 {
