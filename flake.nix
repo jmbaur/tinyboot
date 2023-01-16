@@ -22,20 +22,24 @@
       });
     in
     {
-      nixosConfigurations = nixpkgs.lib.mapAttrs'
-        (system: config: nixpkgs.lib.nameValuePair "extlinux-${system}" (config.extendModules {
-          modules = [ ./test/extlinux.nix ];
-        }))
-        (forAllSystems ({ system, ... }: nixpkgs.lib.nixosSystem {
-          inherit system;
-          modules = [
-            ({ modulesPath, ... }: {
-              disabledModules = [ "${modulesPath}/system/boot/loader/generic-extlinux-compatible" ];
-              imports = [ "${nixpkgs-extlinux-specialisation}/nixos/modules/system/boot/loader/generic-extlinux-compatible" ];
-            })
-            ./test/module.nix
-          ];
-        }));
+      nixosConfigurations =
+        let
+          base = forAllSystems ({ system, ... }: nixpkgs.lib.nixosSystem {
+            inherit system;
+            modules = [
+              ({ modulesPath, ... }: {
+                disabledModules = [ "${modulesPath}/system/boot/loader/generic-extlinux-compatible" ];
+                imports = [ "${nixpkgs-extlinux-specialisation}/nixos/modules/system/boot/loader/generic-extlinux-compatible" ];
+              })
+              ./test/module.nix
+            ];
+          });
+          extend = extension: nixpkgs.lib.mapAttrs'
+            (system: config: nixpkgs.lib.nameValuePair "${extension}-${system}" (config.extendModules {
+              modules = [ ./test/${extension}.nix ];
+            }));
+        in
+        nixpkgs.lib.mergeAttrs (extend "extlinux" base) (extend "grub" base);
       overlays.default = nixpkgs.lib.composeManyExtensions [
         rust-overlay.overlays.default
         (final: prev: {
