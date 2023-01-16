@@ -208,12 +208,12 @@ impl BootLoader for SyslinuxBootLoader {
     }
 
     fn boot_info(
-        &self,
-        entry_id: Option<&str>,
+        &mut self,
+        entry_id: Option<String>,
     ) -> Result<(&Path, &Path, &str, Option<&Path>), Error> {
         if let Some(entry) = self.entries.iter().find(|entry| {
-            if let Some(entry_id) = entry_id {
-                entry.name == entry_id
+            if let Some(entry_id) = &entry_id {
+                &entry.name == entry_id
             } else {
                 entry.default
             }

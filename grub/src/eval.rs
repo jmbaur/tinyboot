@@ -5,7 +5,7 @@ use crate::{
         Parser, Statement,
     },
 };
-use std::{collections::HashMap, io, time::Duration};
+use std::{collections::HashMap, io, path::Path, time::Duration};
 
 /// GrubEnvironment is the implementation of grub on an actual machine. It interacts with the
 /// filesystem and stores state within the evaluation of a Grub configuration file.
@@ -27,7 +27,7 @@ pub trait GrubEnvironment {
 /// (i.e. a submenu).
 /// Menuentry docs: https://www.gnu.org/software/grub/manual/grub/html_node/menuentry.html
 /// Submenu docs: https://www.gnu.org/software/grub/manual/grub/html_node/submenu.html#submenu
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct GrubEntry {
     pub title: String,
     pub id: Option<String>,
@@ -46,7 +46,6 @@ pub struct GrubEntry {
 }
 
 pub struct GrubEvaluator<T: GrubEnvironment> {
-    source: String,
     env: T,
     functions: HashMap<String, Vec<Statement>>,
     pub last_exit_code: u8,
@@ -57,19 +56,24 @@ impl<T> GrubEvaluator<T>
 where
     T: GrubEnvironment,
 {
-    pub fn new(config_file: impl io::Read, env: T) -> Result<Self, io::Error> {
-        let source = io::read_to_string(config_file)?;
-        Ok(Self::new_from_source(source, env))
+    pub fn new(config_file: impl io::Read, env: T) -> Result<Self, String> {
+        let source = io::read_to_string(config_file).map_err(|e| e.to_string())?;
+        Self::new_from_source(source, env)
     }
 
-    pub fn new_from_source(source: String, env: T) -> Self {
-        GrubEvaluator {
-            source,
+    pub fn new_from_source(source: String, env: T) -> Result<Self, String> {
+        let mut s = Self {
             last_exit_code: 0,
             env,
             functions: HashMap::new(),
             menu: Vec::new(),
-        }
+        };
+
+        let mut parser = Parser::new(Lexer::new(&source));
+        let ast = parser.parse()?;
+        s.eval_statements(ast.statements)?;
+
+        Ok(s)
     }
 
     pub fn timeout(&self) -> Duration {
@@ -288,10 +292,27 @@ where
         Ok(())
     }
 
-    pub fn eval(&mut self) -> Result<(), String> {
-        let mut parser = Parser::new(Lexer::new(&self.source));
-        let ast = parser.parse()?;
-        self.eval_statements(ast.statements)
+    pub fn eval_boot_entry(
+        &mut self,
+        entry: &GrubEntry,
+    ) -> Result<(&Path, &Path, &str, Option<&Path>), String> {
+        let Some(consequence) = &entry.consequence else {
+            return Err("not a boot entry".to_string());
+        };
+        self.eval_statements(consequence.to_vec())?;
+        let linux = self
+            .env
+            .get_env("linux")
+            .ok_or_else(|| "no linux found".to_string())?;
+        let initrd = self
+            .env
+            .get_env("initrd")
+            .ok_or_else(|| "no initrd found".to_string())?;
+        let cmdline = self
+            .env
+            .get_env("cmdline")
+            .ok_or_else(|| "no cmdline found".to_string())?;
+        Ok((Path::new(linux), Path::new(initrd), cmdline.as_str(), None))
     }
 }
 
@@ -315,10 +336,7 @@ mod tests {
     #[test]
     fn full_example() {
         let grub_env = SimpleGrubEnvironment {};
-        let mut evaluator = GrubEvaluator::new_from_source(
-            include_str!("../testdata/grub.cfg").to_string(),
-            grub_env,
-        );
-        evaluator.eval().expect("no evaluation errors");
+        GrubEvaluator::new_from_source(include_str!("../testdata/grub.cfg").to_string(), grub_env)
+            .expect("no evaluation errors");
     }
 }

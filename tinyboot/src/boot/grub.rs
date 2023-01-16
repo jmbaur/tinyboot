@@ -1,3 +1,4 @@
+use super::boot_loader::MenuEntry;
 use crate::boot::boot_loader::{BootLoader, Error};
 use crate::boot::util::*;
 use grub::{GrubEnvironment, GrubEvaluator};
@@ -6,14 +7,20 @@ use std::io::Read;
 use std::path::PathBuf;
 use std::{collections::HashMap, fs, path::Path};
 
-use super::boot_loader::MenuEntry;
-
-#[derive(Default)]
 struct TinybootGrubEnvironment {
     env: HashMap<String, String>,
 }
 
 impl TinybootGrubEnvironment {
+    pub fn new(prefix: impl Into<String>) -> Self {
+        Self {
+            env: HashMap::from([
+                ("prefix".to_string(), prefix.into()),
+                ("grub_platform".to_string(), "tinyboot".to_string()),
+            ]),
+        }
+    }
+
     // TODO(jared): the docs mention being able to load multiple initrds, but what is the use case
     // for that?
     // https://www.gnu.org/software/grub/manual/grub/html_node/initrd.html#initrd
@@ -47,13 +54,13 @@ impl TinybootGrubEnvironment {
                     let Some(next) = args.next() else { return 1; };
                     file = next;
                 }
-                "--skip-sig" => todo!(),
+                "--skip-sig" => todo!("implement --skip-sig"),
                 _ => whitelisted_vars.push(next.to_string()),
             };
         }
 
-        // TODO(jared): fill out grub config file prefix
-        let prefix = PathBuf::from("TODO_prefix");
+        let Some(prefix) = self.env.get("prefix") else { return 1; };
+        let prefix = PathBuf::from(prefix);
         let Ok(mut file) = fs::File::open(prefix.join(file)) else { return 1; };
         let mut contents = String::new();
         if file.read_to_string(&mut contents).is_err() {
@@ -80,30 +87,30 @@ impl TinybootGrubEnvironment {
     fn run_save_env(&self, args: Vec<String>) -> u8 {
         let mut _file = "grubenv";
         let mut args = args.iter();
-        let mut _vars_to_save = Vec::new();
+        let mut vars_to_save = Vec::new();
         let Some(next) = args.next() else { return 1; };
         if next == "--file" {
             let Some(next) = args.next() else { return 1; };
             _file = next;
         } else {
-            _vars_to_save.push(next);
+            vars_to_save.push(next);
         }
 
         for next in args {
-            _vars_to_save.push(next);
+            vars_to_save.push(next);
         }
 
-        if _vars_to_save.is_empty() {
+        if vars_to_save.is_empty() {
             return 0;
         }
 
         // TODO(jared): must implement grub environment block:
         // https://www.gnu.org/software/grub/manual/grub/html_node/Environment-block.html#Environment-block
-        todo!()
+        todo!("implement grub environment block")
     }
 
-    fn run_search(&self, _args: Vec<String>) -> u8 {
-        todo!()
+    fn run_search(&mut self, _args: Vec<String>) -> u8 {
+        todo!("implement search grub command")
     }
 
     fn run_set(&mut self, args: Vec<String>) -> u8 {
@@ -246,12 +253,11 @@ pub struct GrubBootLoader {
 
 impl GrubBootLoader {
     pub fn new(mountpoint: &Path) -> Result<Self, Error> {
-        let mut evaluator = GrubEvaluator::new(
+        let evaluator = GrubEvaluator::new(
             fs::File::open(mountpoint.join("boot/grub/grub.cfg"))?,
-            TinybootGrubEnvironment::default(),
-        )?;
-
-        evaluator.eval().map_err(Error::Evaluation)?;
+            TinybootGrubEnvironment::new(mountpoint.to_str().ok_or(Error::InvalidMountpoint)?),
+        )
+        .map_err(Error::Evaluation)?;
 
         Ok(Self {
             mountpoint: mountpoint.to_path_buf(),
@@ -270,16 +276,75 @@ impl BootLoader for GrubBootLoader {
     }
 
     fn menu_entries(&self) -> Result<Vec<MenuEntry>, Error> {
-        todo!()
+        Ok(self
+            .evaluator
+            .menu
+            .iter()
+            .filter_map(|entry| {
+                // is boot entry
+                if entry.consequence.is_some() {
+                    Some(MenuEntry::BootEntry((
+                        entry.id.as_deref().unwrap_or(entry.title.as_str()),
+                        entry.title.as_str(),
+                    )))
+                }
+                // is submenu entry
+                else {
+                    Some(MenuEntry::SubMenu((
+                        entry.id.as_deref().unwrap_or(entry.title.as_str()),
+                        entry
+                            .menuentries
+                            .as_ref()?
+                            .iter()
+                            .filter_map(|entry| {
+                                // ensure this is a boot entry, not a nested submenu (invalid?)
+                                entry.consequence.as_ref()?;
+                                Some(MenuEntry::BootEntry((
+                                    entry.id.as_deref().unwrap_or(entry.title.as_str()),
+                                    entry.title.as_str(),
+                                )))
+                            })
+                            .collect(),
+                    )))
+                }
+            })
+            .collect())
     }
 
     /// The entry ID could be the ID or name of a boot entry, submenu, or boot entry nested within
     /// a submenu.
     fn boot_info(
-        &self,
-        _entry_id: Option<&str>,
+        &mut self,
+        entry_id: Option<String>,
     ) -> Result<(&Path, &Path, &str, Option<&Path>), Error> {
-        todo!()
+        let entries = &self.evaluator.menu.to_vec();
+        let boot_entry = ('entry: {
+            if let Some(entry_id) = entry_id {
+                for entry in entries {
+                    if entry.consequence.is_some() {
+                        if entry.id.as_deref().unwrap_or(entry.title.as_str()) == entry_id {
+                            break 'entry Some(entry);
+                        }
+                    } else if let Some(subentries) = &entry.menuentries {
+                        for subentry in subentries {
+                            if entry.consequence.is_some()
+                                && entry.id.as_deref().unwrap_or(entry.title.as_str()) == entry_id
+                            {
+                                break 'entry Some(subentry);
+                            }
+                        }
+                    }
+                }
+
+                break 'entry None;
+            } else {
+                todo!("find default boot entry")
+            }
+        })
+        .ok_or(Error::BootEntryNotFound)?;
+        self.evaluator
+            .eval_boot_entry(boot_entry)
+            .map_err(Error::Evaluation)
     }
 }
 
@@ -289,7 +354,7 @@ mod tests {
 
     #[test]
     fn grub_run_test() {
-        let g = TinybootGrubEnvironment::default();
+        let g = TinybootGrubEnvironment::new("/dev/null");
         assert_eq!(g.run_test(vec!["-d".to_string(), "/dev".to_string()]), 0);
         assert_eq!(g.run_test(vec!["-f".to_string(), "/dev".to_string()]), 1);
         assert_eq!(g.run_test(vec!["-e".to_string(), "/dev".to_string()]), 0);
