@@ -1,6 +1,7 @@
 mod boot;
 
 use crate::boot::fs::{detect_fs_type, find_block_device, unmount, FsType};
+use crate::boot::grub::GrubBootLoader;
 use boot::boot_loader::{kexec_execute, kexec_load, BootLoader, MenuEntry};
 use boot::syslinux::SyslinuxBootLoader;
 use log::LevelFilter;
@@ -195,10 +196,9 @@ fn logic<B: Backend>(terminal: &mut Terminal<B>) -> anyhow::Result<()> {
             debug!("mounted {} at {}", dev.display(), mountpoint.display());
 
             let boot_loader: Box<dyn BootLoader> = 'loader: {
-                // TODO(jared): enable grub boot loader
-                // if let Ok(grub) = GrubBootLoader::new(&mountpoint) {
-                //     break 'loader Box::new(grub);
-                // }
+                if let Ok(grub) = GrubBootLoader::new(&mountpoint) {
+                    break 'loader Box::new(grub);
+                }
                 if let Ok(syslinux) = SyslinuxBootLoader::new(&mountpoint) {
                     break 'loader Box::new(syslinux);
                 }
