@@ -1,7 +1,7 @@
 use super::boot_loader::MenuEntry;
 use crate::boot::boot_loader::{BootLoader, Error};
 use crate::boot::util::*;
-use grub::{GrubEnvironment, GrubEvaluator};
+use grub::{GrubEntry, GrubEnvironment, GrubEvaluator};
 use log::debug;
 use std::io::Read;
 use std::path::PathBuf;
@@ -317,10 +317,22 @@ impl BootLoader for GrubBootLoader {
         &mut self,
         entry_id: Option<String>,
     ) -> Result<(&Path, &Path, &str, Option<&Path>), Error> {
-        let entries = &self.evaluator.menu.to_vec();
+        let all_entries = self
+            .evaluator
+            .menu
+            .iter()
+            .flat_map(|entry| {
+                if let Some(menuentries) = &entry.menuentries {
+                    menuentries.clone()
+                } else {
+                    vec![entry.clone()]
+                }
+            })
+            .collect::<Vec<GrubEntry>>();
+
         let boot_entry = ('entry: {
             if let Some(entry_id) = entry_id {
-                for entry in entries {
+                for entry in &all_entries {
                     if entry.consequence.is_some() {
                         if entry.id.as_deref().unwrap_or(entry.title.as_str()) == entry_id {
                             break 'entry Some(entry);
@@ -338,10 +350,18 @@ impl BootLoader for GrubBootLoader {
 
                 break 'entry None;
             } else {
-                todo!("find default boot entry")
+                let default_entry_idx = self
+                    .evaluator
+                    .get_env("default")
+                    .map(|value| value.parse::<usize>())
+                    .unwrap_or(Ok(0usize))
+                    .unwrap_or(0usize);
+
+                break 'entry all_entries.get(default_entry_idx);
             }
         })
         .ok_or(Error::BootEntryNotFound)?;
+
         self.evaluator
             .eval_boot_entry(boot_entry)
             .map_err(Error::Evaluation)

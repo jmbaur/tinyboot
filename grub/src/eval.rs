@@ -314,6 +314,10 @@ where
             .ok_or_else(|| "no cmdline found".to_string())?;
         Ok((Path::new(linux), Path::new(initrd), cmdline.as_str(), None))
     }
+
+    pub fn get_env(&self, key: &str) -> Option<&String> {
+        self.env.get_env(key)
+    }
 }
 
 #[cfg(test)]
