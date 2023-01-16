@@ -1,4 +1,5 @@
 use super::boot_loader::MenuEntry;
+use super::fs::FsType;
 use crate::boot::boot_loader::{BootLoader, Error};
 use crate::boot::util::*;
 use clap::Parser;
@@ -192,23 +193,34 @@ impl TinybootGrubEnvironment {
     fn run_search(&mut self, args: Vec<String>) -> u8 {
         let args = SearchArgs::parse_from(args);
         let var = args.set.unwrap_or_else(|| String::from("root"));
-        let value = match (args.file, args.fs_uuid, args.label) {
+        let found = match (args.file, args.fs_uuid, args.label) {
             (true, false, false) => {
                 let file = Path::new(&args.name);
-                if fs::metadata(file).is_err() {
-                    return 1;
-                };
-                file.to_str().unwrap().to_string()
+                crate::boot::fs::find_block_device(|p| p == file)
             }
             (false, true, false) => {
-                todo!("search for drive path from filesystem UUID")
+                crate::boot::fs::find_block_device(|p| match crate::boot::fs::detect_fs_type(p) {
+                    Ok(FsType::Ext4(uuid, ..)) => uuid == args.name,
+                    Ok(FsType::Fat(uuid, ..)) => uuid == args.name,
+                    _ => false,
+                })
             }
             (false, false, true) => {
-                todo!("search for drive path from filesystem label")
+                crate::boot::fs::find_block_device(|p| match crate::boot::fs::detect_fs_type(p) {
+                    Ok(FsType::Ext4(_, label, ..)) => label == args.name,
+                    Ok(FsType::Fat(_, label, ..)) => label == args.name,
+                    _ => false,
+                })
             }
             _ => return 1,
         };
 
+        let Ok(found) = found else { return 1; };
+        if found.is_empty() {
+            return 1;
+        }
+
+        let Some(value) = found[0].to_str().map(|s| s.to_string()) else { return 1; };
         self.env.insert(var, value);
         0
     }
