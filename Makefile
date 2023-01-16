@@ -12,7 +12,7 @@ test: check
 	cargo test --workspace
 
 run:
-	nix run
+	nix run -L
 
 clean:
 	cargo clean
