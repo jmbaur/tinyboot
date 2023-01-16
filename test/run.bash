@@ -14,4 +14,4 @@ fi
 	-kernel @kernel@ \
 	-initrd @initrd@ \
 	-append console=@console@ \
-	-drive if=virtio,file=$img,format=raw
+	-drive if=virtio,file=$img,format=raw,media=disk
