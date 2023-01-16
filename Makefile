@@ -16,4 +16,4 @@ run:
 
 clean:
 	cargo clean
-	rm nixos*.img
+	rm -f nixos*.img
