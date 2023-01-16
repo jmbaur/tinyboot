@@ -41,10 +41,10 @@
         })
       ];
       devShells = forAllSystems ({ pkgs, ... }: {
-        default = pkgs.mkShell ({
-          inputsFrom = [ pkgs.tinyboot ];
-          nativeBuildInputs = [ pkgs.cargo-watch ];
-        } // pkgs.tinyboot.env);
+        default = with pkgs; mkShell ({
+          inputsFrom = [ tinyboot ];
+          nativeBuildInputs = [ grub2 cargo-watch ];
+        } // tinyboot.env);
       });
       packages = forAllSystems ({ pkgs, ... }: {
         default = pkgs.tinyboot;

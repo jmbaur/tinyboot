@@ -51,7 +51,10 @@ impl TinybootGrubEnvironment {
         while let Some(next) = args.next() {
             match next.as_str() {
                 "--file" => {
-                    let Some(next) = args.next() else { return 1; };
+                    let Some(next) = args.next() else {
+                        debug!("no value provided for --file");
+                        return 1;
+                    };
                     file = next;
                 }
                 "--skip-sig" => todo!("implement --skip-sig"),
@@ -59,11 +62,18 @@ impl TinybootGrubEnvironment {
             };
         }
 
-        let Some(prefix) = self.env.get("prefix") else { return 1; };
+        let Some(prefix) = self.env.get("prefix") else {
+            debug!("no prefix environment variable");
+            return 1;
+        };
         let prefix = PathBuf::from(prefix);
-        let Ok(mut file) = fs::File::open(prefix.join(file)) else { return 1; };
+        let Ok(mut file) = fs::File::open(prefix.join(file)) else {
+            debug!("failed to open env file");
+            return 1;
+        };
         let mut contents = String::new();
         if file.read_to_string(&mut contents).is_err() {
+            debug!("could not read env file");
             return 1;
         };
 
@@ -71,7 +81,7 @@ impl TinybootGrubEnvironment {
             HashMap::new(),
             |mut acc, curr| {
                 if let Some(split) = curr.split_once('=') {
-                    if !whitelisted_vars.is_empty() && whitelisted_vars.iter().any(|a| a == split.0)
+                    if whitelisted_vars.is_empty() || whitelisted_vars.iter().any(|a| a == split.0)
                     {
                         acc.insert(split.0.to_string(), split.1.to_string());
                     }
@@ -392,6 +402,17 @@ mod tests {
                 "bar0".to_string()
             ]),
             0
+        );
+    }
+
+    #[test]
+    fn grub_load_env() {
+        let mut g = TinybootGrubEnvironment::new(std::env::var("CARGO_MANIFEST_DIR").unwrap());
+        let exit_code = g.run_load_env(vec!["--file".to_string(), "testdata/grubenv".to_string()]);
+        assert_eq!(exit_code, 0);
+        assert_eq!(
+            g.env,
+            HashMap::from([("foo".to_string(), "bar".to_string())])
         );
     }
 }
