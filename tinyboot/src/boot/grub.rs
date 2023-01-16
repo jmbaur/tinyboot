@@ -2,7 +2,7 @@ use super::boot_loader::MenuEntry;
 use super::fs::FsType;
 use crate::boot::boot_loader::{BootLoader, Error};
 use crate::boot::util::*;
-use clap::Parser;
+use clap::{ArgAction, Parser};
 use grub::{GrubEntry, GrubEnvironment, GrubEvaluator};
 use log::debug;
 use std::io::Read;
@@ -65,6 +65,24 @@ struct SearchArgs {
     name: String,
 }
 
+#[derive(Parser)]
+struct LoadEnvArgs {
+    #[arg(long, value_parser, default_value = "grubenv")]
+    file: PathBuf,
+    #[arg(default_value_t = false)]
+    skip_sig: bool,
+    #[arg(action = ArgAction::Append)]
+    whitelisted_variables: Vec<String>,
+}
+
+#[derive(Parser)]
+struct SaveEnvArgs {
+    #[arg(long, value_parser, default_value = "grubenv")]
+    file: PathBuf,
+    #[arg(action = ArgAction::Append)]
+    variables: Vec<String>,
+}
+
 impl TinybootGrubEnvironment {
     pub fn new(prefix: impl Into<String>) -> Self {
         Self {
@@ -99,61 +117,34 @@ impl TinybootGrubEnvironment {
     }
 
     fn run_load_env(&mut self, args: Vec<String>) -> u8 {
-        let mut file = "grubenv";
-        let mut args = args.iter();
-        let mut whitelisted_vars = Vec::new();
-        while let Some(next) = args.next() {
-            match next.as_str() {
-                "--file" => {
-                    let Some(next) = args.next() else {
-                        debug!("no value provided for --file");
-                        return 1;
-                    };
-                    file = next;
-                }
-                "--skip-sig" => todo!("implement --skip-sig"),
-                _ => whitelisted_vars.push(next.to_string()),
-            };
-        }
+        let args = LoadEnvArgs::parse_from(args);
 
         let Some(prefix) = self.env.get("prefix") else {
             debug!("no prefix environment variable");
             return 1;
         };
+
         let prefix = PathBuf::from(prefix);
-        let Ok(mut file) = fs::File::open(prefix.join(file)) else {
+        let Ok(mut file) = fs::File::open(prefix.join(args.file)) else {
             debug!("failed to open env file");
             return 1;
         };
+
         let mut contents = String::new();
         if file.read_to_string(&mut contents).is_err() {
             debug!("could not read env file");
             return 1;
         };
 
-        let env = load_env(contents, whitelisted_vars);
+        let env = load_env(contents, args.whitelisted_variables);
         self.env.extend(env);
 
         0
     }
 
     fn run_save_env(&self, args: Vec<String>) -> u8 {
-        let mut file = "grubenv";
-        let mut args = args.iter();
-        let mut vars_to_save = Vec::new();
-        let Some(next) = args.next() else { return 1; };
-        if next == "--file" {
-            let Some(next) = args.next() else { return 1; };
-            file = next;
-        } else {
-            vars_to_save.push(next);
-        }
-
-        for next in args {
-            vars_to_save.push(next);
-        }
-
-        if vars_to_save.is_empty() {
+        let args = SaveEnvArgs::parse_from(args);
+        if args.variables.is_empty() {
             return 0;
         }
 
@@ -162,7 +153,7 @@ impl TinybootGrubEnvironment {
             return 1;
         };
         let prefix = PathBuf::from(prefix);
-        let file = prefix.join(file);
+        let file = prefix.join(args.file);
 
         let Ok(existing_env_block_contents) = fs::read_to_string(&file) else {
             debug!("failed to load environment block file");
@@ -171,8 +162,8 @@ impl TinybootGrubEnvironment {
 
         let mut envs = load_env(existing_env_block_contents, vec![]);
 
-        for var in vars_to_save {
-            if let Some(value) = self.env.get(var) {
+        for var in args.variables {
+            if let Some(value) = self.env.get(&var) {
                 envs.push((var.to_string(), value.to_string()));
             }
         }
