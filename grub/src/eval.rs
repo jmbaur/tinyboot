@@ -285,7 +285,7 @@ where
                 Statement::Command(command) => self.run_command(command)?,
                 Statement::Function(function) => self.add_function(function)?,
                 Statement::If(stmt) => self.run_if_statement(stmt)?,
-                Statement::While(_) => todo!(),
+                Statement::While(_) => todo!("implement while loops"),
             };
         }
 

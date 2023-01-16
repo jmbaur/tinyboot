@@ -341,7 +341,7 @@ impl<'a> Parser<'a> {
         Ok(match start_token {
             Token::Newline | Token::Semicolon | Token::Comment(_) => None,
             Token::If => Some(Statement::If(self.parse_if_statement()?)),
-            Token::While | Token::Until => todo!(),
+            Token::While | Token::Until => todo!("implement while/until loops"),
             Token::Function => Some(Statement::Function(self.parse_function_statement()?)),
             Token::Value(value) => {
                 if matches_command(&value) {

@@ -155,7 +155,7 @@ impl TinybootGrubEnvironment {
                 // the length of string is zero
                 ("-z", string) => string_zero_length(string),
                 // expression is false
-                ("!", _expression) => todo!(),
+                ("!", _expression) => todo!("implement 'expression is false'"),
                 _ => 2,
             },
             3 => match (args[0].as_str(), args[1].as_str(), args[2].as_str()) {
@@ -204,11 +204,15 @@ impl TinybootGrubEnvironment {
                 // file1 is older than file2 (modification time). Optionally numeric bias may be directly appended to -ot in which case it is added to the first file modification time.
                 (file1, "-ot", file2) => file_older_than(file1, file2),
                 // both expression1 and expression2 are true
-                (_expression1, "-a", _expression2) => todo!(),
+                (_expression1, "-a", _expression2) => {
+                    todo!("implement 'both expression1 and expression2 are true'")
+                }
                 // either expression1 or expression2 is true
-                (_expression1, "-o", _expression2) => todo!(),
+                (_expression1, "-o", _expression2) => {
+                    todo!("implement 'either expression1 or expression2 is true'")
+                }
                 // expression is true
-                ("(", _expression, ")") => todo!(),
+                ("(", _expression, ")") => todo!("implement 'expression is true'"),
                 _ => 2,
             },
             _ => 2,
