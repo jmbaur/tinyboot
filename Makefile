@@ -16,4 +16,4 @@ run:
 
 clean:
 	cargo clean
-	rm -f nixos*.img
+	rm -f *.qcow2

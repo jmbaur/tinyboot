@@ -12,7 +12,8 @@
   };
   outputs = inputs: with inputs;
     let
-      forAllSystems = f: nixpkgs.lib.genAttrs [ "x86_64-linux" "aarch64-linux" ] (system: f {
+      systems = [ "x86_64-linux" "aarch64-linux" ];
+      forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f {
         inherit system;
         pkgs = import nixpkgs {
           inherit system;
@@ -21,17 +22,20 @@
       });
     in
     {
-      nixosConfigurations = forAllSystems ({ system, ... }: nixpkgs.lib.nixosSystem {
-        inherit system;
-        modules = [
-          ({ modulesPath, ... }: {
-            disabledModules = [ "${modulesPath}/system/boot/loader/generic-extlinux-compatible" ];
-            imports = [ "${nixpkgs-extlinux-specialisation}/nixos/modules/system/boot/loader/generic-extlinux-compatible" ];
-            specialisation.tty-console.configuration.boot.kernelParams = [ "console=tty0" ];
-            system.stateVersion = "23.05";
-          })
-        ];
-      });
+      nixosConfigurations = nixpkgs.lib.mapAttrs'
+        (system: config: nixpkgs.lib.nameValuePair "extlinux-${system}" (config.extendModules {
+          modules = [ ./test/extlinux.nix ];
+        }))
+        (forAllSystems ({ system, ... }: nixpkgs.lib.nixosSystem {
+          inherit system;
+          modules = [
+            ({ modulesPath, ... }: {
+              disabledModules = [ "${modulesPath}/system/boot/loader/generic-extlinux-compatible" ];
+              imports = [ "${nixpkgs-extlinux-specialisation}/nixos/modules/system/boot/loader/generic-extlinux-compatible" ];
+            })
+            ./test/module.nix
+          ];
+        }));
       overlays.default = nixpkgs.lib.composeManyExtensions [
         rust-overlay.overlays.default
         (final: prev: {

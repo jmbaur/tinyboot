@@ -87,6 +87,7 @@ impl TinybootGrubEnvironment {
     pub fn new(prefix: impl Into<String>) -> Self {
         Self {
             env: HashMap::from([
+                ("?".to_string(), 0.to_string()),
                 ("prefix".to_string(), prefix.into()),
                 ("grub_platform".to_string(), "tinyboot".to_string()),
             ]),

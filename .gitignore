@@ -1,4 +1,4 @@
-*.img
+*.qcow2
 .direnv
 result*
 target
