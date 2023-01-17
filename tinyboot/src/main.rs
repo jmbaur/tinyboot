@@ -197,6 +197,7 @@ fn logic<B: Backend>(terminal: &mut Terminal<B>) -> anyhow::Result<()> {
 
             let boot_loader: Box<dyn BootLoader> = 'loader: {
                 if let Ok(grub) = GrubBootLoader::new(&mountpoint) {
+                    debug!("found grub bootloader");
                     break 'loader Box::new(grub);
                 }
                 if let Ok(syslinux) = SyslinuxBootLoader::new(&mountpoint) {
@@ -266,42 +267,49 @@ fn logic<B: Backend>(terminal: &mut Terminal<B>) -> anyhow::Result<()> {
 
     let timeout = boot_loader.timeout();
     let menu_entries = boot_loader.menu_entries()?;
-    let mut boot_entries = StatefulList::with_items(menu_entries);
-    let selected_entry_id: Option<String> = 'selection: loop {
-        terminal.draw(|f| {
-            ui(
-                f,
-                &mut boot_entries,
-                (has_user_interaction, start_instant.elapsed(), timeout),
-            )
-        })?;
-        match rx.recv()? {
-            Msg::Key(key) => {
-                has_user_interaction = true;
-                match key {
-                    Key::Char('l') | Key::Char('\n') => {
-                        let Some(entry) = boot_entries
+    let selected_entry_id: Option<String> = 'selection: {
+        if let (1, Some(MenuEntry::BootEntry((id, ..)))) = (menu_entries.len(), menu_entries.get(0))
+        {
+            break 'selection Some(id.to_string());
+        }
+
+        let mut boot_entries = StatefulList::with_items(menu_entries);
+        loop {
+            terminal.draw(|f| {
+                ui(
+                    f,
+                    &mut boot_entries,
+                    (has_user_interaction, start_instant.elapsed(), timeout),
+                )
+            })?;
+            match rx.recv()? {
+                Msg::Key(key) => {
+                    has_user_interaction = true;
+                    match key {
+                        Key::Char('l') | Key::Char('\n') => {
+                            let Some(entry) = boot_entries
                             .state
                             .selected()
                             .and_then(|idx| boot_entries.items.get(idx)) else { continue; };
-                        match entry {
-                            MenuEntry::BootEntry(entry) => {
-                                break 'selection Some(entry.0.to_string())
-                            }
-                            MenuEntry::SubMenu(_) => boot_entries.choose_currently_selected(),
-                        };
+                            match entry {
+                                MenuEntry::BootEntry(entry) => {
+                                    break 'selection Some(entry.0.to_string())
+                                }
+                                MenuEntry::SubMenu(_) => boot_entries.choose_currently_selected(),
+                            };
+                        }
+                        Key::Left | Key::Char('h') => boot_entries.clear_chosen(),
+                        Key::Down | Key::Char('j') => boot_entries.next(),
+                        Key::Up | Key::Char('k') => boot_entries.previous(),
+                        Key::Char('r') => terminal.clear()?,
+                        _ => {}
+                    };
+                }
+                Msg::Tick => {
+                    // Timeout has occurred without any user interaction
+                    if !has_user_interaction && start_instant.elapsed() >= timeout {
+                        break 'selection None;
                     }
-                    Key::Left | Key::Char('h') => boot_entries.clear_chosen(),
-                    Key::Down | Key::Char('j') => boot_entries.next(),
-                    Key::Up | Key::Char('k') => boot_entries.previous(),
-                    Key::Char('r') => terminal.clear()?,
-                    _ => {}
-                };
-            }
-            Msg::Tick => {
-                // Timeout has occurred without any user interaction
-                if !has_user_interaction && start_instant.elapsed() >= timeout {
-                    break 'selection None;
                 }
             }
         }

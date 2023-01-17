@@ -361,6 +361,7 @@ pub struct GrubBootLoader {
 
 impl GrubBootLoader {
     pub fn new(mountpoint: &Path) -> Result<Self, Error> {
+        debug!("creating grub evaluator");
         let evaluator = GrubEvaluator::new(
             fs::File::open(mountpoint.join("boot/grub/grub.cfg"))?,
             TinybootGrubEnvironment::new(mountpoint.to_str().ok_or(Error::InvalidMountpoint)?),
