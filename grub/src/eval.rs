@@ -7,6 +7,59 @@ use crate::{
 };
 use std::{collections::HashMap, io, path::Path, time::Duration};
 
+fn interpolate_value(env: &impl GrubEnvironment, value: impl Into<String>) -> String {
+    let mut final_value = String::new();
+
+    let value = value.into();
+    let mut peeker = value.chars().peekable();
+    let mut interpolating = false;
+    let mut needs_closing_brace = false;
+    let mut interpolated_identifier = String::new();
+    while let Some(char) = peeker.next() {
+        match char {
+            '$' => {
+                interpolating = true;
+                if peeker.peek().map(|&c| c == '{').unwrap_or_default() {
+                    _ = peeker.next().expect("peek is not None");
+                    // look until closing brace
+                    needs_closing_brace = true;
+                } else {
+                    // look until non ascii alphanumeric character
+                    needs_closing_brace = false;
+                }
+            }
+            '}' => {
+                if interpolating && needs_closing_brace {
+                    interpolating = false;
+                    needs_closing_brace = false;
+                    let Some(interpolated_value) = env.get_env(&interpolated_identifier) else { continue; };
+                    final_value.push_str(interpolated_value);
+                }
+            }
+            _ => {
+                if interpolating {
+                    if needs_closing_brace {
+                        interpolated_identifier.push(char);
+                    } else if
+                    // Stop interpolating if the character is not alphanumeric or is one of the
+                    // special characters that cannot be in an identifier.
+                    // TODO(jared): The `matches!()` args are just ones that work with
+                    // ../testdata/grub.cfg. Fill in further when more examples are discovered.
+                    matches!(char, '/') || !char.is_ascii_alphanumeric() {
+                        interpolating = false;
+                        let Some(interpolated_value) = env.get_env(&interpolated_identifier) else { continue; };
+                        final_value.push_str(interpolated_value);
+                    }
+                } else {
+                    final_value.push(char);
+                }
+            }
+        }
+    }
+
+    final_value
+}
+
 /// GrubEnvironment is the implementation of grub on an actual machine. It interacts with the
 /// filesystem and stores state within the evaluation of a Grub configuration file.
 pub trait GrubEnvironment {
@@ -86,55 +139,7 @@ where
     }
 
     fn interpolate_value(&self, value: String) -> String {
-        let mut final_value = String::new();
-
-        let mut peeker = value.chars().peekable();
-        let mut interpolating = false;
-        let mut needs_closing_brace = false;
-        let mut interpolated_identifier = String::new();
-        while let Some(char) = peeker.next() {
-            match char {
-                '$' => {
-                    interpolating = true;
-                    if peeker.peek().map(|&c| c == '{').unwrap_or_default() {
-                        _ = peeker.next().expect("peek is not None");
-                        // look until closing brace
-                        needs_closing_brace = true;
-                    } else {
-                        // look until non ascii alphanumeric character
-                        needs_closing_brace = false;
-                    }
-                }
-                '}' => {
-                    if interpolating && needs_closing_brace {
-                        interpolating = false;
-                        needs_closing_brace = false;
-                        let Some(interpolated_value) = self.env.get_env(&interpolated_identifier) else { continue; };
-                        final_value.push_str(interpolated_value);
-                    }
-                }
-                _ => {
-                    if interpolating {
-                        if needs_closing_brace {
-                            interpolated_identifier.push(char);
-                        } else if
-                        // Stop interpolating if the character is not alphanumeric or is one of the
-                        // special characters that cannot be in an identifier.
-                        // TODO(jared): The `matches!()` args are just ones that work with
-                        // ../testdata/grub.cfg. Fill in further when more examples are discovered.
-                        matches!(char, '/') || !char.is_ascii_alphanumeric() {
-                            interpolating = false;
-                            let Some(interpolated_value) = self.env.get_env(&interpolated_identifier) else { continue; };
-                            final_value.push_str(interpolated_value);
-                        }
-                    } else {
-                        final_value.push(char);
-                    }
-                }
-            }
-        }
-
-        final_value
+        interpolate_value(&self.env, value)
     }
 
     fn get_entry(&self, command: &CommandStatement) -> Result<GrubEntry, String> {
@@ -345,24 +350,61 @@ where
 mod tests {
     use super::*;
 
-    #[derive(Debug)]
-    struct SimpleGrubEnvironment;
+    #[derive(Debug, Default)]
+    struct SimpleGrubEnvironment {
+        env: HashMap<String, String>,
+    }
     impl GrubEnvironment for SimpleGrubEnvironment {
-        fn run_command(&mut self, _name: String, _args: Vec<String>) -> u8 {
+        fn run_command(&mut self, name: String, args: Vec<String>) -> u8 {
+            eprintln!("{} {}", name, args.join(" "));
             0
         }
 
-        fn set_env(&mut self, _key: String, _val: Option<String>) {}
+        fn set_env(&mut self, key: String, val: Option<String>) {
+            if let Some(val) = val {
+                self.env.insert(key, val);
+            } else {
+                self.env.remove(&key);
+            }
+        }
 
         fn get_env(&self, _key: &str) -> Option<&String> {
-            None
+            self.env.get(_key)
         }
     }
 
     #[test]
+    fn interpolate_value() {
+        let env = SimpleGrubEnvironment {
+            env: HashMap::from([
+                ("foo".to_string(), "bar".to_string()),
+                ("prefix".to_string(), "/mnt/boot/grub".to_string()),
+                ("root".to_string(), "/dev/vda".to_string()),
+            ]),
+        };
+
+        assert_eq!(super::interpolate_value(&env, "$foo"), "bar".to_string());
+        assert_eq!(
+            super::interpolate_value(&env, "${prefix}/grubenv"),
+            "/mnt/boot/grub/grubenv".to_string()
+        );
+        assert_eq!(
+            super::interpolate_value(
+                &env,
+                "($root)//kernels/1pzgainlvg5hcdf8ngjficg3x39j63gv-linux-6.0.15-bzImage"
+            ),
+            "(/dev/vda)//kernels/1pzgainlvg5hcdf8ngjficg3x39j63gv-linux-6.0.15-bzImage".to_string()
+        );
+    }
+
+    #[test]
     fn full_example() {
-        let grub_env = SimpleGrubEnvironment {};
-        GrubEvaluator::new_from_source(include_str!("../testdata/grub.cfg").to_string(), grub_env)
-            .expect("no evaluation errors");
+        let grub_env = SimpleGrubEnvironment::default();
+        let evaluator = GrubEvaluator::new_from_source(
+            include_str!("../testdata/grub.cfg").to_string(),
+            grub_env,
+        )
+        .expect("no evaluation errors");
+        eprintln!("{:#?}", evaluator.menu);
     }
 }
