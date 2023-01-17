@@ -316,10 +316,7 @@ where
         Ok(())
     }
 
-    pub fn eval_boot_entry(
-        &mut self,
-        entry: &GrubEntry,
-    ) -> Result<(&Path, &Path, &str, Option<&Path>), String> {
+    pub fn eval_boot_entry(&mut self, entry: &GrubEntry) -> Result<(&Path, &Path, &str), String> {
         let Some(consequence) = &entry.consequence else {
             return Err("not a boot entry".to_string());
         };
@@ -336,7 +333,7 @@ where
             .env
             .get_env("cmdline")
             .ok_or_else(|| "no cmdline found".to_string())?;
-        Ok((Path::new(linux), Path::new(initrd), cmdline.as_str(), None))
+        Ok((Path::new(linux), Path::new(initrd), cmdline.as_str()))
     }
 
     pub fn get_env(&self, key: &str) -> Option<&String> {

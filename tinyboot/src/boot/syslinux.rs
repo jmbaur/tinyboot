@@ -13,7 +13,6 @@ struct BootEntry {
     kernel: PathBuf,
     initrd: PathBuf,
     cmdline: String,
-    dtb: Option<PathBuf>,
 }
 
 pub struct SyslinuxBootLoader {
@@ -124,16 +123,6 @@ fn syslinux_parse(config_file: &Path) -> Result<(Vec<BootEntry>, Duration), Erro
             continue;
         }
 
-        if line
-            .trim_start_matches(char::is_whitespace)
-            .starts_with("FDT")
-        {
-            p.dtb = Some(config_file.parent().unwrap().join(PathBuf::from(
-                line.split_once("FDT ").ok_or(Error::InvalidConfigFormat)?.1,
-            )));
-            continue;
-        }
-
         if line.trim().is_empty() {
             in_entry = Some(false);
         }
@@ -207,10 +196,7 @@ impl BootLoader for SyslinuxBootLoader {
             .collect())
     }
 
-    fn boot_info(
-        &mut self,
-        entry_id: Option<String>,
-    ) -> Result<(&Path, &Path, &str, Option<&Path>), Error> {
+    fn boot_info(&mut self, entry_id: Option<String>) -> Result<(&Path, &Path, &str), Error> {
         if let Some(entry) = self.entries.iter().find(|entry| {
             if let Some(entry_id) = &entry_id {
                 &entry.name == entry_id
@@ -218,7 +204,7 @@ impl BootLoader for SyslinuxBootLoader {
                 entry.default
             }
         }) {
-            Ok((&entry.kernel, &entry.initrd, &entry.cmdline, None))
+            Ok((&entry.kernel, &entry.initrd, &entry.cmdline))
         } else {
             Err(Error::BootEntryNotFound)
         }

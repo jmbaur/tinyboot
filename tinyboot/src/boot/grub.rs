@@ -468,10 +468,7 @@ impl BootLoader for GrubBootLoader {
 
     /// The entry ID could be the ID or name of a boot entry, submenu, or boot entry nested within
     /// a submenu.
-    fn boot_info(
-        &mut self,
-        entry_id: Option<String>,
-    ) -> Result<(&Path, &Path, &str, Option<&Path>), Error> {
+    fn boot_info(&mut self, entry_id: Option<String>) -> Result<(&Path, &Path, &str), Error> {
         let all_entries = self
             .evaluator
             .menu

@@ -322,7 +322,7 @@ fn logic<B: Backend>(terminal: &mut Terminal<B>) -> anyhow::Result<()> {
         }
     };
 
-    let (kernel, initrd, cmdline, _dtb) = boot_loader.boot_info(selected_entry_id)?;
+    let (kernel, initrd, cmdline) = boot_loader.boot_info(selected_entry_id)?;
     kexec_load(kernel, initrd, cmdline)?;
 
     let mountpoint = boot_loader.mountpoint();

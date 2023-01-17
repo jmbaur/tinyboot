@@ -46,11 +46,8 @@ pub trait BootLoader {
     fn menu_entries(&self) -> Result<Vec<MenuEntry>, Error>;
 
     /// If the entry ID is None, the boot loader should choose the default boot entry.
-    /// The Ok() result tuple looks like: (kernel, initrd, cmdline, Option<dtb>)
-    fn boot_info(
-        &mut self,
-        entry_id: Option<String>,
-    ) -> Result<(&Path, &Path, &str, Option<&Path>), Error>;
+    /// The Ok() result tuple looks like: (kernel, initrd, cmdline)
+    fn boot_info(&mut self, entry_id: Option<String>) -> Result<(&Path, &Path, &str), Error>;
 }
 
 pub fn kexec_load(kernel: &Path, initrd: &Path, cmdline: &str) -> io::Result<()> {
@@ -75,7 +72,6 @@ pub fn kexec_load(kernel: &Path, initrd: &Path, cmdline: &str) -> io::Result<()>
         // of aarch64's kexec_file_load.
         const SYS_KEXEC_FILE_LOAD: std::ffi::c_long = 294;
 
-        // TODO(jared): pass dtb
         arch::asm!(
             "svc #0",
             in("w8") SYS_KEXEC_FILE_LOAD,
