@@ -86,11 +86,11 @@
     },
     "nixpkgs-extlinux-specialisation": {
       "locked": {
-        "lastModified": 1673645083,
-        "narHash": "sha256-lZ2r1c/9M6LqXJdQfNLM8tusXH08UmTSFBdPiwf8rsY=",
+        "lastModified": 1673983351,
+        "narHash": "sha256-TgF4zWcrpJySD2dbNcaK8uugCFgXATayhugaGRY8kPo=",
         "owner": "jmbaur",
         "repo": "nixpkgs",
-        "rev": "422dc632cc93f6932096a491bf632ab6d33e958b",
+        "rev": "8785a5269b2a469f7981c57b5f11b92756a1c923",
         "type": "github"
       },
       "original": {
