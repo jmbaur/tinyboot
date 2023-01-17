@@ -85,13 +85,15 @@ struct SaveEnvArgs {
 
 impl TinybootGrubEnvironment {
     pub fn new(prefix: impl Into<String>) -> Self {
-        Self {
-            env: HashMap::from([
-                ("?".to_string(), 0.to_string()),
-                ("prefix".to_string(), prefix.into()),
-                ("grub_platform".to_string(), "tinyboot".to_string()),
-            ]),
-        }
+        let env = HashMap::from([
+            ("?".to_string(), 0.to_string()),
+            ("prefix".to_string(), prefix.into()),
+            ("grub_platform".to_string(), "tinyboot".to_string()),
+        ]);
+
+        trace!("creating new tinyboot grub environment: {env:#?}");
+
+        Self { env }
     }
 
     // TODO(jared): the docs mention being able to load multiple initrds, but what is the use case
@@ -401,7 +403,12 @@ impl GrubBootLoader {
 
         let evaluator = GrubEvaluator::new_from_source(
             source,
-            TinybootGrubEnvironment::new(mountpoint.to_str().ok_or(Error::InvalidMountpoint)?),
+            TinybootGrubEnvironment::new(
+                mountpoint
+                    .join("boot/grub")
+                    .to_str()
+                    .ok_or(Error::InvalidMountpoint)?,
+            ),
         )
         .map_err(Error::Evaluation)?;
 
