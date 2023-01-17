@@ -13,6 +13,7 @@
   outputs = inputs: with inputs;
     let
       systems = [ "x86_64-linux" "aarch64-linux" ];
+      bootLoaders = [ "grub" "extlinux" ];
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f {
         inherit system;
         pkgs = import nixpkgs {
@@ -39,7 +40,7 @@
               modules = [ ./test/${extension}.nix ];
             }));
         in
-        nixpkgs.lib.mergeAttrs (extend "extlinux" base) (extend "grub" base);
+        nixpkgs.lib.foldAttrs (curr: acc: acc // curr) { } (map (b: extend b base) bootLoaders);
       overlays.default = nixpkgs.lib.composeManyExtensions [
         rust-overlay.overlays.default
         (final: prev: {
@@ -59,10 +60,22 @@
         initramfs = pkgs.tinyboot-initramfs;
         kernel = pkgs.tinyboot-kernel;
       });
-      apps = forAllSystems ({ pkgs, system, ... }: {
-        default = { type = "app"; program = toString (pkgs.callPackage ./test { inherit (self) nixosConfigurations; }); };
-        x86_64 = { type = "app"; program = toString (pkgs.pkgsCross.gnu64.callPackage ./test { inherit (self) nixosConfigurations; }); };
-        aarch64 = { type = "app"; program = toString (pkgs.pkgsCross.aarch64-multiplatform.callPackage ./test { inherit (self) nixosConfigurations; }); };
-      });
+      apps = forAllSystems ({ pkgs, system, ... }: (pkgs.lib.mapAttrs'
+        (name: nixosSystem:
+          pkgs.lib.nameValuePair name {
+            type = "app";
+            program =
+              if nixosSystem.config.nixpkgs.system == system then
+                toString (pkgs.callPackage ./test { inherit name nixosSystem; })
+              else
+                let
+                  pkgsCross = builtins.getAttr nixosSystem.config.nixpkgs.system {
+                    x86_64-linux = pkgs.pkgsCross.gnu64;
+                    aarch64-linux = pkgs.pkgsCross.aarch64-multiplatform;
+                  };
+                in
+                toString (pkgsCross.callPackage ./test { inherit name nixosSystem; });
+          })
+        self.nixosConfigurations) // { default = self.apps.${system}."extlinux-${system}"; });
     };
 }
