@@ -29,16 +29,24 @@ fn syslinux_parse(config_file: &Path) -> Result<(Vec<BootEntry>, Duration), Erro
     let mut p = BootEntry::default();
     let mut default = String::new();
     let mut in_entry: Option<bool> = None;
-    let mut timeout = Duration::from_secs(10);
+    let mut timeout = Duration::from_secs(5);
 
     for line in contents.lines() {
         if !in_entry.unwrap_or_default() && line.starts_with("TIMEOUT") {
             timeout = Duration::from_secs(
+                // https://wiki.syslinux.org/wiki/index.php?title=Config#TIMEOUT
                 line.split_once("TIMEOUT ")
                     .ok_or(Error::InvalidConfigFormat)?
                     .1
-                    .parse()
-                    .unwrap_or(10),
+                    .parse::<i32>()
+                    .map(|timeout| {
+                        if timeout <= 0 {
+                            0u64
+                        } else {
+                            (timeout as u64) / 10
+                        }
+                    })
+                    .unwrap_or(5),
             );
             continue;
         }
@@ -219,7 +227,7 @@ mod tests {
     fn syslinux_parse() {
         let (entries, timeout) =
             super::syslinux_parse(&PathBuf::from("testdata/extlinux.conf")).unwrap();
-        assert_eq!(timeout, Duration::from_secs(50));
+        assert_eq!(timeout, Duration::from_secs(5));
         assert_eq!(entries.len(), 6);
 
         let first = &entries[0];
