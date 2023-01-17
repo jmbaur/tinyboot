@@ -152,7 +152,7 @@ fn ui<B: Backend>(
     if !has_user_interaction {
         let time_left = (timeout - elapsed).as_secs();
         let text = vec![Spans::from(format!(
-            "Will boot automatically in {:?}s",
+            "Boot in {:?}sec.",
             time_left
         ))];
         let paragraph = Paragraph::new(text).alignment(Alignment::Center);
