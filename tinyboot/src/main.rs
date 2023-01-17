@@ -196,12 +196,19 @@ fn logic<B: Backend>(terminal: &mut Terminal<B>) -> anyhow::Result<()> {
             debug!("mounted {} at {}", dev.display(), mountpoint.display());
 
             let boot_loader: Box<dyn BootLoader> = 'loader: {
-                if let Ok(grub) = GrubBootLoader::new(&mountpoint) {
-                    debug!("found grub bootloader");
-                    break 'loader Box::new(grub);
+                match GrubBootLoader::new(&mountpoint) {
+                    Ok(grub) => {
+                        debug!("found grub bootloader");
+                        break 'loader Box::new(grub);
+                    }
+                    Err(e) => error!("error loading grub configuration: {e}"),
                 }
-                if let Ok(syslinux) = SyslinuxBootLoader::new(&mountpoint) {
-                    break 'loader Box::new(syslinux);
+                match SyslinuxBootLoader::new(&mountpoint) {
+                    Ok(syslinux) => {
+                        debug!("found syslinux bootloader");
+                        break 'loader Box::new(syslinux);
+                    }
+                    Err(e) => error!("error loading syslinux configuration: {e}"),
                 }
                 unmount(&mountpoint);
                 return None;

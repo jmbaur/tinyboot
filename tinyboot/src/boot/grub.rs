@@ -4,7 +4,7 @@ use crate::boot::boot_loader::{BootLoader, Error};
 use crate::boot::util::*;
 use clap::{ArgAction, Parser};
 use grub::{GrubEntry, GrubEnvironment, GrubEvaluator};
-use log::debug;
+use log::{debug, error, trace};
 use std::io::Read;
 use std::path::PathBuf;
 use std::{collections::HashMap, fs, path::Path};
@@ -50,22 +50,22 @@ struct TinybootGrubEnvironment {
 }
 
 // https://www.gnu.org/software/grub/manual/grub/grub.html#search
-#[derive(Parser)]
+#[derive(Parser, Debug, PartialEq, Eq)]
 struct SearchArgs {
-    #[arg(short = 'f', long, default_value_t = false)]
+    #[arg(short = 'f', long, conflicts_with_all = ["label", "fs_uuid"])]
     file: bool,
-    #[arg(short = 'l', long, default_value_t = false)]
+    #[arg(short = 'l', long, conflicts_with_all = ["file", "fs_uuid"])]
     label: bool,
-    #[arg(short = 'u', long, default_value_t = false)]
+    #[arg(short = 'u', long, conflicts_with_all = ["file", "label"])]
     fs_uuid: bool,
-    #[arg(long, default_value = None)]
-    set: Option<String>,
-    #[arg(long, default_value_t = false)]
+    #[arg(long)]
     no_floppy: bool,
+    #[arg(long)]
+    set: String,
     name: String,
 }
 
-#[derive(Parser)]
+#[derive(Parser, Debug)]
 struct LoadEnvArgs {
     #[arg(long, value_parser, default_value = "grubenv")]
     file: PathBuf,
@@ -75,7 +75,7 @@ struct LoadEnvArgs {
     whitelisted_variables: Vec<String>,
 }
 
-#[derive(Parser)]
+#[derive(Parser, Debug)]
 struct SaveEnvArgs {
     #[arg(long, value_parser, default_value = "grubenv")]
     file: PathBuf,
@@ -99,6 +99,12 @@ impl TinybootGrubEnvironment {
     // https://www.gnu.org/software/grub/manual/grub/html_node/initrd.html#initrd
     fn run_initrd(&mut self, args: Vec<String>) -> u8 {
         let mut args = args.iter();
+
+        // remove command name
+        if args.next().is_none() {
+            return 1;
+        }
+
         let Some(initrd) = args.next() else { return 1; };
         self.env.insert("initrd".to_string(), initrd.to_string());
         0
@@ -106,6 +112,12 @@ impl TinybootGrubEnvironment {
 
     fn run_linux(&mut self, args: Vec<String>) -> u8 {
         let mut args = args.iter();
+
+        // remove command name
+        if args.next().is_none() {
+            return 1;
+        }
+
         let Some(kernel) = args.next() else { return 1; };
         let mut cmdline = String::new();
         for next in args {
@@ -118,22 +130,24 @@ impl TinybootGrubEnvironment {
     }
 
     fn run_load_env(&mut self, args: Vec<String>) -> u8 {
-        let args = LoadEnvArgs::parse_from(args);
+        let Ok(args) = LoadEnvArgs::try_parse_from(args) else { return 1; };
+
+        trace!("load_env called with args {:#?}", args);
 
         let Some(prefix) = self.env.get("prefix") else {
-            debug!("no prefix environment variable");
+            error!("no prefix environment variable");
             return 1;
         };
 
         let prefix = PathBuf::from(prefix);
         let Ok(mut file) = fs::File::open(prefix.join(args.file)) else {
-            debug!("failed to open env file");
+            error!("failed to open env file");
             return 1;
         };
 
         let mut contents = String::new();
         if file.read_to_string(&mut contents).is_err() {
-            debug!("could not read env file");
+            error!("could not read env file");
             return 1;
         };
 
@@ -144,20 +158,23 @@ impl TinybootGrubEnvironment {
     }
 
     fn run_save_env(&self, args: Vec<String>) -> u8 {
-        let args = SaveEnvArgs::parse_from(args);
+        let Ok(args) = SaveEnvArgs::try_parse_from(args) else { return 1; };
+
+        trace!("save_env called with args {:#?}", args);
+
         if args.variables.is_empty() {
             return 0;
         }
 
         let Some(prefix) = self.env.get("prefix") else {
-            debug!("no prefix environment variable");
+            error!("no prefix environment variable");
             return 1;
         };
         let prefix = PathBuf::from(prefix);
         let file = prefix.join(args.file);
 
         let Ok(existing_env_block_contents) = fs::read_to_string(&file) else {
-            debug!("failed to load environment block file");
+            error!("failed to load environment block file");
             return 1;
         };
 
@@ -170,12 +187,12 @@ impl TinybootGrubEnvironment {
         }
 
         let Ok(block) = grub_environment_block(envs) else {
-            debug!("could not generate grub environment block");
+            error!("could not generate grub environment block");
             return 1;
         };
 
         if let Err(e) = fs::write(file, block) {
-            debug!("write: {e}");
+            error!("write: {e}");
             return 1;
         }
 
@@ -183,8 +200,17 @@ impl TinybootGrubEnvironment {
     }
 
     fn run_search(&mut self, args: Vec<String>) -> u8 {
-        let args = SearchArgs::parse_from(args);
-        let var = args.set.unwrap_or_else(|| String::from("root"));
+        let args = match SearchArgs::try_parse_from(args) {
+            Ok(a) => a,
+            Err(e) => {
+                error!("SearchArgs parse error: {e}");
+                return 1;
+            }
+        };
+
+        trace!("search called with args {:#?}", args);
+
+        let var = args.set;
         let found = match (args.file, args.fs_uuid, args.label) {
             (true, false, false) => {
                 let file = Path::new(&args.name);
@@ -218,23 +244,16 @@ impl TinybootGrubEnvironment {
     }
 
     fn run_set(&mut self, args: Vec<String>) -> u8 {
-        match args.len() {
-            0 | 1 => 2,
-            2 => match (args[0].as_str(), args[1].as_str()) {
-                (key, "=") => {
-                    self.env.remove(key);
-                    0
-                }
-                _ => 2,
-            },
-            3 => match (args[0].as_str(), args[1].as_str(), args[2].as_str()) {
-                (key, "=", val) => {
-                    self.env.insert(key.to_string(), val.to_string());
-                    0
-                }
-                _ => 2,
-            },
-            _ => 2,
+        let Some(set) = args.get(1).and_then(|arg| arg.split_once('=')) else { return 1; };
+        match set {
+            (var, "") => {
+                self.env.remove(var);
+                0
+            }
+            (var, val) => {
+                self.env.insert(var.to_string(), val.to_string());
+                0
+            }
         }
     }
 
@@ -242,6 +261,14 @@ impl TinybootGrubEnvironment {
     /// Returns exit code 1 if the test evaluates to false.
     /// Returns exit code 2 if the arguments are invalid.
     fn run_test(&self, args: Vec<String>) -> u8 {
+        trace!("test command called with args '{:?}'", args);
+
+        if args.is_empty() {
+            return 1;
+        }
+
+        let args = &args[1..];
+
         match args.len() {
             0 => 2,
             1 => string_nonzero_length(&args[0]),
@@ -325,8 +352,12 @@ impl TinybootGrubEnvironment {
 }
 
 impl GrubEnvironment for TinybootGrubEnvironment {
-    fn run_command(&mut self, command: String, args: Vec<String>) -> u8 {
-        match command.as_str() {
+    fn run_command(&mut self, command: String, args_wo_command: Vec<String>) -> u8 {
+        // clap requires the command name to be the first argument, just as std::env::args_os().
+        let mut args = vec![command.clone()];
+        args.extend(args_wo_command);
+
+        let exit_code = match command.as_str() {
             "initrd" => self.run_initrd(args),
             "linux" => self.run_linux(args),
             "load_env" => self.run_load_env(args),
@@ -338,10 +369,15 @@ impl GrubEnvironment for TinybootGrubEnvironment {
                 debug!("'{}' not implemented", command);
                 0
             }
-        }
+        };
+
+        debug!("command '{command}' exited with code {exit_code}");
+
+        exit_code
     }
 
     fn set_env(&mut self, key: String, val: Option<String>) {
+        trace!("setting env '{key}' to '{val:?}'");
         if let Some(val) = val {
             self.env.insert(key, val);
         } else {
@@ -361,12 +397,15 @@ pub struct GrubBootLoader {
 
 impl GrubBootLoader {
     pub fn new(mountpoint: &Path) -> Result<Self, Error> {
-        debug!("creating grub evaluator");
-        let evaluator = GrubEvaluator::new(
-            fs::File::open(mountpoint.join("boot/grub/grub.cfg"))?,
+        let source = fs::read_to_string(mountpoint.join("boot/grub/grub.cfg"))?;
+
+        let evaluator = GrubEvaluator::new_from_source(
+            source,
             TinybootGrubEnvironment::new(mountpoint.to_str().ok_or(Error::InvalidMountpoint)?),
         )
         .map_err(Error::Evaluation)?;
+
+        eprintln!("{:#?}", evaluator.menu);
 
         Ok(Self {
             mountpoint: mountpoint.to_path_buf(),
@@ -484,14 +523,53 @@ mod tests {
     #[test]
     fn grub_run_test() {
         let g = TinybootGrubEnvironment::new("/dev/null");
-        assert_eq!(g.run_test(vec!["-d".to_string(), "/dev".to_string()]), 0);
-        assert_eq!(g.run_test(vec!["-f".to_string(), "/dev".to_string()]), 1);
-        assert_eq!(g.run_test(vec!["-e".to_string(), "/dev".to_string()]), 0);
-        assert_eq!(g.run_test(vec!["-n".to_string(), "foo".to_string()]), 0);
-        assert_eq!(g.run_test(vec!["-z".to_string(), "foo".to_string()]), 1);
-        assert_eq!(g.run_test(vec!["-z".to_string(), "".to_string()]), 0);
         assert_eq!(
             g.run_test(vec![
+                "test".to_string(),
+                "-d".to_string(),
+                "/dev".to_string()
+            ]),
+            0
+        );
+        assert_eq!(
+            g.run_test(vec![
+                "test".to_string(),
+                "-f".to_string(),
+                "/dev".to_string()
+            ]),
+            1
+        );
+        assert_eq!(
+            g.run_test(vec![
+                "test".to_string(),
+                "-e".to_string(),
+                "/dev".to_string()
+            ]),
+            0
+        );
+        assert_eq!(
+            g.run_test(vec![
+                "test".to_string(),
+                "-n".to_string(),
+                "foo".to_string()
+            ]),
+            0
+        );
+        assert_eq!(
+            g.run_test(vec![
+                "test".to_string(),
+                "-z".to_string(),
+                "foo".to_string()
+            ]),
+            1
+        );
+        assert_eq!(
+            g.run_test(vec!["test".to_string(), "-z".to_string(), "".to_string()]),
+            0
+        );
+        assert_eq!(
+            g.run_test(vec![
+                "test".to_string(),
                 "foo1".to_string(),
                 "-pgt".to_string(),
                 "bar0".to_string()
@@ -514,5 +592,23 @@ mod tests {
 
         let env = super::load_env(testdata_env_block, vec![]);
         assert_eq!(env, expected);
+    }
+
+    #[test]
+    fn search_args() {
+        let args =
+            SearchArgs::try_parse_from(vec!["search", "--set=drive1", "--fs-uuid", "BB22-99EC"])
+                .unwrap();
+        assert_eq!(
+            args,
+            SearchArgs {
+                file: false,
+                label: false,
+                fs_uuid: true,
+                no_floppy: false,
+                set: "drive1".to_string(),
+                name: "BB22-99EC".to_string(),
+            }
+        );
     }
 }

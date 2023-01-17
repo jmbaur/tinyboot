@@ -3,7 +3,7 @@
   system.stateVersion = "23.05";
   specialisation.alternate.configuration.boot.kernelParams = [ "console=tty0" ]; # to provide more menu options
   boot.growPartition = true;
-  boot.loader.timeout = 0;
+  boot.loader.timeout = 5;
   users.users.root.password = "";
   fileSystems."/" = {
     device = "/dev/disk/by-label/nixos";

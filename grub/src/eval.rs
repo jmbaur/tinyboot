@@ -45,6 +45,7 @@ pub struct GrubEntry {
     pub menuentries: Option<Vec<GrubEntry>>,
 }
 
+#[derive(Debug)]
 pub struct GrubEvaluator<T: GrubEnvironment> {
     env: T,
     functions: HashMap<String, Vec<Statement>>,
@@ -347,6 +348,7 @@ where
 mod tests {
     use super::*;
 
+    #[derive(Debug)]
     struct SimpleGrubEnvironment;
     impl GrubEnvironment for SimpleGrubEnvironment {
         fn run_command(&mut self, _name: String, _args: Vec<String>) -> u8 {

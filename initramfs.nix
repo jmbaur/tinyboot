@@ -27,6 +27,7 @@ let
     ::restart:/init
     ${tinybootTTY}::respawn:/bin/tinyboot tinyboot.log=${tinybootLog}
     ${shellTTY}::askfirst:/bin/sh
+    ttyS0::respawn:/bin/sh
   '';
 in
 makeInitrdNG {
