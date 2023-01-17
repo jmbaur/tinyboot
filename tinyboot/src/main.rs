@@ -373,7 +373,18 @@ fn main() -> anyhow::Result<()> {
 
     let cfg = Config::new(args.as_slice());
 
-    printk::init("tinyboot", cfg.log_level)?;
+    fern::Dispatch::new()
+        .format(|out, message, record| {
+            out.finish(format_args!(
+                "[{}][{}] {}",
+                record.target(),
+                record.level(),
+                message
+            ))
+        })
+        .level(cfg.log_level)
+        .chain(fern::log_file("/tmp/tinyboot.log")?)
+        .apply()?;
 
     info!("started");
     debug!("args: {:?}", args);

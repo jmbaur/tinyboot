@@ -405,7 +405,7 @@ impl GrubBootLoader {
         )
         .map_err(Error::Evaluation)?;
 
-        eprintln!("{:#?}", evaluator.menu);
+        debug!("{:#?}", evaluator.menu);
 
         Ok(Self {
             mountpoint: mountpoint.to_path_buf(),

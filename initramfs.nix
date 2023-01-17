@@ -1,6 +1,8 @@
-{ tinybootLog ? "debug"
+{ tinybootLog ? "trace"
 , tinybootTTY ? "tty1"
 , shellTTY ? "tty2"
+, extraInittab ? ""
+, extraInit ? ""
 , makeInitrdNG
 , pkgsStatic
 , buildEnv
@@ -18,6 +20,7 @@ let
     mount -t sysfs sysfs /sys
     mount -t tmpfs tmpfs /tmp
     mount -t devpts devpts /dev/pts
+    ${extraInit}
     mdev -s
   '';
   inittab = writeText "inittab" ''
@@ -27,7 +30,7 @@ let
     ::restart:/init
     ${tinybootTTY}::respawn:/bin/tinyboot tinyboot.log=${tinybootLog}
     ${shellTTY}::askfirst:/bin/sh
-    ttyS0::respawn:/bin/sh
+    ${extraInittab}
   '';
 in
 makeInitrdNG {

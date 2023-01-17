@@ -10,6 +10,11 @@ let
       console = "ttyAMA0";
     };
   };
+  initramfs = tinyboot-initramfs.override {
+    extraInittab = ''
+      ${systemConfig.console}::respawn:/bin/sh
+    '';
+  };
   disk = toString (nixosSystem.extendModules {
     modules = [ ({ boot.kernelParams = [ "console=${systemConfig.console}" ]; }) ];
   }).config.system.build.qcow2;
@@ -21,7 +26,7 @@ writeShellScript "tinyboot-test-run.bash" ''
     -serial stdio \
     -m 2G \
     -kernel ${tinyboot-kernel}/${stdenv.hostPlatform.linux-kernel.target} \
-    -initrd ${tinyboot-initramfs}/initrd \
+    -initrd ${initramfs}/initrd \
     -append console=${systemConfig.console} \
     -drive if=virtio,file=nixos-${name}.qcow2,format=qcow2,media=disk
 ''
