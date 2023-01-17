@@ -15,9 +15,11 @@ fn interpolate_value(env: &impl GrubEnvironment, value: impl Into<String>) -> St
     let mut interpolating = false;
     let mut needs_closing_brace = false;
     let mut interpolated_identifier = String::new();
-    while let Some(char) = peeker.next() {
-        match char {
-            '$' => {
+
+    loop {
+        let next = peeker.next();
+        match next {
+            Some('$') => {
                 interpolating = true;
                 if peeker.peek().map(|&c| c == '{').unwrap_or_default() {
                     _ = peeker.next().expect("peek is not None");
@@ -28,7 +30,7 @@ fn interpolate_value(env: &impl GrubEnvironment, value: impl Into<String>) -> St
                     needs_closing_brace = false;
                 }
             }
-            '}' => {
+            Some('}') => {
                 if interpolating && needs_closing_brace {
                     interpolating = false;
                     needs_closing_brace = false;
@@ -36,23 +38,33 @@ fn interpolate_value(env: &impl GrubEnvironment, value: impl Into<String>) -> St
                     final_value.push_str(interpolated_value);
                 }
             }
-            _ => {
+            Some(char) => {
                 if interpolating {
                     if needs_closing_brace {
                         interpolated_identifier.push(char);
                     } else if
                     // Stop interpolating if the character is not alphanumeric or is one of the
                     // special characters that cannot be in an identifier.
-                    // TODO(jared): The `matches!()` args are just ones that work with
-                    // ../testdata/grub.cfg. Fill in further when more examples are discovered.
-                    matches!(char, '/') || !char.is_ascii_alphanumeric() {
+                    !char.is_ascii_alphanumeric() {
                         interpolating = false;
                         let Some(interpolated_value) = env.get_env(&interpolated_identifier) else { continue; };
                         final_value.push_str(interpolated_value);
+                        interpolated_identifier.clear();
+                        final_value.push(char);
+                    } else {
+                        interpolated_identifier.push(char);
                     }
                 } else {
                     final_value.push(char);
                 }
+            }
+            None => {
+                if interpolating {
+                    if let Some(interpolated_value) = env.get_env(&interpolated_identifier) {
+                        final_value.push_str(interpolated_value);
+                    }
+                }
+                break;
             }
         }
     }
