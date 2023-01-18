@@ -140,7 +140,7 @@ fn ui<B: Backend>(
         .block(
             Block::default()
                 .title(title)
-                .title_alignment(Alignment::Center),
+                .title_alignment(Alignment::Left),
         )
         .highlight_style(Style::default().bg(Color::White).fg(Color::Black))
         .highlight_symbol(">>");
@@ -297,7 +297,9 @@ fn logic<B: Backend>(terminal: &mut Terminal<B>) -> anyhow::Result<()> {
                                 MenuEntry::BootEntry(entry) => {
                                     break 'selection Some(entry.0.to_string())
                                 }
-                                MenuEntry::SubMenu(_) => boot_entries.choose_currently_selected(),
+                                MenuEntry::SubMenu(_) => {
+                                    boot_entries.choose_currently_selected();
+                                }
                             };
                         }
                         Key::Left | Key::Char('h') => boot_entries.clear_chosen(),
