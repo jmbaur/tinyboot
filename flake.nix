@@ -76,6 +76,6 @@
                 in
                 toString (pkgsCross.callPackage ./test { inherit name nixosSystem; });
           })
-        self.nixosConfigurations) // { default = self.apps.${system}."extlinux-${system}"; });
+        self.nixosConfigurations) // { default = self.apps.${system}."grub-${system}"; });
     };
 }
