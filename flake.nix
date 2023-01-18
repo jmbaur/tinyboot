@@ -52,7 +52,7 @@
       devShells = forAllSystems ({ pkgs, ... }: {
         default = with pkgs; mkShell ({
           inputsFrom = [ tinyboot ];
-          nativeBuildInputs = [ grub2 cargo-watch ];
+          nativeBuildInputs = [ grub2 cargo-insta cargo-watch ];
         } // tinyboot.env);
       });
       packages = forAllSystems ({ pkgs, ... }: {

@@ -136,7 +136,9 @@ where
         };
 
         let mut parser = Parser::new(Lexer::new(&source));
+
         let ast = parser.parse()?;
+
         s.eval_statements(ast.statements)?;
 
         Ok(s)
@@ -233,7 +235,8 @@ where
     }
 
     fn add_entry(&mut self, command: CommandStatement) -> Result<(), String> {
-        self.menu.push(self.get_entry(&command)?);
+        let entry = self.get_entry(&command)?;
+        self.menu.push(entry);
         Ok(())
     }
 

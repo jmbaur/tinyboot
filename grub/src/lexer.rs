@@ -280,6 +280,6 @@ mod tests {
     #[test]
     fn full_example() {
         let tokens = tokenize(include_str!("../testdata/grub.cfg")).unwrap();
-        assert!(!tokens.iter().any(|tok| matches!(tok, Token::Illegal(_))));
+        insta::assert_debug_snapshot!(tokens);
     }
 }
