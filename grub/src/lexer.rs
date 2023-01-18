@@ -279,7 +279,7 @@ mod tests {
 
     #[test]
     fn full_example() {
-        let tokens = tokenize(include_str!("../testdata/grub.cfg")).unwrap();
+        let tokens = tokenize(include_str!("./testdata/grub.cfg")).unwrap();
         insta::assert_debug_snapshot!(tokens);
     }
 }

@@ -529,7 +529,7 @@ mod tests {
 
     #[test]
     fn full_example() {
-        let mut p = Parser::new(Lexer::new(include_str!("../testdata/grub.cfg")));
+        let mut p = Parser::new(Lexer::new(include_str!("./testdata/grub.cfg")));
         let ast = p.parse().expect("no parsing errors");
         insta::assert_debug_snapshot!(ast);
     }

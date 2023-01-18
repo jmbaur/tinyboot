@@ -1,4 +1,4 @@
-{ tinybootLog ? "trace"
+{ tinybootLog ? "info"
 , tinybootTTY ? "tty1"
 , shellTTY ? "tty2"
 , extraInittab ? ""

@@ -683,7 +683,7 @@ mod tests {
 
     #[test]
     fn grub_environment_block() {
-        let testdata_env_block = include_str!("../../testdata/grubenv");
+        let testdata_env_block = include_str!("../testdata/grubenv");
 
         let expected = vec![
             ("foo".to_string(), "bar".to_string()),

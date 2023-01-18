@@ -422,7 +422,7 @@ mod tests {
     #[test]
     fn full_example() {
         let grub_env = SimpleGrubEnvironment::default();
-        GrubEvaluator::new_from_source(include_str!("../testdata/grub.cfg").to_string(), grub_env)
+        GrubEvaluator::new_from_source(include_str!("./testdata/grub.cfg").to_string(), grub_env)
             .expect("no evaluation errors");
     }
 }

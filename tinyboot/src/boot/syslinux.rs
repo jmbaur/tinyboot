@@ -22,8 +22,11 @@ pub struct SyslinuxBootLoader {
     timeout: Duration,
 }
 
-fn syslinux_parse(config_file: &Path) -> Result<(Vec<BootEntry>, Duration), Error> {
-    let contents = fs::read_to_string(config_file)?;
+fn syslinux_parse_from_source(
+    source: impl Into<String>,
+    syslinux_root: impl AsRef<Path>,
+) -> Result<(Vec<BootEntry>, Duration), Error> {
+    let contents = source.into();
 
     let mut entries = vec![];
     let mut p = BootEntry::default();
@@ -99,7 +102,7 @@ fn syslinux_parse(config_file: &Path) -> Result<(Vec<BootEntry>, Duration), Erro
             .trim_start_matches(char::is_whitespace)
             .starts_with("LINUX")
         {
-            p.kernel = config_file.parent().unwrap().join(PathBuf::from(
+            p.kernel = syslinux_root.as_ref().join(PathBuf::from(
                 line.split_once("LINUX ")
                     .ok_or(Error::InvalidConfigFormat)?
                     .1,
@@ -111,7 +114,7 @@ fn syslinux_parse(config_file: &Path) -> Result<(Vec<BootEntry>, Duration), Erro
             .trim_start_matches(char::is_whitespace)
             .starts_with("INITRD")
         {
-            p.initrd = config_file.parent().unwrap().join(PathBuf::from(
+            p.initrd = syslinux_root.as_ref().join(PathBuf::from(
                 line.split_once("INITRD ")
                     .ok_or(Error::InvalidConfigFormat)?
                     .1,
@@ -140,6 +143,11 @@ fn syslinux_parse(config_file: &Path) -> Result<(Vec<BootEntry>, Duration), Erro
     entries.push(p);
 
     Ok((entries, timeout))
+}
+
+fn syslinux_parse(config_file: impl AsRef<Path>) -> Result<(Vec<BootEntry>, Duration), Error> {
+    let syslinux_root = config_file.as_ref().parent().unwrap();
+    syslinux_parse_from_source(fs::read_to_string(config_file.as_ref())?, syslinux_root)
 }
 
 impl SyslinuxBootLoader {
@@ -221,12 +229,15 @@ impl BootLoader for SyslinuxBootLoader {
 
 #[cfg(test)]
 mod tests {
-    use std::{path::PathBuf, time::Duration};
+    use std::{path::Path, time::Duration};
 
     #[test]
     fn syslinux_parse() {
-        let (entries, timeout) =
-            super::syslinux_parse(&PathBuf::from("testdata/extlinux.conf")).unwrap();
+        let (entries, timeout) = super::syslinux_parse_from_source(
+            include_str!("../testdata/extlinux.conf"),
+            Path::new("/dev/null"),
+        )
+        .unwrap();
         assert_eq!(timeout, Duration::from_secs(5));
         assert_eq!(entries.len(), 6);
 

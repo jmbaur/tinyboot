@@ -11,6 +11,7 @@ let
     };
   };
   initramfs = tinyboot-initramfs.override {
+    tinybootLog = "trace";
     extraInittab = ''
       ${systemConfig.console}::respawn:/bin/sh
     '';

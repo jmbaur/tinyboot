@@ -13,9 +13,20 @@ let
     CARGO_PRIMARY_PACKAGE = "tinyboot";
     HOST_CC = "${stdenv.cc.nativePrefix}cc";
   };
+  craneLib = crane.lib.${stdenv.buildPlatform.system};
+  sourceFilter = src:
+    let
+      notSrc = path: _type: builtins.match "src" path == null;
+      notSrcOrCargo = path: type:
+        (notSrc path type) || (craneLib.filterCargoSources path type);
+    in
+    lib.cleanSourceWith {
+      src = lib.cleanSource src;
+      filter = notSrcOrCargo;
+    };
 in
-(crane.lib.${stdenv.buildPlatform.system}.overrideToolchain toolchain).buildPackage ({
-  src = ./.;
+(craneLib.overrideToolchain toolchain).buildPackage ({
+  src = sourceFilter ./.;
   cargoToml = ./tinyboot/Cargo.toml;
   depsBuildBuild = lib.optional isCrossBuild qemu;
   nativeBuildInputs = [ toolchain ];

@@ -5,15 +5,17 @@
   boot.growPartition = true;
   boot.loader.timeout = 5;
   users.users.root.password = "";
-  fileSystems."/" = {
-    device = "/dev/disk/by-label/nixos";
-    fsType = "ext4";
-    autoResize = true;
+  fileSystems = {
+    "/" = {
+      device = "/dev/disk/by-label/nixos";
+      fsType = "ext4";
+      autoResize = true;
+    };
   };
   system.build.qcow2 = import (pkgs.path + "/nixos/lib/make-disk-image.nix") {
     name = "tinyboot-test-image";
     inherit pkgs lib config;
-    diskSize = 8192;
+    partitionTableType = "legacy+gpt"; # TODO(jared): use efi?
     format = "qcow2";
   };
 }
