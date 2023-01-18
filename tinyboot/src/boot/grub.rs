@@ -5,7 +5,7 @@ use crate::boot::util::*;
 use clap::{ArgAction, Parser};
 use grub::{GrubEntry, GrubEnvironment, GrubEvaluator};
 use log::{debug, error, trace};
-use std::io::Read;
+use std::io::{self, Read};
 use std::path::PathBuf;
 use std::{collections::HashMap, fs, path::Path};
 
@@ -43,6 +43,29 @@ fn load_env(contents: impl Into<String>, whitelisted_vars: Vec<String>) -> Vec<(
             }
             acc
         })
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum GrubEnvironmentError {
+    Io(String),
+    ParseInt,
+    NotImplemented,
+    InvalidArgs,
+    False,
+    MissingEnvironmentVariable,
+    EnvironmentBlock,
+}
+
+impl From<io::Error> for GrubEnvironmentError {
+    fn from(value: io::Error) -> Self {
+        Self::Io(value.to_string())
+    }
+}
+
+impl From<clap::error::Error> for GrubEnvironmentError {
+    fn from(_value: clap::error::Error) -> Self {
+        Self::InvalidArgs
+    }
 }
 
 struct TinybootGrubEnvironment {
@@ -99,28 +122,32 @@ impl TinybootGrubEnvironment {
     // TODO(jared): the docs mention being able to load multiple initrds, but what is the use case
     // for that?
     // https://www.gnu.org/software/grub/manual/grub/html_node/initrd.html#initrd
-    fn run_initrd(&mut self, args: Vec<String>) -> u8 {
+    fn run_initrd(&mut self, args: Vec<String>) -> Result<(), GrubEnvironmentError> {
         let mut args = args.iter();
 
         // remove command name
         if args.next().is_none() {
-            return 1;
+            return Err(GrubEnvironmentError::InvalidArgs);
         }
 
-        let Some(initrd) = args.next() else { return 1; };
+        let Some(initrd) = args.next() else {
+            return Err(GrubEnvironmentError::InvalidArgs);
+        };
         self.env.insert("initrd".to_string(), initrd.to_string());
-        0
+        Ok(())
     }
 
-    fn run_linux(&mut self, args: Vec<String>) -> u8 {
+    fn run_linux(&mut self, args: Vec<String>) -> Result<(), GrubEnvironmentError> {
         let mut args = args.iter();
 
         // remove command name
         if args.next().is_none() {
-            return 1;
+            return Err(GrubEnvironmentError::InvalidArgs);
         }
 
-        let Some(kernel) = args.next() else { return 1; };
+        let Some(kernel) = args.next() else {
+            return Err(GrubEnvironmentError::InvalidArgs);
+        };
         let mut cmdline = String::new();
         for next in args {
             cmdline.push_str(next);
@@ -128,57 +155,48 @@ impl TinybootGrubEnvironment {
         }
         self.env.insert("linux".to_string(), kernel.to_string());
         self.env.insert("linux_cmdline".to_string(), cmdline);
-        0
+
+        Ok(())
     }
 
-    fn run_load_env(&mut self, args: Vec<String>) -> u8 {
-        let Ok(args) = LoadEnvArgs::try_parse_from(args) else { return 1; };
+    fn run_load_env(&mut self, args: Vec<String>) -> Result<(), GrubEnvironmentError> {
+        let args = LoadEnvArgs::try_parse_from(args)?;
 
         trace!("load_env called with args {:#?}", args);
 
         let Some(prefix) = self.env.get("prefix") else {
-            error!("no prefix environment variable");
-            return 1;
+            return Err(GrubEnvironmentError::MissingEnvironmentVariable);
         };
 
         let prefix = PathBuf::from(prefix);
-        let Ok(mut file) = fs::File::open(prefix.join(args.file)) else {
-            error!("failed to open env file");
-            return 1;
-        };
+        let mut file = fs::File::open(prefix.join(args.file))?;
 
         let mut contents = String::new();
-        if file.read_to_string(&mut contents).is_err() {
-            error!("could not read env file");
-            return 1;
-        };
+        file.read_to_string(&mut contents)?;
 
         let env = load_env(contents, args.whitelisted_variables);
         self.env.extend(env);
 
-        0
+        Ok(())
     }
 
-    fn run_save_env(&self, args: Vec<String>) -> u8 {
-        let Ok(args) = SaveEnvArgs::try_parse_from(args) else { return 1; };
+    fn run_save_env(&self, args: Vec<String>) -> Result<(), GrubEnvironmentError> {
+        let args = SaveEnvArgs::try_parse_from(args)?;
 
         trace!("save_env called with args {:#?}", args);
 
         if args.variables.is_empty() {
-            return 0;
+            return Err(GrubEnvironmentError::InvalidArgs);
         }
 
         let Some(prefix) = self.env.get("prefix") else {
             error!("no prefix environment variable");
-            return 1;
+            return Err(GrubEnvironmentError::MissingEnvironmentVariable);
         };
         let prefix = PathBuf::from(prefix);
         let file = prefix.join(args.file);
 
-        let Ok(existing_env_block_contents) = fs::read_to_string(&file) else {
-            error!("failed to load environment block file");
-            return 1;
-        };
+        let existing_env_block_contents = fs::read_to_string(&file)?;
 
         let mut envs = load_env(existing_env_block_contents, vec![]);
 
@@ -189,26 +207,16 @@ impl TinybootGrubEnvironment {
         }
 
         let Ok(block) = grub_environment_block(envs) else {
-            error!("could not generate grub environment block");
-            return 1;
+            return Err(GrubEnvironmentError::EnvironmentBlock);
         };
 
-        if let Err(e) = fs::write(file, block) {
-            error!("write: {e}");
-            return 1;
-        }
+        fs::write(file, block)?;
 
-        0
+        Ok(())
     }
 
-    fn run_search(&mut self, args: Vec<String>) -> u8 {
-        let args = match SearchArgs::try_parse_from(args) {
-            Ok(a) => a,
-            Err(e) => {
-                error!("SearchArgs parse error: {e}");
-                return 1;
-            }
-        };
+    fn run_search(&mut self, args: Vec<String>) -> Result<(), GrubEnvironmentError> {
+        let args = SearchArgs::try_parse_from(args)?;
 
         trace!("search called with args {:#?}", args);
 
@@ -232,64 +240,66 @@ impl TinybootGrubEnvironment {
                     _ => false,
                 })
             }
-            _ => return 1,
+            _ => unreachable!(),
         };
 
-        let Ok(found) = found else { return 1; };
+        let found = found.map_err(|e| GrubEnvironmentError::Io(e.to_string()))?;
         if found.is_empty() {
-            return 1;
+            return Err(GrubEnvironmentError::Io(
+                "file not found".to_string(),
+            ));
         }
 
-        let Some(value) = found[0].to_str().map(|s| s.to_string()) else { return 1; };
+        let Some(value) = found[0].to_str().map(|s| s.to_string()) else { 
+            return Err(GrubEnvironmentError::Io("bad path".to_string()));
+        };
+
         self.env.insert(var, value);
-        0
+
+        Ok(())
     }
 
-    fn run_set(&mut self, args: Vec<String>) -> u8 {
-        let Some(set) = args.get(1).and_then(|arg| arg.split_once('=')) else { return 1; };
+    fn run_set(&mut self, args: Vec<String>) -> Result<(), GrubEnvironmentError> {
+        let Some(set) = args.get(1).and_then(|arg| arg.split_once('=')) else {
+            return Err(GrubEnvironmentError::InvalidArgs);
+        };
+
         match set {
-            (var, "") => {
-                self.env.remove(var);
-                0
-            }
-            (var, val) => {
-                self.env.insert(var.to_string(), val.to_string());
-                0
-            }
-        }
+            (var, "") => self.env.remove(var),
+            (var, val) => self.env.insert(var.to_string(), val.to_string()),
+        };
+
+        Ok(())
     }
 
-    /// Returns exit code 0 if the test evaluates to true.
-    /// Returns exit code 1 if the test evaluates to false.
-    /// Returns exit code 2 if the arguments are invalid.
-    fn run_test(&self, args: Vec<String>) -> u8 {
+    fn run_test(&self, args: Vec<String>) -> Result<(), GrubEnvironmentError> {
         trace!("test command called with args '{:?}'", args);
 
         if args.is_empty() {
-            return 1;
+            return Err(GrubEnvironmentError::InvalidArgs);
         }
 
         let args = &args[1..];
 
-        match args.len() {
-            0 => 2,
+        let result = match args.len() {
+            0 => return Err(GrubEnvironmentError::InvalidArgs),
             1 => string_nonzero_length(&args[0]),
             2 => match (args[0].as_str(), args[1].as_str()) {
                 // file exists and is a directory
-                ("-d", file) => file_exists_and_is_directory(file),
+                ("-d", file) => file_exists_and_is_directory(file)?,
                 // file exists
-                ("-e", file) => file_exists(file),
+                ("-e", file) => file_exists(file)?,
                 // file exists and is not a directory
-                ("-f", file) => file_exists_and_is_not_directory(file),
+                ("-f", file) => file_exists_and_is_not_directory(file)?,
                 // file exists and has a size greater than zero
-                ("-s", file) => file_exists_and_size_greater_than_zero(file),
+                ("-s", file) => file_exists_and_size_greater_than_zero(file)?,
                 // the length of string is nonzero
                 ("-n", string) => string_nonzero_length(string),
                 // the length of string is zero
                 ("-z", string) => string_zero_length(string),
                 // expression is false
                 ("!", _expression) => todo!("implement 'expression is false'"),
-                _ => 2,
+                _ => return Err(GrubEnvironmentError::InvalidArgs),
             },
             3 => match (args[0].as_str(), args[1].as_str(), args[2].as_str()) {
                 // the strings are equal
@@ -311,31 +321,41 @@ impl TinybootGrubEnvironment {
                     strings_lexographically_greater_than_or_equal_to(string1, string2)
                 }
                 // integer1 is equal to integer2
-                (integer1, "-eq", integer2) => integers_equal(integer1, integer2),
+                (integer1, "-eq", integer2) => integers_equal(integer1, integer2)
+                    .map_err(|_| GrubEnvironmentError::ParseInt)?,
                 // integer1 is greater than or equal to integer2
                 (integer1, "-ge", integer2) => {
                     integers_greater_than_or_equal_to(integer1, integer2)
+                        .map_err(|_| GrubEnvironmentError::ParseInt)?
                 }
                 // integer1 is greater than integer2
-                (integer1, "-gt", integer2) => integers_greater_than(integer1, integer2),
+                (integer1, "-gt", integer2) => integers_greater_than(integer1, integer2)
+                    .map_err(|_| GrubEnvironmentError::ParseInt)?,
                 // integer1 is less than or equal to integer2
-                (integer1, "-le", integer2) => integers_less_than_or_equal_to(integer1, integer2),
+                (integer1, "-le", integer2) => {
+                    integers_less_than_or_equal_to(integer1, integer2)
+                        .map_err(|_| GrubEnvironmentError::ParseInt)?
+                }
                 // integer1 is less than integer2
-                (integer1, "-lt", integer2) => integers_less_than(integer1, integer2),
+                (integer1, "-lt", integer2) => integers_less_than(integer1, integer2)
+                    .map_err(|_| GrubEnvironmentError::ParseInt)?,
                 // integer1 is not equal to integer2
-                (integer1, "-ne", integer2) => integers_not_equal(integer1, integer2),
+                (integer1, "-ne", integer2) => integers_not_equal(integer1, integer2)
+                    .map_err(|_| GrubEnvironmentError::ParseInt)?,
                 // integer1 is greater than integer2 after stripping off common non-numeric prefix.
                 (prefixinteger1, "-pgt", prefixinteger2) => {
                     integers_prefix_greater_than(prefixinteger1, prefixinteger2)
+                        .map_err(|_| GrubEnvironmentError::ParseInt)?
                 }
                 // integer1 is less than integer2 after stripping off common non-numeric prefix.
                 (prefixinteger1, "-plt", prefixinteger2) => {
                     integers_prefix_less_than(prefixinteger1, prefixinteger2)
+                        .map_err(|_| GrubEnvironmentError::ParseInt)?
                 }
                 // file1 is newer than file2 (modification time). Optionally numeric bias may be directly appended to -nt in which case it is added to the first file modification time.
-                (file1, "-nt", file2) => file_newer_than(file1, file2),
+                (file1, "-nt", file2) => file_newer_than(file1, file2)?,
                 // file1 is older than file2 (modification time). Optionally numeric bias may be directly appended to -ot in which case it is added to the first file modification time.
-                (file1, "-ot", file2) => file_older_than(file1, file2),
+                (file1, "-ot", file2) => file_older_than(file1, file2)?,
                 // both expression1 and expression2 are true
                 (_expression1, "-a", _expression2) => {
                     todo!("implement 'both expression1 and expression2 are true'")
@@ -346,9 +366,14 @@ impl TinybootGrubEnvironment {
                 }
                 // expression is true
                 ("(", _expression, ")") => todo!("implement 'expression is true'"),
-                _ => 2,
+                _ => return Err(GrubEnvironmentError::InvalidArgs),
             },
-            _ => 2,
+            _ => return Err(GrubEnvironmentError::InvalidArgs),
+        };
+
+        match result {
+            false => Err(GrubEnvironmentError::False),
+            true => Ok(()),
         }
     }
 }
@@ -359,7 +384,7 @@ impl GrubEnvironment for TinybootGrubEnvironment {
         let mut args = vec![command.clone()];
         args.extend(args_wo_command);
 
-        let exit_code = match command.as_str() {
+        let result: Result<(), GrubEnvironmentError> = match command.as_str() {
             "initrd" => self.run_initrd(args),
             "linux" => self.run_linux(args),
             "load_env" => self.run_load_env(args),
@@ -369,12 +394,20 @@ impl GrubEnvironment for TinybootGrubEnvironment {
             "test" => self.run_test(args),
             _ => {
                 debug!("'{}' not implemented", command);
-                0
+                Err(GrubEnvironmentError::NotImplemented)
             }
         };
 
-        debug!("command '{command}' exited with code {exit_code}");
+        let exit_code = match result {
+            Ok(_) | Err(GrubEnvironmentError::NotImplemented) => 0,
+            Err(GrubEnvironmentError::False) => 1,
+            Err(e) =>  {
+                error!("command '{command}' error: {e:?}");
+                2
+            },
+        };
 
+        debug!("command '{command}' exited with code {exit_code}");
         exit_code
     }
 
@@ -527,59 +560,58 @@ mod tests {
     #[test]
     fn grub_run_test() {
         let g = TinybootGrubEnvironment::new("/dev/null");
-        assert_eq!(
-            g.run_test(vec![
+        assert!(g
+            .run_test(vec![
                 "test".to_string(),
                 "-d".to_string(),
                 "/dev".to_string()
-            ]),
-            0
-        );
-        assert_eq!(
+            ])
+            .is_ok(),);
+        assert!(
             g.run_test(vec![
                 "test".to_string(),
                 "-f".to_string(),
                 "/dev".to_string()
-            ]),
-            1
+            ])
+            .err()
+            .unwrap()
+                == GrubEnvironmentError::False,
         );
-        assert_eq!(
-            g.run_test(vec![
+        assert!(g
+            .run_test(vec![
                 "test".to_string(),
                 "-e".to_string(),
                 "/dev".to_string()
-            ]),
-            0
-        );
-        assert_eq!(
-            g.run_test(vec![
+            ])
+            .is_ok(),);
+        assert!(g
+            .run_test(vec![
                 "test".to_string(),
                 "-n".to_string(),
                 "foo".to_string()
-            ]),
-            0
-        );
-        assert_eq!(
+            ])
+            .is_ok(),);
+        assert!(
             g.run_test(vec![
                 "test".to_string(),
                 "-z".to_string(),
                 "foo".to_string()
-            ]),
-            1
+            ])
+            .err()
+            .unwrap()
+                == GrubEnvironmentError::False,
         );
-        assert_eq!(
-            g.run_test(vec!["test".to_string(), "-z".to_string(), "".to_string()]),
-            0
-        );
-        assert_eq!(
-            g.run_test(vec![
+        assert!(g
+            .run_test(vec!["test".to_string(), "-z".to_string(), "".to_string()])
+            .is_ok(),);
+        assert!(g
+            .run_test(vec![
                 "test".to_string(),
                 "foo1".to_string(),
                 "-pgt".to_string(),
                 "bar0".to_string()
-            ]),
-            0
-        );
+            ])
+            .is_ok(),);
     }
 
     #[test]
