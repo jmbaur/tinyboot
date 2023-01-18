@@ -23,8 +23,6 @@ use tui::text::Spans;
 use tui::widgets::{Block, List, ListItem, ListState, Paragraph};
 use tui::{Frame, Terminal};
 
-const NONE: Option<&'static [u8]> = None;
-
 struct StatefulList<T> {
     chosen: Option<usize>,
     state: ListState,
@@ -184,7 +182,7 @@ fn logic<B: Backend>(terminal: &mut Terminal<B>) -> anyhow::Result<()> {
                     FsType::Vfat(..) => "vfat",
                 }),
                 mount::MsFlags::MS_RDONLY,
-                NONE,
+                None::<&[u8]>,
             ) {
                 error!("mount({}): {e}", dev.display());
                 return None;
