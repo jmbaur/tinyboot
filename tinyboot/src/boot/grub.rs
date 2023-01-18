@@ -162,8 +162,6 @@ impl TinybootGrubEnvironment {
     fn run_load_env(&mut self, args: Vec<String>) -> Result<(), GrubEnvironmentError> {
         let args = LoadEnvArgs::try_parse_from(args)?;
 
-        trace!("load_env called with args {:#?}", args);
-
         let Some(prefix) = self.env.get("prefix") else {
             return Err(GrubEnvironmentError::MissingEnvironmentVariable);
         };
@@ -182,8 +180,6 @@ impl TinybootGrubEnvironment {
 
     fn run_save_env(&self, args: Vec<String>) -> Result<(), GrubEnvironmentError> {
         let args = SaveEnvArgs::try_parse_from(args)?;
-
-        trace!("save_env called with args {:#?}", args);
 
         if args.variables.is_empty() {
             return Err(GrubEnvironmentError::InvalidArgs);
@@ -217,8 +213,6 @@ impl TinybootGrubEnvironment {
 
     fn run_search(&mut self, args: Vec<String>) -> Result<(), GrubEnvironmentError> {
         let args = SearchArgs::try_parse_from(args)?;
-
-        trace!("search called with args {:#?}", args);
 
         let var = args.set;
         let found = match (args.file, args.fs_uuid, args.label) {
@@ -273,8 +267,6 @@ impl TinybootGrubEnvironment {
     }
 
     fn run_test(&self, args: Vec<String>) -> Result<(), GrubEnvironmentError> {
-        trace!("test command called with args '{:?}'", args);
-
         if args.is_empty() {
             return Err(GrubEnvironmentError::InvalidArgs);
         }
@@ -379,7 +371,22 @@ impl TinybootGrubEnvironment {
 }
 
 impl GrubEnvironment for TinybootGrubEnvironment {
+    fn set_env(&mut self, key: String, val: Option<String>) {
+        trace!("setting env '{key}' to '{val:?}'");
+        if let Some(val) = val {
+            self.env.insert(key, val);
+        } else {
+            self.env.remove(&key);
+        }
+    }
+
+    fn get_env(&self, _key: &str) -> Option<&String> {
+        self.env.get(_key)
+    }
+
     fn run_command(&mut self, command: String, args_wo_command: Vec<String>) -> u8 {
+        trace!("command '{command}' called with args '{:?}'", args_wo_command.join(" "));
+
         // clap requires the command name to be the first argument, just as std::env::args_os().
         let mut args = vec![command.clone()];
         args.extend(args_wo_command);
@@ -409,19 +416,6 @@ impl GrubEnvironment for TinybootGrubEnvironment {
 
         debug!("command '{command}' exited with code {exit_code}");
         exit_code
-    }
-
-    fn set_env(&mut self, key: String, val: Option<String>) {
-        trace!("setting env '{key}' to '{val:?}'");
-        if let Some(val) = val {
-            self.env.insert(key, val);
-        } else {
-            self.env.remove(&key);
-        }
-    }
-
-    fn get_env(&self, _key: &str) -> Option<&String> {
-        self.env.get(_key)
     }
 }
 
