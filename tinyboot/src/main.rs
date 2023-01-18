@@ -176,7 +176,7 @@ fn logic<B: Backend>(terminal: &mut Terminal<B>) -> anyhow::Result<()> {
                 return None;
             }
 
-            if let Err(e) = nix::mount::mount(
+            if let Err(e) = mount::mount(
                 Some(dev.as_path()),
                 &mountpoint,
                 Some(match fstype {
@@ -188,7 +188,7 @@ fn logic<B: Backend>(terminal: &mut Terminal<B>) -> anyhow::Result<()> {
             ) {
                 error!("mount({}): {e}", dev.display());
                 return None;
-            };
+            }
 
             debug!("mounted {} at {}", dev.display(), mountpoint.display());
 

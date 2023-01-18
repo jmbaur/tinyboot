@@ -47,7 +47,6 @@ fn interpolate_value(env: &impl GrubEnvironment, value: impl Into<String>) -> St
                     // Stop interpolating if the character is not alphanumeric or is one of the
                     // special characters that cannot be in an identifier.
                     !char.is_ascii_alphanumeric() {
-                        eprintln!("{:?}, {:?}", interpolated_identifier, char);
                         interpolating = false;
                         if let Some(interpolated_value) = env.get_env(&interpolated_identifier) {
                             final_value.push_str(interpolated_value);
@@ -356,7 +355,7 @@ where
             .ok_or_else(|| "no initrd found".to_string())?;
         let cmdline = self
             .env
-            .get_env("cmdline")
+            .get_env("linux_cmdline")
             .ok_or_else(|| "no cmdline found".to_string())?;
         Ok((Path::new(linux), Path::new(initrd), cmdline.as_str()))
     }

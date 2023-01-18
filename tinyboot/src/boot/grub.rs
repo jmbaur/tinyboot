@@ -1,13 +1,16 @@
 use super::boot_loader::MenuEntry;
-use super::fs::FsType;
+use super::fs::{detect_fs_type, FsType};
 use crate::boot::boot_loader::{BootLoader, Error};
 use crate::boot::util::*;
 use clap::{ArgAction, Parser};
 use grub::{GrubEntry, GrubEnvironment, GrubEvaluator};
 use log::{debug, error, trace};
+use nix::mount;
 use std::io::{self, Read};
 use std::path::PathBuf;
 use std::{collections::HashMap, fs, path::Path};
+
+const NONE: Option<&'static [u8]> = None;
 
 const GRUB_ENVIRONMENT_BLOCK_LENGTH: i32 = 1024;
 const GRUB_ENVIRONMENT_BLOCK_HEADER: &str = r#"# GRUB Environment Block
@@ -47,13 +50,20 @@ fn load_env(contents: impl Into<String>, whitelisted_vars: Vec<String>) -> Vec<(
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum GrubEnvironmentError {
-    Io(String),
-    ParseInt,
-    NotImplemented,
-    InvalidArgs,
-    False,
-    MissingEnvironmentVariable,
     EnvironmentBlock,
+    False,
+    InvalidArgs,
+    Io(String),
+    MissingEnvironmentVariable,
+    Nix(String),
+    NotImplemented,
+    ParseInt,
+}
+
+impl From<nix::errno::Errno> for GrubEnvironmentError {
+    fn from(value: nix::errno::Errno) -> Self {
+        Self::Nix(value.to_string())
+    }
 }
 
 impl From<io::Error> for GrubEnvironmentError {
@@ -133,7 +143,12 @@ impl TinybootGrubEnvironment {
         let Some(initrd) = args.next() else {
             return Err(GrubEnvironmentError::InvalidArgs);
         };
-        self.env.insert("initrd".to_string(), initrd.to_string());
+
+        let initrd = initrd.replace(|c| matches!(c, '(' | ')'), "");
+
+        trace!("setting 'initrd' to '{}'", initrd);
+        self.env.insert("initrd".to_string(), initrd);
+
         Ok(())
     }
 
@@ -148,12 +163,19 @@ impl TinybootGrubEnvironment {
         let Some(kernel) = args.next() else {
             return Err(GrubEnvironmentError::InvalidArgs);
         };
-        let mut cmdline = String::new();
+
+        let kernel = kernel.replace(|c| matches!(c, '(' | ')'), "");
+
+        trace!("setting 'linux' to '{}'", kernel);
+        self.env.insert("linux".to_string(), kernel);
+
+        let mut cmdline = Vec::new();
         for next in args {
-            cmdline.push_str(next);
-            cmdline.push(' ');
+            cmdline.push(next.to_string());
         }
-        self.env.insert("linux".to_string(), kernel.to_string());
+        let cmdline = cmdline.join(" ");
+
+        trace!("setting 'linux_cmdline' to '{}'", cmdline);
         self.env.insert("linux_cmdline".to_string(), cmdline);
 
         Ok(())
@@ -238,17 +260,39 @@ impl TinybootGrubEnvironment {
         };
 
         let found = found.map_err(|e| GrubEnvironmentError::Io(e.to_string()))?;
-        if found.is_empty() {
-            return Err(GrubEnvironmentError::Io(
-                "file not found".to_string(),
-            ));
-        }
-
-        let Some(value) = found[0].to_str().map(|s| s.to_string()) else { 
-            return Err(GrubEnvironmentError::Io("bad path".to_string()));
+        let Some(found) = found.get(0) else {
+            return Err(GrubEnvironmentError::Io("file not found".to_string()));
         };
 
-        self.env.insert(var, value);
+        let mountpoint = if let Ok(Some(existing_mountpoint)) = mountinfo(found) {
+            existing_mountpoint
+        } else {
+            let mountpoint = PathBuf::from("/mnt").join(
+                found
+                    .to_str()
+                    .expect("invalid unicode")
+                    .trim_start_matches('/')
+                    .replace('/', "-"),
+            );
+
+            let fstype =
+                detect_fs_type(found).map_err(|e| GrubEnvironmentError::Io(e.to_string()))?;
+
+            mount::mount(
+                Some(found.as_path()),
+                &mountpoint,
+                Some(match fstype {
+                    FsType::Ext4(..) => "ext4",
+                    FsType::Vfat(..) => "vfat",
+                }),
+                mount::MsFlags::MS_RDONLY,
+                NONE,
+            )?;
+
+            mountpoint.to_str().expect("bad unicode").to_string()
+        };
+
+        self.env.insert(var, mountpoint);
 
         Ok(())
     }
@@ -324,10 +368,8 @@ impl TinybootGrubEnvironment {
                 (integer1, "-gt", integer2) => integers_greater_than(integer1, integer2)
                     .map_err(|_| GrubEnvironmentError::ParseInt)?,
                 // integer1 is less than or equal to integer2
-                (integer1, "-le", integer2) => {
-                    integers_less_than_or_equal_to(integer1, integer2)
-                        .map_err(|_| GrubEnvironmentError::ParseInt)?
-                }
+                (integer1, "-le", integer2) => integers_less_than_or_equal_to(integer1, integer2)
+                    .map_err(|_| GrubEnvironmentError::ParseInt)?,
                 // integer1 is less than integer2
                 (integer1, "-lt", integer2) => integers_less_than(integer1, integer2)
                     .map_err(|_| GrubEnvironmentError::ParseInt)?,
@@ -385,7 +427,10 @@ impl GrubEnvironment for TinybootGrubEnvironment {
     }
 
     fn run_command(&mut self, command: String, args_wo_command: Vec<String>) -> u8 {
-        trace!("command '{command}' called with args '{:?}'", args_wo_command.join(" "));
+        trace!(
+            "command '{command}' called with args '{:?}'",
+            args_wo_command.join(" ")
+        );
 
         // clap requires the command name to be the first argument, just as std::env::args_os().
         let mut args = vec![command.clone()];
@@ -408,10 +453,10 @@ impl GrubEnvironment for TinybootGrubEnvironment {
         let exit_code = match result {
             Ok(_) | Err(GrubEnvironmentError::NotImplemented) => 0,
             Err(GrubEnvironmentError::False) => 1,
-            Err(e) =>  {
+            Err(e) => {
                 error!("command '{command}' error: {e:?}");
                 2
-            },
+            }
         };
 
         debug!("command '{command}' exited with code {exit_code}");
@@ -547,6 +592,36 @@ impl BootLoader for GrubBootLoader {
     }
 }
 
+fn mountinfo_from_source(source: impl Into<String>, dev: impl AsRef<Path>) -> Option<String> {
+    for line in source.into().lines() {
+        let mut split = line.split_ascii_whitespace();
+        _ = split.next();
+        _ = split.next();
+        _ = split.next();
+        _ = split.next();
+        let mountpoint = split.next();
+        _ = split.next();
+        _ = split.next();
+        _ = split.next();
+        if let Some(device) = split.next() {
+            if device == dev.as_ref().to_str().unwrap_or("") {
+                if let Some(mountpoint) = mountpoint {
+                    return Some(mountpoint.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Returns the mountpoint of a device
+fn mountinfo(dev: impl AsRef<Path>) -> io::Result<Option<String>> {
+    Ok(mountinfo_from_source(
+        fs::read_to_string("/proc/self/mountinfo")?,
+        dev,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -639,6 +714,22 @@ mod tests {
                 set: "drive1".to_string(),
                 name: "BB22-99EC".to_string(),
             }
+        );
+    }
+
+    #[test]
+    fn mountinfo() {
+        let mountinfo_source = r#"1 1 0:2 / / rw - rootfs rootfs rw
+11 1 0:10 / /proc rw,relatime - proc proc rw
+12 1 0:11 / /sys rw,relatime - sysfs sysfs rw
+13 1 0:12 / /tmp rw,relatime - tmpfs tmpfs rw
+14 1 0:13 / /dev/pts rw,relatime - devpts devpts rw,mode=600,ptmxmode=000
+15 1 254:1 / /mnt/dev-vda1 ro,relatime - ext4 /dev/vda1 ro
+"#;
+
+        assert!(
+            super::mountinfo_from_source(mountinfo_source, Path::new("/dev/vda1")).unwrap()
+                == *"/mnt/dev-vda1"
         );
     }
 }
