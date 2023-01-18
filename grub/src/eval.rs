@@ -43,13 +43,18 @@ fn interpolate_value(env: &impl GrubEnvironment, value: impl Into<String>) -> St
                     if needs_closing_brace {
                         interpolated_identifier.push(char);
                     } else if
+                    // TODO(jared): confirm grub identifiers must be ascii alphanumeric
                     // Stop interpolating if the character is not alphanumeric or is one of the
                     // special characters that cannot be in an identifier.
                     !char.is_ascii_alphanumeric() {
+                        eprintln!("{:?}, {:?}", interpolated_identifier, char);
                         interpolating = false;
-                        let Some(interpolated_value) = env.get_env(&interpolated_identifier) else { continue; };
-                        final_value.push_str(interpolated_value);
-                        interpolated_identifier.clear();
+                        if let Some(interpolated_value) = env.get_env(&interpolated_identifier) {
+                            final_value.push_str(interpolated_value);
+                            interpolated_identifier.clear();
+                        }
+
+                        // Ensure that the consumed character makes it into the final value.
                         final_value.push(char);
                     } else {
                         interpolated_identifier.push(char);
@@ -370,8 +375,7 @@ mod tests {
         env: HashMap<String, String>,
     }
     impl GrubEnvironment for SimpleGrubEnvironment {
-        fn run_command(&mut self, name: String, args: Vec<String>) -> u8 {
-            eprintln!("{} {}", name, args.join(" "));
+        fn run_command(&mut self, _name: String, _args: Vec<String>) -> u8 {
             0
         }
 
@@ -410,16 +414,16 @@ mod tests {
             ),
             "(/dev/vda)//kernels/1pzgainlvg5hcdf8ngjficg3x39j63gv-linux-6.0.15-bzImage".to_string()
         );
+        assert_eq!(
+            super::interpolate_value(&env, "($drive1)"),
+            "()".to_string()
+        );
     }
 
     #[test]
     fn full_example() {
         let grub_env = SimpleGrubEnvironment::default();
-        let evaluator = GrubEvaluator::new_from_source(
-            include_str!("../testdata/grub.cfg").to_string(),
-            grub_env,
-        )
-        .expect("no evaluation errors");
-        eprintln!("{:#?}", evaluator.menu);
+        GrubEvaluator::new_from_source(include_str!("../testdata/grub.cfg").to_string(), grub_env)
+            .expect("no evaluation errors");
     }
 }

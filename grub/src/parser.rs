@@ -289,7 +289,17 @@ impl<'a> Parser<'a> {
         while let Some(token) = self.lexer.next() {
             match token {
                 Token::Elif => elifs.push(self.parse_if_statement_if_or_elif()?),
-                Token::Else => alternative = self.parse_if_statement_else()?,
+                Token::Else => {
+                    // allow the next token to be a newline or the start of an "else" body.
+                    if let Some(Token::Newline) = self.lexer.peek() {
+                        _ = self.must_next_token()?;
+                    }
+                    alternative = self.parse_if_statement_else()?;
+
+                    // `self.parse_if_statement_else()` consumes the last "fi", so we break after
+                    // it has run and we don't consume the "fi" in this loop.
+                    break;
+                }
                 Token::Fi => break,
                 _ => {
                     if let Some(stmt) = self.parse_statement(token)? {
