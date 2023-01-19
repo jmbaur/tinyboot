@@ -416,7 +416,10 @@ impl TinybootGrubEnvironment {
 
 impl GrubEnvironment for TinybootGrubEnvironment {
     fn set_env(&mut self, key: String, val: Option<String>) {
-        trace!("setting env '{key}' to '{val:?}'");
+        trace!(
+            "setting env '{key}' to '{}'",
+            val.as_deref().unwrap_or_default()
+        );
         if let Some(val) = val {
             self.env.insert(key, val);
         } else {
@@ -473,28 +476,31 @@ pub struct GrubBootLoader {
 
 impl GrubBootLoader {
     pub fn new(mountpoint: &Path) -> Result<Self, Error> {
-        let source = 'source: {
+        let config_file = 'config: {
             for path in ["boot/grub/grub.cfg", "grub/grub.cfg"] {
-                if let Ok(source) = fs::read_to_string(mountpoint.join(path)) {
-                    break 'source source;
+                if fs::metadata(mountpoint.join(path)).is_ok() {
+                    break 'config path;
                 }
             }
-
             return Err(Error::BootConfigNotFound);
         };
+
+        let source = fs::read_to_string(mountpoint.join(config_file))?;
 
         let evaluator = GrubEvaluator::new_from_source(
             source,
             TinybootGrubEnvironment::new(
                 mountpoint
-                    .join("boot/grub")
+                    .join(
+                        PathBuf::from(config_file)
+                            .parent()
+                            .ok_or(Error::BootConfigNotFound)?,
+                    )
                     .to_str()
                     .ok_or(Error::InvalidMountpoint)?,
             ),
         )
         .map_err(Error::Evaluation)?;
-
-        debug!("{:#?}", evaluator.menu);
 
         Ok(Self {
             mountpoint: mountpoint.to_path_buf(),
