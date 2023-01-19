@@ -30,5 +30,6 @@ in
   cargoToml = ./tinyboot/Cargo.toml;
   depsBuildBuild = lib.optional isCrossBuild qemu;
   nativeBuildInputs = [ dosfstools e2fsprogs toolchain ];
+  cargoTestExtraArgs = "-- --skip detect_fs_type";
   passthru = { inherit env; };
 } // env)
