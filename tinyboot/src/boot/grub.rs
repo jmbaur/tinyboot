@@ -473,7 +473,15 @@ pub struct GrubBootLoader {
 
 impl GrubBootLoader {
     pub fn new(mountpoint: &Path) -> Result<Self, Error> {
-        let source = fs::read_to_string(mountpoint.join("boot/grub/grub.cfg"))?;
+        let source = 'source: {
+            for path in ["boot/grub/grub.cfg", "grub/grub.cfg"] {
+                if let Ok(source) = fs::read_to_string(mountpoint.join(path)) {
+                    break 'source source;
+                }
+            }
+
+            return Err(Error::BootConfigNotFound);
+        };
 
         let evaluator = GrubEvaluator::new_from_source(
             source,
