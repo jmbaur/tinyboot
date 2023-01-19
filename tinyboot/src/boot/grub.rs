@@ -238,23 +238,28 @@ impl TinybootGrubEnvironment {
         let found = match (args.file, args.fs_uuid, args.label) {
             (true, false, false) => {
                 let file = Path::new(&args.name);
+                trace!("searching for block device with file name {}", args.name);
                 crate::boot::fs::find_block_device(|p| p == file)
             }
             (false, true, false) => {
+                trace!(
+                    "searching for block device with filesystem uuid {}",
+                    args.name
+                );
                 crate::boot::fs::find_block_device(|p| match crate::boot::fs::detect_fs_type(p) {
-                    Ok(FsType::Ext4(uuid, ..)) => uuid == args.name,
-                    Ok(FsType::Fat32(_, uuid, ..)) | Ok(FsType::Fat16(_, uuid, ..)) => {
-                        uuid == args.name
-                    }
+                    Ok(FsType::Ext4(uuid, _)) => uuid == args.name,
+                    Ok(FsType::Fat32(uuid, _)) | Ok(FsType::Fat16(uuid, _)) => uuid == args.name,
                     _ => false,
                 })
             }
             (false, false, true) => {
+                trace!(
+                    "searching for block device with filesystem label {}",
+                    args.name
+                );
                 crate::boot::fs::find_block_device(|p| match crate::boot::fs::detect_fs_type(p) {
-                    Ok(FsType::Ext4(_, label, ..)) => label == args.name,
-                    Ok(FsType::Fat32(_, label, ..)) | Ok(FsType::Fat16(_, label, ..)) => {
-                        label == args.name
-                    }
+                    Ok(FsType::Ext4(_, label)) => label == args.name,
+                    Ok(FsType::Fat32(_, label)) | Ok(FsType::Fat16(_, label)) => label == args.name,
                     _ => false,
                 })
             }
@@ -262,6 +267,8 @@ impl TinybootGrubEnvironment {
         };
 
         let found = found.map_err(|e| GrubEnvironmentError::Io(e.to_string()))?;
+        trace!("grub search command found block devices {:?}", found);
+
         let Some(found) = found.get(0) else {
             return Err(GrubEnvironmentError::Io("file not found".to_string()));
         };
