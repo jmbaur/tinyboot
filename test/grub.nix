@@ -1,5 +1,12 @@
 {
-  boot.loader.grub.enable = true;
-  boot.loader.grub.device = "/dev/vda";
-  boot.loader.grub.copyKernels = true;
+  boot.loader = {
+    grub = {
+      enable = true;
+      device = "nodev";
+      efiInstallAsRemovable = true;
+      copyKernels = true;
+      efiSupport = true;
+    };
+    efi.canTouchEfiVariables = false;
+  };
 }

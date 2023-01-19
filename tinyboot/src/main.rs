@@ -166,8 +166,11 @@ fn logic<B: Backend>(terminal: &mut Terminal<B>) -> anyhow::Result<()> {
                     .replace('/', "-"),
             );
 
-            let Ok(fstype) = detect_fs_type(dev) else { return None; };
-            debug!("detected {:?} fstype on {}", fstype, dev.to_str()?);
+            let Ok(fstype) = detect_fs_type(dev) else {
+                debug!("failed to detect fstype on {:?}", dev);
+                return None;
+            };
+            debug!("detected {:?} fstype on {:?}", fstype, dev);
 
             if let Err(e) = fs::create_dir_all(&mountpoint) {
                 error!("failed to create mountpoint: {e}");
@@ -179,7 +182,7 @@ fn logic<B: Backend>(terminal: &mut Terminal<B>) -> anyhow::Result<()> {
                 &mountpoint,
                 Some(match fstype {
                     FsType::Ext4(..) => "ext4",
-                    FsType::Vfat(..) => "vfat",
+                    FsType::Fat32(..) | FsType::Fat16(..) => "vfat",
                 }),
                 mount::MsFlags::MS_RDONLY,
                 None::<&[u8]>,

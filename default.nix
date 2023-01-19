@@ -1,4 +1,4 @@
-{ lib, stdenv, pkgsBuildHost, pkgsStatic, crane, qemu, ... }:
+{ lib, stdenv, pkgsBuildHost, pkgsStatic, crane, qemu, e2fsprogs, dosfstools, ... }:
 let
   toEnvVar = s: lib.replaceStrings [ "-" ] [ "_" ] (lib.toUpper s);
   isCrossBuild = stdenv.hostPlatform.system != stdenv.buildPlatform.system;
@@ -29,6 +29,6 @@ in
   src = sourceFilter ./.;
   cargoToml = ./tinyboot/Cargo.toml;
   depsBuildBuild = lib.optional isCrossBuild qemu;
-  nativeBuildInputs = [ toolchain ];
+  nativeBuildInputs = [ dosfstools e2fsprogs toolchain ];
   passthru = { inherit env; };
 } // env)
