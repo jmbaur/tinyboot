@@ -4,15 +4,15 @@ use crate::boot::fs::{detect_fs_type, find_block_device, unmount, FsType};
 use crate::boot::grub::GrubBootLoader;
 use boot::boot_loader::{kexec_execute, kexec_load, BootLoader, MenuEntry};
 use boot::syslinux::SyslinuxBootLoader;
+use clap::Parser;
 use log::LevelFilter;
 use log::{debug, error, info};
 use nix::mount;
 use std::io;
 use std::path::PathBuf;
-use std::str::FromStr;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
-use std::{env, fs, thread};
+use std::{fs, thread};
 use termion::event::Key;
 use termion::input::TermRead;
 use termion::raw::IntoRawMode;
@@ -331,47 +331,17 @@ fn logic<B: Backend>(terminal: &mut Terminal<B>) -> anyhow::Result<()> {
     Ok(kexec_execute()?)
 }
 
-#[derive(Debug)]
+#[derive(Debug, Parser)]
 struct Config {
+    #[arg(long, value_parser, default_value_t = LevelFilter::Info)]
     log_level: LevelFilter,
-}
 
-impl Default for Config {
-    fn default() -> Self {
-        Config {
-            log_level: LevelFilter::Info,
-        }
-    }
-}
-
-impl Config {
-    pub fn new<T, I>(args: T) -> Self
-    where
-        T: IntoIterator<Item = I>,
-        I: Into<String>,
-    {
-        let mut cfg = Config::default();
-
-        args.into_iter().for_each(|arg| {
-            if let Some(split) = arg.into().split_once('=') {
-                #[allow(clippy::single_match)]
-                match split.0 {
-                    "tinyboot.log" => {
-                        cfg.log_level = LevelFilter::from_str(split.1).unwrap_or(LevelFilter::Info)
-                    }
-                    _ => {}
-                }
-            }
-        });
-
-        cfg
-    }
+    #[arg(long, default_value = "/tmp/tinyboot.log")]
+    log_file: PathBuf,
 }
 
 fn main() -> anyhow::Result<()> {
-    let args: Vec<String> = env::args().collect();
-
-    let cfg = Config::new(args.as_slice());
+    let cfg = Config::parse();
 
     fern::Dispatch::new()
         .format(|out, message, record| {
@@ -383,11 +353,10 @@ fn main() -> anyhow::Result<()> {
             ))
         })
         .level(cfg.log_level)
-        .chain(fern::log_file("/tmp/tinyboot.log")?)
+        .chain(fern::log_file(&cfg.log_file)?)
         .apply()?;
 
     info!("started");
-    debug!("args: {:?}", args);
     debug!("config: {:?}", cfg);
 
     let stdout = io::stdout().lock().into_raw_mode()?;

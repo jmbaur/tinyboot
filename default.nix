@@ -29,7 +29,13 @@ in
   src = sourceFilter ./.;
   cargoToml = ./tinyboot/Cargo.toml;
   depsBuildBuild = lib.optional isCrossBuild qemu;
-  nativeBuildInputs = [ dosfstools e2fsprogs toolchain ];
-  cargoTestExtraArgs = "-- --skip detect_fs_type";
+  nativeBuildInputs = [
+    # provides mkfs.* utilities for tests
+    dosfstools
+    e2fsprogs
+
+    # rust toolchain
+    toolchain
+  ];
   passthru = { inherit env; };
 } // env)

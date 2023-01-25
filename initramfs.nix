@@ -28,7 +28,7 @@ let
     ::ctrlaltdel:/sbin/reboot
     ::shutdown:/bin/umount -a -r
     ::restart:/init
-    ${tinybootTTY}::once:/bin/tinyboot tinyboot.log=${tinybootLog}
+    ${tinybootTTY}::once:/bin/tinyboot --log-level=${tinybootLog}
     ${shellTTY}::askfirst:/bin/sh
     ${extraInittab}
   '';

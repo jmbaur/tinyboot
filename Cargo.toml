@@ -1,3 +1,5 @@
 [workspace]
-
 members = ["tinyboot", "grub"]
+
+[profile.release]
+strip = true

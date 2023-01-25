@@ -9,9 +9,11 @@ pub struct AssignmentStatement {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Condition(pub bool, pub CommandStatement);
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct IfStatement {
-    pub not: bool,
-    pub condition: CommandStatement,
+    pub condition: Condition,
     pub consequence: Vec<Statement>,
     pub elifs: Vec<IfStatement>,
     pub alternative: Vec<Statement>,
@@ -19,8 +21,7 @@ pub struct IfStatement {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WhileStatement {
-    /// Make the boolean expression evaluate to false in order for the `consequence` to execute.
-    pub until: bool,
+    pub condition: Condition,
     pub consequence: Vec<Statement>,
 }
 
@@ -54,7 +55,6 @@ pub enum Statement {
     Command(CommandStatement),
     Function(FunctionStatement),
     If(IfStatement),
-    #[allow(dead_code)]
     While(WhileStatement),
 }
 
@@ -173,18 +173,6 @@ impl<'a> Parser<'a> {
             .ok_or_else(|| "next token is None".to_string())
     }
 
-    /// Consume newline or semicolon if the peeked token is one of those.
-    #[allow(dead_code)]
-    fn eat_end(&mut self) -> Result<(), String> {
-        if matches!(
-            self.lexer.peek(),
-            Some(Token::Newline) | Some(Token::Semicolon)
-        ) {
-            _ = self.must_next_token()?;
-        }
-        Ok(())
-    }
-
     fn parse_assignment_statement(&mut self, value: String) -> Result<AssignmentStatement, String> {
         let split = value
             .split_once('=')
@@ -254,23 +242,29 @@ impl<'a> Parser<'a> {
         Ok(CommandStatement { command, args })
     }
 
+    fn parse_condition(&mut self) -> Result<Condition, String> {
+        let next = self.must_next_token()?;
+        let negation = next == Token::Value(String::from("!"));
+        let start_condition_token = if negation {
+            self.must_next_token()?
+        } else {
+            next
+        };
+        let Token::Value(value) = start_condition_token else {
+                return Err("if statement missing value token as start of condition".to_string());
+            };
+        if !matches_command(&value) {
+            return Err("if statement condition must be a command statement".to_string());
+        }
+        Ok(Condition(!negation, self.parse_command_statement(value)?))
+    }
+
     fn parse_if_statement(&mut self) -> Result<IfStatement, String> {
         self.parse_if_statement_if_or_elif()
     }
 
     fn parse_if_statement_if_or_elif(&mut self) -> Result<IfStatement, String> {
-        let (not, condition) = {
-            let next = self.must_next_token()?;
-            let not = next == Token::ExclamationPoint;
-            let start_condition_token = if not { self.must_next_token()? } else { next };
-            let Token::Value(value) = start_condition_token else {
-                return Err("if statement missing value token as start of condition".to_string());
-            };
-            if !matches_command(&value) {
-                return Err("if statement condition must be a command statement".to_string());
-            }
-            (not, self.parse_command_statement(value)?)
-        };
+        let condition = self.parse_condition()?;
 
         let next = self.must_next_token()?;
         if !matches!(next, Token::Newline | Token::Semicolon) {
@@ -310,7 +304,6 @@ impl<'a> Parser<'a> {
         }
 
         Ok(IfStatement {
-            not,
             condition,
             consequence,
             elifs,
@@ -347,11 +340,51 @@ impl<'a> Parser<'a> {
         Ok(FunctionStatement { name, body })
     }
 
+    /// `is_while` is false when the loop is an until loop, otherwise it is true.
+    fn parse_while_statement(&mut self, is_while: bool) -> Result<WhileStatement, String> {
+        let mut condition = self.parse_condition()?;
+
+        // Flip the condition's negation status based on what kind of loop we are parsing. For
+        // example, a condition with a logical negation inside an until loop (implied negation)
+        // will end up cancelling out the double negations, thus becoming just a regular while loop
+        // without any negation.
+        condition.0 = condition.0 == is_while;
+
+        let mut do_token = self.must_next_token()?;
+        if do_token == Token::Semicolon {
+            do_token = self.must_next_token()?;
+        }
+
+        if do_token != Token::Do {
+            return Err("missing 'do' in while/until loop".to_string());
+        }
+
+        let mut consequence = Vec::new();
+
+        loop {
+            let next = self.must_next_token()?;
+            match next {
+                Token::Done => break,
+                _ => {
+                    if let Some(stmt) = self.parse_statement(next)? {
+                        consequence.push(stmt);
+                    }
+                }
+            }
+        }
+
+        Ok(WhileStatement {
+            condition,
+            consequence,
+        })
+    }
+
     fn parse_statement(&mut self, start_token: Token) -> Result<Option<Statement>, String> {
         Ok(match start_token {
             Token::Newline | Token::Semicolon | Token::Comment(_) => None,
             Token::If => Some(Statement::If(self.parse_if_statement()?)),
-            Token::While | Token::Until => todo!("implement while/until loops"),
+            Token::While => Some(Statement::While(self.parse_while_statement(true)?)),
+            Token::Until => Some(Statement::While(self.parse_while_statement(false)?)),
             Token::Function => Some(Statement::Function(self.parse_function_statement()?)),
             Token::Value(value) => {
                 if matches_command(&value) {
@@ -409,8 +442,7 @@ mod tests {
 
     fn assert_if_statement(
         stmt: &Statement,
-        not: bool,
-        condition: CommandStatement,
+        condition: Condition,
         consequence: Vec<Statement>,
         elifs: Vec<IfStatement>,
         alternative: Vec<Statement>,
@@ -418,11 +450,18 @@ mod tests {
         let Statement::If(if_stmt) = stmt else {
             panic!("not an if statement");
         };
-        assert_eq!(if_stmt.not, not);
         assert_eq!(if_stmt.condition, condition);
         assert_eq!(if_stmt.consequence, consequence);
         assert_eq!(if_stmt.elifs, elifs);
         assert_eq!(if_stmt.alternative, alternative);
+    }
+
+    fn assert_while_statement(stmt: &Statement, condition: Condition, consequence: Vec<Statement>) {
+        let Statement::While(while_stmt) = stmt else {
+            panic!("not while statement");
+        };
+        assert_eq!(while_stmt.condition, condition);
+        assert_eq!(while_stmt.consequence, consequence);
     }
 
     fn assert_function_statement(stmt: &Statement, name: impl Into<String>, body: Vec<Statement>) {
@@ -455,9 +494,9 @@ mod tests {
             &root.statements[0],
             "test",
             vec![
-                CommandArgument::Value("${grub_platform}".to_string()),
-                CommandArgument::Value("=".to_string()),
-                CommandArgument::Value("efi".to_string()),
+                CommandArgument::Value(String::from("${grub_platform}")),
+                CommandArgument::Value(String::from("=")),
+                CommandArgument::Value(String::from("efi")),
             ],
         );
     }
@@ -472,10 +511,64 @@ mod tests {
             &root.statements[1],
             "insmod",
             vec![
-                CommandArgument::Value("foo".to_string()),
-                CommandArgument::Literal("bar".to_string()),
+                CommandArgument::Value(String::from("foo")),
+                CommandArgument::Literal(String::from("bar")),
             ],
         );
+    }
+
+    #[test]
+    fn empty_while_statement() {
+        {
+            let mut p = Parser::new(Lexer::new(r#"while true; do; done"#));
+            let root = p.parse().unwrap();
+            assert!(root.statements.len() == 1);
+            assert_while_statement(
+                &root.statements[0],
+                Condition(
+                    true,
+                    CommandStatement {
+                        command: "true".to_string(),
+                        args: vec![],
+                    },
+                ),
+                vec![],
+            );
+        }
+
+        {
+            let mut p = Parser::new(Lexer::new(r#"until true; do; done"#));
+            let root = p.parse().unwrap();
+            assert!(root.statements.len() == 1);
+            assert_while_statement(
+                &root.statements[0],
+                Condition(
+                    false,
+                    CommandStatement {
+                        command: "true".to_string(),
+                        args: vec![],
+                    },
+                ),
+                vec![],
+            );
+        }
+
+        {
+            let mut p = Parser::new(Lexer::new(r#"until ! true; do; done"#));
+            let root = p.parse().unwrap();
+            assert!(root.statements.len() == 1);
+            assert_while_statement(
+                &root.statements[0],
+                Condition(
+                    true,
+                    CommandStatement {
+                        command: "true".to_string(),
+                        args: vec![],
+                    },
+                ),
+                vec![],
+            );
+        }
     }
 
     #[test]
@@ -487,18 +580,22 @@ mod tests {
         assert!(root.statements.len() == 1);
         assert_if_statement(
             &root.statements[0],
-            false,
-            CommandStatement {
-                command: "test".to_string(),
-                args: vec![CommandArgument::Value("foo".to_string())],
-            },
+            Condition(
+                true,
+                CommandStatement {
+                    command: "test".to_string(),
+                    args: vec![CommandArgument::Value(String::from("foo"))],
+                },
+            ),
             vec![],
             vec![IfStatement {
-                not: false,
-                condition: CommandStatement {
-                    command: "test".to_string(),
-                    args: vec![CommandArgument::Value("bar".to_string())],
-                },
+                condition: Condition(
+                    true,
+                    CommandStatement {
+                        command: "test".to_string(),
+                        args: vec![CommandArgument::Value(String::from("bar"))],
+                    },
+                ),
                 consequence: vec![],
                 alternative: vec![],
                 elifs: vec![],

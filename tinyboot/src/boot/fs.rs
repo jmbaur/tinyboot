@@ -242,6 +242,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn detect_fs_type() {
         setup();
 

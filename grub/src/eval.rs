@@ -2,7 +2,7 @@ use crate::{
     lexer::Lexer,
     parser::{
         AssignmentStatement, CommandArgument, CommandStatement, FunctionStatement, IfStatement,
-        Parser, Statement,
+        Parser, Statement, WhileStatement,
     },
 };
 use std::{collections::HashMap, io, path::Path, time::Duration};
@@ -300,11 +300,11 @@ where
     }
 
     fn run_if_statement(&mut self, stmt: IfStatement) -> Result<(), String> {
-        self.run_command(stmt.condition)?;
-        let success = if stmt.not {
-            self.last_exit_code > 0
-        } else {
+        self.run_command(stmt.condition.1)?;
+        let success = if stmt.condition.0 {
             self.last_exit_code == 0
+        } else {
+            self.last_exit_code > 0
         };
 
         if success {
@@ -316,6 +316,20 @@ where
             }
             // should be empty for elifs
             self.eval_statements(stmt.alternative)?;
+        }
+
+        Ok(())
+    }
+
+    fn run_while_statement(&mut self, stmt: WhileStatement) -> Result<(), String> {
+        loop {
+            self.run_command(stmt.condition.1.clone())?;
+
+            if self.last_exit_code == 0 && !stmt.condition.0 {
+                break;
+            }
+
+            self.eval_statements(stmt.consequence.to_vec())?;
         }
 
         Ok(())
@@ -333,7 +347,7 @@ where
                 Statement::Command(command) => self.run_command(command)?,
                 Statement::Function(function) => self.add_function(function)?,
                 Statement::If(stmt) => self.run_if_statement(stmt)?,
-                Statement::While(_) => todo!("implement while loops"),
+                Statement::While(stmt) => self.run_while_statement(stmt)?,
             };
         }
 

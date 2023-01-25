@@ -22,18 +22,20 @@ Root {
         ),
         If(
             IfStatement {
-                not: false,
-                condition: CommandStatement {
-                    command: "test",
-                    args: [
-                        Value(
-                            "-s",
-                        ),
-                        Value(
-                            "$prefix/grubenv",
-                        ),
-                    ],
-                },
+                condition: Condition(
+                    true,
+                    CommandStatement {
+                        command: "test",
+                        args: [
+                            Value(
+                                "-s",
+                            ),
+                            Value(
+                                "$prefix/grubenv",
+                            ),
+                        ],
+                    },
+                ),
                 consequence: [
                     Command(
                         CommandStatement {
@@ -48,15 +50,17 @@ Root {
         ),
         If(
             IfStatement {
-                not: false,
-                condition: CommandStatement {
-                    command: "test",
-                    args: [
-                        Value(
-                            "${next_entry}",
-                        ),
-                    ],
-                },
+                condition: Condition(
+                    true,
+                    CommandStatement {
+                        command: "test",
+                        args: [
+                            Value(
+                                "${next_entry}",
+                            ),
+                        ],
+                    },
+                ),
                 consequence: [
                     Command(
                         CommandStatement {
@@ -140,18 +144,20 @@ Root {
                 body: [
                     If(
                         IfStatement {
-                            not: false,
-                            condition: CommandStatement {
-                                command: "test",
-                                args: [
-                                    Value(
-                                        "-z",
-                                    ),
-                                    Value(
-                                        "${boot_once}",
-                                    ),
-                                ],
-                            },
+                            condition: Condition(
+                                true,
+                                CommandStatement {
+                                    command: "test",
+                                    args: [
+                                        Value(
+                                            "-z",
+                                        ),
+                                        Value(
+                                            "${boot_once}",
+                                        ),
+                                    ],
+                                },
+                            ),
                             consequence: [
                                 Assignment(
                                     AssignmentStatement {
@@ -181,21 +187,23 @@ Root {
         ),
         If(
             IfStatement {
-                not: false,
-                condition: CommandStatement {
-                    command: "test",
-                    args: [
-                        Value(
-                            "${grub_platform}",
-                        ),
-                        Value(
-                            "=",
-                        ),
-                        Value(
-                            "efi",
-                        ),
-                    ],
-                },
+                condition: Condition(
+                    true,
+                    CommandStatement {
+                        command: "test",
+                        args: [
+                            Value(
+                                "${grub_platform}",
+                            ),
+                            Value(
+                                "=",
+                            ),
+                            Value(
+                                "efi",
+                            ),
+                        ],
+                    },
+                ),
                 consequence: [
                     Command(
                         CommandStatement {
@@ -245,15 +253,17 @@ Root {
         ),
         If(
             IfStatement {
-                not: false,
-                condition: CommandStatement {
-                    command: "loadfont",
-                    args: [
-                        Value(
-                            "($drive1)//converted-font.pf2",
-                        ),
-                    ],
-                },
+                condition: Condition(
+                    true,
+                    CommandStatement {
+                        command: "loadfont",
+                        args: [
+                            Value(
+                                "($drive1)//converted-font.pf2",
+                            ),
+                        ],
+                    },
+                ),
                 consequence: [
                     Command(
                         CommandStatement {
@@ -267,21 +277,23 @@ Root {
                     ),
                     If(
                         IfStatement {
-                            not: false,
-                            condition: CommandStatement {
-                                command: "test",
-                                args: [
-                                    Value(
-                                        "${grub_platform}",
-                                    ),
-                                    Value(
-                                        "=",
-                                    ),
-                                    Value(
-                                        "efi",
-                                    ),
-                                ],
-                            },
+                            condition: Condition(
+                                true,
+                                CommandStatement {
+                                    command: "test",
+                                    args: [
+                                        Value(
+                                            "${grub_platform}",
+                                        ),
+                                        Value(
+                                            "=",
+                                        ),
+                                        Value(
+                                            "efi",
+                                        ),
+                                    ],
+                                },
+                            ),
                             consequence: [
                                 Command(
                                     CommandStatement {
@@ -366,21 +378,23 @@ Root {
         ),
         If(
             IfStatement {
-                not: false,
-                condition: CommandStatement {
-                    command: "background_image",
-                    args: [
-                        Value(
-                            "--mode",
-                        ),
-                        Literal(
-                            "normal",
-                        ),
-                        Value(
-                            "($drive1)//background.png",
-                        ),
-                    ],
-                },
+                condition: Condition(
+                    true,
+                    CommandStatement {
+                        command: "background_image",
+                        args: [
+                            Value(
+                                "--mode",
+                            ),
+                            Literal(
+                                "normal",
+                            ),
+                            Value(
+                                "($drive1)//background.png",
+                            ),
+                        ],
+                    },
+                ),
                 consequence: [
                     Command(
                         CommandStatement {

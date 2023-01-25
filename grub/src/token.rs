@@ -10,7 +10,6 @@ pub enum Token {
     Elif,
     Else,
     Esac,
-    ExclamationPoint,
     Fi,
     For,
     Function,
