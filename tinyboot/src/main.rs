@@ -106,14 +106,20 @@ fn logic<B: Backend>(terminal: &mut Terminal<B>) -> anyhow::Result<()> {
                         debug!("found grub bootloader");
                         break 'loader Box::new(grub);
                     }
-                    Err(e) => error!("error loading grub configuration: {e}"),
+                    Err(e) => error!(
+                        "error loading grub configuration from {}: {e}",
+                        mountpoint.display()
+                    ),
                 }
                 match SyslinuxBootLoader::new(&mountpoint) {
                     Ok(syslinux) => {
                         debug!("found syslinux bootloader");
                         break 'loader Box::new(syslinux);
                     }
-                    Err(e) => error!("error loading syslinux configuration: {e}"),
+                    Err(e) => error!(
+                        "error loading syslinux configuration from {}: {e}",
+                        mountpoint.display()
+                    ),
                 }
                 unmount(&mountpoint);
                 return None;
