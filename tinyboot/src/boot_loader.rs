@@ -11,7 +11,6 @@ pub enum Error {
     BootConfigNotFound,
     BootEntryNotFound,
     Evaluation(String),
-    InvalidConfigFormat,
     InvalidMountpoint,
     Io(io::Error),
 }

@@ -26,7 +26,7 @@ fn syslinux_parse_from_source(
     source: impl Into<String>,
     syslinux_root: impl AsRef<Path>,
 ) -> Result<(Vec<BootEntry>, Duration), Error> {
-    let contents = source.into();
+    let contents: String = source.into();
 
     let mut entries = vec![];
     let mut p = BootEntry::default();
@@ -35,17 +35,19 @@ fn syslinux_parse_from_source(
     let mut timeout = Duration::from_secs(5);
 
     for line in contents.lines() {
-        if !in_entry.unwrap_or_default() && line.starts_with("TIMEOUT") {
+        let lower_line = line.to_lowercase();
+
+        if !in_entry.unwrap_or_default() && lower_line.find("timeout ") == Some(0) {
             timeout = Duration::from_secs(
-                // https://wiki.syslinux.org/wiki/index.php?title=Config#TIMEOUT
-                line.split_once("TIMEOUT ")
-                    .ok_or(Error::InvalidConfigFormat)?
-                    .1
+                line["timeout ".len() - 1..]
+                    .trim()
                     .parse::<i32>()
                     .map(|timeout| {
                         if timeout <= 0 {
                             0u64
                         } else {
+                            // timeout is formatted as tenths of seconds
+                            // https://wiki.syslinux.org/wiki/index.php?title=Config#TIMEOUT
                             (timeout as u64) / 10
                         }
                     })
@@ -54,16 +56,12 @@ fn syslinux_parse_from_source(
             continue;
         }
 
-        if !in_entry.unwrap_or_default() && line.starts_with("DEFAULT") {
-            default = String::from(
-                line.split_once("DEFAULT ")
-                    .ok_or(Error::InvalidConfigFormat)?
-                    .1,
-            );
+        if !in_entry.unwrap_or_default() && lower_line.find("default ") == Some(0) {
+            default = String::from(line["default ".len() - 1..].trim());
             continue;
         }
 
-        if line.starts_with("LABEL") {
+        if lower_line.find("label ") == Some(0) {
             // We have already seen at least one entry, push the previous one into boot parts
             // and start a new one.
             if in_entry.is_some() {
@@ -71,12 +69,7 @@ fn syslinux_parse_from_source(
                 p = BootEntry::default();
             }
 
-            if default
-                == line
-                    .split_once("LABEL ")
-                    .ok_or(Error::InvalidConfigFormat)?
-                    .1
-            {
+            if default == line["label ".len() - 1..].trim() {
                 p.default = true;
             }
 
@@ -86,51 +79,28 @@ fn syslinux_parse_from_source(
         if !in_entry.unwrap_or_default() {
             continue;
         }
-        if line
-            .trim_start_matches(char::is_whitespace)
-            .starts_with("MENU LABEL")
-        {
-            p.name = String::from(
-                line.split_once("MENU LABEL ")
-                    .ok_or(Error::InvalidConfigFormat)?
-                    .1,
-            );
+
+        if let Some(menu_label_start) = lower_line.find("menu label ") {
+            p.name = String::from(line[menu_label_start + "menu label ".len() - 1..].trim());
             continue;
         }
 
-        if line
-            .trim_start_matches(char::is_whitespace)
-            .starts_with("LINUX")
-        {
+        if let Some(linux_start) = lower_line.find("linux ") {
             p.kernel = syslinux_root.as_ref().join(PathBuf::from(
-                line.split_once("LINUX ")
-                    .ok_or(Error::InvalidConfigFormat)?
-                    .1,
+                line[linux_start + "linux ".len() - 1..].trim(),
             ));
             continue;
         }
 
-        if line
-            .trim_start_matches(char::is_whitespace)
-            .starts_with("INITRD")
-        {
+        if let Some(initrd_start) = lower_line.find("initrd ") {
             p.initrd = syslinux_root.as_ref().join(PathBuf::from(
-                line.split_once("INITRD ")
-                    .ok_or(Error::InvalidConfigFormat)?
-                    .1,
+                line[initrd_start + "initrd ".len() - 1..].trim(),
             ));
             continue;
         }
 
-        if line
-            .trim_start_matches(char::is_whitespace)
-            .starts_with("APPEND")
-        {
-            p.cmdline = String::from(
-                line.split_once("APPEND ")
-                    .ok_or(Error::InvalidConfigFormat)?
-                    .1,
-            );
+        if let Some(append_start) = lower_line.find("append ") {
+            p.cmdline = String::from(line[append_start + "append ".len() - 1..].trim());
             continue;
         }
 
