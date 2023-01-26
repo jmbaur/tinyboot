@@ -12,10 +12,8 @@ pub enum ParserError {
     MissingCharacter(String),
     #[error("invalid syntax {0}")]
     InvalidSyntax(Token),
-    #[error("missing newline or semicolon")]
-    MissingNewlineOrSemicolon,
     #[error("unexpected token {found:?}, expected {expected:?}")]
-    UnexpectedToken { expected: Token, found: Token },
+    UnexpectedToken { expected: String, found: Token },
     #[error("unexpected value {0}")]
     UnexpectedValue(String),
 }
@@ -186,9 +184,7 @@ impl<'a> Parser<'a> {
     }
 
     fn must_next_token(&mut self) -> Result<Token, ParserError> {
-        self.lexer
-            .next()
-            .ok_or(ParserError::MissingNextToken)
+        self.lexer.next().ok_or(ParserError::MissingNextToken)
     }
 
     fn parse_assignment_statement(
@@ -273,7 +269,7 @@ impl<'a> Parser<'a> {
 
         let Token::Value(value) = start_condition_token else {
             return Err(ParserError::UnexpectedToken {
-                expected: Token::Value(String::from("TODO")),
+                expected: String::from("grub command"),
                 found: start_condition_token
             });
         };
@@ -294,14 +290,17 @@ impl<'a> Parser<'a> {
 
         let next = self.must_next_token()?;
         if !matches!(next, Token::Newline | Token::Semicolon) {
-            return Err(ParserError::MissingNewlineOrSemicolon);
+            return Err(ParserError::UnexpectedToken {
+                expected: String::from("newline or semicolon"),
+                found: next,
+            });
         }
 
         let next = self.must_next_token()?;
         if next != Token::Then {
             return Err(ParserError::UnexpectedToken {
                 found: next,
-                expected: Token::Then,
+                expected: String::from("'then'"),
             });
         }
 
@@ -363,7 +362,7 @@ impl<'a> Parser<'a> {
         let Token::Value(name) = next else {
             return Err(ParserError::UnexpectedToken{
                 found: next,
-                expected: Token::Value("function name".to_string())
+                expected: String::from("function name"),
             });
         };
 
@@ -371,7 +370,7 @@ impl<'a> Parser<'a> {
         if next != Token::OpenBrace {
             return Err(ParserError::UnexpectedToken {
                 found: next,
-                expected: Token::OpenBrace,
+                expected: String::from("open brace"),
             });
         }
         let body = self.parse_scope()?;
@@ -395,7 +394,7 @@ impl<'a> Parser<'a> {
 
         if do_token != Token::Do {
             return Err(ParserError::UnexpectedToken {
-                expected: Token::Do,
+                expected: String::from("'do'"),
                 found: do_token,
             });
         }
