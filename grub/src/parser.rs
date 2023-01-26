@@ -1,6 +1,24 @@
+use thiserror::Error;
+
 use crate::lexer::Lexer;
 use crate::token::Token;
 use std::iter::Peekable;
+
+#[derive(Error, Debug)]
+pub enum ParserError {
+    #[error("required next token is missing")]
+    MissingNextToken,
+    #[error("missing character {0}")]
+    MissingCharacter(String),
+    #[error("invalid syntax {0}")]
+    InvalidSyntax(Token),
+    #[error("missing newline or semicolon")]
+    MissingNewlineOrSemicolon,
+    #[error("unexpected token {found:?}, expected {expected:?}")]
+    UnexpectedToken { expected: Token, found: Token },
+    #[error("unexpected value {0}")]
+    UnexpectedValue(String),
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AssignmentStatement {
@@ -167,16 +185,19 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn must_next_token(&mut self) -> Result<Token, String> {
+    fn must_next_token(&mut self) -> Result<Token, ParserError> {
         self.lexer
             .next()
-            .ok_or_else(|| "next token is None".to_string())
+            .ok_or(ParserError::MissingNextToken)
     }
 
-    fn parse_assignment_statement(&mut self, value: String) -> Result<AssignmentStatement, String> {
+    fn parse_assignment_statement(
+        &mut self,
+        value: String,
+    ) -> Result<AssignmentStatement, ParserError> {
         let split = value
             .split_once('=')
-            .ok_or_else(|| "missing equals in assignment statement".to_string())?;
+            .ok_or_else(|| ParserError::MissingCharacter("=".to_string()))?;
 
         let name = split.0.to_string();
         let value = split.1.to_string();
@@ -185,7 +206,7 @@ impl<'a> Parser<'a> {
         Ok(AssignmentStatement { name, value })
     }
 
-    fn parse_scope(&mut self) -> Result<Vec<Statement>, String> {
+    fn parse_scope(&mut self) -> Result<Vec<Statement>, ParserError> {
         let mut body = Vec::new();
         loop {
             let next = self.must_next_token()?;
@@ -200,16 +221,17 @@ impl<'a> Parser<'a> {
         Ok(body)
     }
 
-    fn parse_command_statement(&mut self, command: String) -> Result<CommandStatement, String> {
+    fn parse_command_statement(
+        &mut self,
+        command: String,
+    ) -> Result<CommandStatement, ParserError> {
         let mut args = Vec::new();
 
         let mut seen_close_bracket = false;
         while let Some(peek_token) = self.lexer.peek() {
             if matches!(peek_token, &Token::Newline | &Token::Semicolon) {
                 if command.as_str() == "[" && !seen_close_bracket {
-                    return Err(
-                        "opening bracket does not have matching closing bracket".to_string()
-                    );
+                    return Err(ParserError::MissingCharacter("]".to_string()));
                 }
                 break;
             }
@@ -220,16 +242,14 @@ impl<'a> Parser<'a> {
                 Token::Literal(literal) => args.push(CommandArgument::Literal(literal)),
                 Token::CloseBracket => {
                     if command.as_str() != "[" {
-                        return Err(
-                            "closing bracket does not have matching opening bracket".to_string()
-                        );
+                        return Err(ParserError::MissingCharacter("[".to_string()));
                     } else {
                         seen_close_bracket = true;
                         continue;
                     }
                 }
                 Token::OpenBrace => args.push(CommandArgument::Block(self.parse_scope()?)),
-                _ => return Err(format!("invalid syntax: {:?}", token)),
+                _ => return Err(ParserError::InvalidSyntax(token)),
             };
         }
 
@@ -242,7 +262,7 @@ impl<'a> Parser<'a> {
         Ok(CommandStatement { command, args })
     }
 
-    fn parse_condition(&mut self) -> Result<Condition, String> {
+    fn parse_condition(&mut self) -> Result<Condition, ParserError> {
         let next = self.must_next_token()?;
         let negation = next == Token::Value(String::from("!"));
         let start_condition_token = if negation {
@@ -250,30 +270,39 @@ impl<'a> Parser<'a> {
         } else {
             next
         };
+
         let Token::Value(value) = start_condition_token else {
-                return Err("if statement missing value token as start of condition".to_string());
-            };
+            return Err(ParserError::UnexpectedToken {
+                expected: Token::Value(String::from("TODO")),
+                found: start_condition_token
+            });
+        };
+
         if !matches_command(&value) {
-            return Err("if statement condition must be a command statement".to_string());
+            return Err(ParserError::UnexpectedValue(value));
         }
+
         Ok(Condition(!negation, self.parse_command_statement(value)?))
     }
 
-    fn parse_if_statement(&mut self) -> Result<IfStatement, String> {
+    fn parse_if_statement(&mut self) -> Result<IfStatement, ParserError> {
         self.parse_if_statement_if_or_elif()
     }
 
-    fn parse_if_statement_if_or_elif(&mut self) -> Result<IfStatement, String> {
+    fn parse_if_statement_if_or_elif(&mut self) -> Result<IfStatement, ParserError> {
         let condition = self.parse_condition()?;
 
         let next = self.must_next_token()?;
         if !matches!(next, Token::Newline | Token::Semicolon) {
-            return Err("missing end of condition (newline or semicolon)".to_string());
+            return Err(ParserError::MissingNewlineOrSemicolon);
         }
 
         let next = self.must_next_token()?;
         if next != Token::Then {
-            return Err("missing then in if statement".to_string());
+            return Err(ParserError::UnexpectedToken {
+                found: next,
+                expected: Token::Then,
+            });
         }
 
         let mut alternative = Vec::new();
@@ -311,7 +340,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_if_statement_else(&mut self) -> Result<Vec<Statement>, String> {
+    fn parse_if_statement_else(&mut self) -> Result<Vec<Statement>, ParserError> {
         let mut consequence = Vec::new();
 
         loop {
@@ -329,19 +358,28 @@ impl<'a> Parser<'a> {
         Ok(consequence)
     }
 
-    fn parse_function_statement(&mut self) -> Result<FunctionStatement, String> {
-        let Token::Value(name) = self.must_next_token()? else {
-            return Err("function does not have a name".to_string());
+    fn parse_function_statement(&mut self) -> Result<FunctionStatement, ParserError> {
+        let next = self.must_next_token()?;
+        let Token::Value(name) = next else {
+            return Err(ParserError::UnexpectedToken{
+                found: next,
+                expected: Token::Value("function name".to_string())
+            });
         };
-        if self.must_next_token()? != Token::OpenBrace {
-            return Err("function does not have opening brace".to_string());
+
+        let next = self.must_next_token()?;
+        if next != Token::OpenBrace {
+            return Err(ParserError::UnexpectedToken {
+                found: next,
+                expected: Token::OpenBrace,
+            });
         }
         let body = self.parse_scope()?;
         Ok(FunctionStatement { name, body })
     }
 
     /// `is_while` is false when the loop is an until loop, otherwise it is true.
-    fn parse_while_statement(&mut self, is_while: bool) -> Result<WhileStatement, String> {
+    fn parse_while_statement(&mut self, is_while: bool) -> Result<WhileStatement, ParserError> {
         let mut condition = self.parse_condition()?;
 
         // Flip the condition's negation status based on what kind of loop we are parsing. For
@@ -356,7 +394,10 @@ impl<'a> Parser<'a> {
         }
 
         if do_token != Token::Do {
-            return Err("missing 'do' in while/until loop".to_string());
+            return Err(ParserError::UnexpectedToken {
+                expected: Token::Do,
+                found: do_token,
+            });
         }
 
         let mut consequence = Vec::new();
@@ -379,7 +420,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_statement(&mut self, start_token: Token) -> Result<Option<Statement>, String> {
+    fn parse_statement(&mut self, start_token: Token) -> Result<Option<Statement>, ParserError> {
         Ok(match start_token {
             Token::Newline | Token::Semicolon | Token::Comment(_) => None,
             Token::If => Some(Statement::If(self.parse_if_statement()?)),
@@ -395,11 +436,11 @@ impl<'a> Parser<'a> {
                     ))
                 }
             }
-            _ => return Err(format!("invalid syntax: {:?}", start_token)),
+            _ => return Err(ParserError::InvalidSyntax(start_token)),
         })
     }
 
-    pub fn parse(&mut self) -> Result<Root, String> {
+    pub fn parse(&mut self) -> Result<Root, ParserError> {
         let mut root = Root { statements: vec![] };
 
         while let Some(token) = self.lexer.next() {
