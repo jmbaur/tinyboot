@@ -1,5 +1,5 @@
 use crate::boot_loader::{BootLoader, Error, MenuEntry};
-use log::{debug, info, warn};
+use log::{debug, info};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -139,9 +139,7 @@ impl SyslinuxBootLoader {
                 search_path.display()
             );
 
-            if let Err(e) = fs::metadata(&search_path) {
-                warn!("{}: {}", search_path.display(), e)
-            } else {
+            if fs::metadata(&search_path).is_ok() {
                 info!("found syslinux configuration at {}", search_path.display());
                 let mut s = Self {
                     mountpoint: mountpoint.to_path_buf(),
