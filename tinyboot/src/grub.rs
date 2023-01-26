@@ -1,7 +1,7 @@
 use super::boot_loader::MenuEntry;
 use super::fs::{detect_fs_type, FsType};
-use crate::boot::boot_loader::{BootLoader, Error};
-use crate::boot::util::*;
+use crate::boot_loader::{BootLoader, Error};
+use crate::util::*;
 use clap::{ArgAction, Parser};
 use grub::{GrubEntry, GrubEnvironment, GrubEvaluator};
 use log::{debug, error, trace};
@@ -239,14 +239,14 @@ impl TinybootGrubEnvironment {
             (true, false, false) => {
                 let file = Path::new(&args.name);
                 trace!("searching for block device with file name {}", args.name);
-                crate::boot::fs::find_block_device(|p| p == file)
+                crate::fs::find_block_device(|p| p == file)
             }
             (false, true, false) => {
                 trace!(
                     "searching for block device with filesystem uuid {}",
                     args.name
                 );
-                crate::boot::fs::find_block_device(|p| match crate::boot::fs::detect_fs_type(p) {
+                crate::fs::find_block_device(|p| match crate::fs::detect_fs_type(p) {
                     Ok(FsType::Ext4(uuid, _)) => uuid == args.name,
                     Ok(FsType::Fat32(uuid, _)) | Ok(FsType::Fat16(uuid, _)) => uuid == args.name,
                     _ => false,
@@ -257,7 +257,7 @@ impl TinybootGrubEnvironment {
                     "searching for block device with filesystem label {}",
                     args.name
                 );
-                crate::boot::fs::find_block_device(|p| match crate::boot::fs::detect_fs_type(p) {
+                crate::fs::find_block_device(|p| match crate::fs::detect_fs_type(p) {
                     Ok(FsType::Ext4(_, label)) => label == args.name,
                     Ok(FsType::Fat32(_, label)) | Ok(FsType::Fat16(_, label)) => label == args.name,
                     _ => false,
@@ -542,6 +542,7 @@ impl BootLoader for GrubBootLoader {
                 else {
                     Some(MenuEntry::SubMenu((
                         entry.id.as_deref().unwrap_or(entry.title.as_str()),
+                        entry.title.as_str(),
                         entry
                             .menuentries
                             .as_ref()?
@@ -708,7 +709,7 @@ mod tests {
 
     #[test]
     fn grub_environment_block() {
-        let testdata_env_block = include_str!("../testdata/grubenv");
+        let testdata_env_block = include_str!("./testdata/grubenv");
 
         let expected = vec![
             ("foo".to_string(), "bar".to_string()),

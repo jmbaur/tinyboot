@@ -1,4 +1,4 @@
-use crate::boot::boot_loader::{BootLoader, Error, MenuEntry};
+use crate::boot_loader::{BootLoader, Error, MenuEntry};
 use log::{debug, info, warn};
 use std::{
     fs,
@@ -234,7 +234,7 @@ mod tests {
     #[test]
     fn syslinux_parse() {
         let (entries, timeout) = super::syslinux_parse_from_source(
-            include_str!("../testdata/extlinux.conf"),
+            include_str!("./testdata/extlinux.conf"),
             Path::new("/dev/null"),
         )
         .unwrap();

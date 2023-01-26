@@ -248,17 +248,17 @@ mod tests {
 
         let fstype = super::detect_fs_type("/tmp/disk.fat32").unwrap();
         assert!(match fstype {
-            crate::boot::fs::FsType::Fat32(_, label) => label == "FOOBAR",
+            crate::fs::FsType::Fat32(_, label) => label == "FOOBAR",
             _ => false,
         });
         let fstype = super::detect_fs_type("/tmp/disk.fat16").unwrap();
         assert!(match fstype {
-            crate::boot::fs::FsType::Fat16(_, label) => label == "FOOBAR",
+            crate::fs::FsType::Fat16(_, label) => label == "FOOBAR",
             _ => false,
         });
         let fstype = super::detect_fs_type("/tmp/disk.ext4").unwrap();
         assert!(match fstype {
-            crate::boot::fs::FsType::Ext4(_, label) => label == "foobar",
+            crate::fs::FsType::Ext4(_, label) => label == "foobar",
             _ => false,
         });
 
