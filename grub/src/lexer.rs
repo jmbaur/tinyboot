@@ -147,7 +147,7 @@ impl Iterator for Lexer<'_> {
 mod tests {
     use super::*;
 
-    fn tokenize(input: &str) -> Result<Vec<Token>, String> {
+    fn tokenize(input: &str) -> Vec<Token> {
         let l = Lexer::new(input);
 
         let mut tokens = Vec::new();
@@ -155,7 +155,7 @@ mod tests {
             tokens.push(token);
         }
 
-        Ok(tokens)
+        tokens
     }
 
     #[test]
@@ -164,8 +164,7 @@ mod tests {
             tokenize(
                 r#"
                 "#
-            )
-            .unwrap(),
+            ),
             vec![Token::Newline]
         );
     }
@@ -173,7 +172,7 @@ mod tests {
     #[test]
     fn expressions() {
         assert_eq!(
-            tokenize("string1 == string2").unwrap(),
+            tokenize("string1 == string2"),
             vec![
                 Token::Value("string1".to_string()),
                 Token::Value("==".to_string()),
@@ -181,7 +180,7 @@ mod tests {
             ],
         );
         assert_eq!(
-            tokenize("integer1 -gt integer2").unwrap(),
+            tokenize("integer1 -gt integer2"),
             vec![
                 Token::Value("integer1".to_string()),
                 Token::Value("-gt".to_string()),
@@ -193,7 +192,7 @@ mod tests {
     #[test]
     fn set_command() {
         assert_eq!(
-            tokenize("set foo=bar").unwrap(),
+            tokenize("set foo=bar"),
             vec![
                 Token::Value("set".to_string()),
                 Token::Value("foo=bar".to_string()),
@@ -208,8 +207,7 @@ mod tests {
                 r#"if [ $default -ne 0 ]; then
                      set default=0
                    fi"#
-            )
-            .unwrap(),
+            ),
             vec![
                 Token::If,
                 Token::Value("[".to_string()),
@@ -231,7 +229,7 @@ mod tests {
     #[test]
     fn menuentry() {
         assert_eq!(
-            tokenize("menuentry { linux /path/to/linux; }").unwrap(),
+            tokenize("menuentry { linux /path/to/linux; }"),
             vec![
                 Token::Value("menuentry".to_string()),
                 Token::OpenBrace,
@@ -246,7 +244,7 @@ mod tests {
     #[test]
     fn comment() {
         assert_eq!(
-            tokenize("foo # bar").unwrap(),
+            tokenize("foo # bar"),
             vec![
                 Token::Value("foo".to_string()),
                 Token::Comment("bar".to_string()),
@@ -259,8 +257,7 @@ mod tests {
                    # bar
 
                    # baz"#
-            )
-            .unwrap(),
+            ),
             vec![
                 Token::Comment("foo\n bar".to_string()),
                 Token::Newline,
@@ -272,14 +269,14 @@ mod tests {
     #[test]
     fn device_syntax() {
         assert_eq!(
-            tokenize("(hd0,1)").unwrap(),
+            tokenize("(hd0,1)"),
             vec![Token::Value("(hd0,1)".to_string()),]
         );
     }
 
     #[test]
     fn full_example() {
-        let tokens = tokenize(include_str!("./testdata/grub.cfg")).unwrap();
+        let tokens = tokenize(include_str!("./testdata/grub.cfg"));
         insta::assert_debug_snapshot!(tokens);
     }
 }

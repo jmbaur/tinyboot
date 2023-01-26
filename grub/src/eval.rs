@@ -141,7 +141,7 @@ where
 
         let mut parser = Parser::new(Lexer::new(&source));
 
-        let ast = parser.parse()?;
+        let ast = parser.parse().map_err(|e| e.to_string())?;
 
         s.eval_statements(ast.statements)?;
 
