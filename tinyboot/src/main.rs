@@ -1,9 +1,15 @@
-mod boot;
+pub(crate) mod boot_loader;
+pub(crate) mod fs;
+pub(crate) mod grub;
+pub(crate) mod list;
+pub(crate) mod syslinux;
+pub(crate) mod util;
 
-use crate::boot::fs::{detect_fs_type, find_block_device, unmount, FsType};
-use crate::boot::grub::GrubBootLoader;
-use boot::boot_loader::{kexec_execute, kexec_load, BootLoader, MenuEntry};
-use boot::syslinux::SyslinuxBootLoader;
+use crate::boot_loader::{kexec_execute, kexec_load, BootLoader, MenuEntry};
+use crate::fs::{detect_fs_type, find_block_device, unmount, FsType};
+use crate::grub::GrubBootLoader;
+use crate::list::MenuList;
+use crate::syslinux::SyslinuxBootLoader;
 use clap::Parser;
 use log::LevelFilter;
 use log::{debug, error, info};
@@ -11,8 +17,8 @@ use nix::mount;
 use std::io;
 use std::path::PathBuf;
 use std::sync::mpsc;
+use std::thread;
 use std::time::{Duration, Instant};
-use std::{fs, thread};
 use termion::event::Key;
 use termion::input::TermRead;
 use termion::raw::IntoRawMode;
@@ -20,71 +26,12 @@ use tui::backend::{Backend, TermionBackend};
 use tui::layout::{Alignment, Constraint, Direction, Layout};
 use tui::style::{Color, Style};
 use tui::text::Spans;
-use tui::widgets::{Block, List, ListItem, ListState, Paragraph};
+use tui::widgets::{Block, List, Paragraph};
 use tui::{Frame, Terminal};
-
-struct StatefulList<T> {
-    chosen: Option<usize>,
-    state: ListState,
-    items: Vec<T>,
-}
-
-impl<T> StatefulList<T> {
-    fn with_items(items: Vec<T>) -> StatefulList<T> {
-        let non_empty = !items.is_empty();
-        let mut s = StatefulList {
-            chosen: None,
-            state: ListState::default(),
-            items,
-        };
-        if non_empty {
-            s.state.select(Some(0));
-        }
-        s
-    }
-
-    fn next(&mut self) {
-        let i = match self.state.selected() {
-            Some(i) => {
-                if i >= self.items.len() - 1 {
-                    0
-                } else {
-                    i + 1
-                }
-            }
-            None => 0,
-        };
-        self.state.select(Some(i));
-    }
-
-    fn previous(&mut self) {
-        let i = match self.state.selected() {
-            Some(i) => {
-                if i == 0 {
-                    self.items.len() - 1
-                } else {
-                    i - 1
-                }
-            }
-            None => 0,
-        };
-        self.state.select(Some(i));
-    }
-
-    fn choose_currently_selected(&mut self) {
-        if let Some(selected) = self.state.selected() {
-            self.chosen = Some(selected);
-        }
-    }
-
-    fn clear_chosen(&mut self) {
-        self.chosen = None;
-    }
-}
 
 fn ui<B: Backend>(
     f: &mut Frame<B>,
-    boot_entries: &mut StatefulList<MenuEntry>,
+    boot_entries: &mut MenuList,
     (has_user_interaction, elapsed, timeout): (bool, Duration, Duration),
 ) {
     let chunks = Layout::default()
@@ -96,56 +43,16 @@ fn ui<B: Backend>(
         })
         .split(f.size());
 
-    let (title, items): (String, Vec<ListItem>) = {
-        if let Some(MenuEntry::SubMenu(submenu)) = boot_entries
-            .chosen
-            .and_then(|chosen| boot_entries.items.get(chosen))
-        {
-            (
-                format!("tinyboot->{}", submenu.0,),
-                submenu
-                    .1
-                    .iter()
-                    .filter_map(|i| match i {
-                        MenuEntry::BootEntry(boot_entry) => {
-                            let lines = vec![Spans::from(boot_entry.1)];
-                            Some(ListItem::new(lines))
-                        }
-                        _ => None, // nested submenus are not valid
-                    })
-                    .collect(),
-            )
-        } else {
-            (
-                String::from("tinyboot"),
-                boot_entries
-                    .items
-                    .iter()
-                    .map(|i| match i {
-                        MenuEntry::BootEntry(boot_entry) => {
-                            let lines = vec![Spans::from(boot_entry.1)];
-                            ListItem::new(lines)
-                        }
-                        MenuEntry::SubMenu(submenu) => {
-                            let lines = vec![Spans::from(format!("<->{}", submenu.0))];
-                            ListItem::new(lines)
-                        }
-                    })
-                    .collect(),
-            )
-        }
-    };
-
-    let items = List::new(items)
+    let items = List::new(boot_entries.display.2.to_vec())
         .block(
             Block::default()
-                .title(title)
+                .title(boot_entries.display.1.clone())
                 .title_alignment(Alignment::Left),
         )
         .highlight_style(Style::default().bg(Color::White).fg(Color::Black))
         .highlight_symbol(">>");
 
-    f.render_stateful_widget(items, chunks[0], &mut boot_entries.state);
+    f.render_stateful_widget(items, chunks[0], &mut boot_entries.display.0);
 
     if !has_user_interaction {
         let time_left = (timeout - elapsed).as_secs();
@@ -172,7 +79,7 @@ fn logic<B: Backend>(terminal: &mut Terminal<B>) -> anyhow::Result<()> {
             };
             debug!("detected {:?} fstype on {:?}", fstype, dev);
 
-            if let Err(e) = fs::create_dir_all(&mountpoint) {
+            if let Err(e) = std::fs::create_dir_all(&mountpoint) {
                 error!("failed to create mountpoint: {e}");
                 return None;
             }
@@ -278,7 +185,9 @@ fn logic<B: Backend>(terminal: &mut Terminal<B>) -> anyhow::Result<()> {
             break 'selection Some(id.to_string());
         }
 
-        let mut boot_entries = StatefulList::with_items(menu_entries);
+        let mut boot_entries =
+            MenuList::new("tinyboot", menu_entries).expect("menu_entries non-empty");
+        // let mut boot_entries = StatefulList::with_items(menu_entries);
         loop {
             terminal.draw(|f| {
                 ui(
@@ -292,20 +201,11 @@ fn logic<B: Backend>(terminal: &mut Terminal<B>) -> anyhow::Result<()> {
                     has_user_interaction = true;
                     match key {
                         Key::Char('l') | Key::Char('\n') => {
-                            let Some(entry) = boot_entries
-                            .state
-                            .selected()
-                            .and_then(|idx| boot_entries.items.get(idx)) else { continue; };
-                            match entry {
-                                MenuEntry::BootEntry(entry) => {
-                                    break 'selection Some(entry.0.to_string())
-                                }
-                                MenuEntry::SubMenu(_) => {
-                                    boot_entries.choose_currently_selected();
-                                }
-                            };
+                            if let Some(chosen) = boot_entries.select() {
+                                break 'selection Some(chosen.to_string());
+                            }
                         }
-                        Key::Left | Key::Char('h') => boot_entries.clear_chosen(),
+                        Key::Left | Key::Char('h') => boot_entries.exit(),
                         Key::Down | Key::Char('j') => boot_entries.next(),
                         Key::Up | Key::Char('k') => boot_entries.previous(),
                         Key::Char('r') => terminal.clear()?,

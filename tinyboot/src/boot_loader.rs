@@ -30,12 +30,12 @@ impl From<io::Error> for Error {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum MenuEntry<'a> {
     /// BootEntry: (ID, name)
     BootEntry((&'a str, &'a str)),
-    /// SubMenu: (ID, name)
-    SubMenu((&'a str, Vec<MenuEntry<'a>>)),
+    /// SubMenu: (ID, name, entries)
+    SubMenu((&'a str, &'a str, Vec<MenuEntry<'a>>)),
 }
 
 pub trait BootLoader {
