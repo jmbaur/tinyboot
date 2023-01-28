@@ -143,7 +143,7 @@ where
 
         let ast = parser.parse().map_err(|e| e.to_string())?;
 
-        s.eval_statements(ast.statements)?;
+        s.eval(ast.statements)?;
 
         Ok(s)
     }
@@ -245,50 +245,58 @@ where
     }
 
     fn run_command(&mut self, command: CommandStatement) -> Result<(), String> {
-        let args = command
-            .args
-            .iter()
-            .filter_map(|arg| match arg {
-                CommandArgument::Value(value) => Some(self.interpolate_value(value.to_string())),
-                CommandArgument::Literal(literal) => Some(literal.to_string()),
-                CommandArgument::Block(_) => {
-                    // TODO(jared): blocks are invalid here, return an error?
-                    None
+        if let "menuentry" | "submenu" = command.command.as_str() {
+            self.add_entry(command)?
+        } else {
+            let command_name = command.command.as_str();
+            let args = command
+                .args
+                .iter()
+                .filter_map(|arg| match arg {
+                    // block arguments are only valid when calling `menuentry` or `submenu`.
+                    CommandArgument::Block(_) => None,
+                    CommandArgument::Literal(literal) => Some(literal.to_string()),
+                    CommandArgument::Value(value) => {
+                        Some(self.interpolate_value(value.to_string()))
+                    }
+                })
+                .collect::<Vec<String>>();
+            let args_len = args.len();
+
+            if let Some(function) = self.functions.get(&command.command) {
+                // The arguments to the function need to be valid for the entire duration of the
+                // function call.
+                let statements = function.to_vec();
+                for stmt in statements {
+                    // setup command-scoped environment variables
+                    {
+                        self.env
+                            .set_env("#".to_string(), Some(args_len.to_string()));
+                        self.env.set_env("*".to_string(), Some(args.join(" ")));
+                        self.env.set_env("@".to_string(), Some(args.join(" ")));
+                        self.env
+                            .set_env(0.to_string(), Some(command_name.to_string()));
+                        for (i, arg) in args.iter().enumerate() {
+                            self.env.set_env((i + 1).to_string(), Some(arg.to_string()));
+                        }
+                    }
+
+                    self.eval(vec![stmt])?;
+                    // teardown command-scoped environment variables
+                    {
+                        self.env.set_env("#".to_string(), None);
+                        self.env.set_env("*".to_string(), None);
+                        self.env.set_env("@".to_string(), None);
+                        for i in 0..args_len {
+                            self.env.set_env(i.to_string(), None);
+                        }
+                    }
                 }
-            })
-            .collect::<Vec<String>>();
-        let args_len = args.len();
-
-        // setup command-scoped environment variables
-        {
-            self.env
-                .set_env("#".to_string(), Some(args.len().to_string()));
-            self.env.set_env("*".to_string(), Some(args.join(" ")));
-            self.env.set_env("@".to_string(), Some(args.join(" ")));
-            self.env
-                .set_env(0.to_string(), Some(command.command.clone()));
-            for (i, arg) in args.iter().enumerate() {
-                self.env.set_env((i + 1).to_string(), Some(arg.to_string()));
-            }
-        }
-
-        match command.command.as_str() {
-            "menuentry" | "submenu" => self.add_entry(command)?,
-            _ => {
+            } else {
                 let exit_code = self.env.run_command(command.command, args);
                 self.last_exit_code = exit_code;
                 self.env
                     .set_env("?".to_string(), Some(self.last_exit_code.to_string()));
-            }
-        }
-
-        // teardown command-scoped environment variables
-        {
-            self.env.set_env("#".to_string(), None);
-            self.env.set_env("*".to_string(), None);
-            self.env.set_env("@".to_string(), None);
-            for i in 0..args_len {
-                self.env.set_env(i.to_string(), None);
             }
         }
 
@@ -308,14 +316,14 @@ where
         };
 
         if success {
-            self.eval_statements(stmt.consequence)?;
+            self.eval(stmt.consequence)?;
         } else {
             // should be empty for elifs
             for if_statement in stmt.elifs {
                 self.run_if_statement(if_statement)?;
             }
             // should be empty for elifs
-            self.eval_statements(stmt.alternative)?;
+            self.eval(stmt.alternative)?;
         }
 
         Ok(())
@@ -329,7 +337,7 @@ where
                 break;
             }
 
-            self.eval_statements(stmt.consequence.to_vec())?;
+            self.eval(stmt.consequence.to_vec())?;
         }
 
         Ok(())
@@ -340,7 +348,7 @@ where
         Ok(())
     }
 
-    fn eval_statements(&mut self, statements: Vec<Statement>) -> Result<(), String> {
+    fn eval(&mut self, statements: Vec<Statement>) -> Result<(), String> {
         for stmt in statements {
             match stmt {
                 Statement::Assignment(assignment) => self.run_variable_assignment(assignment),
@@ -358,7 +366,7 @@ where
         let Some(consequence) = &entry.consequence else {
             return Err("not a boot entry".to_string());
         };
-        self.eval_statements(consequence.to_vec())?;
+        self.eval(consequence.to_vec())?;
         let linux = self
             .env
             .get_env("linux")

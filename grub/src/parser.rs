@@ -427,7 +427,7 @@ impl<'a> Parser<'a> {
             Token::Until => Some(Statement::While(self.parse_while_statement(false)?)),
             Token::Function => Some(Statement::Function(self.parse_function_statement()?)),
             Token::Value(value) => {
-                if matches_command(&value) {
+                if matches_command(&value) || !value.contains('=') {
                     Some(Statement::Command(self.parse_command_statement(value)?))
                 } else {
                     Some(Statement::Assignment(
@@ -646,14 +646,13 @@ mod tests {
 
     #[test]
     fn function() {
-        // TODO(jared): implement function calls
         let src = r#"
             function foobar { load_env; }
-            # foobar "foo" "bar"
+            foobar "foo" "bar"
         "#;
         let mut p = Parser::new(Lexer::new(src));
         let root = p.parse().unwrap();
-        assert!(root.statements.len() == 1);
+        assert!(root.statements.len() == 2);
         assert_function_statement(
             &root.statements[0],
             "foobar",
@@ -661,6 +660,14 @@ mod tests {
                 command: "load_env".to_string(),
                 args: vec![],
             })],
+        );
+        assert_command_statement(
+            &root.statements[1],
+            "foobar",
+            vec![
+                CommandArgument::Value(String::from("foo")),
+                CommandArgument::Value(String::from("bar")),
+            ],
         );
     }
 

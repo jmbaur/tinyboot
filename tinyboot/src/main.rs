@@ -56,7 +56,7 @@ fn ui<B: Backend>(
 
     if !has_user_interaction {
         let time_left = (timeout - elapsed).as_secs();
-        let text = vec![Spans::from(format!("Boot in {:?} s.", time_left))];
+        let text = vec![Spans::from(format!("Boot in {time_left:?} s."))];
         let paragraph = Paragraph::new(text).alignment(Alignment::Center);
         f.render_widget(paragraph, chunks[1]);
     }
