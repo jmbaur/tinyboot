@@ -193,7 +193,6 @@ fn logic<B: Backend>(terminal: &mut Terminal<B>) -> anyhow::Result<()> {
 
         let mut boot_entries =
             MenuList::new("tinyboot", menu_entries).expect("menu_entries non-empty");
-        // let mut boot_entries = StatefulList::with_items(menu_entries);
         loop {
             terminal.draw(|f| {
                 ui(
@@ -227,6 +226,8 @@ fn logic<B: Backend>(terminal: &mut Terminal<B>) -> anyhow::Result<()> {
             }
         }
     };
+
+    terminal.show_cursor()?;
 
     let (kernel, initrd, cmdline) = boot_loader.boot_info(selected_entry_id)?;
     kexec_load(kernel, initrd, cmdline)?;
