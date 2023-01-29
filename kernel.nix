@@ -1,9 +1,11 @@
-{ lib, linuxManualConfig, linuxPackages_latest, stdenv, ... }:
-linuxManualConfig {
+{ lib, stdenv, linuxKernel, linuxManualConfig, ... }:
+linuxKernel.manualConfig {
   inherit lib stdenv;
-  # follow latest kernel from nixpkgs for best hardware support
-  inherit (linuxPackages_latest.kernel) src version modDirVersion kernelPatches extraMakeFlags;
+  inherit (linuxKernel.kernels.linux_6_1) src version modDirVersion kernelPatches extraMakeFlags;
   configfile = ./configs/${stdenv.hostPlatform.linuxArch}-linux.config;
-  # DTB required to be set to true for nixpkgs kernel build to run `make dtbs`
-  config.DTB = stdenv.hostPlatform.system != "x86_64-linux";
+  config = {
+    # DTB required to be set to true for nixpkgs kernel build to install dtbs into derivation
+    DTB = stdenv.hostPlatform.system != "x86_64-linux";
+    CONFIG_MODULES = "y";
+  };
 }

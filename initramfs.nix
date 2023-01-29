@@ -3,6 +3,7 @@
 , shellTTY ? "tty2"
 , extraInittab ? ""
 , extraInit ? ""
+, kernel
 , makeInitrdNG
 , pkgsStatic
 , buildEnv
@@ -36,6 +37,7 @@ in
 makeInitrdNG {
   compressor = "xz";
   contents = [
+    { object = "${kernel}/lib/modules"; symlink = "/lib/modules"; }
     { object = "${initrdEnv}/bin"; symlink = "/bin"; }
     { object = "${initrdEnv}/sbin"; symlink = "/sbin"; }
     { object = "${initrdEnv}/linuxrc"; symlink = "/init"; }
