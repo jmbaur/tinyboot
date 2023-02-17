@@ -26,7 +26,7 @@ let
   inittab = writeText "inittab" (''
     ::sysinit:/etc/init.d/rcS
     ::ctrlaltdel:/sbin/reboot
-    ::shutdown:/bin/umount -a -r -t ext4,vfat
+    ::shutdown:/bin/umount -ar -t ext4,vfat
     ::restart:/init
     ${tinybootTTY}::once:/bin/tinyboot --log-level=${tinybootLog}
   '' + extraInittab);

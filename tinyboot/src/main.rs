@@ -11,7 +11,7 @@ use crate::syslinux::SyslinuxBootLoader;
 use clap::Parser;
 use log::LevelFilter;
 use log::{debug, error, info};
-use nix::mount;
+use nix::{libc, mount};
 use std::io::{self, Write};
 use std::path::PathBuf;
 use std::process::Command;
@@ -154,8 +154,13 @@ fn logic() -> anyhow::Result<()> {
     let start_instant = Instant::now();
 
     let timeout = boot_loader.timeout();
-    let menu_entries = flatten_entries(boot_loader.menu_entries()?);
-    let selected_entry_id: Option<String> = 'selection: {
+    let mut menu_entries = flatten_entries(boot_loader.menu_entries()?);
+
+    menu_entries.push(("reboot", "Reboot"));
+    menu_entries.push(("poweroff", "Poweroff"));
+    menu_entries.push(("shell", "Exit to shell"));
+
+    let selected_entry_id: Option<&str> = 'selection: {
         let mut stdout = io::stdout().into_raw_mode()?;
 
         write!(
@@ -163,7 +168,7 @@ fn logic() -> anyhow::Result<()> {
             "--------------------------------------------------------------------------------\r\n"
         )?;
         for (i, entry) in menu_entries.iter().enumerate() {
-            write!(stdout, "{}:      {}\r\n", i + 1, entry.0)?;
+            write!(stdout, "{}:      {}\r\n", i + 1, entry.1)?;
         }
         write!(stdout, r#"Enter choice: "#)?;
 
@@ -190,6 +195,10 @@ fn logic() -> anyhow::Result<()> {
                             user_input.clear();
                         }
                         Key::Char('\n') => {
+                            if user_input.is_empty() {
+                                anyhow::bail!("exit")
+                            }
+
                             let Ok(num) = str::parse::<usize>(&user_input) else {
                                 anyhow::bail!("did not input a number");
                             };
@@ -198,7 +207,7 @@ fn logic() -> anyhow::Result<()> {
                                 anyhow::bail!("boot entry does not exist");
                             };
 
-                            break 'selection Some(entry.1.to_string());
+                            break 'selection Some(entry.0);
                         }
                         Key::Char(c) => {
                             if c.is_ascii_digit() {
@@ -208,9 +217,10 @@ fn logic() -> anyhow::Result<()> {
                                 anyhow::bail!("not a numeric input");
                             }
                         }
-                        _ => {
-                            anyhow::bail!("no selection");
+                        Key::Ctrl('c') | Key::Ctrl('g') => {
+                            anyhow::bail!("exit")
                         }
+                        _ => {}
                     };
                 }
                 Msg::Tick => {
@@ -223,13 +233,37 @@ fn logic() -> anyhow::Result<()> {
         }
     };
 
-    let (kernel, initrd, cmdline) = boot_loader.boot_info(selected_entry_id)?;
-    kexec_load(kernel, initrd, cmdline)?;
+    match selected_entry_id {
+        Some("shell") => {
+            anyhow::bail!("exit")
+        }
+        Some("poweroff") => {
+            unsafe { libc::sync() };
+            let ret = unsafe { libc::reboot(libc::LINUX_REBOOT_CMD_POWER_OFF) };
+            if ret < 0 {
+                anyhow::bail!(io::Error::last_os_error());
+            }
+        }
+        Some("reboot") => {
+            unsafe { libc::sync() };
+            let ret = unsafe { libc::reboot(libc::LINUX_REBOOT_CMD_RESTART) };
+            if ret < 0 {
+                anyhow::bail!(io::Error::last_os_error());
+            }
+        }
+        _ => {
+            let (kernel, initrd, cmdline) =
+                boot_loader.boot_info(selected_entry_id.map(|s| s.to_string()))?;
+            kexec_load(kernel, initrd, cmdline)?;
 
-    let mountpoint = boot_loader.mountpoint();
-    unmount(mountpoint);
+            let mountpoint = boot_loader.mountpoint();
+            unmount(mountpoint);
 
-    Ok(kexec_execute()?)
+            kexec_execute()?;
+        }
+    }
+
+    Ok(())
 }
 
 #[derive(Debug, Parser)]
