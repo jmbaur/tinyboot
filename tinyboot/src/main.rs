@@ -233,11 +233,15 @@ fn logic() -> anyhow::Result<()> {
         }
     };
 
+    let mountpoint = boot_loader.mountpoint();
+
     match selected_entry_id {
         Some("shell") => {
+            unmount(mountpoint);
             anyhow::bail!("exit")
         }
         Some("poweroff") => {
+            unmount(mountpoint);
             unsafe { libc::sync() };
             let ret = unsafe { libc::reboot(libc::LINUX_REBOOT_CMD_POWER_OFF) };
             if ret < 0 {
@@ -245,6 +249,7 @@ fn logic() -> anyhow::Result<()> {
             }
         }
         Some("reboot") => {
+            unmount(mountpoint);
             unsafe { libc::sync() };
             let ret = unsafe { libc::reboot(libc::LINUX_REBOOT_CMD_RESTART) };
             if ret < 0 {
