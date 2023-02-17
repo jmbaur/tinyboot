@@ -158,12 +158,12 @@ fn logic() -> anyhow::Result<()> {
     let selected_entry_id: Option<String> = 'selection: {
         let mut stdout = io::stdout().into_raw_mode()?;
 
-        writeln!(
+        write!(
             stdout,
-            r#"--------------------------------------------------------------------------------"#
+            "--------------------------------------------------------------------------------\r\n"
         )?;
         for (i, entry) in menu_entries.iter().enumerate() {
-            writeln!(stdout, r#"{}:      {}"#, i + 1, entry.0)?;
+            write!(stdout, "{}:      {}\r\n", i + 1, entry.0)?;
         }
         write!(stdout, r#"Enter choice: "#)?;
 
