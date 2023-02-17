@@ -471,7 +471,7 @@ impl GrubEnvironment for TinybootGrubEnvironment {
             }
         };
 
-        debug!("command '{command}' exited with code {exit_code}");
+        trace!("command '{command}' exited with code {exit_code}");
         exit_code
     }
 }

@@ -13,6 +13,5 @@ fern = "0.6.1"
 grub = { path = "../grub" }
 log = "0.4.17"
 nix = "0.26.2"
-termion = "1.5.6"
-tui = { version = "0.19", default-features = false, features = ["termion"] }
+termion = "2.0.1"
 uuid = "1.3.0"
