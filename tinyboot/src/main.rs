@@ -1,68 +1,42 @@
 pub(crate) mod boot_loader;
 pub(crate) mod fs;
 pub(crate) mod grub;
-pub(crate) mod list;
 pub(crate) mod syslinux;
 pub(crate) mod util;
 
 use crate::boot_loader::{kexec_execute, kexec_load, BootLoader, MenuEntry};
 use crate::fs::{detect_fs_type, find_block_device, unmount, FsType};
 use crate::grub::GrubBootLoader;
-use crate::list::MenuList;
 use crate::syslinux::SyslinuxBootLoader;
 use clap::Parser;
 use log::LevelFilter;
 use log::{debug, error, info};
 use nix::mount;
-use std::io;
+use std::io::{self, Write};
 use std::path::PathBuf;
+use std::process::Command;
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 use termion::event::Key;
 use termion::input::TermRead;
 use termion::raw::IntoRawMode;
-use tui::backend::{Backend, TermionBackend};
-use tui::layout::{Alignment, Constraint, Direction, Layout};
-use tui::style::{Color, Style};
-use tui::text::Spans;
-use tui::widgets::{Block, List, Paragraph};
-use tui::{Frame, Terminal};
+use termion::{clear, cursor};
 
-fn ui<B: Backend>(
-    f: &mut Frame<B>,
-    boot_entries: &mut MenuList,
-    (has_user_interaction, elapsed, timeout): (bool, Duration, Duration),
-) {
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints(if has_user_interaction {
-            vec![Constraint::Percentage(100)]
-        } else {
-            vec![Constraint::Percentage(90), Constraint::Percentage(10)]
-        })
-        .split(f.size());
-
-    let items = List::new(boot_entries.display.2.to_vec())
-        .block(
-            Block::default()
-                .title(boot_entries.display.1.clone())
-                .title_alignment(Alignment::Left),
-        )
-        .highlight_style(Style::default().bg(Color::White).fg(Color::Black))
-        .highlight_symbol(">>");
-
-    f.render_stateful_widget(items, chunks[0], &mut boot_entries.display.0);
-
-    if !has_user_interaction {
-        let time_left = (timeout - elapsed).as_secs();
-        let text = vec![Spans::from(format!("Boot in {time_left:?} s."))];
-        let paragraph = Paragraph::new(text).alignment(Alignment::Center);
-        f.render_widget(paragraph, chunks[1]);
+fn flatten_entries(entries: Vec<MenuEntry>) -> Vec<(&str, &str)> {
+    let mut flattened = Vec::new();
+    for entry in entries {
+        match entry {
+            MenuEntry::BootEntry(boot_entry) => flattened.push(boot_entry),
+            MenuEntry::SubMenu((_, _, sub_entries)) => {
+                flattened.extend(flatten_entries(sub_entries));
+            }
+        }
     }
+    flattened
 }
 
-fn logic<B: Backend>(terminal: &mut Terminal<B>) -> anyhow::Result<()> {
+fn logic() -> anyhow::Result<()> {
     let mut boot_loaders = find_block_device(|_| true)?
         .iter()
         .filter_map(|dev| {
@@ -133,7 +107,7 @@ fn logic<B: Backend>(terminal: &mut Terminal<B>) -> anyhow::Result<()> {
         if boot_loaders.is_empty() {
             anyhow::bail!("no boot configurations");
         } else {
-            // TODO(jared): provide menu for picking device configuration
+            // TODO(jared): provide a way for the user to pick the device to boot from
             let chosen_loader = boot_loaders.swap_remove(0);
 
             // unmount non-chosen devices
@@ -177,44 +151,66 @@ fn logic<B: Backend>(terminal: &mut Terminal<B>) -> anyhow::Result<()> {
         }
     });
 
-    terminal.clear()?;
-
     let start_instant = Instant::now();
 
-    let mut has_user_interaction = false;
-
     let timeout = boot_loader.timeout();
-    let menu_entries = boot_loader.menu_entries()?;
+    let menu_entries = flatten_entries(boot_loader.menu_entries()?);
     let selected_entry_id: Option<String> = 'selection: {
-        if let (1, Some(MenuEntry::BootEntry((id, ..)))) = (menu_entries.len(), menu_entries.get(0))
-        {
-            break 'selection Some(id.to_string());
-        }
+        let mut stdout = io::stdout().into_raw_mode()?;
 
-        let mut boot_entries =
-            MenuList::new("tinyboot", menu_entries).expect("menu_entries non-empty");
+        writeln!(
+            stdout,
+            r#"--------------------------------------------------------------------------------"#
+        )?;
+        for (i, entry) in menu_entries.iter().enumerate() {
+            writeln!(stdout, r#"{}:      {}"#, i + 1, entry.0)?;
+        }
+        write!(stdout, r#"Enter choice: "#)?;
+
+        let mut has_user_interaction = false;
+        let mut user_input = String::new();
+
         loop {
-            terminal.draw(|f| {
-                ui(
-                    f,
-                    &mut boot_entries,
-                    (has_user_interaction, start_instant.elapsed(), timeout),
-                )
-            })?;
+            stdout.flush()?;
             match rx.recv()? {
                 Msg::Key(key) => {
                     has_user_interaction = true;
                     match key {
-                        Key::Char('l') | Key::Char('\n') => {
-                            if let Some(chosen) = boot_entries.select() {
-                                break 'selection Some(chosen.to_string());
+                        Key::Backspace => {
+                            _ = user_input.pop();
+                            write!(stdout, "{}{}", cursor::Left(1), clear::AfterCursor)?;
+                        }
+                        Key::Ctrl('u') => {
+                            write!(
+                                stdout,
+                                "{}{}",
+                                cursor::Left(user_input.len() as u16),
+                                clear::AfterCursor
+                            )?;
+                            user_input.clear();
+                        }
+                        Key::Char('\n') => {
+                            let Ok(num) = str::parse::<usize>(&user_input) else {
+                                anyhow::bail!("did not input a number");
+                            };
+
+                            let Some(entry) = menu_entries.get(num - 1) else {
+                                anyhow::bail!("boot entry does not exist");
+                            };
+
+                            break 'selection Some(entry.1.to_string());
+                        }
+                        Key::Char(c) => {
+                            if c.is_ascii_digit() {
+                                user_input.push(c);
+                                write!(stdout, "{c}")?;
+                            } else {
+                                anyhow::bail!("not a numeric input");
                             }
                         }
-                        Key::Left | Key::Char('h') => boot_entries.exit(),
-                        Key::Down | Key::Char('j') => boot_entries.next(),
-                        Key::Up | Key::Char('k') => boot_entries.previous(),
-                        Key::Char('r') => terminal.clear()?,
-                        _ => {}
+                        _ => {
+                            anyhow::bail!("no selection");
+                        }
                     };
                 }
                 Msg::Tick => {
@@ -226,8 +222,6 @@ fn logic<B: Backend>(terminal: &mut Terminal<B>) -> anyhow::Result<()> {
             }
         }
     };
-
-    terminal.show_cursor()?;
 
     let (kernel, initrd, cmdline) = boot_loader.boot_info(selected_entry_id)?;
     kexec_load(kernel, initrd, cmdline)?;
@@ -242,10 +236,9 @@ fn logic<B: Backend>(terminal: &mut Terminal<B>) -> anyhow::Result<()> {
 struct Config {
     #[arg(long, value_parser, default_value_t = LevelFilter::Info)]
     log_level: LevelFilter,
-
-    #[arg(long, default_value = "/tmp/tinyboot.log")]
-    log_file: PathBuf,
 }
+
+const VERSION: Option<&'static str> = option_env!("version");
 
 fn main() -> anyhow::Result<()> {
     let cfg = Config::parse();
@@ -260,21 +253,17 @@ fn main() -> anyhow::Result<()> {
             ))
         })
         .level(cfg.log_level)
-        .chain(fern::log_file(&cfg.log_file)?)
+        .chain(io::stderr())
         .apply()?;
 
-    info!("started");
+    info!("running version {}", VERSION.unwrap_or("devel"));
     debug!("config: {:?}", cfg);
 
-    let stdout = io::stdout().lock().into_raw_mode()?;
-    let backend = TermionBackend::new(stdout);
-    let mut terminal = Terminal::new(backend)?;
-
-    if let Err(e) = logic(&mut terminal) {
+    if let Err(e) = logic() {
         error!("{e}");
     }
 
-    terminal.show_cursor()?;
+    Command::new("/bin/sh").spawn()?.wait()?;
 
     Ok(())
 }

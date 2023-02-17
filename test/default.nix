@@ -6,25 +6,26 @@ let
       console = "ttyS0";
     };
     aarch64-linux = {
-      qemuFlags = [ "-M" "virt" "-device" "virtio-gpu-pci" ];
+      qemuFlags = [ "-M" "virt" ];
       console = "ttyAMA0";
     };
   };
   initramfs = tinyboot-initramfs.override {
-    tinybootLog = "trace";
-    extraInittab = ''
-      ${systemConfig.console}::respawn:/bin/sh
-    '';
+    tinybootLog = "debug";
+    tinybootTTY = systemConfig.console;
   };
   disk = toString (nixosSystem.extendModules {
     modules = [ ({ boot.kernelParams = [ "console=${systemConfig.console}" ]; }) ];
   }).config.system.build.qcow2;
 in
 writeShellScript "tinyboot-test-run.bash" ''
-  test -f nixos-${name}.qcow2 || dd if=${disk}/nixos.qcow2 of=nixos-${name}.qcow2
+  if ! test -f nixos-${name}.qcow2; then
+    dd if=${disk}/nixos.qcow2 of=nixos-${name}.qcow2
+  fi
+
   ${pkgsBuildBuild.qemu}/bin/qemu-system-${stdenv.hostPlatform.qemuArch} \
     ${toString systemConfig.qemuFlags} \
-    -serial stdio \
+    -nographic \
     -m 2G \
     -kernel ${tinyboot-kernel}/${stdenv.hostPlatform.linux-kernel.target} \
     -initrd ${initramfs}/initrd \

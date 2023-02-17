@@ -1,8 +1,7 @@
 { tinybootLog ? "info"
-, tinybootTTY ? "tty1"
-, shellTTY ? "tty2"
-, extraInittab ? ""
+, tinybootTTY ? "tty0" # default to the current foreground virtual terminal
 , extraInit ? ""
+, extraInittab ? ""
 , kernel
 , makeInitrdNG
 , pkgsStatic
@@ -14,25 +13,23 @@
 }:
 let
   initrdEnv = buildEnv { name = "initrd-env"; paths = [ pkgsStatic.busybox tinyboot ]; };
-  rcS = writeScript "rcS" ''
+  rcS = writeScript "rcS" (''
     #!/bin/sh
     mkdir -p /dev/pts /sys /proc /tmp /mnt
     mount -t proc proc /proc
     mount -t sysfs sysfs /sys
     mount -t tmpfs tmpfs /tmp
     mount -t devpts devpts /dev/pts
-    ${extraInit}
+  '' + extraInit + ''
     mdev -s
-  '';
-  inittab = writeText "inittab" ''
+  '');
+  inittab = writeText "inittab" (''
     ::sysinit:/etc/init.d/rcS
     ::ctrlaltdel:/sbin/reboot
-    ::shutdown:/bin/umount -a -r
+    ::shutdown:/bin/umount -a -r -t ext4,vfat
     ::restart:/init
     ${tinybootTTY}::once:/bin/tinyboot --log-level=${tinybootLog}
-    ${shellTTY}::askfirst:/bin/sh
-    ${extraInittab}
-  '';
+  '' + extraInittab);
 in
 makeInitrdNG {
   compressor = "xz";
