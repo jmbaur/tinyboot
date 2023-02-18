@@ -71,10 +71,10 @@
                 toString (pkgs.callPackage ./test { inherit name nixosSystem; })
               else
                 let
-                  pkgsCross = builtins.getAttr nixosSystem.config.nixpkgs.system {
+                  pkgsCross = {
                     x86_64-linux = pkgs.pkgsCross.gnu64;
                     aarch64-linux = pkgs.pkgsCross.aarch64-multiplatform;
-                  };
+                  }.${nixosSystem.config.nixpkgs.system};
                 in
                 toString (pkgsCross.callPackage ./test { inherit name nixosSystem; });
           })

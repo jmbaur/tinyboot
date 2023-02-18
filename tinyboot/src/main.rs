@@ -302,7 +302,7 @@ fn main() -> anyhow::Result<()> {
         error!("{e}");
     }
 
-    Command::new("/bin/sh").spawn()?.wait()?;
-
-    Ok(())
+    loop {
+        Command::new("/bin/sh").spawn()?.wait()?;
+    }
 }
