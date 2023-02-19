@@ -196,7 +196,7 @@ fn boot(mut boot_loader: impl BootLoader) -> anyhow::Result<()> {
 
     let mountpoint = boot_loader.mountpoint();
 
-    Ok(match selected_entry_id {
+    match selected_entry_id {
         Some("shell") => {}
         Some("poweroff") => {
             unmount(mountpoint);
@@ -224,7 +224,9 @@ fn boot(mut boot_loader: impl BootLoader) -> anyhow::Result<()> {
 
             kexec_execute()?;
         }
-    })
+    }
+
+    Ok(())
 }
 
 #[derive(Debug, Parser)]
