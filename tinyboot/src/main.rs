@@ -157,7 +157,7 @@ fn boot(mut boot_loader: impl BootLoader) -> anyhow::Result<()> {
                         }
                         Key::Char('\n') => {
                             if user_input.is_empty() {
-                                anyhow::bail!("exit")
+                                return Ok(());
                             }
 
                             let Ok(num) = str::parse::<usize>(&user_input) else {
@@ -179,7 +179,7 @@ fn boot(mut boot_loader: impl BootLoader) -> anyhow::Result<()> {
                             }
                         }
                         Key::Ctrl('c') | Key::Ctrl('g') => {
-                            anyhow::bail!("exit")
+                            return Ok(());
                         }
                         _ => {}
                     };
@@ -196,8 +196,8 @@ fn boot(mut boot_loader: impl BootLoader) -> anyhow::Result<()> {
 
     let mountpoint = boot_loader.mountpoint();
 
-    match selected_entry_id {
-        Some("shell") => anyhow::bail!("exit"),
+    Ok(match selected_entry_id {
+        Some("shell") => {}
         Some("poweroff") => {
             unmount(mountpoint);
             unsafe { libc::sync() };
@@ -224,9 +224,7 @@ fn boot(mut boot_loader: impl BootLoader) -> anyhow::Result<()> {
 
             kexec_execute()?;
         }
-    }
-
-    Ok(())
+    })
 }
 
 #[derive(Debug, Parser)]
@@ -265,7 +263,7 @@ fn choose_device(devices: &[PathBuf]) -> (Option<(&PathBuf, Chosen)>, Vec<&PathB
     (chosen, unchosen)
 }
 
-fn main() -> anyhow::Result<()> {
+fn real_main() -> anyhow::Result<()> {
     let cfg = Config::parse();
 
     fern::Dispatch::new()
@@ -292,20 +290,30 @@ fn main() -> anyhow::Result<()> {
     }
 
     if let Some((mountpoint, chosen)) = chosen {
-        if let Err(e) = (move || -> anyhow::Result<()> {
-            match chosen {
-                Chosen::Grub(config) => boot(GrubBootLoader::new(mountpoint, &config)?),
-                Chosen::Syslinux(config) => boot(SyslinuxBootLoader::new(mountpoint, &config)?),
-            }
-        })() {
-            error!("{e}");
+        if let Err(e) = match chosen {
+            Chosen::Grub(config) => boot(GrubBootLoader::new(mountpoint, &config)?),
+            Chosen::Syslinux(config) => boot(SyslinuxBootLoader::new(mountpoint, &config)?),
+        } {
             unmount(mountpoint);
+            return Err(e);
         }
     } else {
-        error!("no bootloaders found");
+        anyhow::bail!("no bootloaders found");
     };
 
+    Ok(())
+}
+
+fn main() -> ! {
+    if let Err(e) = real_main() {
+        error!("{e}");
+    }
+
     loop {
-        Command::new("/bin/sh").spawn()?.wait()?;
+        Command::new("/bin/sh")
+            .spawn()
+            .expect("could not start /bin/sh")
+            .wait()
+            .expect("/bin/sh wasn't running");
     }
 }

@@ -29,10 +29,6 @@ in
   src = sourceFilter ./.;
   cargoToml = ./tinyboot/Cargo.toml;
   depsBuildBuild = lib.optional isCrossBuild qemu;
-  nativeBuildInputs = [
-    toolchain
-    dosfstools
-    e2fsprogs
-  ];
+  nativeBuildInputs = [ toolchain dosfstools e2fsprogs ];
   passthru = { inherit env; };
 } // env)
