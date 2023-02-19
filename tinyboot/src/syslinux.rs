@@ -121,7 +121,7 @@ fn syslinux_parse(config_file: impl AsRef<Path>) -> Result<(Vec<BootEntry>, Dura
 }
 
 impl SyslinuxBootLoader {
-    pub fn new(mountpoint: &Path) -> Result<Self, Error> {
+    pub fn get_config(mountpoint: &Path) -> Result<PathBuf, Error> {
         for path in [
             "boot/extlinux/extlinux.conf",
             "extlinux/extlinux.conf",
@@ -141,18 +141,22 @@ impl SyslinuxBootLoader {
 
             if fs::metadata(&search_path).is_ok() {
                 info!("found syslinux configuration at {}", search_path.display());
-                let mut s = Self {
-                    mountpoint: mountpoint.to_path_buf(),
-                    config_file: search_path,
-                    entries: Vec::new(),
-                    timeout: Duration::from_secs(10),
-                };
-                s.parse()?;
-                return Ok(s);
+                return Ok(search_path);
             }
         }
 
         Err(Error::BootConfigNotFound)
+    }
+
+    pub fn new(mountpoint: &Path, config_file: &Path) -> Result<Self, Error> {
+        let mut s = Self {
+            mountpoint: mountpoint.to_path_buf(),
+            config_file: config_file.to_path_buf(),
+            entries: Vec::new(),
+            timeout: Duration::from_secs(10),
+        };
+        s.parse()?;
+        Ok(s)
     }
 
     fn parse(&mut self) -> Result<(), Error> {

@@ -482,16 +482,22 @@ pub struct GrubBootLoader {
 }
 
 impl GrubBootLoader {
-    pub fn new(mountpoint: &Path) -> Result<Self, Error> {
-        let config_file = 'config: {
-            for path in ["boot/grub/grub.cfg", "grub/grub.cfg"] {
-                if fs::metadata(mountpoint.join(path)).is_ok() {
-                    break 'config path;
-                }
+    pub fn get_config(mountpoint: &Path) -> Result<PathBuf, Error> {
+        for path in ["boot/grub/grub.cfg", "grub/grub.cfg"] {
+            let search_path = mountpoint.join(path);
+            debug!(
+                "searching for grub configuration at {}",
+                search_path.display()
+            );
+            if fs::metadata(search_path).is_ok() {
+                return Ok(PathBuf::from(path));
             }
-            return Err(Error::BootConfigNotFound);
-        };
+        }
 
+        Err(Error::BootConfigNotFound)
+    }
+
+    pub fn new(mountpoint: &Path, config_file: &Path) -> Result<Self, Error> {
         let source = fs::read_to_string(mountpoint.join(config_file))?;
 
         let evaluator = GrubEvaluator::new_from_source(

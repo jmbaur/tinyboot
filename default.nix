@@ -30,12 +30,9 @@ in
   cargoToml = ./tinyboot/Cargo.toml;
   depsBuildBuild = lib.optional isCrossBuild qemu;
   nativeBuildInputs = [
-    # provides mkfs.* utilities for tests
+    toolchain
     dosfstools
     e2fsprogs
-
-    # rust toolchain
-    toolchain
   ];
   passthru = { inherit env; };
 } // env)

@@ -36,8 +36,8 @@ fn flatten_entries(entries: Vec<MenuEntry>) -> Vec<(&str, &str)> {
     flattened
 }
 
-fn logic() -> anyhow::Result<()> {
-    let mut boot_loaders = find_block_device(|_| true)?
+fn get_devices() -> anyhow::Result<Vec<PathBuf>> {
+    Ok(find_block_device(|_| true)?
         .iter()
         .filter_map(|dev| {
             let mountpoint = PathBuf::from("/mnt").join(
@@ -48,9 +48,9 @@ fn logic() -> anyhow::Result<()> {
             );
 
             let Ok(fstype) = detect_fs_type(dev) else {
-                debug!("failed to detect fstype on {:?}", dev);
-                return None;
-            };
+            debug!("failed to detect fstype on {:?}", dev);
+            return None;
+        };
             debug!("detected {:?} fstype on {:?}", fstype, dev);
 
             if let Err(e) = std::fs::create_dir_all(&mountpoint) {
@@ -74,51 +74,12 @@ fn logic() -> anyhow::Result<()> {
 
             debug!("mounted {} at {}", dev.display(), mountpoint.display());
 
-            let boot_loader: Box<dyn BootLoader> = 'loader: {
-                match GrubBootLoader::new(&mountpoint) {
-                    Ok(grub) => {
-                        debug!("found grub bootloader");
-                        break 'loader Box::new(grub);
-                    }
-                    Err(e) => error!(
-                        "error loading grub configuration from {}: {e}",
-                        mountpoint.display()
-                    ),
-                }
-                match SyslinuxBootLoader::new(&mountpoint) {
-                    Ok(syslinux) => {
-                        debug!("found syslinux bootloader");
-                        break 'loader Box::new(syslinux);
-                    }
-                    Err(e) => error!(
-                        "error loading syslinux configuration from {}: {e}",
-                        mountpoint.display()
-                    ),
-                }
-                unmount(&mountpoint);
-                return None;
-            };
-
-            Some(boot_loader)
+            Some(mountpoint)
         })
-        .collect::<Vec<Box<dyn BootLoader>>>();
+        .collect())
+}
 
-    let mut boot_loader = {
-        if boot_loaders.is_empty() {
-            anyhow::bail!("no boot configurations");
-        } else {
-            // TODO(jared): provide a way for the user to pick the device to boot from
-            let chosen_loader = boot_loaders.swap_remove(0);
-
-            // unmount non-chosen devices
-            for loader in boot_loaders {
-                unmount(loader.mountpoint());
-            }
-
-            chosen_loader
-        }
-    };
-
+fn boot(mut boot_loader: impl BootLoader) -> anyhow::Result<()> {
     info!(
         "using boot loader from device mounted at {}",
         boot_loader.mountpoint().display()
@@ -236,10 +197,7 @@ fn logic() -> anyhow::Result<()> {
     let mountpoint = boot_loader.mountpoint();
 
     match selected_entry_id {
-        Some("shell") => {
-            unmount(mountpoint);
-            anyhow::bail!("exit")
-        }
+        Some("shell") => anyhow::bail!("exit"),
         Some("poweroff") => {
             unmount(mountpoint);
             unsafe { libc::sync() };
@@ -279,6 +237,34 @@ struct Config {
 
 const VERSION: Option<&'static str> = option_env!("version");
 
+enum Chosen {
+    Grub(PathBuf),
+    Syslinux(PathBuf),
+}
+
+fn choose_device(devices: &[PathBuf]) -> (Option<(&PathBuf, Chosen)>, Vec<&PathBuf>) {
+    let mut chosen = None;
+    let mut unchosen = Vec::new();
+
+    // TODO(jared): allow for choosing the device to boot from, not just choosing the first device
+    // that has a bootable configuration file.
+    for device in devices {
+        if chosen.is_none() {
+            if let Ok(grub_config) = GrubBootLoader::get_config(device) {
+                chosen = Some((device, Chosen::Grub(grub_config)));
+                continue;
+            } else if let Ok(syslinux_config) = SyslinuxBootLoader::get_config(device) {
+                chosen = Some((device, Chosen::Syslinux(syslinux_config)));
+                continue;
+            }
+        }
+
+        unchosen.push(device);
+    }
+
+    (chosen, unchosen)
+}
+
 fn main() -> anyhow::Result<()> {
     let cfg = Config::parse();
 
@@ -298,9 +284,26 @@ fn main() -> anyhow::Result<()> {
     info!("running version {}", VERSION.unwrap_or("devel"));
     debug!("config: {:?}", cfg);
 
-    if let Err(e) = logic() {
-        error!("{e}");
+    let devices = get_devices()?;
+    let (chosen, unchosen) = choose_device(&devices);
+
+    for device in unchosen {
+        unmount(device);
     }
+
+    if let Some((mountpoint, chosen)) = chosen {
+        if let Err(e) = (move || -> anyhow::Result<()> {
+            match chosen {
+                Chosen::Grub(config) => boot(GrubBootLoader::new(mountpoint, &config)?),
+                Chosen::Syslinux(config) => boot(SyslinuxBootLoader::new(mountpoint, &config)?),
+            }
+        })() {
+            error!("{e}");
+            unmount(mountpoint);
+        }
+    } else {
+        error!("no bootloaders found");
+    };
 
     loop {
         Command::new("/bin/sh").spawn()?.wait()?;
