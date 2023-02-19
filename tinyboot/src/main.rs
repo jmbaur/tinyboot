@@ -23,6 +23,27 @@ use termion::input::TermRead;
 use termion::raw::IntoRawMode;
 use termion::{clear, cursor};
 
+// https://www.kernel.org/doc/html/v6.1/admin-guide/kernel-parameters.html
+fn parse_kernel_cmdline(cmdline: &str) -> Vec<&str> {
+    cmdline
+        .split_whitespace()
+        .filter_map(|param| {
+            if param.starts_with("console=") {
+                let mut value = param.trim_start_matches("console=");
+                if value.starts_with("brl,") {
+                    value = value.trim_start_matches("brl,");
+                };
+                if let Some(idx) = value.find(',') {
+                    value = &value[0..idx];
+                }
+                Some(value)
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
 fn flatten_entries(entries: Vec<MenuEntry>) -> Vec<(&str, &str)> {
     let mut flattened = Vec::new();
     for entry in entries {
@@ -263,6 +284,31 @@ fn choose_device(devices: &[PathBuf]) -> (Option<(&PathBuf, Chosen)>, Vec<&PathB
 fn real_main() -> anyhow::Result<()> {
     let cfg = Config::parse();
 
+    let cmdline = std::fs::read_to_string("/proc/cmdline")?;
+
+    let current_output = PathBuf::from("/dev/tty0");
+
+    let other_outputs: Vec<PathBuf> = parse_kernel_cmdline(&cmdline)
+        .into_iter()
+        .filter_map(|output| {
+            let mut path = PathBuf::from("/dev");
+            path.push(output);
+            if path == current_output {
+                None
+            } else {
+                Some(path)
+            }
+        })
+        .collect();
+
+    eprintln!("{:?}", current_output);
+    eprintln!("{:?}", other_outputs);
+
+    let current_output = std::fs::OpenOptions::new()
+        .write(true)
+        .open(current_output)?;
+    let other_output = std::fs::File::open(other_outputs.first().unwrap())?;
+
     fern::Dispatch::new()
         .format(|out, message, record| {
             out.finish(format_args!(
@@ -273,7 +319,8 @@ fn real_main() -> anyhow::Result<()> {
             ))
         })
         .level(cfg.log_level)
-        .chain(io::stderr())
+        .chain(current_output)
+        .chain(other_output)
         .apply()?;
 
     info!("running version {}", VERSION.unwrap_or("devel"));
@@ -312,5 +359,22 @@ fn main() -> ! {
             .expect("could not start /bin/sh")
             .wait()
             .expect("/bin/sh wasn't running");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn parse_kernel_cmdline() {
+        assert_eq!(super::parse_kernel_cmdline(""), Vec::<&str>::new());
+        assert_eq!(super::parse_kernel_cmdline("console=ttyS0"), vec!["ttyS0"]);
+        assert_eq!(
+            super::parse_kernel_cmdline("console=brl,tty7"),
+            vec!["tty7"]
+        );
+        assert_eq!(
+            super::parse_kernel_cmdline("console=ttyUSB0,115200"),
+            vec!["ttyUSB0"]
+        );
     }
 }

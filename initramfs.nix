@@ -1,5 +1,4 @@
 { tinybootLog ? "info"
-, tinybootTTY ? "tty0" # default to the current foreground virtual terminal
 , extraInit ? ""
 , extraInittab ? ""
 , kernel
@@ -34,7 +33,7 @@ let
     ::ctrlaltdel:/bin/reboot
     ::shutdown:/bin/umount -ar -t ext4,vfat
     ::restart:/init
-    ${tinybootTTY}::once:/bin/tinyboot --log-level=${tinybootLog}
+    ::once:/bin/tinyboot --log-level=${tinybootLog}
   '' + extraInittab);
 in
 makeInitrdNG {

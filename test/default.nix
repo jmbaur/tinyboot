@@ -10,10 +10,7 @@ let
       console = "ttyAMA0";
     };
   };
-  initramfs = tinyboot-initramfs.override {
-    tinybootLog = "debug";
-    tinybootTTY = systemConfig.console;
-  };
+  initramfs = tinyboot-initramfs.override { tinybootLog = "debug"; };
   disk = toString (nixosSystem.extendModules {
     modules = [ ({ boot.kernelParams = [ "console=${systemConfig.console}" ]; }) ];
   }).config.system.build.qcow2;
