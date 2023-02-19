@@ -157,7 +157,7 @@ fn boot(mut boot_loader: impl BootLoader) -> anyhow::Result<()> {
                         }
                         Key::Char('\n') => {
                             if user_input.is_empty() {
-                                return Ok(());
+                                anyhow::bail!("no choice selected");
                             }
 
                             let Ok(num) = str::parse::<usize>(&user_input) else {
@@ -178,9 +178,7 @@ fn boot(mut boot_loader: impl BootLoader) -> anyhow::Result<()> {
                                 anyhow::bail!("not a numeric input");
                             }
                         }
-                        Key::Ctrl('c') | Key::Ctrl('g') => {
-                            return Ok(());
-                        }
+                        Key::Ctrl('c') | Key::Ctrl('g') => anyhow::bail!("exit"),
                         _ => {}
                     };
                 }
@@ -197,7 +195,7 @@ fn boot(mut boot_loader: impl BootLoader) -> anyhow::Result<()> {
     let mountpoint = boot_loader.mountpoint();
 
     match selected_entry_id {
-        Some("shell") => {}
+        Some("shell") => unmount(mountpoint),
         Some("poweroff") => {
             unmount(mountpoint);
             unsafe { libc::sync() };
