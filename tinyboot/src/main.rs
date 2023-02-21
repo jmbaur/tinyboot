@@ -124,10 +124,7 @@ fn boot(mut boot_loader: impl BootLoader) -> anyhow::Result<()> {
     let selected_entry_id: Option<&str> = 'selection: {
         let mut stdout = io::stdout().into_raw_mode()?;
 
-        write!(
-            stdout,
-            "--------------------------------------------------------------------------------\r\n"
-        )?;
+        write!(stdout, "{}\r\n", "-".repeat(80))?;
         for (i, entry) in menu_entries.iter().enumerate() {
             write!(stdout, "{}:      {}\r\n", i + 1, entry.1)?;
         }
