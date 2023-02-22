@@ -10,20 +10,19 @@ syslinux/extlinux & grub.
 
 ### Coreboot
 
-1. Build the initramfs and kernel.
+Build the initramfs and kernel.
 
-   ```bash
-   nix build --output /tmp/initramfs github:jmbaur/tinyboot#initramfs
-   nix build --output /tmp/kernel github:jmbaur/tinyboot#kernel
-   ```
+```bash
+nix build --output /tmp/initramfs github:jmbaur/tinyboot#initramfs
+nix build --output /tmp/kernel github:jmbaur/tinyboot#kernel
+```
 
-1. Include the output paths into your coreboot build. Note that the kernel
-   filename is different for different architectures (for example x86_64 is
-   `bzImage`).
+Include the output paths into your coreboot build. Note that the kernel filename
+is different for different architectures (for example x86_64 is `bzImage`).
 
-   ```
-   # ...
-   CONFIG_PAYLOAD_LINUX=y
-   CONFIG_PAYLOAD_FILE="/tmp/kernel/bzImage"
-   CONFIG_LINUX_INITRD="/tmp/initramfs/initrd"
-   ```
+```
+# ...
+CONFIG_PAYLOAD_LINUX=y
+CONFIG_PAYLOAD_FILE="/tmp/kernel/bzImage"
+CONFIG_LINUX_INITRD="/tmp/initramfs/initrd"
+```
