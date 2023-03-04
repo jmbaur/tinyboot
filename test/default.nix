@@ -6,7 +6,7 @@ let
       console = "ttyS0";
     };
     aarch64-linux = {
-      qemuFlags = [ "-M" "virt" ];
+      qemuFlags = [ "-M" "virt" "-cpu" "cortex-a53" ];
       console = "ttyAMA0";
     };
   };
