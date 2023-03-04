@@ -40,7 +40,6 @@ in
 makeInitrdNG {
   compressor = "xz";
   contents = [
-    { object = "${kernel}/lib/modules"; symlink = "/lib/modules"; }
     { object = "${initrdEnv}/bin"; symlink = "/bin"; }
     { object = "${initrdEnv}/sbin"; symlink = "/sbin"; }
     { object = "${initrdEnv}/bin/busybox"; symlink = "/init"; }
