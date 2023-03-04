@@ -26,6 +26,7 @@ writeShellScript "tinyboot-test-run.bash" ''
   ${pkgsBuildBuild.qemu}/bin/qemu-system-${stdenv.hostPlatform.qemuArch} \
     ${toString systemConfig.qemuFlags} \
     -nographic \
+    -smp 2 \
     -m 2G \
     -kernel ${tinyboot-kernel}/${stdenv.hostPlatform.linux-kernel.target} \
     -initrd ${initramfs}/initrd \
