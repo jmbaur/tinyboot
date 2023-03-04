@@ -11,7 +11,7 @@ use syscalls::{syscall, Sysno};
 pub enum Error {
     BootConfigNotFound,
     BootEntryNotFound,
-    Evaluation(String),
+    Eval(grub::EvalError),
     InvalidMountpoint,
     Io(io::Error),
 }

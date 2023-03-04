@@ -2,10 +2,24 @@ use crate::{
     lexer::Lexer,
     parser::{
         AssignmentStatement, CommandArgument, CommandStatement, FunctionStatement, IfStatement,
-        Parser, Statement, WhileStatement,
+        Parser, ParserError, Statement, WhileStatement,
     },
 };
 use std::{collections::HashMap, io, path::Path, time::Duration};
+
+#[derive(thiserror::Error, Debug)]
+pub enum EvalError {
+    #[error("not a value")]
+    NotValue,
+    #[error("missing value")]
+    MissingValue,
+    #[error("parser error")]
+    Parser(ParserError),
+    #[error("IO error")]
+    Io(io::Error),
+    #[error("{0}")]
+    Eval(String),
+}
 
 fn interpolate_value(env: &impl GrubEnvironment, value: impl Into<String>) -> String {
     let mut final_value = String::new();
@@ -126,12 +140,12 @@ impl<T> GrubEvaluator<T>
 where
     T: GrubEnvironment,
 {
-    pub fn new(config_file: impl io::Read, env: T) -> Result<Self, String> {
-        let source = io::read_to_string(config_file).map_err(|e| e.to_string())?;
+    pub fn new(config_file: impl io::Read, env: T) -> Result<Self, EvalError> {
+        let source = io::read_to_string(config_file).map_err(EvalError::Io)?;
         Self::new_from_source(source, env)
     }
 
-    pub fn new_from_source(source: String, env: T) -> Result<Self, String> {
+    pub fn new_from_source(source: String, env: T) -> Result<Self, EvalError> {
         let mut s = Self {
             last_exit_code: 0,
             env,
@@ -141,7 +155,7 @@ where
 
         let mut parser = Parser::new(Lexer::new(&source));
 
-        let ast = parser.parse().map_err(|e| e.to_string())?;
+        let ast = parser.parse().map_err(EvalError::Parser)?;
 
         s.eval(ast.statements)?;
 
@@ -160,15 +174,15 @@ where
         interpolate_value(&self.env, value)
     }
 
-    fn get_entry(&self, command: &CommandStatement) -> Result<GrubEntry, String> {
+    fn get_entry(&self, command: &CommandStatement) -> Result<GrubEntry, EvalError> {
         let mut entry = GrubEntry::default();
 
         let mut args = command.args.iter().peekable();
 
-        let destructure_value = |cmd_arg: Option<&CommandArgument>| -> Result<String, String> {
+        let destructure_value = |cmd_arg: Option<&CommandArgument>| -> Result<String, EvalError> {
             let CommandArgument::Value(val) = cmd_arg
-                    .ok_or_else(|| "command argument is None".to_string())? else {
-                        return Err("not a CommandArgument::Value".to_string());
+                    .ok_or_else(|| EvalError::NotValue)? else {
+                        return Err(EvalError::MissingValue);
                     };
             Ok(val.to_string())
         };
@@ -238,13 +252,13 @@ where
         Ok(entry)
     }
 
-    fn add_entry(&mut self, command: CommandStatement) -> Result<(), String> {
+    fn add_entry(&mut self, command: CommandStatement) -> Result<(), EvalError> {
         let entry = self.get_entry(&command)?;
         self.menu.push(entry);
         Ok(())
     }
 
-    fn run_command(&mut self, command: CommandStatement) -> Result<(), String> {
+    fn run_command(&mut self, command: CommandStatement) -> Result<(), EvalError> {
         if let "menuentry" | "submenu" = command.command.as_str() {
             self.add_entry(command)?
         } else {
@@ -307,7 +321,7 @@ where
         self.env.set_env(assignment.name, assignment.value);
     }
 
-    fn run_if_statement(&mut self, stmt: IfStatement) -> Result<(), String> {
+    fn run_if_statement(&mut self, stmt: IfStatement) -> Result<(), EvalError> {
         self.run_command(stmt.condition.1)?;
         let success = if stmt.condition.0 {
             self.last_exit_code == 0
@@ -329,7 +343,7 @@ where
         Ok(())
     }
 
-    fn run_while_statement(&mut self, stmt: WhileStatement) -> Result<(), String> {
+    fn run_while_statement(&mut self, stmt: WhileStatement) -> Result<(), EvalError> {
         loop {
             self.run_command(stmt.condition.1.clone())?;
 
@@ -343,12 +357,12 @@ where
         Ok(())
     }
 
-    fn add_function(&mut self, function: FunctionStatement) -> Result<(), String> {
+    fn add_function(&mut self, function: FunctionStatement) -> Result<(), EvalError> {
         _ = self.functions.insert(function.name, function.body);
         Ok(())
     }
 
-    fn eval(&mut self, statements: Vec<Statement>) -> Result<(), String> {
+    fn eval(&mut self, statements: Vec<Statement>) -> Result<(), EvalError> {
         for stmt in statements {
             match stmt {
                 Statement::Assignment(assignment) => self.run_variable_assignment(assignment),
@@ -362,23 +376,26 @@ where
         Ok(())
     }
 
-    pub fn eval_boot_entry(&mut self, entry: &GrubEntry) -> Result<(&Path, &Path, &str), String> {
+    pub fn eval_boot_entry(
+        &mut self,
+        entry: &GrubEntry,
+    ) -> Result<(&Path, &Path, &str), EvalError> {
         let Some(consequence) = &entry.consequence else {
-            return Err("not a boot entry".to_string());
+            return Err(EvalError::Eval("not a boot entry".to_string()));
         };
         self.eval(consequence.to_vec())?;
         let linux = self
             .env
             .get_env("linux")
-            .ok_or_else(|| "no linux found".to_string())?;
+            .ok_or_else(|| EvalError::Eval("no linux found".to_string()))?;
         let initrd = self
             .env
             .get_env("initrd")
-            .ok_or_else(|| "no initrd found".to_string())?;
+            .ok_or_else(|| EvalError::Eval("no initrd found".to_string()))?;
         let cmdline = self
             .env
             .get_env("linux_cmdline")
-            .ok_or_else(|| "no cmdline found".to_string())?;
+            .ok_or_else(|| EvalError::Eval("no cmdline found".to_string()))?;
         Ok((Path::new(linux), Path::new(initrd), cmdline.as_str()))
     }
 

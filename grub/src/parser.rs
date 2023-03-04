@@ -1,10 +1,8 @@
-use thiserror::Error;
-
 use crate::lexer::Lexer;
 use crate::token::Token;
 use std::iter::Peekable;
 
-#[derive(Error, Debug)]
+#[derive(thiserror::Error, Debug)]
 pub enum ParserError {
     #[error("required next token is missing")]
     MissingNextToken,

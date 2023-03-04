@@ -513,7 +513,7 @@ impl GrubBootLoader {
                     .ok_or(Error::InvalidMountpoint)?,
             ),
         )
-        .map_err(Error::Evaluation)?;
+        .map_err(Error::Eval)?;
 
         Ok(Self {
             mountpoint: mountpoint.to_path_buf(),
@@ -618,7 +618,7 @@ impl BootLoader for GrubBootLoader {
 
         self.evaluator
             .eval_boot_entry(boot_entry)
-            .map_err(Error::Evaluation)
+            .map_err(Error::Eval)
     }
 }
 
