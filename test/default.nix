@@ -31,5 +31,5 @@ writeShellScript "tinyboot-test-run.bash" ''
     -kernel ${tinyboot-kernel}/${stdenv.hostPlatform.linux-kernel.target} \
     -initrd ${initramfs}/initrd \
     -append console=${systemConfig.console} \
-    -drive if=virtio,file=nixos-${name}.qcow2,format=qcow2,media=disk
+    -drive if=virtio,file=nixos-${name}.qcow2,format=qcow2,media=disk "$@"
 ''
