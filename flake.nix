@@ -13,7 +13,6 @@
   outputs = inputs: with inputs;
     let
       systems = [ "x86_64-linux" "aarch64-linux" ];
-      bootLoaders = [ "grub" "extlinux" ];
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f {
         inherit system;
         pkgs = import nixpkgs {
@@ -40,7 +39,7 @@
               modules = [ ./test/${extension}.nix ];
             }));
         in
-        nixpkgs.lib.foldAttrs (curr: acc: acc // curr) { } (map (b: extend b base) bootLoaders);
+        nixpkgs.lib.foldAttrs (curr: acc: acc // curr) { } (map (b: extend b base) [ "grub" "extlinux" "iso" ]);
       overlays.default = nixpkgs.lib.composeManyExtensions [
         rust-overlay.overlays.default
         (final: prev: {
@@ -68,7 +67,11 @@
             type = "app";
             program =
               if nixosSystem.config.nixpkgs.system == system then
-                toString (pkgs.callPackage ./test { inherit name nixosSystem; })
+                toString
+                  (pkgs.callPackage ./test {
+                    inherit name nixosSystem;
+                    isoSystem = self.nixosConfigurations."iso-${system}";
+                  })
               else
                 let
                   pkgsCross = {
@@ -76,7 +79,10 @@
                     aarch64-linux = pkgs.pkgsCross.aarch64-multiplatform;
                   }.${nixosSystem.config.nixpkgs.system};
                 in
-                toString (pkgsCross.callPackage ./test { inherit name nixosSystem; });
+                toString (pkgsCross.callPackage ./test {
+                  inherit name nixosSystem;
+                  isoSystem = self.nixosConfigurations."iso-${system}";
+                });
           })
         self.nixosConfigurations) // { default = self.apps.${system}."grub-${system}"; });
     };
