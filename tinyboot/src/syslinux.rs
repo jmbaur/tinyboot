@@ -22,11 +22,36 @@ pub struct SyslinuxBootLoader {
     timeout: Duration,
 }
 
+/// Perform a pass over the syslinux source and expand all include statements.
+fn expand_includes(
+    source: impl Into<String>,
+    syslinux_root: impl AsRef<Path>,
+) -> Result<String, Error> {
+    let source: String = source.into();
+
+    let mut result_source = String::new();
+
+    for line in source.lines() {
+        let lower_line = line.to_lowercase();
+        if lower_line.find("include ") == Some(0) {
+            let include_file = PathBuf::from(line["include ".len() - 1..].trim());
+            let include_file = syslinux_root.as_ref().join(include_file);
+            let include_source = fs::read_to_string(include_file)?;
+            result_source.push_str(&include_source);
+        } else {
+            result_source.push_str(line);
+        }
+        result_source.push('\n');
+    }
+
+    Ok(result_source)
+}
+
 fn syslinux_parse_from_source(
     source: impl Into<String>,
     syslinux_root: impl AsRef<Path>,
 ) -> Result<(Vec<BootEntry>, Duration), Error> {
-    let contents: String = source.into();
+    let source: String = source.into();
 
     let mut entries = vec![];
     let mut p = BootEntry::default();
@@ -34,7 +59,7 @@ fn syslinux_parse_from_source(
     let mut in_entry: Option<bool> = None;
     let mut timeout = Duration::from_secs(5);
 
-    for line in contents.lines() {
+    for line in source.lines() {
         let lower_line = line.to_lowercase();
 
         if !in_entry.unwrap_or_default() && lower_line.find("timeout ") == Some(0) {
@@ -117,7 +142,9 @@ fn syslinux_parse_from_source(
 
 fn syslinux_parse(config_file: impl AsRef<Path>) -> Result<(Vec<BootEntry>, Duration), Error> {
     let syslinux_root = config_file.as_ref().parent().unwrap();
-    syslinux_parse_from_source(fs::read_to_string(config_file.as_ref())?, syslinux_root)
+    let source = fs::read_to_string(config_file.as_ref())?;
+    let source = expand_includes(source, syslinux_root)?;
+    syslinux_parse_from_source(source, syslinux_root)
 }
 
 impl SyslinuxBootLoader {
