@@ -1,6 +1,7 @@
 pub(crate) mod boot_loader;
 pub(crate) mod fs;
 pub(crate) mod grub;
+pub(crate) mod shell;
 pub(crate) mod syslinux;
 pub(crate) mod util;
 
@@ -14,7 +15,6 @@ use log::{debug, error, info};
 use nix::{libc, mount};
 use std::io::{self, Write};
 use std::path::PathBuf;
-use std::process::Command;
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -306,11 +306,5 @@ fn main() -> ! {
         error!("{e}");
     }
 
-    loop {
-        Command::new("/bin/sh")
-            .spawn()
-            .expect("could not start /bin/sh")
-            .wait()
-            .expect("/bin/sh wasn't running");
-    }
+    shell::shell()
 }
