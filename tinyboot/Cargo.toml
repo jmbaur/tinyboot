@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.70"
-clap = { version = "4.1.13", default-features = false, features = [
+clap = { version = "4.2.1", default-features = false, features = [
   "std",
   "derive",
 ] }
