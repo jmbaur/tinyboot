@@ -2,7 +2,6 @@
 , tinybootTTY ? "tty0" # default to the current foreground virtual terminal
 , extraInit ? ""
 , extraInittab ? ""
-, kernel
 , makeInitrdNG
 , busybox
 , buildEnv
@@ -15,7 +14,30 @@ let
   initrdEnv = buildEnv {
     name = "initrd-env";
     paths = [
-      (busybox.override { enableStatic = true; useMusl = true; })
+      # starts with a .config crafted from allnoconfig, so we must enable all
+      # options we want manually.
+      (busybox.override {
+        useMusl = true;
+        enableStatic = true;
+        enableMinimal = true;
+        extraConfig = ''
+          CONFIG_FEATURE_INIT_MODIFY_CMDLINE y
+          CONFIG_FEATURE_INIT_QUIET y
+          CONFIG_FEATURE_INIT_SCTTY y
+          CONFIG_FEATURE_INIT_SYSLOG y
+          CONFIG_FEATURE_MDEV_CONF y
+          CONFIG_FEATURE_MDEV_DAEMON y
+          CONFIG_FEATURE_MDEV_EXEC y
+          CONFIG_FEATURE_MDEV_LOAD_FIRMWARE y
+          CONFIG_FEATURE_MDEV_RENAME y
+          CONFIG_FEATURE_MDEV_RENAME_REGEXP y
+          CONFIG_FEATURE_USE_INITTAB y
+          CONFIG_INIT y
+          CONFIG_MDEV y
+          CONFIG_MKDIR y
+          CONFIG_MOUNT y
+        '';
+      })
       tinyboot
     ];
   };
@@ -41,8 +63,7 @@ makeInitrdNG {
   compressor = "xz";
   contents = [
     { object = "${initrdEnv}/bin"; symlink = "/bin"; }
-    { object = "${initrdEnv}/sbin"; symlink = "/sbin"; }
-    { object = "${initrdEnv}/bin/busybox"; symlink = "/init"; }
+    { object = "${initrdEnv}/bin/init"; symlink = "/init"; }
     { object = "${rcS}"; symlink = "/etc/init.d/rcS"; }
     { object = "${inittab}"; symlink = "/etc/inittab"; }
   ];
