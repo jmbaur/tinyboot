@@ -13,13 +13,17 @@ fn run_command(input: String) {
     let mut split = input.split_whitespace();
     let Some(first) = split.next() else { return; };
 
+    // Busybox's /init signal handling:
+    // https://github.com/mirror/busybox/blob/2d4a3d9e6c1493a9520b907e07a41aca90cdfd94/init/init.c#L826
+    // SIGTERM => reboot
+    // SIGUSR2 => poweroff
     match first {
-        "reset" => {
-            let ret = unsafe { libc::reboot(libc::LINUX_REBOOT_CMD_RESTART) };
-            if ret < 0 {
-                eprintln!("{}", io::Error::last_os_error());
-            }
-        }
+        "reboot" => unsafe {
+            libc::kill(1, libc::SIGTERM);
+        },
+        "poweroff" => unsafe {
+            libc::kill(1, libc::SIGUSR2);
+        },
         "help" => print!("{USAGE_STRING}"),
         _ => eprintln!("unknown command: {}", first),
     }
