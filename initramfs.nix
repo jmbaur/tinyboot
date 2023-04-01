@@ -36,6 +36,8 @@ let
           CONFIG_MDEV y
           CONFIG_MKDIR y
           CONFIG_MOUNT y
+          CONFIG_REBOOT y
+          CONFIG_UMOUNT y
         '';
       })
       tinyboot
