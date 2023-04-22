@@ -43,6 +43,7 @@
       overlays.default = nixpkgs.lib.composeManyExtensions [
         rust-overlay.overlays.default
         (final: prev: {
+          wolftpm = prev.callPackage ./wolftpm.nix { };
           tinyboot = prev.callPackage ./. { inherit crane; };
           tinyboot-kernel = prev.callPackage ./kernel.nix { };
           tinyboot-initramfs = prev.callPackage ./initramfs.nix {
@@ -51,15 +52,16 @@
         })
       ];
       devShells = forAllSystems ({ pkgs, ... }: {
-        default = with pkgs; mkShell ({
+        default = with pkgs; mkShellNoCC ({
           inputsFrom = [ tinyboot ];
           nativeBuildInputs = [ bashInteractive grub2 cargo-insta ];
-        } // tinyboot.env);
+        } // lib.optionalAttrs (tinyboot?env) { inherit (tinyboot) env; });
       });
       packages = forAllSystems ({ pkgs, ... }: {
         default = pkgs.tinyboot;
         initramfs = pkgs.tinyboot-initramfs;
         kernel = pkgs.tinyboot-kernel;
+        wolftpm = pkgs.wolftpm;
       });
       apps = forAllSystems ({ pkgs, system, ... }: (pkgs.lib.mapAttrs'
         (name: nixosSystem:
