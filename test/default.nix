@@ -10,10 +10,7 @@ let
       console = "ttyAMA0";
     };
   };
-  initramfs = tinyboot-initramfs.override {
-    tinybootLog = "debug";
-    tinybootTTY = systemConfig.console;
-  };
+  initramfs = tinyboot-initramfs.override { debug = true; tinybootTTY = systemConfig.console; };
   disk = toString (nixosSystem.extendModules {
     modules = [ ({ boot.kernelParams = [ "console=${systemConfig.console}" ]; }) ];
   }).config.system.build.qcow2;
@@ -26,7 +23,7 @@ writeShellScript "tinyboot-test-run.bash" ''
   stop() { pkill swtpm; }
   trap stop EXIT SIGINT
 
-  mkdir /tmp/mytpm1
+  mkdir -p /tmp/mytpm1
   swtpm socket --tpmstate dir=/tmp/mytpm1 \
     --ctrl type=unixio,path=/tmp/mytpm1/swtpm-sock \
     --tpm2 &

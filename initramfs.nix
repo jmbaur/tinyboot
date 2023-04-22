@@ -1,26 +1,24 @@
-{ tinybootLog ? "info"
+{ debug ? false
 , tinybootTTY ? "tty0" # default to the current foreground virtual terminal
 , extraInit ? ""
 , extraInittab ? ""
+, lib
 , makeInitrdNG
 , busybox
 , buildEnv
 , tinyboot
 , writeScript
 , writeText
-, ...
 }:
 let
   initrdEnv = buildEnv {
     name = "initrd-env";
     paths = [
-      # starts with a .config crafted from allnoconfig, so we must enable all
-      # options we want manually.
       (busybox.override {
         useMusl = true;
         enableStatic = true;
-        enableMinimal = true;
-        extraConfig = ''
+        enableMinimal = !debug;
+        extraConfig = lib.optionalString (!debug) ''
           CONFIG_FEATURE_INIT_MODIFY_CMDLINE y
           CONFIG_FEATURE_INIT_QUIET y
           CONFIG_FEATURE_INIT_SCTTY y
@@ -58,7 +56,7 @@ let
     ::ctrlaltdel:/bin/reboot
     ::shutdown:/bin/umount -ar -t ext4,vfat
     ::restart:/init
-    ${tinybootTTY}::once:/bin/tinyboot --log-level=${tinybootLog}
+    ${tinybootTTY}::${if debug then "askfirst:/bin/sh" else "once:/bin/tinyboot --log-level=${if debug then "debug" else "info"}"}
   '' + extraInittab);
 in
 makeInitrdNG {

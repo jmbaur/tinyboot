@@ -4,9 +4,9 @@ use std::io::Write;
 use termion::input::TermRead;
 
 const USAGE_STRING: &str = r#"Usage:
-
-reset - reset the machine
-help  - print help output
+reboot   - restart the machine
+poweroff - poweroff the machine
+help     - print help output
 "#;
 
 fn run_command(input: String) {

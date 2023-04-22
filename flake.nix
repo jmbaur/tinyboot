@@ -46,9 +46,7 @@
           wolftpm = prev.callPackage ./wolftpm.nix { };
           tinyboot = prev.callPackage ./. { inherit crane; };
           tinyboot-kernel = prev.callPackage ./kernel.nix { };
-          tinyboot-initramfs = prev.callPackage ./initramfs.nix {
-            inherit (final) tinyboot; kernel = final.tinyboot-kernel;
-          };
+          tinyboot-initramfs = prev.callPackage ./initramfs.nix { inherit (final) tinyboot; };
         })
       ];
       devShells = forAllSystems ({ pkgs, ... }: {
