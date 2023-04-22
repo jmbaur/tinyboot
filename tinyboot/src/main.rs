@@ -3,6 +3,7 @@ pub(crate) mod fs;
 pub(crate) mod grub;
 pub(crate) mod shell;
 pub(crate) mod syslinux;
+pub(crate) mod tpm;
 pub(crate) mod util;
 
 use crate::boot_loader::{kexec_execute, kexec_load, BootLoader, MenuEntry};
@@ -212,7 +213,14 @@ fn boot(mut boot_loader: impl BootLoader) -> anyhow::Result<()> {
         _ => {
             let (kernel, initrd, cmdline) =
                 boot_loader.boot_info(selected_entry_id.map(|s| s.to_string()))?;
+
             kexec_load(kernel, initrd, cmdline)?;
+
+            #[cfg(feature = "measured-boot")]
+            {
+                tpm::measure_initrd(initrd)?;
+                log::info!("Measured initrd into PCR 9");
+            }
 
             let mountpoint = boot_loader.mountpoint();
             unmount(mountpoint);
