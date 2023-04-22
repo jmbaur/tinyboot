@@ -172,7 +172,6 @@ where
     F: Fn(&Path) -> bool,
 {
     Ok(fs::read_dir("/sys/class/block")?
-        .into_iter()
         .filter_map(|blk_dev| {
             let direntry = blk_dev.ok()?;
             let mut path = direntry.path();
