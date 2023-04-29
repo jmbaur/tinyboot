@@ -1,1 +1,1 @@
-#include "./src/tpm.h"
+#include <wolftpm/tpm2_wrap.h>
