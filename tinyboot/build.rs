@@ -1,18 +1,20 @@
 use std::{env, path::PathBuf};
 
 fn main() {
-    println!("cargo:rerun-if-changed=src/tpm.c");
     println!("cargo:rerun-if-changed=wrapper.h");
-
-    cc::Build::new()
-        .file("src/tpm.c")
-        .include("wolftpm")
-        .compile("tpm");
 
     let bindings = bindgen::Builder::default()
         .header("wrapper.h")
         .parse_callbacks(Box::new(bindgen::CargoCallbacks))
-        .allowlist_function("pcr_extend")
+        .allowlist_function("TPM2_GetRCString")
+        .allowlist_function("TPM2_PCR_Extend")
+        .allowlist_function("wolfTPM2_Cleanup")
+        .allowlist_function("wolfTPM2_Init")
+        .allowlist_type("PCR_Extend_In")
+        .allowlist_type("TPM_ALG_ID_T")
+        .allowlist_type("TPM_RC_T")
+        .allowlist_type("WOLFTPM2_DEV")
+        .allowlist_var("TPM_SHA256_DIGEST_SIZE")
         .generate()
         .expect("Unable to generate bindings");
 

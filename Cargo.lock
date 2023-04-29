@@ -551,7 +551,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bindgen",
- "cc",
  "clap",
  "fern",
  "grub",
