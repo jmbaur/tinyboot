@@ -22,7 +22,6 @@ stdenv.mkDerivation ({
   depsBuildBuild = [ pkgsBuildBuild.stdenv.cc ];
   nativeBuildInputs = [ python3 pkg-config ];
   buildInputs = [ flashrom openssl ];
-  patches = [ ./memory-layout.patch ];
   postPatch = ''
     patchShebangs util
   '';

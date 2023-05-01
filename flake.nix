@@ -49,6 +49,7 @@
           tinyboot-kernel = prev.callPackage ./kernel.nix { };
           tinyboot-initramfs = prev.callPackage ./initramfs.nix { inherit (final) tinyboot; };
           buildCoreboot = prev.callPackage ./coreboot.nix { inherit (final) flashrom; };
+          coreboot = prev.callPackage ./boards { inherit (final) buildCoreboot; };
         })
       ];
       devShells = forAllSystems ({ pkgs, ... }: {
@@ -57,6 +58,7 @@
           nativeBuildInputs = [ bashInteractive grub2 cargo-insta ];
         } // lib.optionalAttrs (tinyboot?env) { inherit (tinyboot) env; });
       });
+      legacyPackages = forAllSystems ({ pkgs, ... }: pkgs);
       packages = forAllSystems ({ pkgs, ... }: {
         default = pkgs.tinyboot;
         initramfs = pkgs.tinyboot-initramfs;
