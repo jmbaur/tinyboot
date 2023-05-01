@@ -43,10 +43,12 @@
       overlays.default = nixpkgs.lib.composeManyExtensions [
         rust-overlay.overlays.default
         (final: prev: {
+          flashrom = prev.callPackage ./flashrom.nix { };
           wolftpm = prev.callPackage ./wolftpm.nix { };
           tinyboot = prev.callPackage ./. { inherit crane; };
           tinyboot-kernel = prev.callPackage ./kernel.nix { };
           tinyboot-initramfs = prev.callPackage ./initramfs.nix { inherit (final) tinyboot; };
+          buildCoreboot = prev.callPackage ./coreboot.nix { inherit (final) flashrom; };
         })
       ];
       devShells = forAllSystems ({ pkgs, ... }: {
