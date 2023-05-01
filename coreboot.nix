@@ -1,5 +1,5 @@
 { lib, stdenv, fetchgit, pkgsBuildBuild, python3, pkg-config, flashrom, openssl, ... }:
-lib.makeOverridable ({ boardName, configfile, extraConfig ? "", ... }@args:
+lib.makeOverridable ({ board, configfile, extraConfig ? "", ... }@args:
 let
   toolchain-system = {
     x86_64 = "i386";
@@ -11,7 +11,7 @@ let
   toolchain = pkgsBuildBuild.coreboot-toolchain.${toolchain-system}.override { withAda = false; };
 in
 stdenv.mkDerivation ({
-  pname = "coreboot-${boardName}";
+  pname = "coreboot-${board}";
   inherit (toolchain) version;
   src = fetchgit {
     inherit (toolchain.src) url rev;
@@ -41,4 +41,4 @@ stdenv.mkDerivation ({
     cp build/coreboot.rom $out/coreboot.rom
     runHook postInstall
   '';
-} // (builtins.removeAttrs args [ "boardName" "configfile" "extraConfig" ])))
+} // (builtins.removeAttrs args [ "board" "configfile" "extraConfig" ])))

@@ -1,5 +1,5 @@
 { debug ? false
-, tinybootTTY ? "tty0" # default to the current foreground virtual terminal
+, tty ? "tty0" # default to the current foreground virtual terminal
 , extraInit ? ""
 , extraInittab ? ""
 , lib
@@ -56,7 +56,7 @@ let
     ::ctrlaltdel:/bin/reboot
     ::shutdown:/bin/umount -ar -t ext4,vfat
     ::restart:/init
-    ${tinybootTTY}::${if debug then "askfirst:/bin/sh" else "once:/bin/tinyboot --log-level=${if debug then "debug" else "info"}"}
+    ${tty}::${if debug then "askfirst:/bin/sh" else "once:/bin/tinyboot --log-level=${if debug then "debug" else "info"}"}
   '' + extraInittab);
 in
 makeInitrdNG {
