@@ -217,9 +217,9 @@ fn boot(mut boot_loader: impl BootLoader) -> anyhow::Result<()> {
             kexec_load(kernel, initrd, cmdline)?;
 
             #[cfg(feature = "measured-boot")]
-            match tpm::measure_initrd(initrd) {
-                Err(e) => log::error!("Failed to measure initrd into PCR 9: {e}"),
-                Ok(()) => log::info!("Measured initrd into PCR 9"),
+            match tpm::measure_boot(cmdline, initrd) {
+                Err(e) => log::error!("Failed to measure boot artifacts: {e}"),
+                Ok(()) => log::info!("Measured boot artifacts"),
             };
 
             let mountpoint = boot_loader.mountpoint();

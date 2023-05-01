@@ -8,6 +8,7 @@ mod bindings {
     include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 }
 
+pub const TPM_CMDLINE_PCR: u32 = 8;
 pub const TPM_INITRD_PCR: u32 = 9;
 
 fn get_rc_string(rc: i32) -> String {
@@ -25,10 +26,7 @@ fn bail_on_non_success(msg: &str, rc: i32) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn measure_initrd(initrd: &Path) -> anyhow::Result<()> {
-    let digest = sha256::try_digest(initrd)?;
-
-    let mut pcr_extend = unsafe { std::mem::zeroed::<bindings::PCR_Extend_In>() };
+pub fn measure_boot(cmdline: &str, initrd: &Path) -> anyhow::Result<()> {
     let mut dev: std::mem::MaybeUninit<bindings::WOLFTPM2_DEV> = std::mem::MaybeUninit::uninit();
 
     bail_on_non_success("wolfTPM2_Init", unsafe {
@@ -37,25 +35,33 @@ pub fn measure_initrd(initrd: &Path) -> anyhow::Result<()> {
 
     let mut dev = unsafe { dev.assume_init() };
 
-    pcr_extend.pcrHandle = TPM_INITRD_PCR;
-    pcr_extend.digests.count = 1;
-    pcr_extend.digests.digests[0].hashAlg =
-        u16::try_from(bindings::TPM_ALG_ID_T_TPM_ALG_SHA256).expect("constant value fits into u16");
+    for (pcr, digest) in [
+        (TPM_CMDLINE_PCR, sha256::digest(cmdline)),
+        (TPM_INITRD_PCR, sha256::try_digest(initrd)?),
+    ] {
+        let mut pcr_extend = unsafe { std::mem::zeroed::<bindings::PCR_Extend_In>() };
+        pcr_extend.pcrHandle = pcr;
+        pcr_extend.digests.count = 1;
+        pcr_extend.digests.digests[0].hashAlg =
+            u16::try_from(bindings::TPM_ALG_ID_T_TPM_ALG_SHA256)
+                .expect("constant value fits into u16");
 
-    let mut digest_bytes = [0u8; 64];
-    if digest.len() != digest_bytes.len() {
-        anyhow::bail!("invalid sha256 length")
+        let mut digest_bytes = [0u8; 64];
+        if digest.len() != digest_bytes.len() {
+            anyhow::bail!("invalid sha256 length")
+        }
+
+        digest
+            .bytes()
+            .zip(digest_bytes.iter_mut())
+            .for_each(|(b, ptr)| *ptr = b);
+        pcr_extend.digests.digests[0].digest.H = digest_bytes;
+
+        bail_on_non_success("TPM2_PCR_Extend", unsafe {
+            bindings::TPM2_PCR_Extend(&mut pcr_extend)
+        })?;
     }
 
-    digest
-        .bytes()
-        .zip(digest_bytes.iter_mut())
-        .for_each(|(b, ptr)| *ptr = b);
-    pcr_extend.digests.digests[0].digest.H = digest_bytes;
-
-    bail_on_non_success("TPM2_PCR_Extend", unsafe {
-        bindings::TPM2_PCR_Extend(&mut pcr_extend)
-    })?;
     bail_on_non_success("wolfTPM2_Cleanup", unsafe {
         bindings::wolfTPM2_Cleanup(&mut dev)
     })?;
