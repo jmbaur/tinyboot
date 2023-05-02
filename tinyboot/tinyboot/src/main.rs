@@ -212,22 +212,8 @@ fn boot(mut boot_loader: impl BootLoader) -> anyhow::Result<()> {
             }
         }
         _ => {
-            let boot_info = boot_loader.boot_info(selected_entry_id.map(|s| s.to_string()))?;
-
-            let mut kernel = boot_info.0;
-            let joined_kernel = mountpoint.join(kernel);
-            if !kernel.starts_with(&mountpoint) {
-                eprintln!("joined_kernel: {joined_kernel:?}");
-                kernel = &joined_kernel;
-            }
-
-            let mut initrd = boot_info.1;
-            let joined_initrd = mountpoint.join(initrd);
-            if !initrd.starts_with(&mountpoint) {
-                initrd = &joined_initrd;
-            }
-
-            let cmdline = boot_info.2;
+            let (kernel, initrd, cmdline) =
+                boot_loader.boot_info(selected_entry_id.map(|s| s.to_string()))?;
 
             kexec_load(kernel, initrd, cmdline)?;
 
@@ -267,6 +253,7 @@ fn choose_device(devices: &[PathBuf]) -> (Option<(&PathBuf, Chosen)>, Vec<&PathB
     // TODO(jared): allow for choosing the device to boot from, not just choosing the first device
     // that has a bootable configuration file.
     for device in devices {
+        eprintln!("device: {device:?}");
         if chosen.is_none() {
             if let Ok(grub_config) = GrubBootLoader::get_config(device) {
                 chosen = Some((device, Chosen::Grub(grub_config)));
