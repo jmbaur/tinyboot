@@ -48,7 +48,6 @@ let
     mount -t sysfs sysfs /sys
     mount -t tmpfs tmpfs /tmp
     mount -t devpts devpts /dev/pts
-    echo /bin/mdev > /sys/kernel/uevent_helper
   '' + extraInit + ''
     mdev -s
   '');

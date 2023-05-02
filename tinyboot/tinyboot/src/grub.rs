@@ -291,7 +291,6 @@ impl TinybootGrubEnvironment {
                 Some(found.as_path()),
                 &mountpoint,
                 Some(match fstype {
-                    FsType::Iso9660 => "iso9660",
                     FsType::Ext4(..) => "ext4",
                     FsType::Fat32(..) | FsType::Fat16(..) => "vfat",
                 }),
