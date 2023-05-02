@@ -1,5 +1,5 @@
 { lib, stdenv, fetchgit, pkgsBuildBuild, python3, pkg-config, flashrom, openssl, ... }:
-lib.makeOverridable ({ board, configfile, extraConfig ? "", ... }@args:
+lib.makeOverridable ({ board, configFile, extraConfig ? "", ... }@args:
 let
   toolchain-system = {
     x86_64 = "i386";
@@ -29,7 +29,7 @@ stdenv.mkDerivation ({
   passAsFile = [ "extraConfig" ];
   configurePhase = ''
     runHook preConfigure
-    cat ${configfile} > .config
+    cat ${configFile} > .config
     cat $extraConfigPath >> .config
     make oldconfig
     runHook postConfigure

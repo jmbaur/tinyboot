@@ -6,6 +6,15 @@ let
       type = lib.types.listOf lib.types.str;
       default = [ ];
     };
+    options.kernel = {
+      configFile = lib.mkOption {
+        type = lib.types.path;
+      };
+      extraConfig = lib.mkOption {
+        type = lib.types.lines;
+        default = "";
+      };
+    };
     options.coreboot = {
       configFile = lib.mkOption {
         type = lib.types.path;
@@ -36,18 +45,18 @@ lib.mapAttrs
   (board: _:
   let
     finalConfig = lib.evalModules { modules = [ module (import ./${board}/config.nix) ]; };
-    configfile = finalConfig.config.coreboot.configFile;
     tinybootExtraConfig = lib.attrByPath [ stdenv.hostPlatform.linuxArch ] "" {
       x86_64 = ''
-        CONFIG_PAYLOAD_FILE="${tinyboot-kernel}/bzImage"
+        CONFIG_PAYLOAD_FILE="${tinyboot-kernel.override { inherit (finalConfig.config.kernel) configFile; }}/bzImage"
         CONFIG_LINUX_INITRD="${tinyboot-initramfs.override { inherit (finalConfig.config.tinyboot) debug tty extraInit extraInittab; }}/initrd"
       '';
       # TODO(jared): aarch64 fit images
     };
-    extraConfig = finalConfig.config.coreboot.extraConfig + tinybootExtraConfig;
   in
   buildCoreboot {
-    inherit board configfile extraConfig;
+    inherit board;
+    inherit (finalConfig.config.coreboot) configFile;
+    extraConfig = finalConfig.config.coreboot.extraConfig + tinybootExtraConfig;
     meta = { inherit (finalConfig.config) platforms; };
   })
   (lib.filterAttrs (_: type: type == "directory") (builtins.readDir ./.))
