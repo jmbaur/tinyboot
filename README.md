@@ -1,28 +1,21 @@
 # tinyboot
 
-tinyboot is a kexec bootloader. The nix flake provides an initramfs derivation
-that can be used to create a LinuxBoot implementation. The initramfs uses a
-statically-built busybox along with busybox's `/init` to launch tinyboot and
-find boot configurations to kexec into. Current boot configuration types include
-syslinux/extlinux & grub.
+tinyboot is a linuxboot-like kexec bootloader for coreboot. Current boot
+configuration support includes syslinux/extlinux & grub. The nix flake provides
+coreboot builds for a few boards, contributions for more configs are welcome!
 
 ## Usage
 
-### Coreboot
+```bash
+nix build github:jmbaur/tinyboot#coreboot.<your_board>
+flashrom -w ./result/coreboot.rom -p <your_programmer>
+```
 
-Build the initramfs and kernel.
+## Hacking
+
+Get started with qemu:
 
 ```bash
-nix build --output /tmp/initramfs github:jmbaur/tinyboot#initramfs
-nix build --output /tmp/kernel github:jmbaur/tinyboot#kernel
-```
-
-Include the output paths into your coreboot build. Note that the kernel filename
-is different for different architectures (for example x86_64 is `bzImage`).
-
-```
-# ...
-CONFIG_PAYLOAD_LINUX=y
-CONFIG_PAYLOAD_FILE="/tmp/kernel/bzImage"
-CONFIG_LINUX_INITRD="/tmp/initramfs/initrd"
+nix build github:jmbaur/tinyboot#coreboot.qemu-x86_64
+qemu-system-x86_64 -nographic -bios ./result/coreboot.rom
 ```
