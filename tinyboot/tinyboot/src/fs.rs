@@ -15,11 +15,13 @@ pub enum FsType {
     Ext4(String, String),
     Fat32(String, String),
     Fat16(String, String),
+    Iso9660,
 }
 
 /// formatted as (start, length)
 /// FAT documentation: https://www.win.tue.nl/~aeb/linux/fs/fat/fat-1.html
 /// EXT4 documentation: https://ext4.wiki.kernel.org/index.php/Ext4_Disk_Layout
+/// ISO9660 documentation: https://www.loc.gov/preservation/digital/formats/fdd/fdd000348.shtml
 mod fs_constants {
     pub const FAT_MAGIC_SIGNATURE_START: u64 = 510;
     pub const FAT_MAGIC_SIGNATURE_LENGTH: usize = 2;
@@ -45,6 +47,11 @@ mod fs_constants {
     pub const EXT4_UUID_LENGTH: usize = 16;
     pub const EXT4_LABEL_START: u64 = EXT4_SUPERBLOCK_START + 0x78;
     pub const EXT4_LABEL_LENGTH: usize = 16;
+
+    pub const ISO9660_MAGIC_SIGNATURE_START_1: u64 = 0x8001;
+    pub const ISO9660_MAGIC_SIGNATURE_START_2: u64 = 0x8801;
+    pub const ISO9660_MAGIC_SIGNATURE_START_3: u64 = 0x9001;
+    pub const ISO9660_MAGIC_SIGNATURE_LENGTH: usize = 5;
 }
 
 pub fn detect_fs_type(p: impl AsRef<Path>) -> anyhow::Result<FsType> {
@@ -155,6 +162,25 @@ pub fn detect_fs_type(p: impl AsRef<Path>) -> anyhow::Result<FsType> {
                     .to_string();
             }
             return Ok(FsType::Ext4(uuid.to_string(), label));
+        }
+    }
+
+    // iso9660 detection
+    {
+        for start in [
+            fs_constants::ISO9660_MAGIC_SIGNATURE_START_1,
+            fs_constants::ISO9660_MAGIC_SIGNATURE_START_2,
+            fs_constants::ISO9660_MAGIC_SIGNATURE_START_3,
+        ] {
+            f.seek(io::SeekFrom::Start(start))?;
+            let mut buffer = [0; fs_constants::ISO9660_MAGIC_SIGNATURE_LENGTH];
+            f.read_exact(&mut buffer)?;
+            if std::str::from_utf8(&buffer)
+                .map(|res| res == "CD001")
+                .unwrap_or(false)
+            {
+                return Ok(FsType::Iso9660);
+            }
         }
     }
 
