@@ -8,7 +8,7 @@
           fitimage = buildFitImage {
             boardName = "qemu-aarch64";
             kernel = tinyboot-kernel;
-            initramfs = "${tinyboot-initramfs.override { tinybootTTY = "ttyAMA0"; }}/initrd";
+            initramfs = "${tinyboot-initramfs.override { tty = "ttyAMA0"; }}/initrd";
             # NOTE: See here as to why qemu needs to be in depsBuildBuild and
             # not nativeBuildInputs:
             # https://github.com/NixOS/nixpkgs/pull/146583
