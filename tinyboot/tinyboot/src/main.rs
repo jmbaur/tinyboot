@@ -63,6 +63,7 @@ fn get_devices() -> anyhow::Result<Vec<PathBuf>> {
                 Some(dev.as_path()),
                 &mountpoint,
                 Some(match fstype {
+                    FsType::Iso9660 => "iso9660",
                     FsType::Ext4(..) => "ext4",
                     FsType::Fat32(..) | FsType::Fat16(..) => "vfat",
                 }),
@@ -190,12 +191,12 @@ fn boot(mut boot_loader: impl BootLoader) -> anyhow::Result<()> {
         }
     };
 
-    let mountpoint = boot_loader.mountpoint();
+    let mountpoint = boot_loader.mountpoint().to_owned();
 
     match selected_entry_id {
-        Some("shell") => unmount(mountpoint),
+        Some("shell") => unmount(&mountpoint),
         Some("poweroff") => {
-            unmount(mountpoint);
+            unmount(&mountpoint);
             unsafe { libc::sync() };
             let ret = unsafe { libc::reboot(libc::LINUX_REBOOT_CMD_POWER_OFF) };
             if ret < 0 {
@@ -203,7 +204,7 @@ fn boot(mut boot_loader: impl BootLoader) -> anyhow::Result<()> {
             }
         }
         Some("reboot") => {
-            unmount(mountpoint);
+            unmount(&mountpoint);
             unsafe { libc::sync() };
             let ret = unsafe { libc::reboot(libc::LINUX_REBOOT_CMD_RESTART) };
             if ret < 0 {
