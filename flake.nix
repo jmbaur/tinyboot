@@ -60,12 +60,6 @@
         } // lib.optionalAttrs (tinyboot?env) { inherit (tinyboot) env; });
       });
       legacyPackages = forAllSystems ({ pkgs, ... }: pkgs);
-      packages = forAllSystems ({ pkgs, ... }: {
-        default = pkgs.tinyboot;
-        initramfs = pkgs.tinyboot-initramfs;
-        kernel = pkgs.tinyboot-kernel;
-        wolftpm = pkgs.wolftpm;
-      });
       apps = forAllSystems ({ pkgs, system, ... }: (pkgs.lib.mapAttrs'
         (name: nixosSystem:
           pkgs.lib.nameValuePair name {
