@@ -45,7 +45,7 @@
         (final: prev: {
           flashrom = prev.callPackage ./flashrom.nix { };
           wolftpm = prev.callPackage ./wolftpm.nix { };
-          tinyboot = prev.callPackage ./. { inherit crane; };
+          tinyboot = prev.callPackage ./tinyboot { inherit crane; };
           tinyboot-kernel = prev.callPackage ./kernel.nix { };
           tinyboot-initramfs = prev.callPackage ./initramfs.nix { };
           buildFitImage = prev.callPackage ./fitimage { };

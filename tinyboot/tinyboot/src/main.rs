@@ -252,6 +252,7 @@ fn choose_device(devices: &[PathBuf]) -> (Option<(&PathBuf, Chosen)>, Vec<&PathB
     // TODO(jared): allow for choosing the device to boot from, not just choosing the first device
     // that has a bootable configuration file.
     for device in devices {
+        eprintln!("device: {device:?}");
         if chosen.is_none() {
             if let Ok(grub_config) = GrubBootLoader::get_config(device) {
                 chosen = Some((device, Chosen::Grub(grub_config)));

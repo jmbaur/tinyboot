@@ -16,7 +16,7 @@ let
   isoDrv = isoSystem.config.system.build.isoImage;
   iso = "${isoDrv}/iso/${isoDrv.isoName}";
   corebootROM = coreboot."qemu-${stdenv.hostPlatform.qemuArch}";
-  qemu = if stdenv.hostPlatform == stdenv.buildPlatform then "qemu-kvm" else "qemu-system-${stdenv.hostPlatform.qemuArch}";
+  qemuFlags = systemConfig.qemuFlags ++ lib.optional (stdenv.hostPlatform == stdenv.buildPlatform) "-enable-kvm";
 in
 writeShellScript "tinyboot-test-run.bash" ''
   export PATH=$PATH:${lib.makeBinPath (with pkgsBuildBuild; [ qemu swtpm ])}
@@ -37,8 +37,7 @@ writeShellScript "tinyboot-test-run.bash" ''
     dd if=${disk}/nixos.qcow2 of=nixos-${name}.qcow2
   fi
 
-  ${qemu} \
-    ${toString systemConfig.qemuFlags} \
+  qemu-system-${stdenv.hostPlatform.qemuArch} ${toString qemuFlags} \
     -nographic \
     -smp 2 \
     -m 2G \

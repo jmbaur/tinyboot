@@ -15,19 +15,9 @@ let
     PKG_CONFIG_ALL_STATIC = true;
   };
   craneLib = crane.lib.${stdenv.buildPlatform.system};
-  sourceFilter = src:
-    let
-      notSrc = path: _type: builtins.match "src" path == null;
-      notSrcOrCargo = path: type:
-        (notSrc path type) || (craneLib.filterCargoSources path type);
-    in
-    lib.cleanSourceWith {
-      src = lib.cleanSource src;
-      filter = notSrcOrCargo;
-    };
 in
 (craneLib.overrideToolchain toolchain).buildPackage ({
-  src = sourceFilter ./.;
+  src = ./.;
   cargoToml = ./tinyboot/Cargo.toml;
   depsBuildBuild = lib.optional isCrossBuild qemu;
   nativeBuildInputs = [ rustPlatform.bindgenHook toolchain pkg-config dosfstools e2fsprogs ];
