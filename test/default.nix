@@ -38,6 +38,7 @@ writeShellScript "tinyboot-test-run.bash" ''
   fi
 
   qemu-system-${stdenv.hostPlatform.qemuArch} ${toString qemuFlags} \
+    -no-reboot \
     -nographic \
     -smp 2 \
     -m 2G \

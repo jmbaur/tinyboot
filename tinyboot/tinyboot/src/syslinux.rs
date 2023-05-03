@@ -211,15 +211,19 @@ impl BootLoader for SyslinuxBootLoader {
             .collect())
     }
 
-    fn boot_info(&mut self, entry_id: Option<String>) -> Result<(&Path, &Path, &str), Error> {
-        if let Some(entry) = self.entries.iter().find(|entry| {
+    fn boot_info(&mut self, entry_id: Option<String>) -> Result<(PathBuf, PathBuf, String), Error> {
+        if let Some(entry) = self.entries.iter().find(|&entry| {
             if let Some(entry_id) = &entry_id {
                 &entry.name == entry_id
             } else {
                 entry.default
             }
         }) {
-            Ok((&entry.kernel, &entry.initrd, &entry.cmdline))
+            Ok((
+                entry.kernel.to_owned(),
+                entry.initrd.to_owned(),
+                entry.cmdline.to_owned(),
+            ))
         } else {
             Err(Error::BootEntryNotFound)
         }

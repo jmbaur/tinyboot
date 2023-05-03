@@ -162,10 +162,10 @@ impl TinybootGrubEnvironment {
             return Err(GrubEnvironmentError::InvalidArgs);
         };
 
-        let kernel = kernel.replace(|c| matches!(c, '(' | ')'), "");
-
+        let prefix = self.env.get("prefix");
+        debug!("prefix: {:?}", prefix);
         trace!("setting 'linux' to '{}'", kernel);
-        self.env.insert("linux".to_string(), kernel);
+        self.env.insert("linux".to_string(), kernel.to_string());
 
         let mut cmdline = Vec::new();
         for next in args {
@@ -571,7 +571,7 @@ impl BootLoader for GrubBootLoader {
 
     /// The entry ID could be the ID or name of a boot entry, submenu, or boot entry nested within
     /// a submenu.
-    fn boot_info(&mut self, entry_id: Option<String>) -> Result<(&Path, &Path, &str), Error> {
+    fn boot_info(&mut self, entry_id: Option<String>) -> Result<(PathBuf, PathBuf, String), Error> {
         let all_entries = self
             .evaluator
             .menu
@@ -617,9 +617,28 @@ impl BootLoader for GrubBootLoader {
         })
         .ok_or(Error::BootEntryNotFound)?;
 
-        self.evaluator
+        let boot_info = self
+            .evaluator
             .eval_boot_entry(boot_entry)
-            .map_err(Error::Eval)
+            .map_err(Error::Eval)?;
+
+        let mut kernel = boot_info.0.to_path_buf();
+        let joined_kernel = self
+            .mountpoint
+            .join(kernel.strip_prefix("/").unwrap_or(&kernel));
+        if !kernel.starts_with(&self.mountpoint) {
+            kernel = joined_kernel;
+        }
+
+        let mut initrd = boot_info.1.to_path_buf();
+        let joined_initrd = self
+            .mountpoint
+            .join(initrd.strip_prefix("/").unwrap_or(&initrd));
+        if !initrd.starts_with(&self.mountpoint) {
+            initrd = joined_initrd;
+        }
+
+        Ok((kernel, initrd, boot_info.2.to_string()))
     }
 }
 

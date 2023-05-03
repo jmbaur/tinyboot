@@ -28,11 +28,28 @@ fn interpolate_value(env: &impl GrubEnvironment, value: impl Into<String>) -> St
     let mut peeker = value.chars().peekable();
     let mut interpolating = false;
     let mut needs_closing_brace = false;
+    let mut needs_closing_paren = false;
     let mut interpolated_identifier = String::new();
 
     loop {
         let next = peeker.next();
         match next {
+            Some('(') => {
+                if peeker.peek().map(|&c| c == '$').unwrap_or_default() {
+                    needs_closing_paren = true;
+                } else {
+                    needs_closing_paren = false;
+                    final_value.push(next.expect("next is not None"));
+                }
+            }
+            Some(')') => {
+                if interpolating && needs_closing_paren {
+                    interpolating = false;
+                    needs_closing_paren = false;
+                    let Some(interpolated_value) = env.get_env(&interpolated_identifier) else { continue; };
+                    final_value.push_str(interpolated_value);
+                }
+            }
             Some('$') => {
                 interpolating = true;
                 if peeker.peek().map(|&c| c == '{').unwrap_or_default() {
@@ -54,7 +71,7 @@ fn interpolate_value(env: &impl GrubEnvironment, value: impl Into<String>) -> St
             }
             Some(char) => {
                 if interpolating {
-                    if needs_closing_brace {
+                    if needs_closing_brace || needs_closing_paren {
                         interpolated_identifier.push(char);
                     } else if
                     // TODO(jared): confirm grub identifiers must be ascii alphanumeric
@@ -450,12 +467,9 @@ mod tests {
                 &env,
                 "($root)//kernels/1pzgainlvg5hcdf8ngjficg3x39j63gv-linux-6.0.15-bzImage"
             ),
-            "(/dev/vda)//kernels/1pzgainlvg5hcdf8ngjficg3x39j63gv-linux-6.0.15-bzImage".to_string()
+            "/dev/vda//kernels/1pzgainlvg5hcdf8ngjficg3x39j63gv-linux-6.0.15-bzImage".to_string()
         );
-        assert_eq!(
-            super::interpolate_value(&env, "($drive1)"),
-            "()".to_string()
-        );
+        assert_eq!(super::interpolate_value(&env, "($drive1)"), "".to_string());
     }
 
     #[test]

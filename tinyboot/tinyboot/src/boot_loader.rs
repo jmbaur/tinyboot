@@ -2,7 +2,7 @@ use log::debug;
 use nix::libc;
 use std::fmt::{self, Display};
 use std::os::fd::AsRawFd;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{self, Duration};
 use std::{error, ffi, fs, io, thread};
 use syscalls::{syscall, Sysno};
@@ -47,7 +47,7 @@ pub trait BootLoader {
 
     /// If the entry ID is None, the boot loader should choose the default boot entry.
     /// The Ok() result tuple looks like: (kernel, initrd, cmdline)
-    fn boot_info(&mut self, entry_id: Option<String>) -> Result<(&Path, &Path, &str), Error>;
+    fn boot_info(&mut self, entry_id: Option<String>) -> Result<(PathBuf, PathBuf, String), Error>;
 }
 
 pub fn kexec_load(kernel: &Path, initrd: &Path, cmdline: &str) -> io::Result<()> {

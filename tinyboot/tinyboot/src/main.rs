@@ -215,10 +215,10 @@ fn boot(mut boot_loader: impl BootLoader) -> anyhow::Result<()> {
             let (kernel, initrd, cmdline) =
                 boot_loader.boot_info(selected_entry_id.map(|s| s.to_string()))?;
 
-            kexec_load(kernel, initrd, cmdline)?;
+            kexec_load(&kernel, &initrd, &cmdline)?;
 
             #[cfg(feature = "measured-boot")]
-            match tpm::measure_boot(cmdline, initrd) {
+            match tpm::measure_boot(&cmdline, &initrd) {
                 Err(e) => log::error!("Failed to measure boot artifacts: {e}"),
                 Ok(()) => log::info!("Measured boot artifacts"),
             };
