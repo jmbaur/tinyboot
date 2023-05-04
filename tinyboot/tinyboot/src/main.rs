@@ -1,7 +1,6 @@
 pub(crate) mod boot_loader;
 pub(crate) mod fs;
 pub(crate) mod grub;
-pub(crate) mod shell;
 pub(crate) mod syslinux;
 pub(crate) mod tpm;
 pub(crate) mod util;
@@ -15,7 +14,9 @@ use log::LevelFilter;
 use log::{debug, error, info};
 use nix::{libc, mount};
 use std::io::{self, Write};
+use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
+use std::process::Command;
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -270,24 +271,6 @@ fn choose_device(devices: &[PathBuf]) -> (Option<(&PathBuf, Chosen)>, Vec<&PathB
 }
 
 fn real_main() -> anyhow::Result<()> {
-    let cfg = Config::parse();
-
-    fern::Dispatch::new()
-        .format(|out, message, record| {
-            out.finish(format_args!(
-                "[{}][{}] {}",
-                record.target(),
-                record.level(),
-                message
-            ))
-        })
-        .level(cfg.log_level)
-        .chain(io::stderr())
-        .apply()?;
-
-    info!("running version {}", VERSION.unwrap_or("devel"));
-    debug!("config: {:?}", cfg);
-
     let devices = get_devices()?;
     let (chosen, unchosen) = choose_device(&devices);
 
@@ -310,10 +293,47 @@ fn real_main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn main() -> ! {
-    if let Err(e) = real_main() {
-        error!("{e}");
-    }
+pub fn shell() -> anyhow::Result<()> {
+    let mut cmd = Command::new("/bin/sh");
+    let cmd = cmd
+        .env_clear()
+        .current_dir("/home/tinyuser")
+        .uid(1000)
+        .gid(1000)
+        .arg("-l");
+    let mut child = cmd.spawn()?;
+    child.wait()?;
 
-    shell::shell()
+    Ok(())
+}
+
+fn main() -> anyhow::Result<()> {
+    let cfg = Config::parse();
+
+    fern::Dispatch::new()
+        .format(|out, message, record| {
+            out.finish(format_args!(
+                "[{}][{}] {}",
+                record.target(),
+                record.level(),
+                message
+            ))
+        })
+        .level(cfg.log_level)
+        .chain(io::stderr())
+        .apply()
+        .expect("failed to setup logging");
+
+    info!("running version {}", VERSION.unwrap_or("devel"));
+    debug!("config: {:?}", cfg);
+
+    loop {
+        if let Err(e) = real_main() {
+            error!("{e}");
+        }
+
+        if let Err(e) = shell() {
+            error!("{e}");
+        }
+    }
 }

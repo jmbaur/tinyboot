@@ -13,33 +13,7 @@
 let
   initrdEnv = buildEnv {
     name = "initrd-env";
-    paths = [
-      (busybox.override {
-        useMusl = true;
-        enableStatic = true;
-        enableMinimal = !debug;
-        extraConfig = lib.optionalString (!debug) ''
-          CONFIG_FEATURE_INIT_MODIFY_CMDLINE y
-          CONFIG_FEATURE_INIT_QUIET y
-          CONFIG_FEATURE_INIT_SCTTY y
-          CONFIG_FEATURE_INIT_SYSLOG y
-          CONFIG_FEATURE_MDEV_CONF y
-          CONFIG_FEATURE_MDEV_DAEMON y
-          CONFIG_FEATURE_MDEV_EXEC y
-          CONFIG_FEATURE_MDEV_LOAD_FIRMWARE y
-          CONFIG_FEATURE_MDEV_RENAME y
-          CONFIG_FEATURE_MDEV_RENAME_REGEXP y
-          CONFIG_FEATURE_USE_INITTAB y
-          CONFIG_INIT y
-          CONFIG_MDEV y
-          CONFIG_MKDIR y
-          CONFIG_MOUNT y
-          CONFIG_REBOOT y
-          CONFIG_UMOUNT y
-        '';
-      })
-      tinyboot
-    ];
+    paths = [ (busybox.override { useMusl = true; enableStatic = true; }) tinyboot ];
   };
   rcS = writeScript "rcS" (''
     #!/bin/sh
@@ -49,6 +23,8 @@ let
     mount -t tmpfs tmpfs /tmp
     mount -t devpts devpts /dev/pts
     echo /bin/mdev > /sys/kernel/uevent_helper
+    mkdir -p /home/tinyuser
+    chown -R tinyuser:tinyuser /home/tinyuser
   '' + extraInit + ''
     mdev -s
   '');
@@ -57,15 +33,26 @@ let
     ::ctrlaltdel:/bin/reboot
     ::shutdown:/bin/umount -ar -t ext4,vfat
     ::restart:/init
-    ${tty}::${if debug then "askfirst:/bin/sh" else "once:/bin/tinyboot --log-level=${if debug then "debug" else "info"}"}
+    ${tty}::once:/bin/tinyboot --log-level=${if debug then "debug" else "info"}
   '' + extraInittab);
+  passwd = writeText "passwd" ''
+    root:x:0:0:System administrator:/root:/bin/sh
+    tinyuser:x:1000:1000:TinyUser:/home/tinyuser:/bin/sh
+  '';
+  group = writeText "passwd" ''
+    root:x:0:
+    tinyuser:x:1000:
+  '';
 in
 makeInitrdNG {
   compressor = "xz";
   contents = [
     { object = "${initrdEnv}/bin"; symlink = "/bin"; }
+    { object = "${initrdEnv}/bin"; symlink = "/sbin"; }
     { object = "${initrdEnv}/bin/init"; symlink = "/init"; }
     { object = "${rcS}"; symlink = "/etc/init.d/rcS"; }
     { object = "${inittab}"; symlink = "/etc/inittab"; }
+    { object = "${passwd}"; symlink = "/etc/passwd"; }
+    { object = "${group}"; symlink = "/etc/group"; }
   ];
 }
