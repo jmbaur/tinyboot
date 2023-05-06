@@ -1,6 +1,6 @@
 { pkgs, ... }: {
   platforms = [ "x86_64-linux" ];
-  kernel.configFile = pkgs.concatText "volteer-elemi-kernel.config" [ ../generic-kernel.config ../x86_64-kernel.config ../chromebook-kernel.config ];
+  kernel.configFile = pkgs.concatText "volteer-elemi-kernel.config" [ ../generic-kernel.config ../x86_64-kernel.config ../chromebook-kernel.config ./kernel.config ];
   coreboot = {
     configFile = ./coreboot.config;
     extraConfig =
