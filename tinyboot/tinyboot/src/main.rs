@@ -327,6 +327,11 @@ fn main() -> anyhow::Result<()> {
     info!("running version {}", VERSION.unwrap_or("devel"));
     debug!("config: {:?}", cfg);
 
+    if (unsafe { nix::libc::getuid() }) != 0 {
+        error!("tinyboot not running as root");
+        return Ok(());
+    }
+
     loop {
         if let Err(e) = real_main() {
             error!("{e}");
