@@ -175,7 +175,7 @@ impl BlsBootLoader {
                 entry.initrd = PathBuf::from(initrd);
             }
             if line.starts_with("options") {
-                let Some(options) = line.split_whitespace().last() else { continue; };
+                let options = line["options".len() - 1..].trim();
                 entry.options = Some(options.to_string());
             }
             if line.starts_with("devicetree") {
