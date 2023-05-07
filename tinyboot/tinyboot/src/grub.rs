@@ -486,10 +486,12 @@ impl GrubBootLoader {
     pub fn get_config(mountpoint: &Path) -> Result<PathBuf, Error> {
         for path in ["boot/grub/grub.cfg", "grub/grub.cfg"] {
             let search_path = mountpoint.join(path);
+
             debug!(
                 "searching for grub configuration at {}",
                 search_path.display()
             );
+
             if fs::metadata(search_path).is_ok() {
                 return Ok(PathBuf::from(path));
             }

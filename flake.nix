@@ -39,7 +39,7 @@
               modules = [ ./test/${extension}.nix ];
             }));
         in
-        nixpkgs.lib.foldAttrs (curr: acc: acc // curr) { } (map (b: extend b base) [ "grub" "extlinux" "iso" ]);
+        nixpkgs.lib.foldAttrs (curr: acc: acc // curr) { } (map (b: extend b base) [ "bls" "grub" "extlinux" "iso" ]);
       overlays.default = nixpkgs.lib.composeManyExtensions [
         rust-overlay.overlays.default
         (final: prev: {
@@ -83,6 +83,6 @@
                   isoSystem = self.nixosConfigurations."iso-${system}";
                 });
           })
-        self.nixosConfigurations) // { default = self.apps.${system}."grub-${system}"; });
+        self.nixosConfigurations) // { default = self.apps.${system}."bls-${system}"; });
     };
 }
