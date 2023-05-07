@@ -12,6 +12,7 @@ pub enum Error {
     BootConfigNotFound,
     BootEntryNotFound,
     Eval(grub::EvalError),
+    InvalidEntry,
     InvalidMountpoint,
     Io(io::Error),
 }

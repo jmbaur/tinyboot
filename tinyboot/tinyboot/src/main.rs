@@ -1,3 +1,4 @@
+pub(crate) mod bls;
 pub(crate) mod boot_loader;
 pub(crate) mod fs;
 pub(crate) mod grub;
@@ -5,6 +6,7 @@ pub(crate) mod syslinux;
 pub(crate) mod tpm;
 pub(crate) mod util;
 
+use crate::bls::BlsBootLoader;
 use crate::boot_loader::{kexec_execute, kexec_load, BootLoader, MenuEntry};
 use crate::fs::{detect_fs_type, find_block_device, unmount, FsType};
 use crate::grub::GrubBootLoader;
@@ -243,6 +245,7 @@ struct Config {
 const VERSION: Option<&'static str> = option_env!("version");
 
 enum Chosen {
+    Bls(PathBuf),
     Grub(PathBuf),
     Syslinux(PathBuf),
 }
@@ -255,7 +258,10 @@ fn choose_device(devices: &[PathBuf]) -> (Option<(&PathBuf, Chosen)>, Vec<&PathB
     // that has a bootable configuration file.
     for device in devices {
         if chosen.is_none() {
-            if let Ok(grub_config) = GrubBootLoader::get_config(device) {
+            if let Ok(bls_config) = BlsBootLoader::get_config(device) {
+                chosen = Some((device, Chosen::Bls(bls_config)));
+                continue;
+            } else if let Ok(grub_config) = GrubBootLoader::get_config(device) {
                 chosen = Some((device, Chosen::Grub(grub_config)));
                 continue;
             } else if let Ok(syslinux_config) = SyslinuxBootLoader::get_config(device) {
@@ -270,7 +276,7 @@ fn choose_device(devices: &[PathBuf]) -> (Option<(&PathBuf, Chosen)>, Vec<&PathB
     (chosen, unchosen)
 }
 
-fn real_main() -> anyhow::Result<()> {
+fn boot_logic() -> anyhow::Result<()> {
     let devices = get_devices()?;
     let (chosen, unchosen) = choose_device(&devices);
 
@@ -280,6 +286,7 @@ fn real_main() -> anyhow::Result<()> {
 
     if let Some((mountpoint, chosen)) = chosen {
         if let Err(e) = match chosen {
+            Chosen::Bls(config) => boot(BlsBootLoader::new(mountpoint, &config)?),
             Chosen::Grub(config) => boot(GrubBootLoader::new(mountpoint, &config)?),
             Chosen::Syslinux(config) => boot(SyslinuxBootLoader::new(mountpoint, &config)?),
         } {
@@ -333,7 +340,7 @@ fn main() -> anyhow::Result<()> {
     }
 
     loop {
-        if let Err(e) = real_main() {
+        if let Err(e) = boot_logic() {
             error!("{e}");
         }
 
