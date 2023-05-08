@@ -1,6 +1,7 @@
 use crate::boot_loader::{BootLoader, Error, MenuEntry};
 use log::{debug, error};
 use std::{
+    cmp::Ordering,
     fs,
     path::{Path, PathBuf},
     str::FromStr,
@@ -122,6 +123,14 @@ impl BlsBootLoader {
 
             entries.push(parsed_entry);
         }
+
+        entries.sort_by(|a, b| {
+            if a.name < b.name {
+                Ordering::Greater
+            } else {
+                Ordering::Less
+            }
+        });
 
         Ok(BlsBootLoader {
             entries,
