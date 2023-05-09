@@ -8,7 +8,8 @@ use std::{
     time::Duration,
 };
 
-enum EfiArch {
+#[derive(Debug, PartialEq)]
+pub enum EfiArch {
     Ia32,
     X64,
     Ia64,
@@ -37,6 +38,7 @@ impl FromStr for EfiArch {
 #[derive(Default)]
 struct BlsEntry {
     name: String,
+    pretty_name: String,
     title: Option<String>,
     version: Option<String>,
     machine_id: Option<String>,
@@ -125,7 +127,15 @@ impl BlsBootLoader {
         }
 
         entries.sort_by(|a, b| {
-            if a.name < b.name {
+            if a.version < b.version {
+                Ordering::Greater
+            } else if a.version > b.version {
+                Ordering::Less
+            } else if a.title > b.title {
+                Ordering::Greater
+            } else if a.title < b.title {
+                Ordering::Less
+            } else if a.name > b.name {
                 Ordering::Greater
             } else {
                 Ordering::Less
@@ -159,12 +169,12 @@ impl BlsBootLoader {
                 let Ok(architecture) = EfiArch::from_str(architecture) else { continue; };
                 entry.architecture = Some(architecture);
             }
-            if line.starts_with("title") {
-                let Some(title) = line.split_whitespace().last() else { continue; };
+            if line.starts_with("title ") {
+                let title = line["title ".len() - 1..].trim();
                 entry.title = Some(title.to_string());
             }
-            if line.starts_with("version") {
-                let Some(version) = line.split_whitespace().last() else { continue; };
+            if line.starts_with("version ") {
+                let version = line["version ".len() - 1..].trim();
                 entry.version = Some(version.to_string());
             }
             if line.starts_with("machine-id") {
@@ -183,8 +193,8 @@ impl BlsBootLoader {
                 let Some(initrd) = line.split_whitespace().last() else { continue; };
                 entry.initrd = PathBuf::from(initrd);
             }
-            if line.starts_with("options") {
-                let options = line["options".len() - 1..].trim();
+            if line.starts_with("options ") {
+                let options = line["options ".len() - 1..].trim();
                 entry.options = Some(options.to_string());
             }
             if line.starts_with("devicetree") {
@@ -196,6 +206,17 @@ impl BlsBootLoader {
                 entry.devicetree_overlay = Some(PathBuf::from(devicetree_overlay));
             }
         }
+
+        entry.pretty_name = 'pretty: {
+            let Some(title) = &entry.title else {
+                break 'pretty entry.name.clone();
+            };
+            let Some(version) = &entry.version else {
+                break 'pretty entry.name.clone();
+            };
+
+            format!("{} {}", title, version)
+        };
 
         Ok(entry)
     }
@@ -214,7 +235,7 @@ impl BootLoader for BlsBootLoader {
         Ok(self
             .entries
             .iter()
-            .map(|entry| MenuEntry::BootEntry((entry.name.as_str(), entry.name.as_str())))
+            .map(|entry| MenuEntry::BootEntry((&entry.name, &entry.pretty_name)))
             .collect())
     }
 
@@ -239,5 +260,44 @@ impl BootLoader for BlsBootLoader {
         } else {
             Err(Error::BootConfigNotFound)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+    use std::path::PathBuf;
+
+    #[test]
+    fn test_parse_entry_conf() {
+        let entry = super::BlsBootLoader::parse_entry_conf(Path::new("foo.conf"), String::from(r#"title NixOS
+version Generation 118 NixOS 23.05.20230506.0000000, Linux Kernel 6.1.27, Built on 2023-05-07
+linux /efi/nixos/00000000000000000000000000000000-linux-6.1.27-bzImage.efi
+initrd /efi/nixos/00000000000000000000000000000000-initrd-linux-6.1.27-initrd.efi
+options init=/nix/store/00000000000000000000000000000000-nixos-system-beetroot-23.05.20230506.0000000/init systemd.show_status=auto loglevel=4
+machine-id 00000000000000000000000000000000
+"#)).unwrap();
+        assert_eq!(entry.name, String::from("foo"));
+        assert_eq!(entry.devicetree, None);
+        assert_eq!(entry.options, Some(String::from("init=/nix/store/00000000000000000000000000000000-nixos-system-beetroot-23.05.20230506.0000000/init systemd.show_status=auto loglevel=4")));
+        assert_eq!(entry.devicetree_overlay, None);
+        assert_eq!(entry.architecture, None);
+        assert_eq!(
+            entry.initrd,
+            PathBuf::from(
+                "/efi/nixos/00000000000000000000000000000000-initrd-linux-6.1.27-initrd.efi"
+            )
+        );
+        assert_eq!(entry.sort_key, None);
+        assert_eq!(entry.title, Some(String::from("NixOS")));
+        assert_eq!(
+            entry.linux,
+            PathBuf::from("/efi/nixos/00000000000000000000000000000000-linux-6.1.27-bzImage.efi")
+        );
+        assert_eq!(entry.version, Some(String::from("Generation 118 NixOS 23.05.20230506.0000000, Linux Kernel 6.1.27, Built on 2023-05-07")));
+        assert_eq!(
+            entry.machine_id,
+            Some(String::from("00000000000000000000000000000000"))
+        );
     }
 }
