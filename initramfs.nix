@@ -1,4 +1,6 @@
 { debug ? false
+, measuredBoot ? false
+, verifiedBoot ? false
 , tty ? "tty0" # default to the current foreground virtual terminal
 , extraInit ? ""
 , extraInittab ? ""
@@ -13,7 +15,10 @@
 let
   initrdEnv = buildEnv {
     name = "initrd-env";
-    paths = [ (busybox.override { useMusl = true; enableStatic = true; }) tinyboot ];
+    paths = [ (busybox.override { useMusl = true; enableStatic = true; }) (tinyboot.override {
+      cargoExtraArgs = "--features ${lib.concatStringsSep "," ((lib.optional measuredBoot "measured-boot") ++ (lib.optional verifiedBoot "verified-boot"))}";
+    })
+  ];
   };
   rcS = writeScript "rcS" (''
     #!/bin/sh

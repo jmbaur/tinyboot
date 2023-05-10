@@ -5,6 +5,7 @@ pub(crate) mod grub;
 pub(crate) mod syslinux;
 pub(crate) mod tpm;
 pub(crate) mod util;
+pub(crate) mod verify;
 
 use crate::bls::BlsBootLoader;
 use crate::boot_loader::{kexec_execute, kexec_load, BootLoader, MenuEntry};
@@ -218,13 +219,42 @@ fn boot(mut boot_loader: impl BootLoader) -> anyhow::Result<()> {
             let (kernel, initrd, cmdline) =
                 boot_loader.boot_info(selected_entry_id.map(|s| s.to_string()))?;
 
+            let kernel_digest = sha256::try_digest(kernel.as_ref())?;
+            let initrd_digest = sha256::try_digest(initrd.as_ref())?;
+            let cmdline_digest = sha256::digest(cmdline.as_str());
+
+            let verified_digest = if cfg!(feature = "verified-boot") {
+                match verify::verify_artifacts((&kernel, &kernel_digest), (&initrd, &initrd_digest))
+                {
+                    Ok(digest) => {
+                        info!("Verified boot artifacts");
+                        digest
+                    }
+                    Err(e) => {
+                        error!("Failed to verify boot artifacts: {}", e);
+                        anyhow::bail!("verification failure");
+                    }
+                }
+            } else {
+                String::new()
+            };
+
             kexec_load(&kernel, &initrd, &cmdline)?;
 
-            #[cfg(feature = "measured-boot")]
-            match tpm::measure_boot(&cmdline, &initrd) {
-                Err(e) => log::error!("Failed to measure boot artifacts: {e}"),
-                Ok(()) => log::info!("Measured boot artifacts"),
-            };
+            if cfg!(feature = "measured-boot") {
+                match tpm::measure_boot(
+                    verified_digest,
+                    (&kernel, &kernel_digest),
+                    (&initrd, &initrd_digest),
+                    (&cmdline, &cmdline_digest),
+                ) {
+                    Ok(()) => info!("Measured boot artifacts"),
+                    Err(e) => {
+                        error!("Failed to measure boot artifacts: {e}");
+                        anyhow::bail!("tpm failure");
+                    }
+                };
+            }
 
             let mountpoint = boot_loader.mountpoint();
             unmount(mountpoint);

@@ -1,4 +1,4 @@
-{ pkgs, lib, stdenv, buildCoreboot, tinyboot-kernel, tinyboot-initramfs }:
+{ pkgs, lib, stdenv, runCommand, coreboot-utils, buildCoreboot, tinyboot-kernel, tinyboot-initramfs }:
 let
   module = { ... }: {
     config._module.args = { inherit pkgs lib; };
@@ -9,6 +9,10 @@ let
     options.kernel = {
       configFile = lib.mkOption {
         type = lib.types.path;
+      };
+      commandLine = lib.mkOption {
+        type = lib.types.listOf lib.types.nonEmptyStr;
+        default = [];
       };
       extraConfig = lib.mkOption {
         type = lib.types.lines;
@@ -26,6 +30,8 @@ let
     };
     options.tinyboot = {
       debug = lib.mkEnableOption "debug mode";
+      measuredBoot = lib.mkEnableOption "measured boot";
+      verifiedBoot = lib.mkEnableOption "verified boot";
       tty = lib.mkOption {
         type = lib.types.str;
         default = "tty0";
@@ -45,18 +51,22 @@ lib.mapAttrs
   (board: _:
   let
     finalConfig = lib.evalModules { modules = [ module (import ./${board}/config.nix) ]; };
-    tinybootExtraConfig = lib.attrByPath [ stdenv.hostPlatform.linuxArch ] "" {
-      x86_64 = ''
-        CONFIG_PAYLOAD_FILE="${tinyboot-kernel.override { inherit (finalConfig.config.kernel) configFile; }}/bzImage"
-        CONFIG_LINUX_INITRD="${tinyboot-initramfs.override { inherit (finalConfig.config.tinyboot) debug tty extraInit extraInittab; }}/initrd"
-      '';
-      # TODO(jared): aarch64 fit images
+    coreboot = buildCoreboot {
+      inherit board;
+      inherit (finalConfig.config.coreboot) configFile extraConfig;
+      meta = { inherit (finalConfig.config) platforms; };
     };
+    linux = tinyboot-kernel.override { inherit (finalConfig.config.kernel) configFile; };
+    initrd = tinyboot-initramfs.override { inherit (finalConfig.config.tinyboot) measuredBoot verifiedBoot debug tty extraInit extraInittab; };
   in
-  buildCoreboot {
-    inherit board;
-    inherit (finalConfig.config.coreboot) configFile;
-    extraConfig = finalConfig.config.coreboot.extraConfig + tinybootExtraConfig;
-    meta = { inherit (finalConfig.config) platforms; };
-  })
-  (lib.filterAttrs (_: type: type == "directory") (builtins.readDir ./.))
+  # TODO(jared): aarch64 fit images
+  (runCommand "tinyboot-${coreboot.name}" { nativeBuildInputs = [ coreboot-utils ]; } ''
+    mkdir -p $out
+    dd if=${coreboot}/coreboot.rom of=$out/coreboot.rom
+    cbfstool $out/coreboot.rom add-payload \
+      -n fallback/payload \
+      -f ${linux}/${stdenv.hostPlatform.linux-kernel.target} \
+      -I ${initrd}/initrd \
+      -C '${toString finalConfig.config.kernel.commandLine}'
+  ''))
+    (lib.filterAttrs (_: type: type == "directory") (builtins.readDir ./.))

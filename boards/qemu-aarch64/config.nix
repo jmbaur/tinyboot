@@ -1,6 +1,9 @@
 { pkgs, ... }: {
   platforms = [ "aarch64-linux" ];
-  kernel.configFile = pkgs.concatText "qemu-aarch64-kernel.config" [ ../generic-kernel.config ../qemu-kernel.config ../aarch64-kernel.config ];
+  kernel = {
+    configFile = pkgs.concatText "qemu-aarch64-kernel.config" [ ../generic-kernel.config ../qemu-kernel.config ../aarch64-kernel.config ];
+    commandLine = [ "console=ttyAMA0" ];
+  };
   coreboot = {
     configFile = ./coreboot.config;
     extraConfig = pkgs.callPackage

@@ -1,4 +1,4 @@
-{ rustPlatform, lib, stdenv, pkg-config, pkgsStatic, crane, qemu, e2fsprogs, dosfstools, ... }:
+{ cargoExtraArgs ? "", rustPlatform, lib, stdenv, pkg-config, pkgsStatic, crane, qemu, e2fsprogs, dosfstools, ... }:
 let
   toEnvVar = s: lib.replaceStrings [ "-" ] [ "_" ] (lib.toUpper s);
   isCrossBuild = stdenv.hostPlatform.system != stdenv.buildPlatform.system;
@@ -19,6 +19,7 @@ in
 (craneLib.overrideToolchain toolchain).buildPackage ({
   src = ./.;
   cargoToml = ./tinyboot/Cargo.toml;
+  inherit cargoExtraArgs;
   depsBuildBuild = lib.optional isCrossBuild qemu;
   nativeBuildInputs = [ rustPlatform.bindgenHook toolchain pkg-config dosfstools e2fsprogs ];
   buildInputs = with pkgsStatic; [ wolftpm ];

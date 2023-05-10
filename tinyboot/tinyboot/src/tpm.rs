@@ -8,8 +8,10 @@ mod bindings {
     include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 }
 
+pub const TPM_VERIFIED_PCR: u32 = 7;
 pub const TPM_CMDLINE_PCR: u32 = 8;
 pub const TPM_INITRD_PCR: u32 = 9;
+pub const TPM_KERNEL_PCR: u32 = 11;
 
 fn get_rc_string(rc: i32) -> String {
     (unsafe { std::ffi::CStr::from_ptr(bindings::TPM2_GetRCString(rc)) })
@@ -26,7 +28,12 @@ fn bail_on_non_success(msg: &str, rc: i32) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn measure_boot(cmdline: &str, initrd: &Path) -> anyhow::Result<()> {
+pub fn measure_boot(
+    verified_digest: impl AsRef<str>,
+    kernel: (impl AsRef<Path>, impl AsRef<str>),
+    initrd: (impl AsRef<Path>, impl AsRef<str>),
+    cmdline: (impl AsRef<str>, impl AsRef<str>),
+) -> anyhow::Result<()> {
     let mut dev: std::mem::MaybeUninit<bindings::WOLFTPM2_DEV> = std::mem::MaybeUninit::uninit();
 
     bail_on_non_success("wolfTPM2_Init", unsafe {
@@ -36,8 +43,10 @@ pub fn measure_boot(cmdline: &str, initrd: &Path) -> anyhow::Result<()> {
     let mut dev = unsafe { dev.assume_init() };
 
     for (pcr, digest) in [
-        (TPM_CMDLINE_PCR, sha256::digest(cmdline)),
-        (TPM_INITRD_PCR, sha256::try_digest(initrd)?),
+        (TPM_VERIFIED_PCR, verified_digest.as_ref()),
+        (TPM_KERNEL_PCR, kernel.1.as_ref()),
+        (TPM_INITRD_PCR, initrd.1.as_ref()),
+        (TPM_CMDLINE_PCR, cmdline.1.as_ref()),
     ] {
         let mut pcr_extend = unsafe { std::mem::zeroed::<bindings::PCR_Extend_In>() };
         pcr_extend.pcrHandle = pcr;
