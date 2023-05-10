@@ -15,10 +15,16 @@
 let
   initrdEnv = buildEnv {
     name = "initrd-env";
-    paths = [ (busybox.override { useMusl = true; enableStatic = true; }) (tinyboot.override {
-      cargoExtraArgs = "--features ${lib.concatStringsSep "," ((lib.optional measuredBoot "measured-boot") ++ (lib.optional verifiedBoot "verified-boot"))}";
-    })
-  ];
+    paths = [
+      (busybox.override { useMusl = true; enableStatic = true; })
+      (tinyboot.override {
+        cargoExtraArgs =
+          let
+            features = (lib.optional measuredBoot "measured-boot") ++ (lib.optional verifiedBoot "verified-boot");
+          in
+          lib.optionalString (lib.length features > 0) "--features ${lib.concatStringsSep "," features}";
+      })
+    ];
   };
   rcS = writeScript "rcS" (''
     #!/bin/sh

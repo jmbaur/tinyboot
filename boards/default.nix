@@ -12,7 +12,7 @@ let
       };
       commandLine = lib.mkOption {
         type = lib.types.listOf lib.types.nonEmptyStr;
-        default = [];
+        default = [ ];
       };
       extraConfig = lib.mkOption {
         type = lib.types.lines;
@@ -69,4 +69,4 @@ lib.mapAttrs
       -I ${initrd}/initrd \
       -C '${toString finalConfig.config.kernel.commandLine}'
   ''))
-    (lib.filterAttrs (_: type: type == "directory") (builtins.readDir ./.))
+  (lib.filterAttrs (_: type: type == "directory") (builtins.readDir ./.))
