@@ -8,8 +8,10 @@ fn main() {
         println!("cargo:rustc-env=VERIFIED_BOOT_PUBLIC_KEY=/dev/null");
     }
 
+    let nix_cflags = env::var("NIX_CFLAGS_COMPILE").unwrap();
     let bindings = bindgen::Builder::default()
         .header("wrapper.h")
+        .clang_args(nix_cflags.split(' '))
         .parse_callbacks(Box::new(bindgen::CargoCallbacks))
         .allowlist_function("TPM2_GetRCString")
         .allowlist_function("TPM2_PCR_Extend")

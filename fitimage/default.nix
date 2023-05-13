@@ -1,24 +1,22 @@
-{ runCommand, ubootTools, dtc, xz, rsync, ... }:
-{ boardName, kernel, initramfs, dtb ? null, dtbPattern ? null, }:
+{ buildPackages, ... }:
+{ board, linux, initrd, dtb ? null, dtbPattern ? null, }:
 let
-  nativeBuildInputs = [ rsync ubootTools dtc xz ];
   copyDtbs =
     if dtbPattern != null then ''
-      find -L ${kernel}/dtbs -type f -name "*.dtb" |
+      find -L ${linux}/dtbs -type f -name "*.dtb" |
         grep -E "${dtbPattern}" |
         xargs -n1 basename |
-        rsync -a --include="*/" --include-from=- --exclude="*" ${kernel}/dtbs/ dtbs/
+        rsync -a --include="*/" --include-from=- --exclude="*" ${linux}/dtbs/ dtbs/
     '' else "cp ${dtb} dtbs";
-  fitimage = runCommand "fitimage-${boardName}" { inherit nativeBuildInputs; } ''
+in
+buildPackages.runCommand "fitimage-${board}"
+{ nativeBuildInputs = with buildPackages; [ rsync ubootTools dtc xz ]; }
+  ''
     mkdir -p dtbs $out
-    lzma --threads 0 <${kernel}/Image >Image.lzma
-    xz --test <${initramfs}
-    cp ${initramfs} initramfs.cpio.xz
+    lzma --threads 0 <${linux}/Image >Image.lzma
+    xz --test <${initrd}/initrd
+    cp ${initrd}/initrd initramfs.cpio.xz
     ${copyDtbs}
     bash ${./make-image-its.bash} > image.its
     mkimage -f image.its $out/uImage
-  '';
-in
-fitimage.overrideAttrs (old: {
-  passthru = (old.passthru or { }) // { inherit boardName; };
-})
+  ''

@@ -8,6 +8,7 @@
 , makeInitrdNG
 , busybox
 , buildEnv
+, pkgsStatic
 , tinyboot
 , writeScript
 , writeText

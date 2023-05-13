@@ -1,4 +1,4 @@
-{ pkgs, lib, stdenv, runCommand, coreboot-utils, buildCoreboot, tinyboot-kernel, tinyboot-initramfs }:
+{ pkgs, lib, stdenv, buildPackages, buildCoreboot, buildFitImage, tinyboot-kernel, tinyboot-initramfs }:
 let
   module = { ... }: {
     config._module.args = { inherit pkgs lib; };
@@ -17,6 +17,14 @@ let
       extraConfig = lib.mkOption {
         type = lib.types.lines;
         default = "";
+      };
+      dtb = lib.mkOption {
+        type = lib.types.nullOr lib.types.path;
+        default = null;
+      };
+      dtbPattern = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
       };
     };
     options.coreboot = {
@@ -58,15 +66,22 @@ lib.mapAttrs
     };
     linux = tinyboot-kernel.override { inherit (finalConfig.config.kernel) configFile; };
     initrd = tinyboot-initramfs.override { inherit (finalConfig.config.tinyboot) measuredBoot verifiedBoot debug tty extraInit extraInittab; };
+    fitImage = buildFitImage { inherit board linux initrd; inherit (finalConfig.config.kernel) dtb dtbPattern; };
   in
-  # TODO(jared): aarch64 fit images
-  (runCommand "tinyboot-${coreboot.name}" { nativeBuildInputs = [ coreboot-utils ]; } ''
-    mkdir -p $out
-    dd if=${coreboot}/coreboot.rom of=$out/coreboot.rom
-    cbfstool $out/coreboot.rom add-payload \
-      -n fallback/payload \
-      -f ${linux}/${stdenv.hostPlatform.linux-kernel.target} \
-      -I ${initrd}/initrd \
-      -C '${toString finalConfig.config.kernel.commandLine}'
-  ''))
+  (buildPackages.runCommand "tinyboot-${coreboot.name}"
+  { nativeBuildInputs = with buildPackages; [ coreboot-utils ]; }
+    ''
+      mkdir -p $out
+      dd if=${coreboot}/coreboot.rom of=$out/coreboot.rom
+      ${if stdenv.hostPlatform.linuxArch == "x86_64" then ''
+      cbfstool $out/coreboot.rom add-payload \
+        -n fallback/payload \
+        -f ${linux}/${stdenv.hostPlatform.linux-kernel.target} \
+        -I ${initrd}/initrd \
+        -C '${toString finalConfig.config.kernel.commandLine}'
+        '' else if stdenv.hostPlatform.linuxArch == "arm64" then ''
+      cbfstool $out/coreboot.rom add -f ${fitImage}/uImage \
+        -n fallback/payload -t fit -c lzma
+        '' else throw "Unsupported architecture"}
+    ''))
   (lib.filterAttrs (_: type: type == "directory") (builtins.readDir ./.))

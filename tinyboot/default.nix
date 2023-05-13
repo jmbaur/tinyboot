@@ -4,7 +4,9 @@ let
   isCrossBuild = stdenv.hostPlatform.system != stdenv.buildPlatform.system;
   target = pkgsStatic.stdenv.hostPlatform.config;
   toolchain = pkgsStatic.pkgsBuildHost.rust-bin.stable.latest.default.override { targets = [ target ]; };
-  env = (lib.optionalAttrs isCrossBuild {
+  env = (lib.optionalAttrs (stdenv.hostPlatform.qemuArch == "aarch64") {
+    CFLAGS = "-mno-outline-atomics";
+  }) // (lib.optionalAttrs isCrossBuild {
     "CARGO_TARGET_${toEnvVar target}_RUNNER" = "qemu-${stdenv.hostPlatform.qemuArch}";
   }) // {
     "CARGO_TARGET_${toEnvVar target}_LINKER" = "${pkgsStatic.stdenv.cc.targetPrefix}ld";
@@ -20,8 +22,9 @@ in
   src = ./.;
   cargoToml = ./tinyboot/Cargo.toml;
   inherit cargoExtraArgs;
+  strictDeps = true;
   depsBuildBuild = lib.optional isCrossBuild qemu;
   nativeBuildInputs = [ rustPlatform.bindgenHook toolchain pkg-config dosfstools e2fsprogs ];
-  buildInputs = with pkgsStatic; [ wolftpm ];
+  buildInputs = [ pkgsStatic.wolftpm ];
   passthru = { inherit env; };
 } // env)

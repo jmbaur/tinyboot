@@ -1,14 +1,7 @@
 { lib, stdenv, fetchgit, pkgsBuildBuild, python3, pkg-config, flashrom, openssl, ... }:
 lib.makeOverridable ({ board, configFile, extraConfig ? "", ... }@args:
 let
-  toolchain-system = {
-    x86_64 = "i386";
-    arm64 = "aarch64";
-    arm = "arm";
-    riscv = "riscv";
-    powerpc = "ppc64";
-  }.${stdenv.hostPlatform.linuxArch};
-  toolchain = pkgsBuildBuild.coreboot-toolchain.${toolchain-system}.override { withAda = false; };
+  toolchain = pkgsBuildBuild.coreboot-toolchain.${{ x86_64 = "i386"; arm64 = "aarch64"; arm = "arm"; riscv = "riscv"; powerpc = "ppc64"; }.${stdenv.hostPlatform.linuxArch}};
 in
 stdenv.mkDerivation ({
   pname = "coreboot-${board}";
