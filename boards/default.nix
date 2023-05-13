@@ -1,4 +1,4 @@
-{ pkgs, lib, stdenv, buildPackages, buildCoreboot, buildFitImage, tinyboot-kernel, tinyboot-initramfs }:
+{ pkgs, lib, stdenv, buildPackages, buildCoreboot, buildFitImage }:
 let
   module = { ... }: {
     config._module.args = { inherit pkgs lib; };
@@ -7,6 +7,10 @@ let
       default = [ ];
     };
     options.kernel = {
+      basePackage = lib.mkOption {
+        type = lib.types.package;
+        default = pkgs.linuxKernel.kernels.linux_6_1;
+      };
       configFile = lib.mkOption {
         type = lib.types.path;
       };
@@ -64,8 +68,8 @@ lib.mapAttrs
       inherit (finalConfig.config.coreboot) configFile extraConfig;
       meta = { inherit (finalConfig.config) platforms; };
     };
-    linux = tinyboot-kernel.override { inherit (finalConfig.config.kernel) configFile; };
-    initrd = tinyboot-initramfs.override { inherit (finalConfig.config.tinyboot) measuredBoot verifiedBoot debug tty extraInit extraInittab; };
+    linux = pkgs.callPackage ../kernel.nix { inherit (finalConfig.config.kernel) basePackage configFile; };
+    initrd = pkgs.callPackage ../initramfs.nix { inherit (finalConfig.config.tinyboot) measuredBoot verifiedBoot debug tty extraInit extraInittab; };
     fitImage = buildFitImage { inherit board linux initrd; inherit (finalConfig.config.kernel) dtb dtbPattern; };
   in
   (buildPackages.runCommand "tinyboot-${coreboot.name}"
@@ -80,8 +84,7 @@ lib.mapAttrs
         -I ${initrd}/initrd \
         -C '${toString finalConfig.config.kernel.commandLine}'
         '' else if stdenv.hostPlatform.linuxArch == "arm64" then ''
-      cbfstool $out/coreboot.rom add -f ${fitImage}/uImage \
-        -n fallback/payload -t fit -c lzma
+      cbfstool $out/coreboot.rom add -f ${fitImage}/uImage -n fallback/payload -t fit_payload
         '' else throw "Unsupported architecture"}
     ''))
   (lib.filterAttrs (_: type: type == "directory") (builtins.readDir ./.))

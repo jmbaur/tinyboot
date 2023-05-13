@@ -1,15 +1,6 @@
-{ configFile ? null, lib, stdenv, buildPackages, linuxKernel }:
+{ basePackage, configFile, lib, stdenv, buildPackages }:
 stdenv.mkDerivation {
-  inherit (linuxKernel.kernels.linux_6_1) pname version src buildInputs nativeBuildInputs depsBuildBuild;
-  config = if configFile != null then (builtins.readFile configFile) else (lib.warn "building tinyconfig kernel" "");
-  passAsFile = [ "config" ];
-  configurePhase = ''
-    runHook preConfigure
-    make "''${makeFlagsArray[@]}" tinyconfig
-    cat $configPath >> .config
-    make "''${makeFlagsArray[@]}" olddefconfig
-    runHook postConfigure
-  '';
+  inherit (basePackage) pname version src buildInputs nativeBuildInputs depsBuildBuild;
   makeFlags = [
     "CC=${stdenv.cc}/bin/${stdenv.cc.targetPrefix}cc"
     "HOSTCC=${buildPackages.stdenv.cc}/bin/${buildPackages.stdenv.cc.targetPrefix}cc"
@@ -17,6 +8,13 @@ stdenv.mkDerivation {
     "ARCH=${stdenv.hostPlatform.linuxArch}"
   ] ++ lib.optional (stdenv.hostPlatform != stdenv.buildPlatform)
     "CROSS_COMPILE=${stdenv.cc.targetPrefix}";
+  configurePhase = ''
+    runHook preConfigure
+    make ARCH=${stdenv.hostPlatform.linuxArch} tinyconfig
+    cat ${configFile} >> .config
+    make ARCH=${stdenv.hostPlatform.linuxArch} olddefconfig
+    runHook postConfigure
+  '';
   preBuild = ''
     makeFlagsArray+=("-j$NIX_BUILD_CORES")
   '';

@@ -1,24 +1,12 @@
 {
-  description = "A small initramfs for linuxboot";
-  inputs = {
-    crane.inputs.nixpkgs.follows = "nixpkgs";
-    crane.url = "github:ipetkov/crane";
-    nixpkgs.url = "nixpkgs/nixos-unstable";
-    rust-overlay.inputs.nixpkgs.follows = "nixpkgs";
-    rust-overlay.url = "github:oxalica/rust-overlay";
-
-    # TODO(jared): delete if/when merged
-    nixpkgs-extlinux-specialisation.url = "github:jmbaur/nixpkgs/extlinux-specialisation";
-  };
+  description = "A small linuxboot payload for coreboot";
+  inputs.nixpkgs.url = "nixpkgs/nixos-unstable";
   outputs = inputs: with inputs;
     let
       systems = [ "x86_64-linux" "aarch64-linux" ];
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f {
         inherit system;
-        pkgs = import nixpkgs {
-          inherit system;
-          overlays = [ self.overlays.default ];
-        };
+        pkgs = import nixpkgs { inherit system; overlays = [ self.overlays.default ]; };
       });
     in
     {
@@ -26,13 +14,7 @@
         let
           base = forAllSystems ({ system, ... }: nixpkgs.lib.nixosSystem {
             inherit system;
-            modules = [
-              ({ modulesPath, ... }: {
-                disabledModules = [ "${modulesPath}/system/boot/loader/generic-extlinux-compatible" ];
-                imports = [ "${nixpkgs-extlinux-specialisation}/nixos/modules/system/boot/loader/generic-extlinux-compatible" ];
-              })
-              ./test/module.nix
-            ];
+            modules = [ ./test/module.nix ];
           });
           extend = extension: nixpkgs.lib.mapAttrs'
             (system: config: nixpkgs.lib.nameValuePair "${extension}-${system}" (config.extendModules {
@@ -40,24 +22,18 @@
             }));
         in
         nixpkgs.lib.foldAttrs (curr: acc: acc // curr) { } (map (b: extend b base) [ "bls" "grub" "extlinux" ]);
-      overlays.default = nixpkgs.lib.composeManyExtensions [
-        rust-overlay.overlays.default
-        (final: prev: {
-          flashrom = prev.callPackage ./flashrom.nix { };
-          wolftpm = prev.callPackage ./wolftpm.nix { };
-          tinyboot = prev.callPackage ./tinyboot { inherit crane; };
-          tinyboot-kernel = prev.callPackage ./kernel.nix { };
-          tinyboot-initramfs = prev.callPackage ./initramfs.nix { };
-          buildFitImage = prev.callPackage ./fitimage { };
-          buildCoreboot = prev.callPackage ./coreboot.nix { };
-          coreboot = prev.callPackage ./boards { };
-        })
-      ];
+      overlays.default = final: prev: {
+        flashrom = prev.callPackage ./flashrom.nix { };
+        wolftpm = prev.callPackage ./wolftpm.nix { };
+        buildFitImage = prev.callPackage ./fitimage { };
+        buildCoreboot = prev.callPackage ./coreboot.nix { };
+        coreboot = prev.callPackage ./boards { };
+      };
       devShells = forAllSystems ({ pkgs, ... }: {
-        default = with pkgs; mkShellNoCC ({
-          inputsFrom = [ tinyboot ];
+        default = with pkgs; mkShell {
+          inputsFrom = [ (callPackage ./tinyboot { }) ];
           nativeBuildInputs = [ bashInteractive grub2 cargo-insta ];
-        } // lib.optionalAttrs (tinyboot?env) { inherit (tinyboot) env; });
+        };
       });
       legacyPackages = forAllSystems ({ pkgs, ... }: pkgs);
       apps = forAllSystems ({ pkgs, system, ... }: (pkgs.lib.mapAttrs'

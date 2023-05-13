@@ -8,7 +8,8 @@ fn main() {
         println!("cargo:rustc-env=VERIFIED_BOOT_PUBLIC_KEY=/dev/null");
     }
 
-    let nix_cflags = env::var("NIX_CFLAGS_COMPILE").unwrap();
+    let nix_cflags = env::var("NIX_CFLAGS_COMPILE").expect("could not get NIX_CFLAGS_COMPILE");
+
     let bindings = bindgen::Builder::default()
         .header("wrapper.h")
         .clang_args(nix_cflags.split(' '))
@@ -26,10 +27,11 @@ fn main() {
         .expect("Unable to generate bindings");
 
     let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
+
     bindings
         .write_to_file(out_path.join("bindings.rs"))
         .expect("Couldn't write bindings!");
 
-    println!("cargo:rustc-link-lib=static=wolftpm");
-    println!("cargo:rustc-link-lib=static=wolfssl");
+    println!("cargo:rustc-link-lib=wolftpm");
+    println!("cargo:rustc-link-lib=wolfssl");
 }

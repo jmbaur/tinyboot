@@ -9,7 +9,6 @@
 , busybox
 , buildEnv
 , pkgsStatic
-, tinyboot
 , writeScript
 , writeText
 }:
@@ -18,12 +17,8 @@ let
     name = "initrd-env";
     paths = [
       (busybox.override { useMusl = true; enableStatic = true; })
-      (tinyboot.override {
-        cargoExtraArgs =
-          let
-            features = (lib.optional measuredBoot "measured-boot") ++ (lib.optional verifiedBoot "verified-boot");
-          in
-          lib.optionalString (lib.length features > 0) "--features ${lib.concatStringsSep "," features}";
+      (pkgsStatic.callPackage ./tinyboot {
+        cargoBuildFeatures = (lib.optional measuredBoot "measured-boot") ++ (lib.optional verifiedBoot "verified-boot");
       })
     ];
   };
