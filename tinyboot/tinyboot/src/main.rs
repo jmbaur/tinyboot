@@ -243,7 +243,7 @@ fn boot(mut boot_loader: impl BootLoader) -> anyhow::Result<()> {
 
             if cfg!(feature = "measured-boot") {
                 match tpm::measure_boot(
-                    verified_digest,
+                    (cfg!(feature = "verified-boot"), verified_digest),
                     (&kernel, &kernel_digest),
                     (&initrd, &initrd_digest),
                     (&cmdline, &cmdline_digest),

@@ -1,9 +1,9 @@
-{ debug ? false
-, measuredBoot ? false
-, verifiedBoot ? false
-, tty ? "tty0" # default to the current foreground virtual terminal
-, extraInit ? ""
-, extraInittab ? ""
+{ debug
+, measuredBoot
+, verifiedBoot
+, tty
+, extraInit
+, extraInittab
 , lib
 , makeInitrdNG
 , busybox
@@ -18,7 +18,7 @@ let
     paths = [
       (busybox.override { useMusl = true; enableStatic = true; })
       (pkgsStatic.callPackage ./tinyboot {
-        cargoBuildFeatures = (lib.optional measuredBoot "measured-boot") ++ (lib.optional verifiedBoot "verified-boot");
+        buildFeatures = (lib.optional measuredBoot "measured-boot") ++ (lib.optional verifiedBoot "verified-boot");
       })
     ];
   };

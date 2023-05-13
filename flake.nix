@@ -25,9 +25,10 @@
       overlays.default = final: prev: {
         flashrom = prev.callPackage ./flashrom.nix { };
         wolftpm = prev.callPackage ./wolftpm.nix { };
-        buildFitImage = prev.callPackage ./fitimage { };
-        buildCoreboot = prev.callPackage ./coreboot.nix { };
-        coreboot = prev.callPackage ./boards { };
+        coreboot = prev.callPackage ./boards {
+          buildFitImage = prev.callPackage ./fitimage { };
+          buildCoreboot = prev.callPackage ./coreboot.nix { };
+        };
       };
       devShells = forAllSystems ({ pkgs, ... }: {
         default = with pkgs; mkShell {

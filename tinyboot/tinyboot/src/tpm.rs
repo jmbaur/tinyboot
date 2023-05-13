@@ -29,7 +29,7 @@ fn bail_on_non_success(msg: &str, rc: i32) -> anyhow::Result<()> {
 }
 
 pub fn measure_boot(
-    verified_digest: impl AsRef<str>,
+    verified: (bool,  impl AsRef<str>),
     kernel: (impl AsRef<Path>, impl AsRef<str>),
     initrd: (impl AsRef<Path>, impl AsRef<str>),
     cmdline: (impl AsRef<str>, impl AsRef<str>),
@@ -42,12 +42,17 @@ pub fn measure_boot(
 
     let mut dev = unsafe { dev.assume_init() };
 
-    for (pcr, digest) in [
-        (TPM_VERIFIED_PCR, verified_digest.as_ref()),
+    let mut digests = Vec::from([
         (TPM_KERNEL_PCR, kernel.1.as_ref()),
         (TPM_INITRD_PCR, initrd.1.as_ref()),
         (TPM_CMDLINE_PCR, cmdline.1.as_ref()),
-    ] {
+    ]);
+
+    if verified.0 {
+        digests.push((TPM_VERIFIED_PCR, verified.1.as_ref()));
+    }
+
+    for (pcr, digest) in digests {
         let mut pcr_extend = unsafe { std::mem::zeroed::<bindings::PCR_Extend_In>() };
         pcr_extend.pcrHandle = pcr;
         pcr_extend.digests.count = 1;
