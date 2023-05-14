@@ -1,5 +1,4 @@
 # shellcheck shell=bash
-pushd "$(dirname "$0")" || exit
-openssl genpkey -algorithm ed25519 -out privkey
-openssl pkey -in privkey -pubout -out pubkey
-popd || exit
+out=${1:-"$(dirname "$0")"}
+openssl genpkey -algorithm ed25519 -out "${out}/privkey"
+openssl pkey -in "${out}/privkey" -pubout -out "${out}/pubkey"
