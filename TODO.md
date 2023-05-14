@@ -1,4 +1,5 @@
 - make the program smarter about printing to all known outputs, not just a
   statically configured output
 - allow for picking of boot device (currently just choosing the first device)
-- FitImage support
+- don't call oneshot `mdev -s` when tinyboot is not being ran explicitly on a
+  tty

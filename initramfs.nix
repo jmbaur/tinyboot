@@ -30,16 +30,15 @@ let
     mount -t sysfs sysfs /sys
     mount -t tmpfs tmpfs /tmp
     mount -t devpts devpts /dev/pts
-    echo /bin/mdev > /sys/kernel/uevent_helper
+    mdev -s
     mkdir -p /home/tinyuser
     chown -R tinyuser:tinyuser /home/tinyuser
-  '' + extraInit + ''
-    mdev -s
-  '');
+  '' + extraInit);
   inittab = writeText "inittab" (''
     ::sysinit:/etc/init.d/rcS
     ::ctrlaltdel:/bin/reboot
     ::shutdown:/bin/umount -ar -t ext4,vfat
+    ::respawn:/bin/mdev -df
     ::restart:/init
     ${tty}::once:/bin/tbootd --log-level=${if debug then "debug" else "info"}
   '' + extraInittab);

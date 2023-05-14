@@ -230,10 +230,7 @@ fn boot(mut boot_loader: impl BootLoader) -> anyhow::Result<()> {
                         info!("Verified boot artifacts");
                         digest
                     }
-                    Err(e) => {
-                        error!("Failed to verify boot artifacts: {}", e);
-                        anyhow::bail!("Verified boot failed");
-                    }
+                    Err(e) => anyhow::bail!("Failed to verify boot artifacts: {}", e),
                 }
             } else {
                 String::new()
