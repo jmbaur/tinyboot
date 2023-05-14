@@ -39,7 +39,7 @@ pub fn verify_artifacts(
 
     let pem = include_str!(env!("VERIFIED_BOOT_PUBLIC_KEY"));
 
-    debug!("Using public key: {}", pem);
+    debug!("Using public key:\n{}", pem);
 
     let verifying_key = VerifyingKey::from_public_key_pem(pem).map_err(|e| anyhow::anyhow!(e))?;
 
