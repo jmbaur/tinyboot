@@ -8,4 +8,13 @@
     '';
   };
   coreboot.configFile = ./coreboot.config;
+  tinyboot = {
+    debug = true;
+    tty = "ttyAMA0";
+    verifiedBoot = {
+      enable = true;
+      publicKey = ../../test/keys/pubkey;
+    };
+    measuredBoot.enable = false;
+  };
 }
