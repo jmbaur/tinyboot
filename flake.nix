@@ -14,7 +14,10 @@
         let
           base = forAllSystems ({ system, ... }: nixpkgs.lib.nixosSystem {
             inherit system;
-            modules = [ ./test/module.nix ];
+            modules = [
+              ({ nixpkgs.overlays = [ self.overlays.default ]; })
+              ./test/module.nix
+            ];
           });
           extend = extension: nixpkgs.lib.mapAttrs'
             (system: config: nixpkgs.lib.nameValuePair "${extension}-${system}" (config.extendModules {

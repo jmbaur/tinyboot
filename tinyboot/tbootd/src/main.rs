@@ -221,11 +221,7 @@ fn boot(mut boot_loader: impl BootLoader) -> anyhow::Result<()> {
                 boot_loader.boot_info(selected_entry_id.map(|s| s.to_string()))?;
 
             let verified_digest = if cfg!(feature = "verified-boot") {
-                let kernel_digest = tboot::hash::sha512_digest_file(&kernel)?;
-                let initrd_digest = tboot::hash::sha512_digest_file(&initrd)?;
-
-                match verify::verify_artifacts((&kernel, &kernel_digest), (&initrd, &initrd_digest))
-                {
+                match verify::verify_artifacts(&kernel, &initrd) {
                     Ok(digest) => {
                         info!("Verified boot artifacts");
                         digest

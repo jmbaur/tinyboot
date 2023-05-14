@@ -9,7 +9,7 @@
     debug = true;
     tty = "ttyS0";
     verifiedBoot = {
-      enable = true;
+      enable = false;
       publicKey = ../../test/keys/pubkey;
     };
     measuredBoot.enable = false;

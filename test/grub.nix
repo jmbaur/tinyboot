@@ -1,13 +1,8 @@
 { pkgs, ... }: {
-  boot.loader = {
-    grub = {
-      enable = true;
-      device = "nodev";
-      extraInstallCommands = ''
-        find /boot/kernels -type f \
-          -exec sh -c "${pkgs.openssl}/bin/openssl pkeyutl -sign -inkey ${./keys/privkey} -out {}.sig -rawin -in {}" \;
-      '';
-    };
-    efi.canTouchEfiVariables = false;
-  };
+  boot.loader.grub.enable = true;
+  boot.loader.grub.device = "nodev";
+  boot.loader.grub.extraInstallCommands = ''
+    find /boot/kernels -type f \
+      -exec ${pkgs.tinyboot}/bin/tbootctl verified-boot sign --verbose --private-key ${./keys/privkey} --file {} \;
+  '';
 }

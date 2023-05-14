@@ -4,7 +4,10 @@ use ed25519_dalek::{
     DigestSigner, Signature, SigningKey, VerifyingKey,
 };
 use sha2::{Digest, Sha512};
-use std::{fs, io, path::Path};
+use std::{
+    fs, io,
+    path::{Path, PathBuf},
+};
 
 #[derive(thiserror::Error, Debug)]
 pub enum VerifiedBootError {
@@ -42,6 +45,21 @@ impl From<spki::Error> for VerifiedBootError {
     }
 }
 
+/// Get the signature path for a file to sign.
+pub fn signature_file_path(p: impl AsRef<Path>) -> PathBuf {
+    let extension = 'block: {
+        let Some(extension) = p.as_ref().extension() else {
+            break 'block "sig".to_string();
+        };
+        let Some(extension) = extension.to_str() else {
+            break 'block "sig".to_string();
+        };
+        format!("{}.sig", extension)
+    };
+
+    p.as_ref().with_extension(extension)
+}
+
 pub fn sign(
     private_key: impl AsRef<Path>,
     file_to_sign: impl AsRef<Path>,
@@ -62,12 +80,11 @@ pub fn sign(
 }
 
 pub fn verify(
-    public_key: impl AsRef<Path>,
+    pem: &str,
     file_to_verify: impl AsRef<Path>,
     signature_file: impl AsRef<Path>,
-) -> Result<(), VerifiedBootError> {
-    let pem = fs::read_to_string(public_key)?;
-    let verifying_key = VerifyingKey::from_public_key_pem(&pem)?;
+) -> Result<VerifyingKey, VerifiedBootError> {
+    let verifying_key = VerifyingKey::from_public_key_pem(pem)?;
 
     let mut file = fs::File::open(file_to_verify)?;
     let mut digest = Sha512::new();
@@ -77,5 +94,5 @@ pub fn verify(
 
     verifying_key.verify_prehashed(digest, None, &signature)?;
 
-    Ok(())
+    Ok(verifying_key)
 }
