@@ -18,7 +18,8 @@ let
     paths = [
       (busybox.override { useMusl = true; enableStatic = true; })
       (pkgsStatic.callPackage ./tinyboot {
-        buildFeatures = (lib.optional measuredBoot "measured-boot") ++ (lib.optional verifiedBoot "verified-boot");
+        buildFeatures = (lib.optional measuredBoot.enable "measured-boot") ++ (lib.optional verifiedBoot.enable "verified-boot");
+        verifiedBootPublicKey = verifiedBoot.publicKey;
       })
     ];
   };

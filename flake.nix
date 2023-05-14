@@ -33,7 +33,8 @@
       devShells = forAllSystems ({ pkgs, ... }: {
         default = with pkgs; mkShell {
           inputsFrom = [ (callPackage ./tinyboot { }) ];
-          nativeBuildInputs = [ bashInteractive grub2 cargo-insta ];
+          nativeBuildInputs = [ bashInteractive grub2 cargo-insta rustfmt cargo-edit ];
+          VERIFIED_BOOT_PUBLIC_KEY = ./test/keys/pubkey;
         };
       });
       legacyPackages = forAllSystems ({ pkgs, ... }: pkgs);

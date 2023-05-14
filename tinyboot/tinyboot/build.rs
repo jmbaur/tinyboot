@@ -3,11 +3,6 @@ use std::{env, path::PathBuf};
 fn main() {
     println!("cargo:rerun-if-changed=wrapper.h");
 
-    // TODO(jared): Find out how to not require this if verified-boot is turned off.
-    if env::var("VERIFIED_BOOT_PUBLIC_KEY").is_err() {
-        println!("cargo:rustc-env=VERIFIED_BOOT_PUBLIC_KEY=/dev/null");
-    }
-
     let nix_cflags = env::var("NIX_CFLAGS_COMPILE").expect("could not get NIX_CFLAGS_COMPILE");
 
     let bindings = bindgen::Builder::default()

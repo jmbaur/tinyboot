@@ -232,7 +232,7 @@ fn boot(mut boot_loader: impl BootLoader) -> anyhow::Result<()> {
                     }
                     Err(e) => {
                         error!("Failed to verify boot artifacts: {}", e);
-                        anyhow::bail!("verification failure");
+                        anyhow::bail!("Verified boot failed");
                     }
                 }
             } else {
@@ -251,7 +251,6 @@ fn boot(mut boot_loader: impl BootLoader) -> anyhow::Result<()> {
                     Ok(()) => info!("Measured boot artifacts"),
                     Err(e) => {
                         error!("Failed to measure boot artifacts: {e}");
-                        anyhow::bail!("tpm failure");
                     }
                 };
             }

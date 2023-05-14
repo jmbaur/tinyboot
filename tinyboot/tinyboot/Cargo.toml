@@ -11,7 +11,7 @@ verified-boot = []
 [dependencies]
 anyhow = "1.0.71"
 clap = { version = "4.2.7", features = ["derive"] }
-ed25519-dalek = "1.0.1"
+ed25519-dalek = { version = "2.0.0-rc.2", features = ["alloc", "pem", "batch"] }
 fern = "0.6.2"
 grub = { path = "../grub" }
 log = "0.4.17"

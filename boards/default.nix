@@ -42,8 +42,14 @@ let
     };
     options.tinyboot = {
       debug = lib.mkEnableOption "debug mode";
-      measuredBoot = lib.mkEnableOption "measured boot";
-      verifiedBoot = lib.mkEnableOption "verified boot";
+      measuredBoot.enable = lib.mkEnableOption "measured boot";
+      verifiedBoot = {
+        enable = lib.mkEnableOption "verified boot";
+        publicKey = lib.mkOption {
+          type = lib.types.path;
+          default = "/dev/null";
+        };
+      };
       tty = lib.mkOption {
         type = lib.types.str;
         default = "tty0";

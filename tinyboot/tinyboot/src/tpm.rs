@@ -29,7 +29,7 @@ fn bail_on_non_success(msg: &str, rc: i32) -> anyhow::Result<()> {
 }
 
 pub fn measure_boot(
-    verified: (bool,  impl AsRef<str>),
+    verified: (bool, impl AsRef<str>),
     kernel: (impl AsRef<Path>, impl AsRef<str>),
     initrd: (impl AsRef<Path>, impl AsRef<str>),
     cmdline: (impl AsRef<str>, impl AsRef<str>),

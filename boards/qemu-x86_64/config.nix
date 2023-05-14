@@ -8,7 +8,10 @@
   tinyboot = {
     debug = true;
     tty = "ttyS0";
-    verifiedBoot = false;
-    measuredBoot = true;
+    verifiedBoot = {
+      enable = true;
+      publicKey = ../../test/keys/pubkey;
+    };
+    measuredBoot.enable = false;
   };
 }
