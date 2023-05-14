@@ -288,6 +288,7 @@ dependencies = [
  "rand_core",
  "serde",
  "sha2",
+ "signature",
  "zeroize",
 ]
 
@@ -374,12 +375,6 @@ name = "hermit-abi"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fed44880c466736ef9a5c5b5facefb5ed0785676d0c02d612db14e54f0d84286"
-
-[[package]]
-name = "hex"
-version = "0.4.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
 name = "insta"
@@ -600,9 +595,9 @@ checksum = "e3d7ddaed09e0eb771a79ab0fd64609ba0afb0a8366421957936ad14cbd13630"
 
 [[package]]
 name = "prettyplease"
-version = "0.2.4"
+version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1ceca8aaf45b5c46ec7ed39fff75f57290368c1846d33d24a122ca81416ab058"
+checksum = "617feabb81566b593beb4886fb8c1f38064169dae4dccad0e3220160c3b37203"
 dependencies = [
  "proc-macro2",
  "syn",
@@ -728,16 +723,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sha256"
-version = "1.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5f9f8b5de2bac3a4ae28e9b611072a8e326d9b26c8189c0972d4c321fa684f1f"
-dependencies = [
- "hex",
- "sha2",
-]
-
-[[package]]
 name = "shlex"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -745,9 +730,12 @@ checksum = "43b2853a4d09f215c24cc5489c992ce46052d359b5109343cbafbf26bc62f8a3"
 
 [[package]]
 name = "signature"
-version = "2.1.0"
+version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e1788eed21689f9cf370582dfc467ef36ed9c707f073528ddafa8d83e3b8500"
+checksum = "8fe458c98333f9c8152221191a77e2a44e8325d0193484af2e9421a53019e57d"
+dependencies = [
+ "digest",
+]
 
 [[package]]
 name = "similar"
@@ -785,9 +773,9 @@ checksum = "81cdd64d312baedb58e21336b31bc043b77e01cc99033ce76ef539f78e965ebc"
 
 [[package]]
 name = "syn"
-version = "2.0.15"
+version = "2.0.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a34fcf3e8b60f57e6a14301a2e916d323af98b0ea63c599441eec8558660c822"
+checksum = "a6f671d4b5ffdb8eadec19c0ae67fe2639df8684bd7bc4b83d986b8db549cf01"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -806,8 +794,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "tboot"
+version = "0.1.0"
+dependencies = [
+ "ed25519-dalek",
+ "fern",
+ "log",
+ "sha2",
+ "thiserror",
+]
+
+[[package]]
 name = "tbootctl"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "log",
+ "tboot",
+]
 
 [[package]]
 name = "tbootd"
@@ -817,15 +822,23 @@ dependencies = [
  "bindgen",
  "clap",
  "ed25519-dalek",
- "fern",
  "grub",
  "log",
  "nix",
- "sha256",
+ "sha2",
  "syscalls",
+ "tboot",
  "termion",
  "uuid",
 ]
+
+[[package]]
+name = "tbootmon"
+version = "0.1.0"
+
+[[package]]
+name = "tbootui"
+version = "0.1.0"
 
 [[package]]
 name = "termion"

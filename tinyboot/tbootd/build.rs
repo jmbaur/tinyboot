@@ -3,11 +3,14 @@ use std::{env, path::PathBuf};
 fn main() {
     println!("cargo:rerun-if-changed=wrapper.h");
 
-    let nix_cflags = env::var("NIX_CFLAGS_COMPILE").expect("could not get NIX_CFLAGS_COMPILE");
+    let mut builder = bindgen::Builder::default();
 
-    let bindings = bindgen::Builder::default()
+    if let Ok(nix_cflags) = env::var("NIX_CFLAGS_COMPILE") {
+        builder = builder.clang_args(nix_cflags.split(' '));
+    }
+
+    let bindings = builder
         .header("wrapper.h")
-        .clang_args(nix_cflags.split(' '))
         .parse_callbacks(Box::new(bindgen::CargoCallbacks))
         .allowlist_function("TPM2_GetRCString")
         .allowlist_function("TPM2_PCR_Extend")

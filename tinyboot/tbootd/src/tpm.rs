@@ -1,9 +1,10 @@
 use std::path::Path;
 
 mod bindings {
-    #![allow(non_upper_case_globals)]
+    #![allow(clippy::all)]
     #![allow(non_camel_case_types)]
     #![allow(non_snake_case)]
+    #![allow(non_upper_case_globals)]
     #![allow(unused)]
     include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 }
@@ -29,10 +30,10 @@ fn bail_on_non_success(msg: &str, rc: i32) -> anyhow::Result<()> {
 }
 
 pub fn measure_boot(
-    verified: (bool, impl AsRef<str>),
-    kernel: (impl AsRef<Path>, impl AsRef<str>),
-    initrd: (impl AsRef<Path>, impl AsRef<str>),
-    cmdline: (impl AsRef<str>, impl AsRef<str>),
+    verified: (bool, &[u8]),
+    kernel: (impl AsRef<Path>, &[u8]),
+    initrd: (impl AsRef<Path>, &[u8]),
+    cmdline: (impl AsRef<str>, &[u8]),
 ) -> anyhow::Result<()> {
     let mut dev: std::mem::MaybeUninit<bindings::WOLFTPM2_DEV> = std::mem::MaybeUninit::uninit();
 
@@ -43,13 +44,13 @@ pub fn measure_boot(
     let mut dev = unsafe { dev.assume_init() };
 
     let mut digests = Vec::from([
-        (TPM_KERNEL_PCR, kernel.1.as_ref()),
-        (TPM_INITRD_PCR, initrd.1.as_ref()),
-        (TPM_CMDLINE_PCR, cmdline.1.as_ref()),
+        (TPM_KERNEL_PCR, kernel.1),
+        (TPM_INITRD_PCR, initrd.1),
+        (TPM_CMDLINE_PCR, cmdline.1),
     ]);
 
     if verified.0 {
-        digests.push((TPM_VERIFIED_PCR, verified.1.as_ref()));
+        digests.push((TPM_VERIFIED_PCR, verified.1));
     }
 
     for (pcr, digest) in digests {
@@ -66,9 +67,9 @@ pub fn measure_boot(
         }
 
         digest
-            .bytes()
+            .iter()
             .zip(digest_bytes.iter_mut())
-            .for_each(|(b, ptr)| *ptr = b);
+            .for_each(|(b, ptr)| *ptr = *b);
         pcr_extend.digests.digests[0].digest.H = digest_bytes;
 
         bail_on_non_success("TPM2_PCR_Extend", unsafe {

@@ -1,11 +1,12 @@
 use ed25519_dalek::{pkcs8::DecodePublicKey, verify_batch, Signature, VerifyingKey};
 use log::debug;
+use sha2::{Digest, Sha256};
 use std::{fs, path::Path};
 
 pub fn verify_artifacts(
-    kernel: (impl AsRef<Path>, impl AsRef<str>),
-    initrd: (impl AsRef<Path>, impl AsRef<str>),
-) -> anyhow::Result<String> {
+    kernel: (impl AsRef<Path>, &[u8]),
+    initrd: (impl AsRef<Path>, &[u8]),
+) -> anyhow::Result<Vec<u8>> {
     let kernel_extension = if let Some(kernel_extension) = kernel.0.as_ref().extension() {
         format!(
             "{}.sig",
@@ -47,7 +48,7 @@ pub fn verify_artifacts(
     let verifying_key = VerifyingKey::from_public_key_pem(pem).map_err(|e| anyhow::anyhow!(e))?;
 
     verify_batch(
-        &[kernel.1.as_ref().as_bytes(), initrd.1.as_ref().as_bytes()],
+        &[kernel.1, initrd.1],
         &[
             Signature::from_slice(fs::read(kernel_sig_path)?.as_slice())?,
             Signature::from_slice(fs::read(initrd_sig_path)?.as_slice())?,
@@ -55,5 +56,7 @@ pub fn verify_artifacts(
         &[verifying_key, verifying_key],
     )?;
 
-    Ok(sha256::digest(verifying_key.as_bytes()))
+    let key_digest = Sha256::digest(verifying_key.as_bytes());
+
+    Ok(key_digest.to_vec())
 }

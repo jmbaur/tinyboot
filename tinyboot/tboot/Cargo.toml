@@ -1,12 +1,18 @@
 [package]
-name = "tbootctl"
+name = "tboot"
 version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-anyhow = "1.0.71"
-clap = { version = "4.2.7", features = ["derive"] }
+ed25519-dalek = { version = "2.0.0-rc.2", features = [
+  "alloc",
+  "pem",
+  "batch",
+  "digest",
+] }
+fern = "0.6.2"
 log = "0.4.17"
-tboot = { path = "../tboot" }
+sha2 = "0.10.6"
+thiserror = "1.0.40"

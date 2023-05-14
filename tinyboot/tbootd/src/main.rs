@@ -16,10 +16,11 @@ use clap::Parser;
 use log::LevelFilter;
 use log::{debug, error, info};
 use nix::{libc, mount};
+use sha2::{Digest, Sha256};
 use std::io::{self, Write};
 use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{self, Command};
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -219,11 +220,10 @@ fn boot(mut boot_loader: impl BootLoader) -> anyhow::Result<()> {
             let (kernel, initrd, cmdline) =
                 boot_loader.boot_info(selected_entry_id.map(|s| s.to_string()))?;
 
-            let kernel_digest = sha256::try_digest(kernel.as_ref())?;
-            let initrd_digest = sha256::try_digest(initrd.as_ref())?;
-            let cmdline_digest = sha256::digest(cmdline.as_str());
-
             let verified_digest = if cfg!(feature = "verified-boot") {
+                let kernel_digest = tboot::hash::sha512_digest_file(&kernel)?;
+                let initrd_digest = tboot::hash::sha512_digest_file(&initrd)?;
+
                 match verify::verify_artifacts((&kernel, &kernel_digest), (&initrd, &initrd_digest))
                 {
                     Ok(digest) => {
@@ -233,14 +233,18 @@ fn boot(mut boot_loader: impl BootLoader) -> anyhow::Result<()> {
                     Err(e) => anyhow::bail!("Failed to verify boot artifacts: {}", e),
                 }
             } else {
-                String::new()
+                Vec::new()
             };
 
             kexec_load(&kernel, &initrd, &cmdline)?;
 
             if cfg!(feature = "measured-boot") {
+                let kernel_digest = tboot::hash::sha256_digest_file(&kernel)?;
+                let initrd_digest = tboot::hash::sha256_digest_file(&initrd)?;
+                let cmdline_digest = Sha256::digest(cmdline.as_str());
+
                 match tpm::measure_boot(
-                    (cfg!(feature = "verified-boot"), verified_digest),
+                    (cfg!(feature = "verified-boot"), &verified_digest),
                     (&kernel, &kernel_digest),
                     (&initrd, &initrd_digest),
                     (&cmdline, &cmdline_digest),
@@ -343,26 +347,14 @@ pub fn shell() -> anyhow::Result<()> {
 fn main() -> anyhow::Result<()> {
     let cfg = Config::parse();
 
-    fern::Dispatch::new()
-        .format(|out, message, record| {
-            out.finish(format_args!(
-                "[{}][{}] {}",
-                record.target(),
-                record.level(),
-                message
-            ))
-        })
-        .level(cfg.log_level)
-        .chain(io::stderr())
-        .apply()
-        .expect("failed to setup logging");
+    tboot::log::setup_logging(cfg.log_level).expect("failed to setup logging");
 
     info!("running version {}", VERSION.unwrap_or("devel"));
     debug!("config: {:?}", cfg);
 
     if (unsafe { nix::libc::getuid() }) != 0 {
         error!("tinyboot not running as root");
-        return Ok(());
+        process::exit(1);
     }
 
     loop {
