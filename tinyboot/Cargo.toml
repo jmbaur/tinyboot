@@ -1,5 +1,5 @@
 [workspace]
-members = ["tinyboot", "grub"]
+members = ["tbootd", "grub"]
 
 [profile.release]
 lto = true

@@ -41,7 +41,7 @@ let
     ::ctrlaltdel:/bin/reboot
     ::shutdown:/bin/umount -ar -t ext4,vfat
     ::restart:/init
-    ${tty}::once:/bin/tinyboot --log-level=${if debug then "debug" else "info"}
+    ${tty}::once:/bin/tbootd --log-level=${if debug then "debug" else "info"}
   '' + extraInittab);
   passwd = writeText "passwd" ''
     root:x:0:0:System administrator:/root:/bin/sh
