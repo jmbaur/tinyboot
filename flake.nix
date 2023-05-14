@@ -28,6 +28,7 @@
       overlays.default = final: prev: {
         flashrom = prev.callPackage ./flashrom.nix { };
         wolftpm = prev.callPackage ./wolftpm.nix { };
+        tinyboot = prev.callPackage ./tinyboot { };
         coreboot = prev.callPackage ./boards {
           buildFitImage = prev.callPackage ./fitimage { };
           buildCoreboot = prev.callPackage ./coreboot.nix { };
@@ -35,7 +36,7 @@
       };
       devShells = forAllSystems ({ pkgs, ... }: {
         default = with pkgs; mkShell {
-          inputsFrom = [ (callPackage ./tinyboot { }) ];
+          inputsFrom = [ tinyboot ];
           nativeBuildInputs = [ bashInteractive grub2 cargo-insta rustfmt cargo-edit clippy ];
           VERIFIED_BOOT_PUBLIC_KEY = ./test/keys/pubkey;
         };

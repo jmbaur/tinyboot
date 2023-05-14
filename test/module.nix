@@ -1,11 +1,6 @@
 { config, pkgs, lib, modulesPath, ... }: {
   imports = [ "${modulesPath}/profiles/qemu-guest.nix" ];
   system.stateVersion = "23.05";
-  nixpkgs.overlays = [
-    (final: prev: {
-      tinyboot = prev.pkgsStatic.callPackage ../tinyboot { };
-    })
-  ];
   environment.etc.tboot-pubkey.source = ./keys/pubkey;
   environment.systemPackages = [ pkgs.tinyboot ];
   specialisation.alternate.configuration.boot.kernelParams = [ "console=tty0" ]; # to provide more menu options
