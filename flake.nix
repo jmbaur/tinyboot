@@ -26,12 +26,12 @@
         in
         nixpkgs.lib.foldAttrs (curr: acc: acc // curr) { } (map (b: extend b base) [ "bls" "grub" "extlinux" ]);
       overlays.default = final: prev: {
-        flashrom = prev.callPackage ./flashrom.nix { };
+        flashrom-cros = prev.callPackage ./flashrom.nix { };
         wolftpm = prev.callPackage ./wolftpm.nix { };
         tinyboot = prev.callPackage ./tinyboot { };
         coreboot = prev.callPackage ./boards {
           buildFitImage = prev.callPackage ./fitimage { };
-          buildCoreboot = prev.callPackage ./coreboot.nix { };
+          buildCoreboot = prev.callPackage ./coreboot.nix { flashrom = final.flashrom-cros; };
         };
       };
       devShells = forAllSystems ({ pkgs, ... }: {
