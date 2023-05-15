@@ -9,7 +9,8 @@ pub fn handle_verified_boot_sign(args: &SignCommand) -> anyhow::Result<()> {
 
     debug!("signing {:?} with {:?}", args.file, args.private_key);
 
-    verified_boot::sign(&args.private_key, &args.file, &target_file)?;
+    let pem = fs::read_to_string(&args.private_key)?;
+    verified_boot::sign(&pem, &args.file, &target_file)?;
 
     debug!("detached signature written to {:?}", target_file);
 

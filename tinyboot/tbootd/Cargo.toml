@@ -11,7 +11,6 @@ verified-boot = []
 [dependencies]
 anyhow = "1.0.71"
 clap = { version = "4.2.7", features = ["derive"] }
-ed25519-dalek = { version = "2.0.0-rc.2", features = ["alloc", "pem", "batch"] }
 grub = { path = "../grub" }
 log = "0.4.17"
 nix = "0.26.2"
@@ -19,7 +18,7 @@ sha2 = "0.10.6"
 syscalls = "0.6.10"
 tboot = { path = "../tboot" }
 termion = "2.0.1"
-uuid = "1.3.2"
+uuid = "1.2.2"
 
 [build-dependencies]
 bindgen = { version = "0.65.1" }

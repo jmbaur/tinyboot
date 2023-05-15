@@ -61,12 +61,11 @@ pub fn signature_file_path(p: impl AsRef<Path>) -> PathBuf {
 }
 
 pub fn sign(
-    private_key: impl AsRef<Path>,
+    pem: &str,
     file_to_sign: impl AsRef<Path>,
     signature_file: impl AsRef<Path>,
 ) -> Result<(), VerifiedBootError> {
-    let priv_key_string = fs::read_to_string(private_key)?;
-    let signing_key = SigningKey::from_pkcs8_pem(&priv_key_string)?;
+    let signing_key = SigningKey::from_pkcs8_pem(pem)?;
 
     let mut file = fs::File::open(file_to_sign)?;
     let mut digest = Sha512::new();
@@ -95,4 +94,37 @@ pub fn verify(
     verifying_key.verify_prehashed(digest, None, &signature)?;
 
     Ok(verifying_key)
+}
+
+#[cfg(test)]
+mod tests {
+    use mktemp::Temp;
+    use std::{fs, path::PathBuf};
+
+    const PRIVATE_KEY: &str = r#"-----BEGIN PRIVATE KEY-----
+MC4CAQAwBQYDK2VwBCIEINxJJ4IvE5lIw4nlYgGnXKVm1xLHakOc8SkM5klZwk2H
+-----END PRIVATE KEY-----"#;
+
+    const PUBLIC_KEY: &str = r#"-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEAKPiHYO0He9hagQI1wwRes0y5P79JF4FDhkq890Uhobs=
+-----END PUBLIC KEY-----"#;
+
+    // TODO(jared): don't write to filesystem
+    #[test]
+    fn test_sign_and_verify() {
+        let temp_file = Temp::new_file().unwrap();
+        fs::write(temp_file.as_path(), "foobar").unwrap();
+        super::sign(
+            PRIVATE_KEY,
+            temp_file.as_path(),
+            PathBuf::from(format!("{}.sig", temp_file.as_path().to_str().unwrap())),
+        )
+        .expect("sign failed");
+        super::verify(
+            PUBLIC_KEY,
+            temp_file.as_path(),
+            PathBuf::from(format!("{}.sig", temp_file.as_path().to_str().unwrap())),
+        )
+        .expect("verify failed");
+    }
 }
