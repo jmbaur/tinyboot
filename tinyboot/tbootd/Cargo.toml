@@ -12,6 +12,7 @@ verified-boot = []
 anyhow = "1.0.71"
 clap = { version = "4.2.7", features = ["derive"] }
 grub = { path = "../grub" }
+hex = "0.4.3"
 log = "0.4.17"
 nix = "0.26.2"
 sha2 = "0.10.6"

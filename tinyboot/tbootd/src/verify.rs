@@ -26,7 +26,7 @@ pub fn verify_artifacts(
     tboot::verified_boot::verify(PEM, kernel, &kernel_sig_path)?;
     tboot::verified_boot::verify(PEM, initrd, &initrd_sig_path)?;
 
-    let key_digest = Sha256::digest(PEM.as_bytes());
+    let key_digest = Sha256::digest(PEM);
 
     Ok(key_digest.to_vec())
 }

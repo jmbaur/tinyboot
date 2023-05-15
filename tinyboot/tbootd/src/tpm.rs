@@ -44,13 +44,13 @@ pub fn measure_boot(
     let mut dev = unsafe { dev.assume_init() };
 
     let mut digests = Vec::from([
-        (TPM_KERNEL_PCR, kernel.1),
-        (TPM_INITRD_PCR, initrd.1),
-        (TPM_CMDLINE_PCR, cmdline.1),
+        (TPM_KERNEL_PCR, hex::encode(kernel.1)),
+        (TPM_INITRD_PCR, hex::encode(initrd.1)),
+        (TPM_CMDLINE_PCR, hex::encode(cmdline.1)),
     ]);
 
     if verified.0 {
-        digests.push((TPM_VERIFIED_PCR, verified.1));
+        digests.push((TPM_VERIFIED_PCR, hex::encode(verified.1)));
     }
 
     for (pcr, digest) in digests {
@@ -67,9 +67,9 @@ pub fn measure_boot(
         }
 
         digest
-            .iter()
+            .bytes()
             .zip(digest_bytes.iter_mut())
-            .for_each(|(b, ptr)| *ptr = *b);
+            .for_each(|(b, ptr)| *ptr = b);
         pcr_extend.digests.digests[0].digest.H = digest_bytes;
 
         bail_on_non_success("TPM2_PCR_Extend", unsafe {
