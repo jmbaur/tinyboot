@@ -3,7 +3,6 @@ use ed25519_dalek::{
     pkcs8::{self, spki, DecodePrivateKey, DecodePublicKey},
     DigestSigner, Signature, SigningKey, VerifyingKey,
 };
-use log::info;
 use sha2::{Digest, Sha512};
 use std::{
     fs, io,
@@ -20,6 +19,8 @@ pub enum VerifiedBootError {
     Signature(signature::Error),
     #[error("spki error: {0}")]
     Spki(spki::Error),
+    #[error("file already exists")]
+    FileAlreadyExists,
 }
 
 impl From<io::Error> for VerifiedBootError {
@@ -67,9 +68,7 @@ pub fn sign(
     signature_file: impl AsRef<Path>,
 ) -> Result<(), VerifiedBootError> {
     if signature_file.as_ref().exists() {
-        info!("file exists at path for signature file, skipping write");
-        // TODO(jared): error here?
-        return Ok(());
+        return Err(VerifiedBootError::FileAlreadyExists);
     }
 
     let signing_key = SigningKey::from_pkcs8_pem(pem)?;
