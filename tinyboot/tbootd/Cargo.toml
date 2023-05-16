@@ -8,6 +8,9 @@ default = []
 measured-boot = []
 verified-boot = []
 
+[build-dependencies]
+bindgen = { version = "0.65.1" }
+
 [dependencies]
 anyhow = "1.0.71"
 clap = { version = "4.2.7", features = ["derive"] }
@@ -20,6 +23,3 @@ syscalls = "0.6.10"
 tboot = { path = "../tboot" }
 termion = "2.0.1"
 uuid = "1.2.2"
-
-[build-dependencies]
-bindgen = { version = "0.65.1" }
