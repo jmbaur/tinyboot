@@ -10,7 +10,7 @@ stdenv.mkDerivation ({
     inherit (toolchain.src) url rev;
     leaveDotGit = false;
     fetchSubmodules = true;
-    sha256 = "sha256-QvQ87mPnETNZL3GbMHHBAOxJFvRDUzIlXSiuLG7wxEw=";
+    sha256 = "sha256-DPaudCeK9SKu2eN1fad6a52ICs5d/GXCUFMdqAl65BE=";
   };
   depsBuildBuild = [ pkgsBuildBuild.stdenv.cc ];
   nativeBuildInputs = [ python3 pkg-config ];
