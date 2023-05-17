@@ -220,36 +220,50 @@ fn boot(mut boot_loader: impl BootLoader) -> anyhow::Result<()> {
             let (kernel, initrd, cmdline) =
                 boot_loader.boot_info(selected_entry_id.map(|s| s.to_string()))?;
 
+            let mut needs_pcr_reset = false;
+
             let verified_digest = if cfg!(feature = "verified-boot") {
-                match verify::verify_artifacts(&kernel, &initrd) {
+                match verify::verify_boot_payloads(&kernel, &initrd) {
                     Ok(digest) => {
                         info!("Verified boot artifacts");
-                        digest
+                        Some(digest)
                     }
-                    Err(e) => anyhow::bail!("Failed to verify boot artifacts: {}", e),
+                    Err(e) => {
+                        error!("Failed to verify boot artifacts: {}", e);
+                        needs_pcr_reset = true;
+                        None
+                    }
                 }
             } else {
-                Vec::new()
+                None
             };
 
             kexec_load(&kernel, &initrd, &cmdline)?;
 
-            if cfg!(feature = "measured-boot") {
-                let kernel_digest = tboot::hash::sha256_digest_file(&kernel)?;
-                let initrd_digest = tboot::hash::sha256_digest_file(&initrd)?;
-                let cmdline_digest = Sha256::digest(cmdline.as_str());
+            if !needs_pcr_reset {
+                if cfg!(feature = "measured-boot") {
+                    let kernel_digest = tboot::hash::sha256_digest_file(&kernel)?;
+                    let initrd_digest = tboot::hash::sha256_digest_file(&initrd)?;
+                    let cmdline_digest = Sha256::digest(cmdline.as_str());
 
-                match tpm::measure_boot(
-                    (cfg!(feature = "verified-boot"), &verified_digest),
-                    (&kernel, &kernel_digest),
-                    (&initrd, &initrd_digest),
-                    (&cmdline, &cmdline_digest),
-                ) {
-                    Ok(()) => info!("Measured boot artifacts"),
-                    Err(e) => {
-                        error!("Failed to measure boot artifacts: {e}");
-                    }
-                };
+                    match tpm::measure_boot(
+                        (
+                            cfg!(feature = "verified-boot"),
+                            &verified_digest.unwrap_or_default(),
+                        ),
+                        (&kernel, &kernel_digest),
+                        (&initrd, &initrd_digest),
+                        (&cmdline, &cmdline_digest),
+                    ) {
+                        Ok(()) => info!("Measured boot artifacts"),
+                        Err(e) => {
+                            error!("Failed to measure boot artifacts: {e}");
+                            error!("This board may be misconfigured!!");
+                        }
+                    };
+                }
+            } else if let Err(e) = tpm::reset_pcr_slots() {
+                error!("Failed to reset tinyboot-managed PCR slots: {e}");
             }
 
             let mountpoint = boot_loader.mountpoint();

@@ -29,6 +29,43 @@ fn bail_on_non_success(msg: &str, rc: i32) -> anyhow::Result<()> {
     Ok(())
 }
 
+pub fn reset_pcr_slots() -> anyhow::Result<()> {
+    let mut dev: std::mem::MaybeUninit<bindings::WOLFTPM2_DEV> = std::mem::MaybeUninit::uninit();
+
+    bail_on_non_success("wolfTPM2_Init", unsafe {
+        bindings::wolfTPM2_Init(dev.as_mut_ptr(), None, std::ptr::null_mut())
+    })?;
+
+    let mut dev = unsafe { dev.assume_init() };
+
+    let mut errors = Vec::new();
+
+    for pcr in [
+        TPM_VERIFIED_PCR,
+        TPM_CMDLINE_PCR,
+        TPM_INITRD_PCR,
+        TPM_KERNEL_PCR,
+    ] {
+        let mut pcr_reset = unsafe { std::mem::zeroed::<bindings::PCR_Reset_In>() };
+        pcr_reset.pcrHandle = pcr;
+        let rc = unsafe { bindings::TPM2_PCR_Reset(&mut pcr_reset) };
+        if rc != bindings::TPM_RC_T_TPM_RC_SUCCESS {
+            errors.push(get_rc_string(rc));
+        }
+    }
+
+    bail_on_non_success("wolfTPM2_Cleanup", unsafe {
+        bindings::wolfTPM2_Cleanup(&mut dev)
+    })?;
+
+    if !errors.is_empty() {
+        errors.dedup();
+        Err(anyhow::anyhow!(errors.join(";")))
+    } else {
+        Ok(())
+    }
+}
+
 pub fn measure_boot(
     verified: (bool, &[u8]),
     kernel: (impl AsRef<Path>, &[u8]),
@@ -36,7 +73,6 @@ pub fn measure_boot(
     cmdline: (impl AsRef<str>, &[u8]),
 ) -> anyhow::Result<()> {
     let mut dev: std::mem::MaybeUninit<bindings::WOLFTPM2_DEV> = std::mem::MaybeUninit::uninit();
-
     bail_on_non_success("wolfTPM2_Init", unsafe {
         bindings::wolfTPM2_Init(dev.as_mut_ptr(), None, std::ptr::null_mut())
     })?;

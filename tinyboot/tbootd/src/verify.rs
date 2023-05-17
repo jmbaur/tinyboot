@@ -4,7 +4,7 @@ use std::path::Path;
 
 const PEM: &str = include_str!(env!("VERIFIED_BOOT_PUBLIC_KEY"));
 
-pub fn verify_artifacts(
+pub fn verify_boot_payloads(
     kernel: impl AsRef<Path>,
     initrd: impl AsRef<Path>,
 ) -> anyhow::Result<Vec<u8>> {
