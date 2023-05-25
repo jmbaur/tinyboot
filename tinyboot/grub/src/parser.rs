@@ -670,8 +670,22 @@ mod tests {
     }
 
     #[test]
-    fn full_example() {
-        let mut p = Parser::new(Lexer::new(include_str!("./testdata/grub.cfg")));
+    fn nixos_example() {
+        let mut p = Parser::new(Lexer::new(include_str!("./testdata/grub-nixos.cfg")));
+        let ast = p.parse().expect("no parsing errors");
+        insta::assert_debug_snapshot!(ast);
+    }
+
+    #[test]
+    fn ubuntu_iso_example() {
+        let mut p = Parser::new(Lexer::new(include_str!("./testdata/grub-ubuntu.cfg")));
+        let ast = p.parse().expect("no parsing errors");
+        insta::assert_debug_snapshot!(ast);
+    }
+
+    #[test]
+    fn alpine_iso_example() {
+        let mut p = Parser::new(Lexer::new(include_str!("./testdata/grub-alpine.cfg")));
         let ast = p.parse().expect("no parsing errors");
         insta::assert_debug_snapshot!(ast);
     }

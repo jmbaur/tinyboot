@@ -1,4 +1,4 @@
-use crate::boot_loader::{BootLoader, Error, MenuEntry};
+use crate::boot_loader::{BootLoader, Error, LinuxBootEntry};
 use log::{debug, info};
 use std::{
     fs,
@@ -16,7 +16,6 @@ struct BootEntry {
 }
 
 pub struct SyslinuxBootLoader {
-    mountpoint: PathBuf,
     config_file: PathBuf,
     entries: Vec<BootEntry>,
     timeout: Duration,
@@ -175,15 +174,15 @@ impl SyslinuxBootLoader {
         Err(Error::BootConfigNotFound)
     }
 
-    pub fn new(mountpoint: &Path, config_file: &Path) -> Result<Self, Error> {
+    #[allow(clippy::new_ret_no_self)]
+    pub fn new(config_file: &Path) -> Result<Box<dyn BootLoader + Send>, Error> {
         let mut s = Self {
-            mountpoint: mountpoint.to_path_buf(),
             config_file: config_file.to_path_buf(),
             entries: Vec::new(),
             timeout: Duration::from_secs(10),
         };
         s.parse()?;
-        Ok(s)
+        Ok(Box::new(s))
     }
 
     fn parse(&mut self) -> Result<(), Error> {
@@ -199,34 +198,18 @@ impl BootLoader for SyslinuxBootLoader {
         self.timeout
     }
 
-    fn mountpoint(&self) -> &Path {
-        &self.mountpoint
-    }
-
-    fn menu_entries(&self) -> std::result::Result<Vec<MenuEntry>, Error> {
+    fn boot_entries(&self) -> Result<Vec<LinuxBootEntry>, Error> {
         Ok(self
             .entries
             .iter()
-            .map(|entry| MenuEntry::BootEntry((&entry.name, &entry.name)))
+            .map(|entry| LinuxBootEntry {
+                default: entry.default,
+                display: entry.name.clone(),
+                linux: entry.kernel.clone(),
+                initrd: Some(entry.initrd.clone()),
+                cmdline: Some(entry.cmdline.clone()),
+            })
             .collect())
-    }
-
-    fn boot_info(&mut self, entry_id: Option<String>) -> Result<(PathBuf, PathBuf, String), Error> {
-        if let Some(entry) = self.entries.iter().find(|&entry| {
-            if let Some(entry_id) = &entry_id {
-                &entry.name == entry_id
-            } else {
-                entry.default
-            }
-        }) {
-            Ok((
-                entry.kernel.to_owned(),
-                entry.initrd.to_owned(),
-                entry.cmdline.to_owned(),
-            ))
-        } else {
-            Err(Error::BootEntryNotFound)
-        }
     }
 }
 

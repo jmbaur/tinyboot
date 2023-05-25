@@ -37,7 +37,7 @@
       devShells = forAllSystems ({ pkgs, ... }: {
         default = with pkgs; mkShell {
           inputsFrom = [ tinyboot ];
-          nativeBuildInputs = [ bashInteractive grub2 cargo-insta rustfmt cargo-edit clippy ];
+          nativeBuildInputs = [ bashInteractive grub2 cargo-insta rustfmt cargo-watch cargo-edit clippy ];
           VERIFIED_BOOT_PUBLIC_KEY = ./test/keys/pubkey;
         };
       });

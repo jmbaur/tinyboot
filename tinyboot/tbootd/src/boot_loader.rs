@@ -10,7 +10,6 @@ use syscalls::{syscall, Sysno};
 #[derive(Debug)]
 pub enum Error {
     BootConfigNotFound,
-    BootEntryNotFound,
     Eval(grub::EvalError),
     InvalidEntry,
     InvalidMountpoint,
@@ -31,48 +30,62 @@ impl From<io::Error> for Error {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub enum MenuEntry<'a> {
-    /// BootEntry: (ID, name)
-    BootEntry((&'a str, &'a str)),
-    /// SubMenu: (ID, name, entries)
-    SubMenu((&'a str, &'a str, Vec<MenuEntry<'a>>)),
+#[derive(Clone, Debug, PartialEq)]
+pub struct LinuxBootEntry {
+    pub default: bool,
+    pub display: String,
+    pub linux: PathBuf,
+    pub initrd: Option<PathBuf>,
+    pub cmdline: Option<String>,
 }
 
 pub trait BootLoader {
     fn timeout(&self) -> Duration;
 
-    fn mountpoint(&self) -> &Path;
-
-    fn menu_entries(&self) -> Result<Vec<MenuEntry>, Error>;
-
-    /// If the entry ID is None, the boot loader should choose the default boot entry.
-    /// The Ok() result tuple looks like: (kernel, initrd, cmdline)
-    fn boot_info(&mut self, entry_id: Option<String>) -> Result<(PathBuf, PathBuf, String), Error>;
+    fn boot_entries(&self) -> Result<Vec<LinuxBootEntry>, Error>;
 }
 
-pub fn kexec_load(kernel: &Path, initrd: &Path, cmdline: &str) -> io::Result<()> {
-    debug!("loading kernel from {:?}", kernel);
+pub fn kexec_load(
+    kernel: impl AsRef<Path>,
+    initrd: Option<impl AsRef<Path>>,
+    cmdline: &str,
+) -> io::Result<()> {
+    debug!("loading kernel from {:?}", kernel.as_ref());
     let kernel = fs::File::open(kernel)?;
-    let kernel = kernel.as_raw_fd() as usize;
-
-    debug!("loading initrd from {:?}", initrd);
-    let initrd = fs::File::open(initrd)?;
-    let initrd = initrd.as_raw_fd();
+    let kernel_fd = kernel.as_raw_fd() as libc::c_int;
+    debug!("kernel loaded as fd {}", kernel_fd);
 
     debug!("loading cmdline as {:?}", cmdline);
     let cmdline = ffi::CString::new(cmdline)?;
     let cmdline = cmdline.to_bytes_with_nul();
 
-    let retval = unsafe {
-        syscall!(
-            Sysno::kexec_file_load,
-            kernel,
-            initrd,
-            cmdline.len(),
-            cmdline.as_ptr(),
-            0
-        )?
+    let retval = if let Some(initrd) = initrd {
+        debug!("loading initrd from {:?}", initrd.as_ref());
+        let initrd = fs::File::open(initrd)?;
+        let initrd_fd = initrd.as_raw_fd() as libc::c_int;
+        debug!("initrd loaded as fd {}", initrd_fd);
+
+        unsafe {
+            syscall!(
+                Sysno::kexec_file_load,
+                kernel_fd,
+                initrd_fd,
+                cmdline.len(),
+                cmdline.as_ptr(),
+                0 as libc::c_ulong
+            )?
+        }
+    } else {
+        unsafe {
+            syscall!(
+                Sysno::kexec_file_load,
+                kernel_fd,
+                0 as libc::c_int, // this gets ignored when KEXEC_FILE_NO_INITRAMFS is set
+                cmdline.len(),
+                cmdline.as_ptr(),
+                nix::libc::KEXEC_FILE_NO_INITRAMFS as libc::c_ulong
+            )?
+        }
     };
 
     if retval > -4096isize as usize {

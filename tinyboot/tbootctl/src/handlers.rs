@@ -7,7 +7,7 @@ use tboot::verified_boot;
 pub fn handle_verified_boot_sign(args: &SignCommand) -> anyhow::Result<()> {
     let target_file = tboot::verified_boot::signature_file_path(&args.file);
 
-    debug!("signing {:?} with {:?}", args.file, args.private_key);
+    debug!("signing {:?}", args.file);
 
     let pem = fs::read_to_string(&args.private_key)?;
     match verified_boot::sign(&pem, &args.file, &target_file) {

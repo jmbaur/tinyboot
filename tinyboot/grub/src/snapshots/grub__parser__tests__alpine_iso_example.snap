@@ -1,0 +1,58 @@
+---
+source: grub/src/parser.rs
+expression: ast
+---
+Root {
+    statements: [
+        Command(
+            CommandStatement {
+                command: "set",
+                args: [
+                    Value(
+                        "timeout=1",
+                    ),
+                ],
+            },
+        ),
+        Command(
+            CommandStatement {
+                command: "menuentry",
+                args: [
+                    Value(
+                        "Linux lts",
+                    ),
+                    Block(
+                        [
+                            Command(
+                                CommandStatement {
+                                    command: "linux",
+                                    args: [
+                                        Value(
+                                            "/boot/vmlinuz-lts",
+                                        ),
+                                        Value(
+                                            "modules=loop,squashfs,sd-mod,usb-storage",
+                                        ),
+                                        Value(
+                                            "quiet",
+                                        ),
+                                    ],
+                                },
+                            ),
+                            Command(
+                                CommandStatement {
+                                    command: "initrd",
+                                    args: [
+                                        Value(
+                                            "/boot/initramfs-lts",
+                                        ),
+                                    ],
+                                },
+                            ),
+                        ],
+                    ),
+                ],
+            },
+        ),
+    ],
+}

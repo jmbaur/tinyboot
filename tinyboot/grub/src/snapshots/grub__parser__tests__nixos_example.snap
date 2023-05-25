@@ -1,0 +1,726 @@
+---
+source: grub/src/parser.rs
+expression: ast
+---
+Root {
+    statements: [
+        Command(
+            CommandStatement {
+                command: "search",
+                args: [
+                    Value(
+                        "--set=drive1",
+                    ),
+                    Value(
+                        "--fs-uuid",
+                    ),
+                    Value(
+                        "BB22-99EC",
+                    ),
+                ],
+            },
+        ),
+        If(
+            IfStatement {
+                condition: Condition(
+                    true,
+                    CommandStatement {
+                        command: "test",
+                        args: [
+                            Value(
+                                "-s",
+                            ),
+                            Value(
+                                "$prefix/grubenv",
+                            ),
+                        ],
+                    },
+                ),
+                consequence: [
+                    Command(
+                        CommandStatement {
+                            command: "load_env",
+                            args: [],
+                        },
+                    ),
+                ],
+                elifs: [],
+                alternative: [],
+            },
+        ),
+        If(
+            IfStatement {
+                condition: Condition(
+                    true,
+                    CommandStatement {
+                        command: "test",
+                        args: [
+                            Value(
+                                "${next_entry}",
+                            ),
+                        ],
+                    },
+                ),
+                consequence: [
+                    Command(
+                        CommandStatement {
+                            command: "set",
+                            args: [
+                                Value(
+                                    "default=\"${next_entry}\"",
+                                ),
+                            ],
+                        },
+                    ),
+                    Command(
+                        CommandStatement {
+                            command: "set",
+                            args: [
+                                Value(
+                                    "next_entry=",
+                                ),
+                            ],
+                        },
+                    ),
+                    Command(
+                        CommandStatement {
+                            command: "save_env",
+                            args: [
+                                Value(
+                                    "next_entry",
+                                ),
+                            ],
+                        },
+                    ),
+                    Command(
+                        CommandStatement {
+                            command: "set",
+                            args: [
+                                Value(
+                                    "timeout=1",
+                                ),
+                            ],
+                        },
+                    ),
+                    Command(
+                        CommandStatement {
+                            command: "set",
+                            args: [
+                                Value(
+                                    "boot_once=true",
+                                ),
+                            ],
+                        },
+                    ),
+                ],
+                elifs: [],
+                alternative: [
+                    Command(
+                        CommandStatement {
+                            command: "set",
+                            args: [
+                                Value(
+                                    "default=0",
+                                ),
+                            ],
+                        },
+                    ),
+                    Command(
+                        CommandStatement {
+                            command: "set",
+                            args: [
+                                Value(
+                                    "timeout=5",
+                                ),
+                            ],
+                        },
+                    ),
+                ],
+            },
+        ),
+        Function(
+            FunctionStatement {
+                name: "savedefault",
+                body: [
+                    If(
+                        IfStatement {
+                            condition: Condition(
+                                true,
+                                CommandStatement {
+                                    command: "test",
+                                    args: [
+                                        Value(
+                                            "-z",
+                                        ),
+                                        Value(
+                                            "${boot_once}",
+                                        ),
+                                    ],
+                                },
+                            ),
+                            consequence: [
+                                Assignment(
+                                    AssignmentStatement {
+                                        name: "saved_entry",
+                                        value: Some(
+                                            "\"${chosen}\"",
+                                        ),
+                                    },
+                                ),
+                                Command(
+                                    CommandStatement {
+                                        command: "save_env",
+                                        args: [
+                                            Value(
+                                                "saved_entry",
+                                            ),
+                                        ],
+                                    },
+                                ),
+                            ],
+                            elifs: [],
+                            alternative: [],
+                        },
+                    ),
+                ],
+            },
+        ),
+        If(
+            IfStatement {
+                condition: Condition(
+                    true,
+                    CommandStatement {
+                        command: "test",
+                        args: [
+                            Value(
+                                "${grub_platform}",
+                            ),
+                            Value(
+                                "=",
+                            ),
+                            Value(
+                                "efi",
+                            ),
+                        ],
+                    },
+                ),
+                consequence: [
+                    Command(
+                        CommandStatement {
+                            command: "insmod",
+                            args: [
+                                Value(
+                                    "efi_gop",
+                                ),
+                            ],
+                        },
+                    ),
+                    Command(
+                        CommandStatement {
+                            command: "insmod",
+                            args: [
+                                Value(
+                                    "efi_uga",
+                                ),
+                            ],
+                        },
+                    ),
+                ],
+                elifs: [],
+                alternative: [
+                    Command(
+                        CommandStatement {
+                            command: "insmod",
+                            args: [
+                                Value(
+                                    "vbe",
+                                ),
+                            ],
+                        },
+                    ),
+                ],
+            },
+        ),
+        Command(
+            CommandStatement {
+                command: "insmod",
+                args: [
+                    Value(
+                        "font",
+                    ),
+                ],
+            },
+        ),
+        If(
+            IfStatement {
+                condition: Condition(
+                    true,
+                    CommandStatement {
+                        command: "loadfont",
+                        args: [
+                            Value(
+                                "($drive1)//converted-font.pf2",
+                            ),
+                        ],
+                    },
+                ),
+                consequence: [
+                    Command(
+                        CommandStatement {
+                            command: "insmod",
+                            args: [
+                                Value(
+                                    "gfxterm",
+                                ),
+                            ],
+                        },
+                    ),
+                    If(
+                        IfStatement {
+                            condition: Condition(
+                                true,
+                                CommandStatement {
+                                    command: "test",
+                                    args: [
+                                        Value(
+                                            "${grub_platform}",
+                                        ),
+                                        Value(
+                                            "=",
+                                        ),
+                                        Value(
+                                            "efi",
+                                        ),
+                                    ],
+                                },
+                            ),
+                            consequence: [
+                                Command(
+                                    CommandStatement {
+                                        command: "set",
+                                        args: [
+                                            Value(
+                                                "gfxmode=auto",
+                                            ),
+                                        ],
+                                    },
+                                ),
+                                Command(
+                                    CommandStatement {
+                                        command: "set",
+                                        args: [
+                                            Value(
+                                                "gfxpayload=keep",
+                                            ),
+                                        ],
+                                    },
+                                ),
+                            ],
+                            elifs: [],
+                            alternative: [
+                                Command(
+                                    CommandStatement {
+                                        command: "set",
+                                        args: [
+                                            Value(
+                                                "gfxmode=1024x768",
+                                            ),
+                                        ],
+                                    },
+                                ),
+                                Command(
+                                    CommandStatement {
+                                        command: "set",
+                                        args: [
+                                            Value(
+                                                "gfxpayload=text",
+                                            ),
+                                        ],
+                                    },
+                                ),
+                            ],
+                        },
+                    ),
+                    Command(
+                        CommandStatement {
+                            command: "terminal_output",
+                            args: [
+                                Value(
+                                    "gfxterm",
+                                ),
+                            ],
+                        },
+                    ),
+                ],
+                elifs: [],
+                alternative: [],
+            },
+        ),
+        Command(
+            CommandStatement {
+                command: "background_color",
+                args: [
+                    Literal(
+                        "#2F302F",
+                    ),
+                ],
+            },
+        ),
+        Command(
+            CommandStatement {
+                command: "insmod",
+                args: [
+                    Value(
+                        "png",
+                    ),
+                ],
+            },
+        ),
+        If(
+            IfStatement {
+                condition: Condition(
+                    true,
+                    CommandStatement {
+                        command: "background_image",
+                        args: [
+                            Value(
+                                "--mode",
+                            ),
+                            Literal(
+                                "normal",
+                            ),
+                            Value(
+                                "($drive1)//background.png",
+                            ),
+                        ],
+                    },
+                ),
+                consequence: [
+                    Command(
+                        CommandStatement {
+                            command: "set",
+                            args: [
+                                Value(
+                                    "color_normal=white/black",
+                                ),
+                            ],
+                        },
+                    ),
+                    Command(
+                        CommandStatement {
+                            command: "set",
+                            args: [
+                                Value(
+                                    "color_highlight=black/white",
+                                ),
+                            ],
+                        },
+                    ),
+                ],
+                elifs: [],
+                alternative: [
+                    Command(
+                        CommandStatement {
+                            command: "set",
+                            args: [
+                                Value(
+                                    "menu_color_normal=cyan/blue",
+                                ),
+                            ],
+                        },
+                    ),
+                    Command(
+                        CommandStatement {
+                            command: "set",
+                            args: [
+                                Value(
+                                    "menu_color_highlight=white/blue",
+                                ),
+                            ],
+                        },
+                    ),
+                ],
+            },
+        ),
+        Command(
+            CommandStatement {
+                command: "menuentry",
+                args: [
+                    Value(
+                        "NixOS - Default",
+                    ),
+                    Value(
+                        "--class",
+                    ),
+                    Value(
+                        "nixos",
+                    ),
+                    Value(
+                        "--unrestricted",
+                    ),
+                    Block(
+                        [
+                            Command(
+                                CommandStatement {
+                                    command: "search",
+                                    args: [
+                                        Value(
+                                            "--set=drive1",
+                                        ),
+                                        Value(
+                                            "--fs-uuid",
+                                        ),
+                                        Value(
+                                            "BB22-99EC",
+                                        ),
+                                    ],
+                                },
+                            ),
+                            Command(
+                                CommandStatement {
+                                    command: "linux",
+                                    args: [
+                                        Value(
+                                            "($drive1)//kernels/1pzgainlvg5hcdf8ngjficg3x39j63gv-linux-6.0.15-bzImage",
+                                        ),
+                                        Value(
+                                            "init=/nix/store/kd6rrm02cs95hd8mf1kmnx14vksnrhwi-nixos-system-beetroot-23.05.20230102.0fc9fca/init",
+                                        ),
+                                        Value(
+                                            "loglevel=4",
+                                        ),
+                                        Value(
+                                            "zram.num_devices=1",
+                                        ),
+                                    ],
+                                },
+                            ),
+                            Command(
+                                CommandStatement {
+                                    command: "initrd",
+                                    args: [
+                                        Value(
+                                            "($drive1)//kernels/2spacgl5d8l701wskfrz45q575f0q3fg-initrd-linux-6.0.15-initrd",
+                                        ),
+                                    ],
+                                },
+                            ),
+                        ],
+                    ),
+                ],
+            },
+        ),
+        Command(
+            CommandStatement {
+                command: "menuentry",
+                args: [
+                    Value(
+                        "NixOS - (flashfriendly - 1969-12-31 - 23.05.20230102.0fc9fca)",
+                    ),
+                    Block(
+                        [
+                            Command(
+                                CommandStatement {
+                                    command: "search",
+                                    args: [
+                                        Value(
+                                            "--set=drive1",
+                                        ),
+                                        Value(
+                                            "--fs-uuid",
+                                        ),
+                                        Value(
+                                            "BB22-99EC",
+                                        ),
+                                    ],
+                                },
+                            ),
+                            Command(
+                                CommandStatement {
+                                    command: "linux",
+                                    args: [
+                                        Value(
+                                            "($drive1)//kernels/1pzgainlvg5hcdf8ngjficg3x39j63gv-linux-6.0.15-bzImage",
+                                        ),
+                                        Value(
+                                            "init=/nix/store/0y1mijr8m7wdah8mzlc31g5gj8w7psal-nixos-system-beetroot-23.05.20230102.0fc9fca/init",
+                                        ),
+                                        Value(
+                                            "iomem=relaxed",
+                                        ),
+                                        Value(
+                                            "loglevel=4",
+                                        ),
+                                        Value(
+                                            "zram.num_devices=1",
+                                        ),
+                                    ],
+                                },
+                            ),
+                            Command(
+                                CommandStatement {
+                                    command: "initrd",
+                                    args: [
+                                        Value(
+                                            "($drive1)//kernels/2spacgl5d8l701wskfrz45q575f0q3fg-initrd-linux-6.0.15-initrd",
+                                        ),
+                                    ],
+                                },
+                            ),
+                        ],
+                    ),
+                ],
+            },
+        ),
+        Command(
+            CommandStatement {
+                command: "submenu",
+                args: [
+                    Value(
+                        "NixOS - All configurations",
+                    ),
+                    Value(
+                        "--class",
+                    ),
+                    Value(
+                        "submenu",
+                    ),
+                    Block(
+                        [
+                            Command(
+                                CommandStatement {
+                                    command: "menuentry",
+                                    args: [
+                                        Value(
+                                            "NixOS - Configuration 78 (2023-01-04 - 23.05.20230102.0fc9fca)",
+                                        ),
+                                        Value(
+                                            "--class",
+                                        ),
+                                        Value(
+                                            "nixos",
+                                        ),
+                                        Block(
+                                            [
+                                                Command(
+                                                    CommandStatement {
+                                                        command: "search",
+                                                        args: [
+                                                            Value(
+                                                                "--set=drive1",
+                                                            ),
+                                                            Value(
+                                                                "--fs-uuid",
+                                                            ),
+                                                            Value(
+                                                                "BB22-99EC",
+                                                            ),
+                                                        ],
+                                                    },
+                                                ),
+                                                Command(
+                                                    CommandStatement {
+                                                        command: "linux",
+                                                        args: [
+                                                            Value(
+                                                                "($drive1)//kernels/0wcixirfmmv0arr098ap4ynzk48npbmf-linux-6.1.1-bzImage",
+                                                            ),
+                                                            Value(
+                                                                "init=/nix/store/sj68yqfhzfq0h3bgi2v6dj464ak2v7bb-nixos-system-okra-23.05.20230102.0fc9fca/init",
+                                                            ),
+                                                            Value(
+                                                                "loglevel=4",
+                                                            ),
+                                                            Value(
+                                                                "zram.num_devices=1",
+                                                            ),
+                                                        ],
+                                                    },
+                                                ),
+                                                Command(
+                                                    CommandStatement {
+                                                        command: "initrd",
+                                                        args: [
+                                                            Value(
+                                                                "($drive1)//kernels/vc142a0m33nvrcy44lrz5xph3n7gr756-initrd-linux-6.1.1-initrd",
+                                                            ),
+                                                        ],
+                                                    },
+                                                ),
+                                            ],
+                                        ),
+                                    ],
+                                },
+                            ),
+                            Command(
+                                CommandStatement {
+                                    command: "menuentry",
+                                    args: [
+                                        Value(
+                                            "NixOS - Configuration 77 (2023-01-03 - 23.05.20230102.0fc9fca)",
+                                        ),
+                                        Value(
+                                            "--class",
+                                        ),
+                                        Value(
+                                            "nixos",
+                                        ),
+                                        Block(
+                                            [
+                                                Command(
+                                                    CommandStatement {
+                                                        command: "search",
+                                                        args: [
+                                                            Value(
+                                                                "--set=drive1",
+                                                            ),
+                                                            Value(
+                                                                "--fs-uuid",
+                                                            ),
+                                                            Value(
+                                                                "BB22-99EC",
+                                                            ),
+                                                        ],
+                                                    },
+                                                ),
+                                                Command(
+                                                    CommandStatement {
+                                                        command: "linux",
+                                                        args: [
+                                                            Value(
+                                                                "($drive1)//kernels/1pzgainlvg5hcdf8ngjficg3x39j63gv-linux-6.0.15-bzImage",
+                                                            ),
+                                                            Value(
+                                                                "init=/nix/store/q42sjmlgdzhr7zyq7l3p41lhbzldwz09-nixos-system-okra-23.05.20230102.0fc9fca/init",
+                                                            ),
+                                                            Value(
+                                                                "loglevel=4",
+                                                            ),
+                                                            Value(
+                                                                "zram.num_devices=1",
+                                                            ),
+                                                        ],
+                                                    },
+                                                ),
+                                                Command(
+                                                    CommandStatement {
+                                                        command: "initrd",
+                                                        args: [
+                                                            Value(
+                                                                "($drive1)//kernels/vkvh2cjaybp0gf18k1v8pxzgwd3nch3v-initrd-linux-6.0.15-initrd",
+                                                            ),
+                                                        ],
+                                                    },
+                                                ),
+                                            ],
+                                        ),
+                                    ],
+                                },
+                            ),
+                        ],
+                    ),
+                ],
+            },
+        ),
+    ],
+}

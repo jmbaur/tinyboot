@@ -275,8 +275,20 @@ mod tests {
     }
 
     #[test]
-    fn full_example() {
-        let tokens = tokenize(include_str!("./testdata/grub.cfg"));
+    fn nixos_example() {
+        let tokens = tokenize(include_str!("./testdata/grub-nixos.cfg"));
+        insta::assert_debug_snapshot!(tokens);
+    }
+
+    #[test]
+    fn ubuntu_iso_example() {
+        let tokens = tokenize(include_str!("./testdata/grub-ubuntu.cfg"));
+        insta::assert_debug_snapshot!(tokens);
+    }
+
+    #[test]
+    fn alpine_iso_example() {
+        let tokens = tokenize(include_str!("./testdata/grub-alpine.cfg"));
         insta::assert_debug_snapshot!(tokens);
     }
 }
