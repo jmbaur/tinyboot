@@ -1,3 +1,4 @@
+- Provide a way to edit kernel cmdline
 - Don't allow clippy::new_ret_no_self lints
 - better bootloader interface
 - populate `chosen` env var:

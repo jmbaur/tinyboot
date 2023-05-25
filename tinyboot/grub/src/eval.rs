@@ -204,7 +204,7 @@ where
             Ok(val.to_string())
         };
 
-        entry.title = self.interpolate_value(destructure_value(dbg!(args.next()))?);
+        entry.title = self.interpolate_value(destructure_value(args.next())?);
 
         let mut menuentry_consequence = Vec::new();
         let mut menuentry_extra_args = Vec::new();
