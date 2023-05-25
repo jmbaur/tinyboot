@@ -1,4 +1,4 @@
-use crate::boot_loader::{BootLoader, Error, MenuEntry};
+use crate::boot_loader::{BootLoader, Error, LinuxBootEntry};
 use log::{debug, error};
 use std::{
     cmp::Ordering,
@@ -76,9 +76,10 @@ impl BlsBootLoader {
         }
     }
 
-    pub fn new(mountpoint: &Path, config_file: &Path) -> Result<Self, Error> {
+    #[allow(clippy::new_ret_no_self)]
+    pub fn new(mountpoint: &Path, config_file: &Path) -> Result<Box<dyn BootLoader + Send>, Error> {
         let source = fs::read_to_string(mountpoint.join(config_file))?;
-        Self::parse_loader_conf(mountpoint, source)
+        Ok(Box::new(Self::parse_loader_conf(mountpoint, source)?))
     }
 
     fn parse_loader_conf(mountpoint: &Path, loader_conf: String) -> Result<Self, Error> {
@@ -227,39 +228,23 @@ impl BootLoader for BlsBootLoader {
         self.timeout
     }
 
-    fn mountpoint(&self) -> &std::path::Path {
-        &self.mountpoint
-    }
-
-    fn menu_entries(&self) -> Result<Vec<MenuEntry>, Error> {
+    fn boot_entries(&self) -> Result<Vec<LinuxBootEntry>, Error> {
         Ok(self
             .entries
             .iter()
-            .map(|entry| MenuEntry::BootEntry((&entry.name, &entry.pretty_name)))
-            .collect())
-    }
-
-    fn boot_info(
-        &mut self,
-        entry_id: Option<String>,
-    ) -> Result<(std::path::PathBuf, std::path::PathBuf, String), Error> {
-        let entry_to_find = entry_id.unwrap_or(self.default_entry.to_string());
-
-        if let Some(entry) = self
-            .entries
-            .iter()
-            .find(|entry| entry.name == entry_to_find)
-        {
-            Ok((
-                self.mountpoint
+            .map(|entry| LinuxBootEntry {
+                default: entry.name == self.default_entry,
+                display: entry.pretty_name.clone(),
+                linux: self
+                    .mountpoint
                     .join(entry.linux.strip_prefix("/").unwrap_or(&entry.linux)),
-                self.mountpoint
-                    .join(entry.initrd.strip_prefix("/").unwrap_or(&entry.initrd)),
-                entry.options.to_owned().unwrap_or_default(),
-            ))
-        } else {
-            Err(Error::BootConfigNotFound)
-        }
+                initrd: Some(
+                    self.mountpoint
+                        .join(entry.initrd.strip_prefix("/").unwrap_or(&entry.initrd)),
+                ),
+                cmdline: entry.options.clone(),
+            })
+            .collect())
     }
 }
 

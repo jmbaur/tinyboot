@@ -89,8 +89,7 @@ lib.mapAttrs
         cbfstool $out/coreboot.rom add-payload \
           -n fallback/payload \
           -f ${linux}/${stdenv.hostPlatform.linux-kernel.target} \
-          -I ${initrd}/initrd \
-          -C '${toString finalConfig.config.kernel.commandLine}'
+          -I ${initrd}/initrd
           '' else if stdenv.hostPlatform.linuxArch == "arm64" then ''
         cbfstool $out/coreboot.rom add -f ${fitImage}/uImage -n fallback/payload -t fit_payload
           '' else throw "Unsupported architecture"}

@@ -1,7 +1,6 @@
-use log::{debug, error};
+use log::error;
 use nix::mount;
 use std::fmt::Write;
-use std::path::PathBuf;
 use std::{
     fs,
     io::{self, Read, Seek},
@@ -188,45 +187,9 @@ pub fn detect_fs_type(p: impl AsRef<Path>) -> anyhow::Result<FsType> {
 }
 
 pub fn unmount(path: &Path) {
-    if let Err(e) = nix::mount::umount2(path, mount::MntFlags::MNT_DETACH) {
+    if let Err(e) = mount::umount2(path, mount::MntFlags::MNT_DETACH) {
         error!("umount2({}): {e}", path.display());
     }
-}
-
-pub fn find_block_device<F>(filter: F) -> anyhow::Result<Vec<PathBuf>>
-where
-    F: Fn(&Path) -> bool,
-{
-    Ok(fs::read_dir("/sys/class/block")?
-        .filter_map(|blk_dev| {
-            let direntry = blk_dev.ok()?;
-            let mut path = direntry.path();
-            path.push("uevent");
-            match fs::read_to_string(path).map(|uevent| {
-                let mut is_partition = false;
-                let mut dev_path = PathBuf::from("/dev");
-                for line in uevent.lines() {
-                    if line == "DEVTYPE=partition" {
-                        is_partition = true;
-                    }
-                    if line.starts_with("DEVNAME") {
-                        dev_path.push(line.split_once('=').expect("invalid DEVNAME").1);
-                    }
-                }
-                (is_partition, dev_path)
-            }) {
-                Ok((true, dev_path)) => {
-                    if filter(&dev_path) {
-                        debug!("found block device at {dev_path:?}");
-                        Some(dev_path)
-                    } else {
-                        None
-                    }
-                }
-                _ => None,
-            }
-        })
-        .collect::<Vec<PathBuf>>())
 }
 
 #[cfg(test)]

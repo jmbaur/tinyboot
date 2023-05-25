@@ -197,14 +197,14 @@ where
         let mut args = command.args.iter().peekable();
 
         let destructure_value = |cmd_arg: Option<&CommandArgument>| -> Result<String, EvalError> {
-            let CommandArgument::Value(val) = cmd_arg
+            let (CommandArgument::Value(val) | CommandArgument::Literal(val)) = cmd_arg
                     .ok_or_else(|| EvalError::NotValue)? else {
                         return Err(EvalError::MissingValue);
                     };
             Ok(val.to_string())
         };
 
-        entry.title = self.interpolate_value(destructure_value(args.next())?);
+        entry.title = self.interpolate_value(destructure_value(dbg!(args.next()))?);
 
         let mut menuentry_consequence = Vec::new();
         let mut menuentry_extra_args = Vec::new();
@@ -393,13 +393,22 @@ where
         Ok(())
     }
 
-    pub fn eval_boot_entry(
+    pub fn get_env(&self, key: &str) -> Option<&String> {
+        self.env.get_env(key)
+    }
+
+    pub fn eval_grub_entry(
         &mut self,
         entry: &GrubEntry,
     ) -> Result<(&Path, &Path, &str), EvalError> {
         let Some(consequence) = &entry.consequence else {
             return Err(EvalError::Eval("not a boot entry".to_string()));
         };
+
+        // Running a menuentry sets the "chosen" variable to the entry ID.
+        // https://www.gnu.org/software/grub/manual/grub/html_node/menuentry.html
+        self.env.set_env("chosen".to_string(), entry.id.to_owned());
+
         self.eval(consequence.to_vec())?;
         let linux = self
             .env
@@ -414,10 +423,6 @@ where
             .get_env("linux_cmdline")
             .ok_or_else(|| EvalError::Eval("no cmdline found".to_string()))?;
         Ok((Path::new(linux), Path::new(initrd), cmdline.as_str()))
-    }
-
-    pub fn get_env(&self, key: &str) -> Option<&String> {
-        self.env.get_env(key)
     }
 }
 
@@ -453,29 +458,59 @@ mod tests {
             env: HashMap::from([
                 ("foo".to_string(), "bar".to_string()),
                 ("prefix".to_string(), "/mnt/boot/grub".to_string()),
-                ("root".to_string(), "/dev/vda".to_string()),
+                ("drive1".to_string(), "/mnt/drive1".to_string()),
+                ("drive2".to_string(), "/mnt/drive2".to_string()),
             ]),
         };
 
         assert_eq!(super::interpolate_value(&env, "$foo"), "bar".to_string());
+
         assert_eq!(
             super::interpolate_value(&env, "${prefix}/grubenv"),
             "/mnt/boot/grub/grubenv".to_string()
         );
+
         assert_eq!(
             super::interpolate_value(
                 &env,
-                "($root)//kernels/1pzgainlvg5hcdf8ngjficg3x39j63gv-linux-6.0.15-bzImage"
+                "($drive1)//kernels/1pzgainlvg5hcdf8ngjficg3x39j63gv-linux-6.0.15-bzImage"
             ),
-            "/dev/vda//kernels/1pzgainlvg5hcdf8ngjficg3x39j63gv-linux-6.0.15-bzImage".to_string()
+            "/mnt/drive1//kernels/1pzgainlvg5hcdf8ngjficg3x39j63gv-linux-6.0.15-bzImage"
+                .to_string()
         );
-        assert_eq!(super::interpolate_value(&env, "($drive1)"), "".to_string());
+
+        assert_eq!(
+            super::interpolate_value(&env, "($drive2)"),
+            "/mnt/drive2".to_string()
+        );
+
+        assert_eq!(super::interpolate_value(&env, "($drive3)"), "".to_string());
     }
 
     #[test]
-    fn full_example() {
+    fn nixos_example() {
         let grub_env = SimpleGrubEnvironment::default();
-        GrubEvaluator::new_from_source(include_str!("./testdata/grub.cfg").to_string(), grub_env)
+        GrubEvaluator::new_from_source(include_str!("./testdata/grub-nixos.cfg").to_string(), grub_env)
             .expect("no evaluation errors");
+    }
+
+    #[test]
+    fn ubuntu_iso_example() {
+        let grub_env = SimpleGrubEnvironment::default();
+        GrubEvaluator::new_from_source(
+            include_str!("./testdata/grub-ubuntu.cfg").to_string(),
+            grub_env,
+        )
+        .expect("no evaluation errors");
+    }
+
+    #[test]
+    fn alpine_iso_example() {
+        let grub_env = SimpleGrubEnvironment::default();
+        GrubEvaluator::new_from_source(
+            include_str!("./testdata/grub-alpine.cfg").to_string(),
+            grub_env,
+        )
+        .expect("no evaluation errors");
     }
 }

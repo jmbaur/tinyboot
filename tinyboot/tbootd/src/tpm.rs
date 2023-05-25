@@ -67,10 +67,10 @@ pub fn reset_pcr_slots() -> anyhow::Result<()> {
 }
 
 pub fn measure_boot(
-    verified: (bool, &[u8]),
-    kernel: (impl AsRef<Path>, &[u8]),
-    initrd: (impl AsRef<Path>, &[u8]),
-    cmdline: (impl AsRef<str>, &[u8]),
+    verified: Option<Vec<u8>>,
+    kernel: (impl AsRef<Path>, Vec<u8>),
+    initrd: (Option<impl AsRef<Path>>, Option<Vec<u8>>),
+    cmdline: (impl AsRef<str>, Vec<u8>),
 ) -> anyhow::Result<()> {
     let mut dev: std::mem::MaybeUninit<bindings::WOLFTPM2_DEV> = std::mem::MaybeUninit::uninit();
     bail_on_non_success("wolfTPM2_Init", unsafe {
@@ -81,12 +81,15 @@ pub fn measure_boot(
 
     let mut digests = Vec::from([
         (TPM_KERNEL_PCR, hex::encode(kernel.1)),
-        (TPM_INITRD_PCR, hex::encode(initrd.1)),
         (TPM_CMDLINE_PCR, hex::encode(cmdline.1)),
     ]);
 
-    if verified.0 {
-        digests.push((TPM_VERIFIED_PCR, hex::encode(verified.1)));
+    if let Some(digest) = initrd.1 {
+        digests.push((TPM_INITRD_PCR, hex::encode(digest)));
+    }
+
+    if let Some(digest) = verified {
+        digests.push((TPM_VERIFIED_PCR, hex::encode(digest)));
     }
 
     for (pcr, digest) in digests {

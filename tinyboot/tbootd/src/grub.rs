@@ -1,13 +1,14 @@
-use super::boot_loader::MenuEntry;
 use super::fs::{detect_fs_type, FsType};
-use crate::boot_loader::{BootLoader, Error};
+use crate::block_device::find_disk_partitions;
+use crate::boot_loader::{BootLoader, Error, LinuxBootEntry};
 use crate::util::*;
 use clap::{ArgAction, Parser};
-use grub::{GrubEntry, GrubEnvironment, GrubEvaluator};
+use grub::{GrubEnvironment, GrubEvaluator};
 use log::{debug, error, trace};
 use nix::mount;
 use std::io::{self, Read};
 use std::path::PathBuf;
+use std::time::Duration;
 use std::{collections::HashMap, fs, path::Path};
 
 const GRUB_ENVIRONMENT_BLOCK_LENGTH: i32 = 1024;
@@ -239,14 +240,14 @@ impl TinybootGrubEnvironment {
             (true, false, false) => {
                 let file = Path::new(&args.name);
                 trace!("searching for block device with file name {}", args.name);
-                crate::fs::find_block_device(|p| p == file)
+                find_disk_partitions(|p| p == file)
             }
             (false, true, false) => {
                 trace!(
                     "searching for block device with filesystem uuid {}",
                     args.name
                 );
-                crate::fs::find_block_device(|p| match crate::fs::detect_fs_type(p) {
+                find_disk_partitions(|p| match crate::fs::detect_fs_type(p) {
                     Ok(FsType::Ext4(uuid, _)) => uuid == args.name,
                     Ok(FsType::Fat32(uuid, _)) | Ok(FsType::Fat16(uuid, _)) => uuid == args.name,
                     _ => false,
@@ -257,7 +258,7 @@ impl TinybootGrubEnvironment {
                     "searching for block device with filesystem label {}",
                     args.name
                 );
-                crate::fs::find_block_device(|p| match crate::fs::detect_fs_type(p) {
+                find_disk_partitions(|p| match crate::fs::detect_fs_type(p) {
                     Ok(FsType::Ext4(_, label)) => label == args.name,
                     Ok(FsType::Fat32(_, label)) | Ok(FsType::Fat16(_, label)) => label == args.name,
                     _ => false,
@@ -478,8 +479,8 @@ impl GrubEnvironment for TinybootGrubEnvironment {
 }
 
 pub struct GrubBootLoader {
-    mountpoint: PathBuf,
-    evaluator: GrubEvaluator<TinybootGrubEnvironment>,
+    timeout: Duration,
+    entries: Vec<LinuxBootEntry>,
 }
 
 impl GrubBootLoader {
@@ -500,10 +501,11 @@ impl GrubBootLoader {
         Err(Error::BootConfigNotFound)
     }
 
-    pub fn new(mountpoint: &Path, config_file: &Path) -> Result<Self, Error> {
+    #[allow(clippy::new_ret_no_self)]
+    pub fn new(mountpoint: &Path, config_file: &Path) -> Result<Box<dyn BootLoader + Send>, Error> {
         let source = fs::read_to_string(mountpoint.join(config_file))?;
 
-        let evaluator = GrubEvaluator::new_from_source(
+        let mut evaluator = GrubEvaluator::new_from_source(
             source,
             TinybootGrubEnvironment::new(
                 mountpoint
@@ -518,129 +520,87 @@ impl GrubBootLoader {
         )
         .map_err(Error::Eval)?;
 
-        Ok(Self {
-            mountpoint: mountpoint.to_path_buf(),
-            evaluator,
-        })
+        let entries: Vec<LinuxBootEntry> = evaluator
+            .menu
+            .clone()
+            .into_iter()
+            .flat_map(|grub_entry| {
+                if let Some(entries) = grub_entry.menuentries {
+                    // is submenu entry
+                    entries
+                } else {
+                    // is boot entry
+                    vec![grub_entry]
+                }
+            })
+            .filter_map(|grub_entry| {
+                let Ok((kernel, initrd, cmdline)) = evaluator.eval_grub_entry(&grub_entry) else {
+                    return None;
+                };
+
+                // TODO(jared): don't do this hack
+                // NOTE: Grub paths can either be full paths or have a string-interpolated drive
+                // name. We are assuming all mounts will exist under /mnt, so if the full path
+                // doesn't start with /mnt, make sure it does before we kexec_file_load.
+                let linux = if kernel.starts_with("/mnt") {
+                    kernel.to_path_buf()
+                } else {
+                    let kernel = kernel.to_path_buf();
+                    let mut linux = mountpoint.to_path_buf();
+                    linux.push(kernel.strip_prefix("/").unwrap_or(&kernel));
+                    debug!("grub hack patched linux path: {:?}", linux);
+                    linux
+                };
+
+                // TODO(jared): don't do this hack
+                // NOTE: Grub paths can either be full paths or have a string-interpolated drive
+                // name. We are assuming all mounts will exist under /mnt, so if the full path
+                // doesn't start with /mnt, make sure it does before we kexec_file_load.
+                let initrd = if initrd.starts_with("/mnt") {
+                    Some(initrd.to_path_buf())
+                } else {
+                    let initrd = initrd.to_path_buf();
+                    let mut final_initrd = mountpoint.to_path_buf();
+                    final_initrd.push(initrd.strip_prefix("/").unwrap_or(&initrd));
+                    debug!("grub hack patched initrd path: {:?}", final_initrd);
+                    Some(final_initrd)
+                };
+
+                let cmdline = Some(cmdline.to_string());
+
+                let is_default = 'block: {
+                    if let Some(default_id) = evaluator.get_env("default") {
+                        if let Some(id) = &grub_entry.id {
+                            break 'block default_id == id;
+                        }
+                    }
+                    break 'block false;
+                };
+
+                Some(LinuxBootEntry {
+                    default: is_default,
+                    display: grub_entry.title,
+                    linux,
+                    initrd,
+                    cmdline,
+                })
+            })
+            .collect();
+
+        Ok(Box::new(Self {
+            entries,
+            timeout: evaluator.timeout(),
+        }))
     }
 }
 
 impl BootLoader for GrubBootLoader {
     fn timeout(&self) -> std::time::Duration {
-        self.evaluator.timeout()
+        self.timeout
     }
 
-    fn mountpoint(&self) -> &Path {
-        &self.mountpoint
-    }
-
-    fn menu_entries(&self) -> Result<Vec<MenuEntry>, Error> {
-        Ok(self
-            .evaluator
-            .menu
-            .iter()
-            .filter_map(|entry| {
-                // is boot entry
-                if entry.consequence.is_some() {
-                    Some(MenuEntry::BootEntry((
-                        entry.id.as_deref().unwrap_or(entry.title.as_str()),
-                        entry.title.as_str(),
-                    )))
-                }
-                // is submenu entry
-                else {
-                    Some(MenuEntry::SubMenu((
-                        entry.id.as_deref().unwrap_or(entry.title.as_str()),
-                        entry.title.as_str(),
-                        entry
-                            .menuentries
-                            .as_ref()?
-                            .iter()
-                            .filter_map(|entry| {
-                                // ensure this is a boot entry, not a nested submenu (invalid?)
-                                entry.consequence.as_ref()?;
-                                Some(MenuEntry::BootEntry((
-                                    entry.id.as_deref().unwrap_or(entry.title.as_str()),
-                                    entry.title.as_str(),
-                                )))
-                            })
-                            .collect(),
-                    )))
-                }
-            })
-            .collect())
-    }
-
-    /// The entry ID could be the ID or name of a boot entry, submenu, or boot entry nested within
-    /// a submenu.
-    fn boot_info(&mut self, entry_id: Option<String>) -> Result<(PathBuf, PathBuf, String), Error> {
-        let all_entries = self
-            .evaluator
-            .menu
-            .iter()
-            .flat_map(|entry| {
-                if let Some(menuentries) = &entry.menuentries {
-                    menuentries.clone()
-                } else {
-                    vec![entry.clone()]
-                }
-            })
-            .collect::<Vec<GrubEntry>>();
-
-        let boot_entry = ('entry: {
-            if let Some(entry_id) = entry_id {
-                for entry in &all_entries {
-                    if entry.consequence.is_some() {
-                        if entry.id.as_deref().unwrap_or(entry.title.as_str()) == entry_id {
-                            break 'entry Some(entry);
-                        }
-                    } else if let Some(subentries) = &entry.menuentries {
-                        for subentry in subentries {
-                            if entry.consequence.is_some()
-                                && entry.id.as_deref().unwrap_or(entry.title.as_str()) == entry_id
-                            {
-                                break 'entry Some(subentry);
-                            }
-                        }
-                    }
-                }
-
-                break 'entry None;
-            } else {
-                let default_entry_idx = self
-                    .evaluator
-                    .get_env("default")
-                    .map(|value| value.parse::<usize>())
-                    .unwrap_or(Ok(0usize))
-                    .unwrap_or(0usize);
-
-                break 'entry all_entries.get(default_entry_idx);
-            }
-        })
-        .ok_or(Error::BootEntryNotFound)?;
-
-        let boot_info = self
-            .evaluator
-            .eval_boot_entry(boot_entry)
-            .map_err(Error::Eval)?;
-
-        let mut kernel = boot_info.0.to_path_buf();
-        let joined_kernel = self
-            .mountpoint
-            .join(kernel.strip_prefix("/").unwrap_or(&kernel));
-        if !kernel.starts_with(&self.mountpoint) {
-            kernel = joined_kernel;
-        }
-
-        let mut initrd = boot_info.1.to_path_buf();
-        let joined_initrd = self
-            .mountpoint
-            .join(initrd.strip_prefix("/").unwrap_or(&initrd));
-        if !initrd.starts_with(&self.mountpoint) {
-            initrd = joined_initrd;
-        }
-
-        Ok((kernel, initrd, boot_info.2.to_string()))
+    fn boot_entries(&self) -> Result<Vec<crate::boot_loader::LinuxBootEntry>, Error> {
+        Ok(self.entries.to_vec())
     }
 }
 
