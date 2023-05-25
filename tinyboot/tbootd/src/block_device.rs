@@ -12,8 +12,12 @@ use std::path::{Path, PathBuf};
 impl TryFrom<UEvent> for BlockDevice {
     type Error = anyhow::Error;
 
-    fn try_from(value: UEvent) -> Result<Self, Self::Error> {
-        let devtype = value
+    fn try_from(uevent: UEvent) -> Result<Self, Self::Error> {
+        if &uevent.subsystem != "block" {
+            anyhow::bail!("not block subsystem");
+        }
+
+        let devtype = uevent
             .env
             .get("DEVTYPE")
             .ok_or(anyhow::anyhow!("no devtype"))?;
@@ -22,20 +26,23 @@ impl TryFrom<UEvent> for BlockDevice {
             anyhow::bail!("not a disk");
         }
 
-        let devname = value
+        let devname = uevent
             .env
             .get("DEVNAME")
             .ok_or(anyhow::anyhow!("no devname"))?;
 
         // devpath is of the form "/devices/blah/blah"
-        let devpath = value.devpath.strip_prefix("/")?;
+        let devpath = uevent.devpath.strip_prefix("/")?;
 
         let removable = {
-            let mut removable_path = PathBuf::from("/sys");
-            removable_path.push(devpath);
+            let mut removable_path = PathBuf::from("/sys/class");
+            removable_path.push(uevent.subsystem);
+            removable_path.push(devname);
             removable_path.push("removable");
+            debug!("reading removable path {:?}", removable_path);
             fs::read_to_string(removable_path)
                 .unwrap_or_else(|_| String::from("1"))
+                .trim()
                 .parse::<u8>()
                 .unwrap_or(1)
                 == 1
@@ -59,12 +66,12 @@ impl TryFrom<UEvent> for BlockDevice {
                 fs::read_to_string(vendor_path).unwrap_or_else(|_| String::from("Unknown"));
             let vendor = vendor.trim();
 
-            let mut subsystem_link_path = PathBuf::from("/sys");
-            subsystem_link_path.push(devpath);
-            subsystem_link_path.push("device");
-            subsystem_link_path.push("subsystem");
-            debug!("reading subsystem from {:?}", subsystem_link_path);
-            let subsystem_path = fs::read_link(subsystem_link_path)?;
+            let mut device_subsystem_link_path = PathBuf::from("/sys");
+            device_subsystem_link_path.push(devpath);
+            device_subsystem_link_path.push("device");
+            device_subsystem_link_path.push("subsystem");
+            debug!("reading subsystem from {:?}", device_subsystem_link_path);
+            let subsystem_path = fs::read_link(device_subsystem_link_path)?;
             let subsystem = subsystem_path
                 .file_name()
                 .and_then(|file_name| file_name.to_str())
@@ -141,6 +148,10 @@ where
             let Ok(uevent) = UEvent::from_sysfs_path(path, Path::new("/sys")) else {
                 return None;
             };
+
+            if &uevent.subsystem != "block" {
+                return None;
+            }
 
             let Some(devtype) = uevent.env.get("DEVTYPE") else {
                 return None;
