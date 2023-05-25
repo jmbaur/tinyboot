@@ -14,10 +14,6 @@ let
       configFile = lib.mkOption {
         type = lib.types.path;
       };
-      commandLine = lib.mkOption {
-        type = lib.types.listOf lib.types.nonEmptyStr;
-        default = [ ];
-      };
       extraConfig = lib.mkOption {
         type = lib.types.lines;
         default = "";
