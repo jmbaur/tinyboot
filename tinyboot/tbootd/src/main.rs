@@ -271,8 +271,8 @@ fn boot() -> anyhow::Result<()> {
 
             kexec_load(linux, initrd, cmdline)?;
 
-            if !needs_pcr_reset {
-                if cfg!(feature = "measured-boot") {
+            if cfg!(feature = "measured-boot") {
+                if !needs_pcr_reset {
                     let kernel_digest = tboot::hash::sha256_digest_file(linux)?;
                     let initrd_digest = initrd.map(tboot::hash::sha256_digest_file).transpose()?;
                     let cmdline_digest = Sha256::digest(cmdline).to_vec();
@@ -289,9 +289,9 @@ fn boot() -> anyhow::Result<()> {
                             error!("This board may be misconfigured!!");
                         }
                     };
+                } else if let Err(e) = tpm::reset_pcr_slots() {
+                    error!("Failed to reset tinyboot-managed PCR slots: {e}");
                 }
-            } else if let Err(e) = tpm::reset_pcr_slots() {
-                error!("Failed to reset tinyboot-managed PCR slots: {e}");
             }
 
             mountpoints.iter().for_each(|m| unmount(m));
