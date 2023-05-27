@@ -50,6 +50,15 @@ let
     root:x:0:
     tinyuser:x:1000:
   '';
+  mdevConf = writeText "mdev.conf" ''
+    ([vs]d[a-z])             root:root  660  >disk/%1/0
+    ([vs]d[a-z])([0-9]+)     root:root  660  >disk/%1/%2
+    nvme([0-9]+)             root:root  660  >disk/nvme/%1/0
+    nvme([0-9]+)p([0-9]+)    root:root  660  >disk/nvme/%1/%2
+    mmcblk([0-9]+)           root:root  660  >disk/mmc/%1/0
+    mmcblk([0-9]+)p([0-9]+)  root:root  660  >disk/mmc/%1/%2
+    (tun|tap)                root:root  660  >net/%1
+  '';
 in
 makeInitrdNG {
   compressor = "xz";
@@ -57,9 +66,10 @@ makeInitrdNG {
     { object = "${initrdEnv}/bin"; symlink = "/bin"; }
     { object = "${initrdEnv}/bin"; symlink = "/sbin"; }
     { object = "${initrdEnv}/bin/init"; symlink = "/init"; }
-    { object = "${rcS}"; symlink = "/etc/init.d/rcS"; }
-    { object = "${inittab}"; symlink = "/etc/inittab"; }
-    { object = "${passwd}"; symlink = "/etc/passwd"; }
     { object = "${group}"; symlink = "/etc/group"; }
+    { object = "${inittab}"; symlink = "/etc/inittab"; }
+    { object = "${mdevConf}"; symlink = "/etc/mdev.conf"; }
+    { object = "${passwd}"; symlink = "/etc/passwd"; }
+    { object = "${rcS}"; symlink = "/etc/init.d/rcS"; }
   ];
 }

@@ -96,7 +96,7 @@ impl TryFrom<UEvent> for BlockDevice {
         let (bootloader, boot_partition_mountpoint) = dev_partitions.iter().find_map(|part| {
             let mountpoint = match mount_block_device(part) {
                 Err(e) => {
-                    error!("failed to mount block device: {e}");
+                    error!("failed to mount block device {:?}: {e}", part);
                     return None;
                 }
                 Ok(m) => m,
@@ -206,7 +206,7 @@ pub fn mount_block_device(block_device: impl AsRef<Path>) -> anyhow::Result<Path
         Some(match fstype {
             FsType::Iso9660 => "iso9660",
             FsType::Ext4(..) => "ext4",
-            FsType::Fat32(..) | FsType::Fat16(..) => "vfat",
+            FsType::Vfat(..) => "vfat",
         }),
         mount::MsFlags::MS_RDONLY,
         None::<&[u8]>,

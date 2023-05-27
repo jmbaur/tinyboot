@@ -12,8 +12,7 @@ use uuid::Uuid;
 #[derive(Debug, PartialEq, Eq)]
 pub enum FsType {
     Ext4(String, String),
-    Fat32(String, String),
-    Fat16(String, String),
+    Vfat(String, String),
     Iso9660,
 }
 
@@ -93,7 +92,7 @@ pub fn detect_fs_type(p: impl AsRef<Path>) -> anyhow::Result<FsType> {
                         f.read_exact(&mut buffer)?;
                         label = String::from_utf8(buffer.to_vec())?.trim_end().to_string();
                     }
-                    return Ok(FsType::Fat32(uuid, label));
+                    return Ok(FsType::Vfat(uuid, label));
                 };
             }
 
@@ -129,7 +128,7 @@ pub fn detect_fs_type(p: impl AsRef<Path>) -> anyhow::Result<FsType> {
                         f.read_exact(&mut buffer)?;
                         label = String::from_utf8(buffer.to_vec())?.trim_end().to_string();
                     }
-                    return Ok(FsType::Fat16(uuid, label));
+                    return Ok(FsType::Vfat(uuid, label));
                 };
             }
         }
@@ -237,12 +236,12 @@ mod tests {
 
         let fstype = super::detect_fs_type("/tmp/disk.fat32").unwrap();
         assert!(match fstype {
-            crate::fs::FsType::Fat32(_, label) => label == "FOOBAR",
+            crate::fs::FsType::Vfat(_, label) => label == "FOOBAR",
             _ => false,
         });
         let fstype = super::detect_fs_type("/tmp/disk.fat16").unwrap();
         assert!(match fstype {
-            crate::fs::FsType::Fat16(_, label) => label == "FOOBAR",
+            crate::fs::FsType::Vfat(_, label) => label == "FOOBAR",
             _ => false,
         });
         let fstype = super::detect_fs_type("/tmp/disk.ext4").unwrap();

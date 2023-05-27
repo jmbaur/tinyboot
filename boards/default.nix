@@ -14,6 +14,10 @@ let
       configFile = lib.mkOption {
         type = lib.types.path;
       };
+      commandLine = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [ "quiet" ];
+      };
       extraConfig = lib.mkOption {
         type = lib.types.lines;
         default = "";
@@ -85,10 +89,11 @@ lib.mapAttrs
         cbfstool $out/coreboot.rom add-payload \
           -n fallback/payload \
           -f ${linux}/${stdenv.hostPlatform.linux-kernel.target} \
-          -I ${initrd}/initrd
-          '' else if stdenv.hostPlatform.linuxArch == "arm64" then ''
+          -I ${initrd}/initrd \
+          -C '${toString finalConfig.config.kernel.commandLine}'
+        '' else if stdenv.hostPlatform.linuxArch == "arm64" then ''
         cbfstool $out/coreboot.rom add -f ${fitImage}/uImage -n fallback/payload -t fit_payload
-          '' else throw "Unsupported architecture"}
+        '' else throw "Unsupported architecture"}
       ''))
   { })
   (lib.filterAttrs (_: type: type == "directory") (builtins.readDir ./.))

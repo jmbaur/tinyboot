@@ -1,10 +1,10 @@
 use super::fs::{detect_fs_type, FsType};
-use crate::block_device::find_disk_partitions;
+use crate::block_device::{find_disk_partitions, mount_block_device};
 use crate::boot_loader::{BootLoader, Error, LinuxBootEntry};
 use crate::util::*;
 use clap::{ArgAction, Parser};
 use grub::{GrubEnvironment, GrubEvaluator};
-use log::{debug, error, trace};
+use log::{debug, error};
 use nix::mount;
 use std::io::{self, Read};
 use std::path::PathBuf;
@@ -116,20 +116,21 @@ struct SaveEnvArgs {
 }
 
 impl TinybootGrubEnvironment {
-    pub fn new(prefix: impl Into<String>) -> Self {
+    pub fn new(root: impl Into<String>, prefix: impl Into<String>) -> Self {
         let env = HashMap::from([
             ("?".to_string(), 0.to_string()),
             ("prefix".to_string(), prefix.into()),
+            ("root".to_string(), root.into()),
             ("grub_platform".to_string(), "tinyboot".to_string()),
         ]);
 
-        trace!("creating new tinyboot grub environment: {env:#?}");
+        debug!("creating new tinyboot grub environment: {env:?}");
 
         Self { env }
     }
 
-    // TODO(jared): the docs mention being able to load multiple initrds, but what is the use case
-    // for that?
+    // TODO(jared): the docs mention being able to load multiple initrds, we need to support that
+    // (by concatenate the extracted cpios?).
     // https://www.gnu.org/software/grub/manual/grub/html_node/initrd.html#initrd
     fn run_initrd(&mut self, args: Vec<String>) -> Result<(), GrubEnvironmentError> {
         let mut args = args.iter();
@@ -145,7 +146,7 @@ impl TinybootGrubEnvironment {
 
         let initrd = initrd.replace(|c| matches!(c, '(' | ')'), "");
 
-        trace!("setting 'initrd' to '{}'", initrd);
+        debug!("setting 'initrd' to '{}'", initrd);
         self.env.insert("initrd".to_string(), initrd);
 
         Ok(())
@@ -163,9 +164,7 @@ impl TinybootGrubEnvironment {
             return Err(GrubEnvironmentError::InvalidArgs);
         };
 
-        let prefix = self.env.get("prefix");
-        debug!("prefix: {:?}", prefix);
-        trace!("setting 'linux' to '{}'", kernel);
+        debug!("setting 'linux' to '{}'", kernel);
         self.env.insert("linux".to_string(), kernel.to_string());
 
         let mut cmdline = Vec::new();
@@ -174,7 +173,7 @@ impl TinybootGrubEnvironment {
         }
         let cmdline = cmdline.join(" ");
 
-        trace!("setting 'linux_cmdline' to '{}'", cmdline);
+        debug!("setting 'linux_cmdline' to '{}'", cmdline);
         self.env.insert("linux_cmdline".to_string(), cmdline);
 
         Ok(())
@@ -237,38 +236,49 @@ impl TinybootGrubEnvironment {
 
         let var = args.set;
         let found = match (args.file, args.fs_uuid, args.label) {
+            // search for block device where filepath exists
             (true, false, false) => {
-                let file = Path::new(&args.name);
-                trace!("searching for block device with file name {}", args.name);
-                find_disk_partitions(|p| p == file)
+                debug!("searching for block device with file {}", args.name);
+                find_disk_partitions(|p| {
+                    let Ok(mountpoint) = mount_block_device(p) else {
+                        return false;
+                    };
+
+                    let mut filepath = mountpoint;
+                    filepath.push(args.name.strip_prefix('/').unwrap_or(&args.name));
+
+                    filepath.exists()
+                })
             }
+            // search for block device where filesystem UUID matches
             (false, true, false) => {
-                trace!(
+                debug!(
                     "searching for block device with filesystem uuid {}",
                     args.name
                 );
                 find_disk_partitions(|p| match crate::fs::detect_fs_type(p) {
                     Ok(FsType::Ext4(uuid, _)) => uuid == args.name,
-                    Ok(FsType::Fat32(uuid, _)) | Ok(FsType::Fat16(uuid, _)) => uuid == args.name,
+                    Ok(FsType::Vfat(uuid, _)) => uuid == args.name,
                     _ => false,
                 })
             }
+            // search for block device where filesystem label matches
             (false, false, true) => {
-                trace!(
+                debug!(
                     "searching for block device with filesystem label {}",
                     args.name
                 );
                 find_disk_partitions(|p| match crate::fs::detect_fs_type(p) {
                     Ok(FsType::Ext4(_, label)) => label == args.name,
-                    Ok(FsType::Fat32(_, label)) | Ok(FsType::Fat16(_, label)) => label == args.name,
+                    Ok(FsType::Vfat(_, label)) => label == args.name,
                     _ => false,
                 })
             }
-            _ => unreachable!(),
+            _ => unreachable!("clap parsing failed us"),
         };
 
         let found = found.map_err(|e| GrubEnvironmentError::Io(e.to_string()))?;
-        trace!("grub search command found block devices {:?}", found);
+        debug!("grub search command found block devices {:?}", found);
 
         let Some(found) = found.get(0) else {
             return Err(GrubEnvironmentError::Io("file not found".to_string()));
@@ -294,7 +304,7 @@ impl TinybootGrubEnvironment {
                 Some(match fstype {
                     FsType::Iso9660 => "iso9660",
                     FsType::Ext4(..) => "ext4",
-                    FsType::Fat32(..) | FsType::Fat16(..) => "vfat",
+                    FsType::Vfat(..) => "vfat",
                 }),
                 mount::MsFlags::MS_RDONLY,
                 None::<&[u8]>,
@@ -425,7 +435,7 @@ impl TinybootGrubEnvironment {
 
 impl GrubEnvironment for TinybootGrubEnvironment {
     fn set_env(&mut self, key: String, val: Option<String>) {
-        trace!(
+        debug!(
             "setting env '{key}' to '{}'",
             val.as_deref().unwrap_or_default()
         );
@@ -441,7 +451,7 @@ impl GrubEnvironment for TinybootGrubEnvironment {
     }
 
     fn run_command(&mut self, command: String, args_wo_command: Vec<String>) -> u8 {
-        trace!(
+        debug!(
             "command '{command}' called with args '{:?}'",
             args_wo_command.join(" ")
         );
@@ -473,7 +483,7 @@ impl GrubEnvironment for TinybootGrubEnvironment {
             }
         };
 
-        trace!("command '{command}' exited with code {exit_code}");
+        debug!("command '{command}' exited with code {exit_code}");
         exit_code
     }
 }
@@ -508,6 +518,7 @@ impl GrubBootLoader {
         let mut evaluator = GrubEvaluator::new_from_source(
             source,
             TinybootGrubEnvironment::new(
+                mountpoint.to_str().ok_or(Error::InvalidMountpoint)?,
                 mountpoint
                     .join(
                         PathBuf::from(config_file)
@@ -534,35 +545,32 @@ impl GrubBootLoader {
                 }
             })
             .filter_map(|grub_entry| {
+                // use mountpoint as implicit value for $root
+                let root = evaluator
+                    .get_env("root")
+                    .map(Path::new)
+                    .unwrap_or(mountpoint)
+                    .to_path_buf();
+
                 let Ok((kernel, initrd, cmdline)) = evaluator.eval_grub_entry(&grub_entry) else {
                     return None;
                 };
 
-                // TODO(jared): don't do this hack
-                // NOTE: Grub paths can either be full paths or have a string-interpolated drive
-                // name. We are assuming all mounts will exist under /mnt, so if the full path
-                // doesn't start with /mnt, make sure it does before we kexec_file_load.
                 let linux = if kernel.starts_with("/mnt") {
                     kernel.to_path_buf()
                 } else {
                     let kernel = kernel.to_path_buf();
-                    let mut linux = mountpoint.to_path_buf();
+                    let mut linux = root.clone();
                     linux.push(kernel.strip_prefix("/").unwrap_or(&kernel));
-                    debug!("grub hack patched linux path: {:?}", linux);
                     linux
                 };
 
-                // TODO(jared): don't do this hack
-                // NOTE: Grub paths can either be full paths or have a string-interpolated drive
-                // name. We are assuming all mounts will exist under /mnt, so if the full path
-                // doesn't start with /mnt, make sure it does before we kexec_file_load.
                 let initrd = if initrd.starts_with("/mnt") {
                     Some(initrd.to_path_buf())
                 } else {
                     let initrd = initrd.to_path_buf();
-                    let mut final_initrd = mountpoint.to_path_buf();
+                    let mut final_initrd = root;
                     final_initrd.push(initrd.strip_prefix("/").unwrap_or(&initrd));
-                    debug!("grub hack patched initrd path: {:?}", final_initrd);
                     Some(final_initrd)
                 };
 
@@ -640,7 +648,7 @@ mod tests {
 
     #[test]
     fn grub_run_test() {
-        let g = TinybootGrubEnvironment::new("/dev/null");
+        let g = TinybootGrubEnvironment::new("/dev/null", "/dev/null");
         assert!(g
             .run_test(vec![
                 "test".to_string(),
