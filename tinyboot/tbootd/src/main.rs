@@ -20,8 +20,10 @@ use log::{debug, error, info};
 use netlink_sys::protocols::NETLINK_KOBJECT_UEVENT;
 use netlink_sys::{Socket, SocketAddr};
 use nix::libc;
+use nix::unistd::{chown, Gid, Uid};
 use sha2::{Digest, Sha256};
 use std::io::{self, Write};
+use std::os::unix::net::UnixListener;
 use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
 use std::process::{self, Command};
@@ -342,6 +344,14 @@ fn main() -> anyhow::Result<()> {
         error!("tinyboot not running as root");
         process::exit(1);
     }
+
+    let sock_path = "/tmp/tinyboot.sock";
+    let _sock = UnixListener::bind(sock_path)?;
+    chown(
+        sock_path,
+        Some(Uid::from_raw(1000)),
+        Some(Gid::from_raw(1000)),
+    )?;
 
     loop {
         if let Err(e) = boot() {

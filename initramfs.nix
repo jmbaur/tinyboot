@@ -41,6 +41,7 @@ let
     ::respawn:/bin/mdev -df
     ::restart:/init
     ${tty}::once:/bin/tbootd --log-level=${if debug then "debug" else "info"}
+    ${tty}::once:/bin/tbootui
   '' + extraInittab);
   passwd = writeText "passwd" ''
     root:x:0:0:System administrator:/root:/bin/sh
