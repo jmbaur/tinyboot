@@ -85,7 +85,9 @@ fn select_entry(
                         default_entry = new_entries.first().cloned();
                     }
 
-                    debug!("assigned default entry: {:?}", default_entry);
+                    if let Some(entry) = &default_entry {
+                        debug!("assigned default entry: {}", entry.display);
+                    }
                 }
 
                 if !device.removable {
