@@ -4,7 +4,7 @@ use crate::fs::{detect_fs_type, FsType};
 use crate::grub::GrubBootLoader;
 use crate::syslinux::SyslinuxBootLoader;
 use kobject_uevent::UEvent;
-use log::debug;
+use log::{debug, error};
 use nix::mount;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -94,22 +94,29 @@ impl TryFrom<UEvent> for BlockDevice {
         debug!("discovered disk: {}", name);
 
         let (bootloader, boot_partition_mountpoint) = dev_partitions.iter().find_map(|part| {
-            let Ok(mountpoint) = mount_block_device(part) else { return None; };
-                if let Ok(bls_config) = BlsBootLoader::get_config(&mountpoint) {
-                    let Ok(bls) = BlsBootLoader::new(&mountpoint, &bls_config) else { return None; };
-                    debug!("found bls bootloader");
-                    Some((bls, mountpoint))
-                } else if let Ok(grub_config) = GrubBootLoader::get_config(&mountpoint) {
-                    let Ok(grub) = GrubBootLoader::new(&mountpoint, &grub_config) else { return None; };
-                    debug!("found grub bootloader");
-                    Some((grub, mountpoint))
-                } else if let Ok(syslinux_config) = SyslinuxBootLoader::get_config(&mountpoint) {
-                    let Ok(syslinux) = SyslinuxBootLoader::new(&syslinux_config)else { return None; };
-                    debug!("found syslinux bootloader");
-                    Some((syslinux, mountpoint))
-                } else {
-                    None
+            let mountpoint = match mount_block_device(part) {
+                Err(e) => {
+                    error!("failed to mount block device: {e}");
+                    return None;
                 }
+                Ok(m) => m,
+            };
+
+            if let Ok(bls_config) = BlsBootLoader::get_config(&mountpoint) {
+                let Ok(bls) = BlsBootLoader::new(&mountpoint, &bls_config) else { return None; };
+                debug!("found bls bootloader");
+                Some((bls, mountpoint))
+            } else if let Ok(grub_config) = GrubBootLoader::get_config(&mountpoint) {
+                let Ok(grub) = GrubBootLoader::new(&mountpoint, &grub_config) else { return None; };
+                debug!("found grub bootloader");
+                Some((grub, mountpoint))
+            } else if let Ok(syslinux_config) = SyslinuxBootLoader::get_config(&mountpoint) {
+                let Ok(syslinux) = SyslinuxBootLoader::new(&syslinux_config)else { return None; };
+                debug!("found syslinux bootloader");
+                Some((syslinux, mountpoint))
+            } else {
+                None
+            }
         }).ok_or(anyhow::anyhow!("no bootloader"))?;
 
         Ok(BlockDevice {
