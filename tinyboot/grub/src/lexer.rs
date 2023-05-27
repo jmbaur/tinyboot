@@ -18,12 +18,30 @@ impl<'a> Lexer<'a> {
 
     fn read_other(&mut self) -> Token {
         let mut other_str = String::from(self.current_char);
+
+        let mut last_char = self.current_char;
+
+        let mut getting_introspected_value = false;
         while let Some(&char) = self.src.peek() {
-            if char.is_ascii_whitespace() || char == ';' {
+            if last_char == '$' && char == '{' {
+                getting_introspected_value = true;
+            }
+
+            if char.is_ascii_whitespace()
+                // allow for semicolon and close_brace to break a `value` without any whitespace between the value
+                // and the semicolon/close_brace
+                || char == ';'
+                || (char == '}' && !getting_introspected_value)
+            {
                 break;
             }
 
+            if char == '}' && getting_introspected_value {
+                getting_introspected_value = false;
+            }
+
             other_str.push(self.src.next().expect("peek is not None"));
+            last_char = char;
         }
 
         match other_str.as_str() {
@@ -201,6 +219,26 @@ mod tests {
     }
 
     #[test]
+    fn introspective_value() {
+        assert_eq!(
+            tokenize(r#"${foobar}"#),
+            vec![Token::Value("${foobar}".to_string()),]
+        );
+        assert_eq!(
+            tokenize(r#"isoboot="findiso=${iso_path}""#),
+            vec![Token::Value(r#"isoboot="findiso=${iso_path}""#.to_string()),]
+        );
+        assert_eq!(
+            tokenize(r#"{foobar}"#),
+            vec![
+                Token::OpenBrace,
+                Token::Value("foobar".to_string()),
+                Token::CloseBrace,
+            ]
+        );
+    }
+
+    #[test]
     fn simple_expression() {
         assert_eq!(
             tokenize(
@@ -281,14 +319,20 @@ mod tests {
     }
 
     #[test]
+    fn nixos_iso_example() {
+        let tokens = tokenize(include_str!("./testdata/grub-nixos-iso.cfg"));
+        insta::assert_debug_snapshot!(tokens);
+    }
+
+    #[test]
     fn ubuntu_iso_example() {
-        let tokens = tokenize(include_str!("./testdata/grub-ubuntu.cfg"));
+        let tokens = tokenize(include_str!("./testdata/grub-ubuntu-iso.cfg"));
         insta::assert_debug_snapshot!(tokens);
     }
 
     #[test]
     fn alpine_iso_example() {
-        let tokens = tokenize(include_str!("./testdata/grub-alpine.cfg"));
+        let tokens = tokenize(include_str!("./testdata/grub-alpine-iso.cfg"));
         insta::assert_debug_snapshot!(tokens);
     }
 }

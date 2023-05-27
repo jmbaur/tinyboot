@@ -142,6 +142,7 @@ fn matches_command(s: &str) -> bool {
             | "read"
             | "reboot"
             | "regexp"
+            | "return"
             | "rmmod"
             | "save_env"
             | "search"
@@ -223,7 +224,10 @@ impl<'a> Parser<'a> {
 
         let mut seen_close_bracket = false;
         while let Some(peek_token) = self.lexer.peek() {
-            if matches!(peek_token, &Token::Newline | &Token::Semicolon) {
+            if matches!(
+                peek_token,
+                &Token::Newline | &Token::Semicolon | &Token::CloseBrace
+            ) {
                 if command.as_str() == "[" && !seen_close_bracket {
                     return Err(ParserError::MissingCharacter("]".to_string()));
                 }
@@ -669,6 +673,31 @@ mod tests {
         );
     }
 
+    // test weird quirk in nixos iso grub configuration
+    #[test]
+    fn nixos_quirk() {
+        let src = r#"
+              # Some laptop and convertibles have the panel installed in an
+              # inconvenient way, rotated away from the keyboard.
+              # Those entries makes it easier to use the installer.
+              submenu "" {return}
+        "#;
+        let mut p = Parser::new(Lexer::new(src));
+        let root = p.parse().unwrap();
+        assert!(root.statements.len() == 1);
+        assert_command_statement(
+            &root.statements[0],
+            "submenu",
+            vec![
+                CommandArgument::Value(String::from("")),
+                CommandArgument::Block(vec![Statement::Command(CommandStatement {
+                    command: "return".to_string(),
+                    args: vec![],
+                })]),
+            ],
+        )
+    }
+
     #[test]
     fn nixos_example() {
         let mut p = Parser::new(Lexer::new(include_str!("./testdata/grub-nixos.cfg")));
@@ -677,15 +706,22 @@ mod tests {
     }
 
     #[test]
+    fn nixos_iso_example() {
+        let mut p = Parser::new(Lexer::new(include_str!("./testdata/grub-nixos-iso.cfg")));
+        let ast = p.parse().expect("no parsing errors");
+        insta::assert_debug_snapshot!(ast);
+    }
+
+    #[test]
     fn ubuntu_iso_example() {
-        let mut p = Parser::new(Lexer::new(include_str!("./testdata/grub-ubuntu.cfg")));
+        let mut p = Parser::new(Lexer::new(include_str!("./testdata/grub-ubuntu-iso.cfg")));
         let ast = p.parse().expect("no parsing errors");
         insta::assert_debug_snapshot!(ast);
     }
 
     #[test]
     fn alpine_iso_example() {
-        let mut p = Parser::new(Lexer::new(include_str!("./testdata/grub-alpine.cfg")));
+        let mut p = Parser::new(Lexer::new(include_str!("./testdata/grub-alpine-iso.cfg")));
         let ast = p.parse().expect("no parsing errors");
         insta::assert_debug_snapshot!(ast);
     }

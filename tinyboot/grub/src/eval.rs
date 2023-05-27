@@ -490,15 +490,28 @@ mod tests {
     #[test]
     fn nixos_example() {
         let grub_env = SimpleGrubEnvironment::default();
-        GrubEvaluator::new_from_source(include_str!("./testdata/grub-nixos.cfg").to_string(), grub_env)
-            .expect("no evaluation errors");
+        GrubEvaluator::new_from_source(
+            include_str!("./testdata/grub-nixos.cfg").to_string(),
+            grub_env,
+        )
+        .expect("no evaluation errors");
+    }
+
+    #[test]
+    fn nixos_iso_example() {
+        let grub_env = SimpleGrubEnvironment::default();
+        GrubEvaluator::new_from_source(
+            include_str!("./testdata/grub-nixos-iso.cfg").to_string(),
+            grub_env,
+        )
+        .expect("no evaluation errors");
     }
 
     #[test]
     fn ubuntu_iso_example() {
         let grub_env = SimpleGrubEnvironment::default();
         GrubEvaluator::new_from_source(
-            include_str!("./testdata/grub-ubuntu.cfg").to_string(),
+            include_str!("./testdata/grub-ubuntu-iso.cfg").to_string(),
             grub_env,
         )
         .expect("no evaluation errors");
@@ -508,7 +521,7 @@ mod tests {
     fn alpine_iso_example() {
         let grub_env = SimpleGrubEnvironment::default();
         GrubEvaluator::new_from_source(
-            include_str!("./testdata/grub-alpine.cfg").to_string(),
+            include_str!("./testdata/grub-alpine-iso.cfg").to_string(),
             grub_env,
         )
         .expect("no evaluation errors");

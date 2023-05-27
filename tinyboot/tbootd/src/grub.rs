@@ -485,7 +485,7 @@ pub struct GrubBootLoader {
 
 impl GrubBootLoader {
     pub fn get_config(mountpoint: &Path) -> Result<PathBuf, Error> {
-        for path in ["boot/grub/grub.cfg", "grub/grub.cfg"] {
+        for path in ["boot/grub/grub.cfg", "grub/grub.cfg", "EFI/boot/grub.cfg"] {
             let search_path = mountpoint.join(path);
 
             debug!(

@@ -104,7 +104,8 @@ pub fn detect_fs_type(p: impl AsRef<Path>) -> anyhow::Result<FsType> {
                 f.read_exact(&mut buffer)?;
 
                 if std::str::from_utf8(&buffer)
-                    .map(|res| res == "FAT16   ")
+                    // fat12 is mostly consistent with fat16 for our uses
+                    .map(|res| res == "FAT16   " || res == "FAT12   ")
                     .unwrap_or(false)
                 {
                     let uuid: String;
