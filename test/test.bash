@@ -15,9 +15,9 @@ if [[ ! -f nixos-@system@.iso ]]; then
 	curl -L -o nixos-@system@.iso https://channels.nixos.org/nixos-22.11/latest-nixos-minimal-@system@.iso
 fi
 
-# if [[ ! -f nixos-@testName@.qcow2 ]]; then
-# 	dd if=@disk@/nixos.qcow2 of=nixos-@testName@.qcow2
-# fi
+if [[ ! -f nixos-@testName@.qcow2 ]]; then
+	dd if=@disk@/nixos.qcow2 of=nixos-@testName@.qcow2
+fi
 
 # -chardev socket,id=chrtpm,path=/tmp/mytpm1/swtpm-sock \
 # -tpmdev emulator,id=tpm0,chardev=chrtpm \

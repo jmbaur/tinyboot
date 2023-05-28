@@ -1,5 +1,3 @@
-use log::error;
-use nix::mount;
 use std::fmt::Write;
 use std::{
     fs,
@@ -184,12 +182,6 @@ pub fn detect_fs_type(p: impl AsRef<Path>) -> anyhow::Result<FsType> {
     }
 
     anyhow::bail!("unsupported fs type")
-}
-
-pub fn unmount(path: &Path) {
-    if let Err(e) = mount::umount2(path, mount::MntFlags::MNT_DETACH) {
-        error!("umount2({}): {e}", path.display());
-    }
 }
 
 #[cfg(test)]

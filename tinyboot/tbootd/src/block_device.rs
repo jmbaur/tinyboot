@@ -1,13 +1,28 @@
-use crate::bls::BlsBootLoader;
-use crate::device::BlockDevice;
 use crate::fs::{detect_fs_type, FsType};
-use crate::grub::GrubBootLoader;
-use crate::syslinux::SyslinuxBootLoader;
+use crate::message::Msg;
 use kobject_uevent::UEvent;
 use log::{debug, error};
+use netlink_sys::{protocols::NETLINK_KOBJECT_UEVENT, Socket, SocketAddr};
+use nix::libc::MSG_DONTWAIT;
 use nix::mount;
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::sync::mpsc::Receiver;
+use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
+use std::{
+    collections::HashMap,
+    fs,
+    path::{Path, PathBuf},
+    sync::mpsc::Sender,
+    thread,
+};
+
+const MAX_WAIT_FOR_UEVENT_SEC: u64 = 3;
+
+pub struct BlockDevice {
+    pub name: String,
+    pub removable: bool,
+    pub partition_mounts: HashMap<PathBuf, PathBuf>,
+}
 
 impl TryFrom<UEvent> for BlockDevice {
     type Error = anyhow::Error;
@@ -85,6 +100,8 @@ impl TryFrom<UEvent> for BlockDevice {
             }
         };
 
+        // TODO(jared): Use fs::read_dir based on mdev.conf that will put all partitions under
+        // /dev/disk/vda/N, where N is the partition number.
         let dev_partitions = find_disk_partitions(|p| {
             let Some(filename) = p.file_name() else { return false; };
             let Some(filename) = filename.to_str() else { return false; };
@@ -93,37 +110,26 @@ impl TryFrom<UEvent> for BlockDevice {
 
         debug!("discovered disk: {}", name);
 
-        let (bootloader, boot_partition_mountpoint) = dev_partitions.iter().find_map(|part| {
-            let mountpoint = match mount_block_device(part) {
-                Err(e) => {
-                    error!("failed to mount block device {:?}: {e}", part);
-                    return None;
-                }
-                Ok(m) => m,
-            };
+        let partition_mounts =
+            dev_partitions
+                .into_iter()
+                .fold(HashMap::new(), |mut hmap, partition| {
+                    match mount_block_device(&partition) {
+                        Err(e) => {
+                            error!("failed to mount block device {:?}: {e}", partition);
+                        }
+                        Ok(mount) => {
+                            hmap.insert(partition, mount);
+                        }
+                    };
 
-            if let Ok(bls_config) = BlsBootLoader::get_config(&mountpoint) {
-                let Ok(bls) = BlsBootLoader::new(&mountpoint, &bls_config) else { return None; };
-                debug!("found bls bootloader");
-                Some((bls, mountpoint))
-            } else if let Ok(grub_config) = GrubBootLoader::get_config(&mountpoint) {
-                let Ok(grub) = GrubBootLoader::new(&mountpoint, &grub_config) else { return None; };
-                debug!("found grub bootloader");
-                Some((grub, mountpoint))
-            } else if let Ok(syslinux_config) = SyslinuxBootLoader::get_config(&mountpoint) {
-                let Ok(syslinux) = SyslinuxBootLoader::new(&syslinux_config)else { return None; };
-                debug!("found syslinux bootloader");
-                Some((syslinux, mountpoint))
-            } else {
-                None
-            }
-        }).ok_or(anyhow::anyhow!("no bootloader"))?;
+                    hmap
+                });
 
         Ok(BlockDevice {
-            bootloader,
             name,
             removable,
-            boot_partition_mountpoint,
+            partition_mounts,
         })
     }
 }
@@ -138,7 +144,15 @@ pub fn find_disks() -> anyhow::Result<Vec<BlockDevice>> {
                 return None;
             };
 
-            BlockDevice::try_from(uevent).ok()
+            debug!("trying to get block device for {:?}", uevent.devpath);
+
+            match BlockDevice::try_from(uevent) {
+                Ok(bd) => Some(bd),
+                Err(e) => {
+                    error!("failed to get block device: {}", e);
+                    None
+                }
+            }
         })
         .collect())
 }
@@ -213,4 +227,98 @@ pub fn mount_block_device(block_device: impl AsRef<Path>) -> anyhow::Result<Path
     )?;
 
     Ok(mountpoint)
+}
+
+pub enum MountMsg {
+    UnmountAll,
+    NewMount(PathBuf),
+}
+
+pub fn handle_unmounting(rx: Receiver<MountMsg>) -> JoinHandle<()> {
+    thread::spawn(move || {
+        let mut mountpoints = Vec::new();
+
+        loop {
+            if let Ok(msg) = rx.recv() {
+                match msg {
+                    MountMsg::NewMount(mount) => mountpoints.push(mount),
+                    MountMsg::UnmountAll => {
+                        debug!("unmounting all mounts");
+                        if mountpoints
+                            .iter()
+                            .map(|mountpoint| {
+                                mount::umount2(mountpoint, mount::MntFlags::MNT_DETACH)
+                            })
+                            .any(|result| result.is_err())
+                        {
+                            error!("could not unmount all partitions");
+                        }
+
+                        // quit the main thread loop so we can continue booting
+                        break;
+                    }
+                }
+            }
+        }
+    })
+}
+
+pub fn mount_all_devs(blockdev_tx: Sender<Msg>, mount_tx: Sender<MountMsg>) -> JoinHandle<()> {
+    thread::spawn(move || {
+        match find_disks() {
+            Err(e) => error!("failed to get initial block devices: {e}"),
+            Ok(initial_devs) => {
+                for bd in initial_devs {
+                    bd.partition_mounts.values().for_each(|mountpoint| {
+                        _ = mount_tx.send(MountMsg::NewMount(mountpoint.to_path_buf()));
+                    });
+
+                    if blockdev_tx.send(Msg::Device(bd)).is_err() {
+                        break;
+                    }
+                }
+            }
+        };
+
+        let mut socket = Socket::new(NETLINK_KOBJECT_UEVENT).unwrap();
+        let sa = SocketAddr::new(0, 1 << 0);
+        socket.bind(&sa).unwrap();
+
+        let mut last_found_at = Instant::now();
+
+        let mut buf = bytes::BytesMut::with_capacity(1024 * 8);
+        loop {
+            // sleep since we are setting MSG_DONTWAIT on our recv_from call
+            thread::sleep(Duration::from_millis(100));
+
+            let now = Instant::now();
+            if last_found_at.duration_since(now) > Duration::from_secs(MAX_WAIT_FOR_UEVENT_SEC) {
+                break;
+            }
+
+            buf.clear();
+            let Ok(_) = socket.recv_from(&mut buf, MSG_DONTWAIT) else {
+                    continue;
+                };
+
+            let n = buf.len();
+            let Ok(uevent) = UEvent::from_netlink_packet(&buf[..n]) else {
+                    continue;
+                };
+
+            let Ok(bd) = BlockDevice::try_from(uevent) else {
+                    continue;
+                };
+
+            bd.partition_mounts.values().for_each(|mountpoint| {
+                _ = mount_tx.send(MountMsg::NewMount(mountpoint.to_path_buf()));
+            });
+
+            if blockdev_tx.send(Msg::Device(bd)).is_err() {
+                break;
+            }
+
+            last_found_at = now;
+        }
+    })
 }
