@@ -8,7 +8,7 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.71"
 kobject-uevent = "0.1.0"
-log = "0.4.17"
+log = "0.4.18"
 # don't use libudev
 serialport = { version = "4.2.1", default-features = false }
 tboot = { path = "../tboot" }

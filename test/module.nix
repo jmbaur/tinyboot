@@ -1,5 +1,6 @@
 { config, pkgs, lib, modulesPath, ... }: {
   imports = [ "${modulesPath}/profiles/qemu-guest.nix" ];
+  boot.kernelParams = [ "console=${{ x86_64 = "ttyS0"; arm64 = "ttyAMA0"; }.${config.nixpkgs.hostPlatform.linuxArch}}" ];
   system.stateVersion = "23.05";
   environment.etc.tboot-pubkey.source = ./keys/pubkey;
   environment.systemPackages = [ pkgs.tinyboot ];

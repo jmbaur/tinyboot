@@ -16,7 +16,10 @@ if [[ ! -f nixos-@system@.iso ]]; then
 fi
 
 if [[ ! -f nixos-@testName@.qcow2 ]]; then
-	dd if=@disk@/nixos.qcow2 of=nixos-@testName@.qcow2
+	echo "no disk image found"
+	echo "make sure you run this first:"
+	echo "nix run .#@testName@-disk"
+	exit 1
 fi
 
 # -chardev socket,id=chrtpm,path=/tmp/mytpm1/swtpm-sock \

@@ -12,23 +12,23 @@
     {
       nixosConfigurations =
         let
-          base = forAllSystems ({ system, ... }: nixpkgs.lib.nixosSystem {
-            inherit system;
-            modules = [
-              ({ nixpkgs.overlays = [ self.overlays.default ]; })
+          baseConfig = forAllSystems ({ system, ... }: {
+            imports = [
+              ({ nixpkgs.hostPlatform = system; nixpkgs.overlays = [ self.overlays.default ]; })
               ./test/module.nix
             ];
           });
           extend = extension: nixpkgs.lib.mapAttrs'
-            (system: config: nixpkgs.lib.nameValuePair "${extension}-${system}" (config.extendModules {
-              modules = [ ./test/${extension}.nix ];
+            (system: baseConfig: nixpkgs.lib.nameValuePair "${extension}-${system}" (nixpkgs.lib.nixosSystem {
+              modules = [ baseConfig ./test/${extension}.nix ];
             }));
         in
-        nixpkgs.lib.foldAttrs (curr: acc: acc // curr) { } (map (b: extend b base) [ "bls" "grub" "extlinux" ]);
+        nixpkgs.lib.foldAttrs (curr: acc: acc // curr) { } (map (b: extend b baseConfig) [ "bls" "grub" "extlinux" ]);
       overlays.default = final: prev: {
         flashrom-cros = prev.callPackage ./flashrom.nix { };
         wolftpm = prev.callPackage ./wolftpm.nix { };
         tinyboot = prev.callPackage ./tinyboot { };
+        tinyboot-client = final.tinyboot.override { clientOnly = true; };
         coreboot = prev.callPackage ./boards {
           buildFitImage = prev.callPackage ./fitimage { };
           buildCoreboot = prev.callPackage ./coreboot.nix { flashrom = final.flashrom-cros; };
@@ -42,22 +42,34 @@
         };
       });
       legacyPackages = forAllSystems ({ pkgs, ... }: pkgs);
-      apps = forAllSystems ({ pkgs, system, ... }: (pkgs.lib.mapAttrs'
+      apps = forAllSystems ({ pkgs, system, ... }: (pkgs.lib.concatMapAttrs
         (testName: nixosSystem:
-          pkgs.lib.nameValuePair testName {
-            type = "app";
-            program =
-              if nixosSystem.config.nixpkgs.system == system then
-                toString (pkgs.callPackage ./test { inherit testName nixosSystem; })
-              else
+          let
+            testScript = {
+              type = "app";
+              program =
                 let
-                  pkgsCross = {
-                    x86_64-linux = pkgs.pkgsCross.gnu64;
-                    aarch64-linux = pkgs.pkgsCross.aarch64-multiplatform;
-                  }.${nixosSystem.config.nixpkgs.system};
+                  myPkgs = if nixosSystem.config.nixpkgs.hostPlatform.system == system then pkgs else {
+                    x86_64-linux = myPkgs.pkgsCross.gnu64;
+                    aarch64-linux = myPkgs.pkgsCross.aarch64-multiplatform;
+                  }.${nixosSystem.config.nixpkgs.hostPlatform.system};
                 in
-                toString (pkgsCross.callPackage ./test { inherit testName nixosSystem; });
+                toString (myPkgs.callPackage ./test { inherit testName; });
+            };
+            makeTestDiskScript = {
+              type = "app";
+              program = toString (pkgs.writeShellScript "make-disk-image" ''
+                dd if=${nixosSystem.config.system.build.qcow2}/nixos.qcow2 of=nixos-${testName}.qcow2
+              '');
+            };
+          in
+          {
+            "${testName}-run" = testScript;
+            "${testName}-disk" = makeTestDiskScript;
           })
-        self.nixosConfigurations) // { default = self.apps.${system}."bls-${system}"; });
+        self.nixosConfigurations) // {
+        disk = self.apps.${system}."bls-${system}-disk";
+        default = self.apps.${system}."bls-${system}-run";
+      });
     };
 }

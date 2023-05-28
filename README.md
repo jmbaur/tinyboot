@@ -13,9 +13,7 @@ flashrom -w ./result/coreboot.rom -p <your_programmer>
 
 ## Hacking
 
-Get started with qemu:
-
 ```bash
-nix build github:jmbaur/tinyboot#coreboot.qemu-x86_64
-qemu-system-x86_64 -nographic -bios ./result/coreboot.rom
+nix run .#disk
+nix run .#default
 ```
