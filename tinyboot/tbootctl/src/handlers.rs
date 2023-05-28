@@ -1,7 +1,6 @@
-use std::fs;
-
 use crate::cli::{SignCommand, VerifyCommand};
 use log::{debug, info};
+use std::fs;
 use tboot::verified_boot;
 
 pub fn handle_verified_boot_sign(args: &SignCommand) -> anyhow::Result<()> {

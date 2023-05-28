@@ -3,8 +3,7 @@ use clap_complete::{
     generate_to,
     shells::{Bash, Fish, Zsh},
 };
-use std::env;
-use std::io::Error;
+use std::{env, io::Error};
 
 include!("src/cli.rs");
 

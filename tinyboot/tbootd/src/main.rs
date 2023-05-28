@@ -96,7 +96,7 @@ fn select_entry(rx: Receiver<Msg>) -> anyhow::Result<LinuxBootEntry> {
                     // print entries
                     {
                         write!(stdout, "{}\r\n", "-".repeat(120))?;
-                        write!(stdout, "{:?} {}\r\n", part_path, device.name)?;
+                        write!(stdout, "{} {}\r\n", part_path.display(), device.name)?;
                         for (i, entry) in new_entries.iter().enumerate() {
                             let is_default = default_entry
                                 .as_ref()
@@ -302,9 +302,7 @@ fn main() -> anyhow::Result<()> {
         let (tx, rx) = mpsc::channel::<Msg>();
         let (mount_tx, mount_rx) = mpsc::channel::<MountMsg>();
 
-        mount_all_devs(tx.clone(), mount_tx.clone());
-
-        debug!("HERE");
+        let mount_handle = mount_all_devs(tx.clone(), mount_tx.clone());
 
         let unmount_handle = handle_unmounting(mount_rx);
 
@@ -312,6 +310,7 @@ fn main() -> anyhow::Result<()> {
 
         if mount_tx.send(MountMsg::UnmountAll).is_ok() {
             // wait for unmounting to finish
+            _ = mount_handle.join();
             _ = unmount_handle.join();
         }
 

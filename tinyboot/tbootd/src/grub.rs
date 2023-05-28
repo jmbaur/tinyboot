@@ -1,15 +1,17 @@
-use super::fs::{detect_fs_type, FsType};
-use crate::block_device::{find_disk_partitions, mount_block_device};
+use super::fs::FsType;
+use crate::block_device::find_disk_partitions;
 use crate::boot_loader::{BootLoader, Error, LinuxBootEntry};
 use crate::util::*;
 use clap::{ArgAction, Parser};
 use grub::{GrubEnvironment, GrubEvaluator};
 use log::{debug, error};
-use nix::mount;
-use std::io::{self, Read};
-use std::path::PathBuf;
-use std::time::Duration;
-use std::{collections::HashMap, fs, path::Path};
+use std::{
+    collections::HashMap,
+    fs,
+    io::{self, Read},
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 const GRUB_ENVIRONMENT_BLOCK_LENGTH: i32 = 1024;
 const GRUB_ENVIRONMENT_BLOCK_HEADER: &str = r#"# GRUB Environment Block
@@ -240,11 +242,12 @@ impl TinybootGrubEnvironment {
             (true, false, false) => {
                 debug!("searching for block device with file {}", args.name);
                 find_disk_partitions(|p| {
-                    let Ok(mountpoint) = mount_block_device(p) else {
+                    let Ok(Some(mountpoint)) = mountinfo(p) else {
+                        debug!("did not find existing mountpoint");
                         return false;
                     };
 
-                    let mut filepath = mountpoint;
+                    let mut filepath = PathBuf::from(mountpoint);
                     filepath.push(args.name.strip_prefix('/').unwrap_or(&args.name));
 
                     filepath.exists()
@@ -284,36 +287,11 @@ impl TinybootGrubEnvironment {
             return Err(GrubEnvironmentError::Io("file not found".to_string()));
         };
 
-        let mountpoint = if let Ok(Some(existing_mountpoint)) = mountinfo(found) {
-            existing_mountpoint
+        if let Ok(Some(mountpoint)) = mountinfo(found) {
+            self.env.insert(var, mountpoint);
         } else {
-            let mountpoint = PathBuf::from("/mnt").join(
-                found
-                    .to_str()
-                    .expect("invalid unicode")
-                    .trim_start_matches('/')
-                    .replace('/', "-"),
-            );
-
-            let fstype =
-                detect_fs_type(found).map_err(|e| GrubEnvironmentError::Io(e.to_string()))?;
-
-            mount::mount(
-                Some(found.as_path()),
-                &mountpoint,
-                Some(match fstype {
-                    FsType::Iso9660 => "iso9660",
-                    FsType::Ext4(..) => "ext4",
-                    FsType::Vfat(..) => "vfat",
-                }),
-                mount::MsFlags::MS_RDONLY,
-                None::<&[u8]>,
-            )?;
-
-            mountpoint.to_str().expect("bad unicode").to_string()
-        };
-
-        self.env.insert(var, mountpoint);
+            debug!("did not find existing mountpoint");
+        }
 
         Ok(())
     }
@@ -451,11 +429,6 @@ impl GrubEnvironment for TinybootGrubEnvironment {
     }
 
     fn run_command(&mut self, command: String, args_wo_command: Vec<String>) -> u8 {
-        debug!(
-            "command '{command}' called with args '{:?}'",
-            args_wo_command.join(" ")
-        );
-
         // clap requires the command name to be the first argument, just as std::env::args_os().
         let mut args = vec![command.clone()];
         args.extend(args_wo_command);

@@ -292,23 +292,25 @@ pub fn mount_all_devs(blockdev_tx: Sender<Msg>, mount_tx: Sender<MountMsg>) -> J
             thread::sleep(Duration::from_millis(100));
 
             let now = Instant::now();
-            if last_found_at.duration_since(now) > Duration::from_secs(MAX_WAIT_FOR_UEVENT_SEC) {
+            if now.duration_since(last_found_at) > Duration::from_secs(MAX_WAIT_FOR_UEVENT_SEC) {
                 break;
             }
 
             buf.clear();
             let Ok(_) = socket.recv_from(&mut buf, MSG_DONTWAIT) else {
-                    continue;
-                };
+                continue;
+            };
 
             let n = buf.len();
             let Ok(uevent) = UEvent::from_netlink_packet(&buf[..n]) else {
-                    continue;
-                };
+                continue;
+            };
 
             let Ok(bd) = BlockDevice::try_from(uevent) else {
-                    continue;
-                };
+                continue;
+            };
+
+            last_found_at = now;
 
             bd.partition_mounts.values().for_each(|mountpoint| {
                 _ = mount_tx.send(MountMsg::NewMount(mountpoint.to_path_buf()));
@@ -317,8 +319,6 @@ pub fn mount_all_devs(blockdev_tx: Sender<Msg>, mount_tx: Sender<MountMsg>) -> J
             if blockdev_tx.send(Msg::Device(bd)).is_err() {
                 break;
             }
-
-            last_found_at = now;
         }
     })
 }

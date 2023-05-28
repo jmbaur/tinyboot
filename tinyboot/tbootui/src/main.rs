@@ -1,7 +1,7 @@
 use kobject_uevent::UEvent;
 use log::{info, LevelFilter};
-use std::io::prelude::*;
 use std::{
+    io::prelude::*,
     os::unix::net::UnixStream,
     path::{Path, PathBuf},
 };
