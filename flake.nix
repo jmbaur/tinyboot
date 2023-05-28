@@ -28,7 +28,7 @@
         flashrom-cros = prev.callPackage ./flashrom.nix { };
         wolftpm = prev.callPackage ./wolftpm.nix { };
         tinyboot = prev.callPackage ./tinyboot { };
-        tinyboot-client = final.tinyboot.override { clientOnly = true; };
+        tinyboot-client = prev.callPackage ./tinyboot { clientOnly = true; };
         coreboot = prev.callPackage ./boards {
           buildFitImage = prev.callPackage ./fitimage { };
           buildCoreboot = prev.callPackage ./coreboot.nix { flashrom = final.flashrom-cros; };

@@ -1,7 +1,7 @@
-{ measuredBoot ? false
+{ clientOnly ? false
+, measuredBoot ? false
 , verifiedBoot ? false
 , verifiedBootPublicKey ? "/dev/null"
-, clientOnly ? false
 , lib
 , rustPlatform
 , wolftpm
