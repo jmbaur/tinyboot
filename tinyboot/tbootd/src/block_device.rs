@@ -3,20 +3,20 @@ use crate::message::Msg;
 use kobject_uevent::UEvent;
 use log::{debug, error};
 use netlink_sys::{protocols::NETLINK_KOBJECT_UEVENT, Socket, SocketAddr};
-use nix::libc::MSG_DONTWAIT;
-use nix::mount;
-use std::sync::mpsc::Receiver;
-use std::thread::JoinHandle;
-use std::time::{Duration, Instant};
+use nix::{libc::MSG_DONTWAIT, mount};
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use std::{
     collections::HashMap,
     fs,
     path::{Path, PathBuf},
-    sync::mpsc::Sender,
-    thread,
+    sync::{
+        atomic::AtomicBool,
+        mpsc::{Receiver, Sender},
+    },
+    thread::{self, JoinHandle},
+    time::Duration,
 };
-
-const MAX_WAIT_FOR_UEVENT_SEC: u64 = 3;
 
 pub struct BlockDevice {
     pub name: String,
@@ -263,7 +263,11 @@ pub fn handle_unmounting(rx: Receiver<MountMsg>) -> JoinHandle<()> {
     })
 }
 
-pub fn mount_all_devs(blockdev_tx: Sender<Msg>, mount_tx: Sender<MountMsg>) -> JoinHandle<()> {
+pub fn mount_all_devs(
+    blockdev_tx: Sender<Msg>,
+    mount_tx: Sender<MountMsg>,
+    done: Arc<AtomicBool>,
+) -> JoinHandle<()> {
     thread::spawn(move || {
         match find_disks() {
             Err(e) => error!("failed to get initial block devices: {e}"),
@@ -284,17 +288,14 @@ pub fn mount_all_devs(blockdev_tx: Sender<Msg>, mount_tx: Sender<MountMsg>) -> J
         let sa = SocketAddr::new(0, 1 << 0);
         socket.bind(&sa).unwrap();
 
-        let mut last_found_at = Instant::now();
-
         let mut buf = bytes::BytesMut::with_capacity(1024 * 8);
         loop {
-            // sleep since we are setting MSG_DONTWAIT on our recv_from call
-            thread::sleep(Duration::from_millis(100));
-
-            let now = Instant::now();
-            if now.duration_since(last_found_at) > Duration::from_secs(MAX_WAIT_FOR_UEVENT_SEC) {
+            if done.load(Ordering::Relaxed) {
                 break;
             }
+
+            // sleep since we are setting MSG_DONTWAIT on our recv_from call
+            thread::sleep(Duration::from_millis(100));
 
             buf.clear();
             let Ok(_) = socket.recv_from(&mut buf, MSG_DONTWAIT) else {
@@ -309,8 +310,6 @@ pub fn mount_all_devs(blockdev_tx: Sender<Msg>, mount_tx: Sender<MountMsg>) -> J
             let Ok(bd) = BlockDevice::try_from(uevent) else {
                 continue;
             };
-
-            last_found_at = now;
 
             bd.partition_mounts.values().for_each(|mountpoint| {
                 _ = mount_tx.send(MountMsg::NewMount(mountpoint.to_path_buf()));

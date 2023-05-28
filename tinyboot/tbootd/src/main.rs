@@ -22,12 +22,15 @@ use nix::{
     unistd::{chown, Gid, Uid},
 };
 use sha2::{Digest, Sha256};
-use std::sync::mpsc::Sender;
+use std::sync::Arc;
 use std::{
     io::{self, Write},
     os::unix::{net::UnixListener, process::CommandExt},
     process::{self, Command},
-    sync::mpsc::{self, Receiver},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc::{self, Receiver, Sender},
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -302,11 +305,14 @@ fn main() -> anyhow::Result<()> {
         let (tx, rx) = mpsc::channel::<Msg>();
         let (mount_tx, mount_rx) = mpsc::channel::<MountMsg>();
 
-        let mount_handle = mount_all_devs(tx.clone(), mount_tx.clone());
+        let done = Arc::new(AtomicBool::new(false));
+        let mount_handle = mount_all_devs(tx.clone(), mount_tx.clone(), done.clone());
 
         let unmount_handle = handle_unmounting(mount_rx);
 
         let res = prepare_boot(tx, rx);
+
+        done.store(true, Ordering::Relaxed);
 
         if mount_tx.send(MountMsg::UnmountAll).is_ok() {
             // wait for unmounting to finish
