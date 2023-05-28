@@ -975,8 +975,11 @@ dependencies = [
 name = "tbootui"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "kobject-uevent",
+ "log",
  "serialport",
+ "tboot",
 ]
 
 [[package]]

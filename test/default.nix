@@ -17,5 +17,5 @@ substituteAll {
   extraPath = lib.makeBinPath (with pkgsBuildBuild; [ qemu swtpm ]);
   qemu = "qemu-system-${stdenv.hostPlatform.qemuArch}";
   inherit (stdenv.hostPlatform) system;
-  inherit qemuFlags corebootROM/*disk*/ testName;
+  inherit qemuFlags corebootROM disk testName;
 }
