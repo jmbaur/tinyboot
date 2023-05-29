@@ -289,7 +289,7 @@ pub fn mount_all_devs(
         socket.bind(&sa).unwrap();
 
         let mut buf = bytes::BytesMut::with_capacity(1024 * 8);
-        loop {
+        'outer: loop {
             if done.load(Ordering::Relaxed) {
                 break;
             }
@@ -306,6 +306,20 @@ pub fn mount_all_devs(
             let Ok(uevent) = UEvent::from_netlink_packet(&buf[..n]) else {
                 continue;
             };
+
+            // Wait for mdev daemon to create device node for block device.
+            if let Some(devname) = uevent.env.get("DEVNAME") {
+                let mut devpath = PathBuf::from("/dev");
+                devpath.push(devname);
+                let mut tries = 0;
+                while !devpath.exists() {
+                    thread::sleep(Duration::from_millis(100));
+                    tries += 1;
+                    if tries >= 5 {
+                        continue 'outer;
+                    }
+                }
+            }
 
             let Ok(bd) = BlockDevice::try_from(uevent) else {
                 continue;
