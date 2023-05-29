@@ -69,8 +69,8 @@ impl BlsBootLoader {
             search_path.display()
         );
 
-        if fs::metadata(search_path).is_ok() {
-            Ok(PathBuf::from(path))
+        if fs::metadata(&search_path).is_ok() {
+            Ok(search_path)
         } else {
             Err(Error::BootConfigNotFound)
         }
@@ -78,7 +78,7 @@ impl BlsBootLoader {
 
     #[allow(clippy::new_ret_no_self)]
     pub fn new(mountpoint: &Path, config_file: &Path) -> Result<Box<dyn BootLoader + Send>, Error> {
-        let source = fs::read_to_string(mountpoint.join(config_file))?;
+        let source = fs::read_to_string(config_file)?;
         Ok(Box::new(Self::parse_loader_conf(mountpoint, source)?))
     }
 

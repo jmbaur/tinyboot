@@ -476,8 +476,8 @@ impl GrubBootLoader {
                 search_path.display()
             );
 
-            if fs::metadata(search_path).is_ok() {
-                return Ok(PathBuf::from(path));
+            if fs::metadata(&search_path).is_ok() {
+                return Ok(search_path);
             }
         }
 
@@ -486,18 +486,15 @@ impl GrubBootLoader {
 
     #[allow(clippy::new_ret_no_self)]
     pub fn new(mountpoint: &Path, config_file: &Path) -> Result<Box<dyn BootLoader + Send>, Error> {
-        let source = fs::read_to_string(mountpoint.join(config_file))?;
+        let source = fs::read_to_string(config_file)?;
 
         let mut evaluator = GrubEvaluator::new_from_source(
             source,
             TinybootGrubEnvironment::new(
                 mountpoint.to_str().ok_or(Error::InvalidMountpoint)?,
-                mountpoint
-                    .join(
-                        PathBuf::from(config_file)
-                            .parent()
-                            .ok_or(Error::BootConfigNotFound)?,
-                    )
+                PathBuf::from(config_file)
+                    .parent()
+                    .ok_or(Error::BootConfigNotFound)?
                     .to_str()
                     .ok_or(Error::InvalidMountpoint)?,
             ),

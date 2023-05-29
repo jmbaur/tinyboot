@@ -15,6 +15,7 @@ use crate::boot_loader::{kexec_execute, kexec_load, LinuxBootEntry};
 use crate::grub::GrubBootLoader;
 use crate::syslinux::SyslinuxBootLoader;
 use clap::Parser;
+use crc::{Crc, CRC_32_ISCSI};
 use log::{debug, error, info, LevelFilter};
 use message::Msg;
 use nix::{
@@ -22,6 +23,7 @@ use nix::{
     unistd::{chown, Gid, Uid},
 };
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::{
     io::{self, Write},
@@ -36,16 +38,19 @@ use std::{
 };
 use termion::{clear, cursor, event::Key, input::TermRead, raw::IntoRawMode};
 
+pub const CASTAGNOLI: Crc<u32> = Crc::<u32>::new(&CRC_32_ISCSI);
+
 fn select_entry(rx: Receiver<Msg>) -> anyhow::Result<LinuxBootEntry> {
     let start = Instant::now();
 
-    let mut timeout = Duration::from_secs(10);
     let mut boot_entries = Vec::new();
     let mut default_entry: Option<LinuxBootEntry> = None;
     let mut has_internal_device = false;
     let mut has_user_interaction = false;
-    let mut user_input = String::new();
+    let mut seen_config_files = HashMap::new();
     let mut stdout = io::stdout().into_raw_mode()?;
+    let mut timeout = Duration::from_secs(10);
+    let mut user_input = String::new();
 
     loop {
         stdout.flush()?;
@@ -54,16 +59,55 @@ fn select_entry(rx: Receiver<Msg>) -> anyhow::Result<LinuxBootEntry> {
                 for (part_path, mount) in device.partition_mounts {
                     debug!("getting boot entries on {:?}", part_path);
 
-                    let bl = if let Ok(Ok(bls)) = BlsBootLoader::get_config(&mount)
-                        .map(|config| BlsBootLoader::new(&mount, &config))
-                    {
+                    // TODO(jared): cleanup, dedup
+                    let bl = if let Ok(Some(Ok(bls))) =
+                        BlsBootLoader::get_config(&mount).map(|config| {
+                            if let Ok(config_contents) = std::fs::read_to_string(&config) {
+                                let checksum = CASTAGNOLI.checksum(config_contents.as_bytes());
+                                debug!("SEEN CHECKSUM: {}", checksum);
+                                if seen_config_files.get(&checksum).is_some() {
+                                    None
+                                } else {
+                                    seen_config_files.insert(checksum, Some(()));
+                                    Some(BlsBootLoader::new(&mount, &config))
+                                }
+                            } else {
+                                None
+                            }
+                        }) {
                         bls
-                    } else if let Ok(Ok(grub)) = GrubBootLoader::get_config(&mount)
-                        .map(|config| GrubBootLoader::new(&mount, &config))
+                    } else if let Ok(Some(Ok(grub))) =
+                        GrubBootLoader::get_config(&mount).map(|config| {
+                            if let Ok(config_contents) = std::fs::read_to_string(&config) {
+                                let checksum = CASTAGNOLI.checksum(config_contents.as_bytes());
+                                debug!("SEEN CHECKSUM: {}", checksum);
+                                if seen_config_files.get(&checksum).is_some() {
+                                    None
+                                } else {
+                                    seen_config_files.insert(checksum, Some(()));
+                                    Some(GrubBootLoader::new(&mount, &config))
+                                }
+                            } else {
+                                None
+                            }
+                        })
                     {
                         grub
-                    } else if let Ok(Ok(syslinux)) = SyslinuxBootLoader::get_config(&mount)
-                        .map(|config| SyslinuxBootLoader::new(&config))
+                    } else if let Ok(Some(Ok(syslinux))) = SyslinuxBootLoader::get_config(&mount)
+                        .map(|config| {
+                            if let Ok(config_contents) = std::fs::read_to_string(&config) {
+                                let checksum = CASTAGNOLI.checksum(config_contents.as_bytes());
+                                debug!("SEEN CHECKSUM: {}", checksum);
+                                if seen_config_files.get(&checksum).is_some() {
+                                    None
+                                } else {
+                                    seen_config_files.insert(checksum, Some(()));
+                                    Some(SyslinuxBootLoader::new(&config))
+                                }
+                            } else {
+                                None
+                            }
+                        })
                     {
                         syslinux
                     } else {
