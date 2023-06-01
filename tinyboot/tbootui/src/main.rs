@@ -4,6 +4,8 @@ use std::{
     io::prelude::*,
     os::unix::net::UnixStream,
     path::{Path, PathBuf},
+    thread,
+    time::Duration,
 };
 
 fn main() -> anyhow::Result<()> {
@@ -28,5 +30,7 @@ fn main() -> anyhow::Result<()> {
     let mut stream = UnixStream::connect("/tmp/tinyboot.sock")?;
     stream.write_all(b"hello world")?;
 
-    Ok(())
+    loop {
+        thread::sleep(Duration::from_secs(99999));
+    }
 }

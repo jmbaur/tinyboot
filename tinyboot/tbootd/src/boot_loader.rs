@@ -1,11 +1,15 @@
 use log::debug;
 use nix::libc;
-use std::fmt::{self, Display};
-use std::os::fd::AsRawFd;
-use std::path::{Path, PathBuf};
-use std::time::{self, Duration};
-use std::{error, ffi, fs, io, thread};
+use std::{
+    error, ffi,
+    fmt::{self, Display},
+    io,
+    os::fd::AsRawFd,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 use syscalls::{syscall, Sysno};
+use tokio::{fs, time};
 
 #[derive(Debug)]
 pub enum Error {
@@ -45,13 +49,13 @@ pub trait BootLoader {
     fn boot_entries(&self) -> Result<Vec<LinuxBootEntry>, Error>;
 }
 
-pub fn kexec_load(
+pub async fn kexec_load(
     kernel: impl AsRef<Path>,
     initrd: Option<impl AsRef<Path>>,
     cmdline: &str,
 ) -> io::Result<()> {
     debug!("loading kernel from {:?}", kernel.as_ref());
-    let kernel = fs::File::open(kernel)?;
+    let kernel = fs::File::open(kernel).await?;
     let kernel_fd = kernel.as_raw_fd() as libc::c_int;
     debug!("kernel loaded as fd {}", kernel_fd);
 
@@ -61,7 +65,7 @@ pub fn kexec_load(
 
     let retval = if let Some(initrd) = initrd {
         debug!("loading initrd from {:?}", initrd.as_ref());
-        let initrd = fs::File::open(initrd)?;
+        let initrd = fs::File::open(initrd).await?;
         let initrd_fd = initrd.as_raw_fd() as libc::c_int;
         debug!("initrd loaded as fd {}", initrd_fd);
 
@@ -95,7 +99,7 @@ pub fn kexec_load(
 
     while std::fs::read("/sys/kernel/kexec_loaded")? != [b'1', b'\n'] {
         debug!("waiting for kexec_loaded");
-        thread::sleep(time::Duration::from_millis(100));
+        time::sleep(time::Duration::from_millis(100)).await;
     }
 
     unsafe { libc::sync() };

@@ -39,10 +39,10 @@ let
     ::sysinit:/etc/init.d/rcS
     ::ctrlaltdel:/bin/reboot
     ::shutdown:/bin/umount -ar -t ext4,vfat
-    ::respawn:/bin/mdev -df
     ::restart:/init
-    ${tty}::once:/bin/tbootd --log-level=${if debug then "debug" else "info"}
-    ${tty}::once:/bin/tbootui
+    ::respawn:/bin/mdev -df
+    ${tty}::respawn:/bin/tbootd --log-level=${if debug then "debug" else "info"}
+    ${tty}::respawn:/bin/tbootui
   '' + extraInittab);
   passwd = writeText "passwd" ''
     root:x:0:0:System administrator:/root:/bin/sh

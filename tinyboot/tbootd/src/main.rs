@@ -16,6 +16,7 @@ use crate::grub::GrubBootLoader;
 use crate::syslinux::SyslinuxBootLoader;
 use clap::Parser;
 use crc::{Crc, CRC_32_ISCSI};
+use futures::StreamExt;
 use log::{debug, error, info, LevelFilter};
 use message::Msg;
 use nix::{
@@ -23,24 +24,22 @@ use nix::{
     unistd::{chown, Gid, Uid},
 };
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::{
+    collections::HashMap,
     io::{self, Write},
     os::unix::{net::UnixListener, process::CommandExt},
     process::{self, Command},
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        mpsc::{self, Receiver, Sender},
-    },
-    thread,
+    sync::Arc,
     time::{Duration, Instant},
 };
-use termion::{clear, cursor, event::Key, input::TermRead, raw::IntoRawMode};
+use termion::{clear, cursor, event::Key, raw::IntoRawMode};
+use termion_input_tokio::TermReadAsync;
+use tokio::sync::mpsc::{self, Receiver, Sender};
 
 pub const CASTAGNOLI: Crc<u32> = Crc::<u32>::new(&CRC_32_ISCSI);
 
-fn select_entry(rx: Receiver<Msg>) -> anyhow::Result<LinuxBootEntry> {
+async fn select_entry(mut rx: Receiver<Msg>) -> anyhow::Result<LinuxBootEntry> {
     let start = Instant::now();
 
     let mut boot_entries = Vec::new();
@@ -54,7 +53,7 @@ fn select_entry(rx: Receiver<Msg>) -> anyhow::Result<LinuxBootEntry> {
 
     loop {
         stdout.flush()?;
-        match rx.recv()? {
+        match rx.recv().await.ok_or(anyhow::anyhow!("TODO"))? {
             Msg::Device(device) => {
                 for (part_path, mount) in device.partition_mounts {
                     debug!("getting boot entries on {:?}", part_path);
@@ -64,7 +63,6 @@ fn select_entry(rx: Receiver<Msg>) -> anyhow::Result<LinuxBootEntry> {
                         BlsBootLoader::get_config(&mount).map(|config| {
                             if let Ok(config_contents) = std::fs::read_to_string(&config) {
                                 let checksum = CASTAGNOLI.checksum(config_contents.as_bytes());
-                                debug!("SEEN CHECKSUM: {}", checksum);
                                 if seen_config_files.get(&checksum).is_some() {
                                     None
                                 } else {
@@ -80,7 +78,6 @@ fn select_entry(rx: Receiver<Msg>) -> anyhow::Result<LinuxBootEntry> {
                         GrubBootLoader::get_config(&mount).map(|config| {
                             if let Ok(config_contents) = std::fs::read_to_string(&config) {
                                 let checksum = CASTAGNOLI.checksum(config_contents.as_bytes());
-                                debug!("SEEN CHECKSUM: {}", checksum);
                                 if seen_config_files.get(&checksum).is_some() {
                                     None
                                 } else {
@@ -97,7 +94,6 @@ fn select_entry(rx: Receiver<Msg>) -> anyhow::Result<LinuxBootEntry> {
                         .map(|config| {
                             if let Ok(config_contents) = std::fs::read_to_string(&config) {
                                 let checksum = CASTAGNOLI.checksum(config_contents.as_bytes());
-                                debug!("SEEN CHECKSUM: {}", checksum);
                                 if seen_config_files.get(&checksum).is_some() {
                                     None
                                 } else {
@@ -122,6 +118,7 @@ fn select_entry(rx: Receiver<Msg>) -> anyhow::Result<LinuxBootEntry> {
                     let new_entries = bl.boot_entries()?;
                     let start_num = boot_entries.len();
 
+                    // TODO(jared): improve selection of default device
                     if default_entry.is_none() && !has_internal_device {
                         default_entry = new_entries.iter().find(|&entry| entry.default).cloned();
 
@@ -220,28 +217,29 @@ fn select_entry(rx: Receiver<Msg>) -> anyhow::Result<LinuxBootEntry> {
     }
 }
 
-fn prepare_boot(tx: Sender<Msg>, rx: Receiver<Msg>) -> anyhow::Result<()> {
+async fn prepare_boot(tx: Sender<Msg>, rx: Receiver<Msg>) -> anyhow::Result<()> {
     let tick_tx = tx.clone();
-    thread::spawn(move || {
+    tokio::spawn(async move {
         let tick_duration = Duration::from_secs(1);
         loop {
-            thread::sleep(tick_duration);
-            if tick_tx.send(Msg::Tick).is_err() {
+            tokio::time::sleep(tick_duration).await;
+            if tick_tx.send(Msg::Tick).await.is_err() {
                 break;
             }
         }
     });
 
-    thread::spawn(move || {
-        let mut keys = io::stdin().lock().keys();
-        while let Some(Ok(key)) = keys.next() {
-            if tx.send(Msg::Key(key)).is_err() {
+    tokio::spawn(async move {
+        let _raw_term = std::io::stdout().into_raw_mode().unwrap();
+        let mut keys = tokio::io::stdin().keys_stream();
+        while let Some(Ok(key)) = keys.next().await {
+            if tx.send(Msg::Key(key)).await.is_err() {
                 break;
             }
         }
     });
 
-    let entry = select_entry(rx)?;
+    let entry = select_entry(rx).await?;
 
     let linux = entry.linux.as_path();
     let initrd = entry.initrd.as_deref();
@@ -274,7 +272,7 @@ fn prepare_boot(tx: Sender<Msg>, rx: Receiver<Msg>) -> anyhow::Result<()> {
         None
     };
 
-    kexec_load(linux, initrd, cmdline)?;
+    kexec_load(linux, initrd, cmdline).await?;
 
     if cfg!(feature = "measured-boot") {
         if !needs_pcr_reset {
@@ -324,7 +322,8 @@ pub fn shell() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn main() -> anyhow::Result<()> {
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
     let cfg = Config::parse();
 
     tboot::log::setup_logging(cfg.log_level).expect("failed to setup logging");
@@ -346,22 +345,22 @@ fn main() -> anyhow::Result<()> {
     )?;
 
     loop {
-        let (tx, rx) = mpsc::channel::<Msg>();
-        let (mount_tx, mount_rx) = mpsc::channel::<MountMsg>();
+        let (tx, rx) = mpsc::channel::<Msg>(100);
+        let (mount_tx, mount_rx) = mpsc::channel::<MountMsg>(100);
 
         let done = Arc::new(AtomicBool::new(false));
         let mount_handle = mount_all_devs(tx.clone(), mount_tx.clone(), done.clone());
 
         let unmount_handle = handle_unmounting(mount_rx);
 
-        let res = prepare_boot(tx, rx);
+        let res = prepare_boot(tx, rx).await;
 
         done.store(true, Ordering::Relaxed);
 
-        if mount_tx.send(MountMsg::UnmountAll).is_ok() {
+        if mount_tx.send(MountMsg::UnmountAll).await.is_ok() {
             // wait for unmounting to finish
-            _ = mount_handle.join();
-            _ = unmount_handle.join();
+            _ = mount_handle.await;
+            _ = unmount_handle.await;
         }
 
         if let Err(e) = res {
