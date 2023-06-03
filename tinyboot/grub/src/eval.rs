@@ -33,74 +33,78 @@ fn interpolate_value(env: &impl GrubEnvironment, value: impl Into<String>) -> St
 
     loop {
         let next = peeker.next();
-        match next {
-            Some('(') => {
-                if peeker.peek().map(|&c| c == '$').unwrap_or_default() {
-                    needs_closing_paren = true;
-                } else {
-                    needs_closing_paren = false;
-                    final_value.push(next.expect("next is not None"));
-                }
-            }
-            Some(')') => {
-                if interpolating && needs_closing_paren {
-                    interpolating = false;
-                    needs_closing_paren = false;
-                    let Some(interpolated_value) = env.get_env(&interpolated_identifier) else { continue; };
-                    final_value.push_str(interpolated_value);
-                }
-            }
-            Some('$') => {
-                interpolating = true;
-                if peeker.peek().map(|&c| c == '{').unwrap_or_default() {
-                    _ = peeker.next().expect("peek is not None");
-                    // look until closing brace
-                    needs_closing_brace = true;
-                } else {
-                    // look until non ascii alphanumeric character
-                    needs_closing_brace = false;
-                }
-            }
-            Some('}') => {
-                if interpolating && needs_closing_brace {
-                    interpolating = false;
-                    needs_closing_brace = false;
-                    let Some(interpolated_value) = env.get_env(&interpolated_identifier) else { continue; };
-                    final_value.push_str(interpolated_value);
-                }
-            }
-            Some(char) => {
-                if interpolating {
-                    if needs_closing_brace || needs_closing_paren {
-                        interpolated_identifier.push(char);
-                    } else if
-                    // TODO(jared): confirm grub identifiers must be ascii alphanumeric
-                    // Stop interpolating if the character is not alphanumeric or is one of the
-                    // special characters that cannot be in an identifier.
-                    !char.is_ascii_alphanumeric() {
-                        interpolating = false;
-                        if let Some(interpolated_value) = env.get_env(&interpolated_identifier) {
-                            final_value.push_str(interpolated_value);
-                            interpolated_identifier.clear();
-                        }
-
-                        // Ensure that the consumed character makes it into the final value.
-                        final_value.push(char);
+        if let Some(char) = next {
+            match char {
+                '(' => {
+                    if peeker.peek().map(|&c| c == '$').unwrap_or_default() {
+                        needs_closing_paren = true;
                     } else {
-                        interpolated_identifier.push(char);
+                        needs_closing_paren = false;
+                        final_value.push(next.expect("next is not None"));
                     }
-                } else {
-                    final_value.push(char);
                 }
-            }
-            None => {
-                if interpolating {
-                    if let Some(interpolated_value) = env.get_env(&interpolated_identifier) {
+                ')' => {
+                    if interpolating && needs_closing_paren {
+                        interpolating = false;
+                        needs_closing_paren = false;
+                        let Some(interpolated_value) = env.get_env(&interpolated_identifier) else { continue; };
+                        final_value.push_str(interpolated_value);
+                    } else {
+                        final_value.push(next.expect("next is not None"));
+                    }
+                }
+                '$' => {
+                    interpolating = true;
+                    if peeker.peek().map(|&c| c == '{').unwrap_or_default() {
+                        _ = peeker.next().expect("peek is not None");
+                        // look until closing brace
+                        needs_closing_brace = true;
+                    } else {
+                        // look until non ascii alphanumeric character
+                        needs_closing_brace = false;
+                    }
+                }
+                '}' => {
+                    if interpolating && needs_closing_brace {
+                        interpolating = false;
+                        needs_closing_brace = false;
+                        let Some(interpolated_value) = env.get_env(&interpolated_identifier) else { continue; };
                         final_value.push_str(interpolated_value);
                     }
                 }
-                break;
+                _ => {
+                    if interpolating {
+                        if needs_closing_brace || needs_closing_paren {
+                            interpolated_identifier.push(char);
+                        } else if
+                        // TODO(jared): confirm grub identifiers must be ascii alphanumeric
+                        // Stop interpolating if the character is not alphanumeric or is one of the
+                        // special characters that cannot be in an identifier.
+                        !char.is_ascii_alphanumeric() {
+                            interpolating = false;
+                            if let Some(interpolated_value) = env.get_env(&interpolated_identifier)
+                            {
+                                final_value.push_str(interpolated_value);
+                                interpolated_identifier.clear();
+                            }
+
+                            // Ensure that the consumed character makes it into the final value.
+                            final_value.push(char);
+                        } else {
+                            interpolated_identifier.push(char);
+                        }
+                    } else {
+                        final_value.push(char);
+                    }
+                }
             }
+        } else {
+            if interpolating {
+                if let Some(interpolated_value) = env.get_env(&interpolated_identifier) {
+                    final_value.push_str(interpolated_value);
+                }
+            }
+            break;
         }
     }
 
