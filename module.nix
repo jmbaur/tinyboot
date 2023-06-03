@@ -9,7 +9,7 @@
   config = lib.mkIf (config.boot.loader.tinyboot.privateKey != null) {
     boot.loader.systemd-boot.extraInstallCommands = ''
       find /boot/EFI/nixos -type f -name "*.efi" \
-        -exec ${pkgs.tinyboot-client}/bin/tbootctl verified-boot sign --verbose --private-key ${config.boot.loader.tinyboot.privateKey} \;
+        -exec ${pkgs.tinyboot-client}/bin/tbootctl verified-boot sign --verbose --private-key ${config.boot.loader.tinyboot.privateKey} --file {} \;
     '';
     boot.loader.grub.device = "nodev"; # just install grub config file
     boot.loader.grub.extraInstallCommands = ''
