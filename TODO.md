@@ -1,5 +1,3 @@
-- figure out why building a test disk image requires both tinyboot and
-  tinyboot-client
 - provide a way to edit kernel cmdline
 - don't allow clippy::new_ret_no_self lints
 - way better UI
