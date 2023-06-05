@@ -117,6 +117,9 @@ async fn select_entry(
         tokio::select! {
             Ok(msg) = request_rx.recv() => {
                 match msg {
+                    Request::ListBlockDevices => {
+                        _ = response_tx.send(Response::ListBlockDevices(block_devices.clone()));
+                    },
                     Request::Boot(entry) => return Ok(entry),
                     Request::Ping => {/* this is handled by the client task */}
                     Request::UserIsPresent => {

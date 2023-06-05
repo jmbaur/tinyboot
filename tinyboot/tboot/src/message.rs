@@ -26,6 +26,9 @@ pub enum Request {
     Poweroff,
     Reboot,
     UserIsPresent,
+    ListBlockDevices,
+    StartStreaming,
+    StopStreaming,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -35,6 +38,7 @@ pub enum Response {
     TimeLeft(Duration),
     VerifiedBootFailure,
     ServerDone,
+    ListBlockDevices(Vec<BlockDevice>),
 }
 
 pub type ClientCodec = Codec<Response, Request>;
