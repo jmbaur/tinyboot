@@ -9,7 +9,7 @@ mktemp = "0.5.0"
 
 [dependencies]
 anyhow = "1.0.71"
-clap = { version = "4.3.1", features = ["derive"] }
+clap = { version = "4.3.2", features = ["derive"] }
 crc = "3.0.1"
 ed25519-dalek = { version = "2.0.0-rc.2", features = [
   "alloc",
