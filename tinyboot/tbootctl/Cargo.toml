@@ -12,5 +12,7 @@ clap_complete = "*"
 [dependencies]
 anyhow = "1.0.71"
 clap = { version = "4.3.1", features = ["derive"] }
+futures = "0.3.28"
 log = "0.4.18"
 tboot = { path = "../tboot" }
+tokio = { version = "1.28.2", features = ["full"] }

@@ -40,7 +40,6 @@ use tokio::{
 use tokio_serde_cbor::Codec;
 use tokio_util::codec::Decoder;
 
-// State machine that handles tinyboot request/response protocol.
 async fn handle_client(
     stream: UnixStream,
     mut client_rx: broadcast::Receiver<Response>,

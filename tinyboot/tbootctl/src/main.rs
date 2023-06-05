@@ -6,10 +6,10 @@ use cli::{TopLevel, TopLevelCommand, VerifiedBootCommand};
 use log::error;
 use std::{path::Path, process};
 
-fn run_top_level(args: TopLevel) -> anyhow::Result<()> {
+async fn run_top_level(args: TopLevel) -> anyhow::Result<()> {
     match args.command {
-        TopLevelCommand::Reboot => handlers::handle_reboot(),
-        TopLevelCommand::Poweroff => handlers::handle_poweroff(),
+        TopLevelCommand::Reboot => handlers::handle_reboot().await,
+        TopLevelCommand::Poweroff => handlers::handle_poweroff().await,
         TopLevelCommand::VerifiedBoot(vboot_args) => match vboot_args.command {
             VerifiedBootCommand::Sign(sign_args) => handlers::handle_verified_boot_sign(&sign_args),
             VerifiedBootCommand::Verify(verify_args) => {
@@ -19,7 +19,8 @@ fn run_top_level(args: TopLevel) -> anyhow::Result<()> {
     }
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let top_level = TopLevel::parse();
 
     tboot::log::setup_logging(
@@ -32,7 +33,7 @@ fn main() {
     )
     .expect("failed to setup logging");
 
-    if let Err(e) = run_top_level(top_level) {
+    if let Err(e) = run_top_level(top_level).await {
         error!("{e:?}");
         process::exit(1);
     }

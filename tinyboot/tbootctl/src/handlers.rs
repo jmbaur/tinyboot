@@ -1,7 +1,11 @@
 use crate::cli::{SignCommand, VerifyCommand};
+use futures::{SinkExt, StreamExt};
 use log::{debug, info};
 use std::fs;
-use tboot::verified_boot;
+use tboot::{
+    message::{Request, Response},
+    verified_boot,
+};
 
 pub(crate) fn handle_verified_boot_sign(args: &SignCommand) -> anyhow::Result<()> {
     let target_file = tboot::verified_boot::signature_file_path(&args.file);
@@ -28,10 +32,22 @@ pub(crate) fn handle_verified_boot_verify(args: &VerifyCommand) -> anyhow::Resul
     Ok(())
 }
 
-pub(crate) fn handle_reboot() -> Result<(), anyhow::Error> {
-    todo!()
+pub(crate) async fn handle_reboot() -> Result<(), anyhow::Error> {
+    let (mut sink, mut stream) = tboot::message::get_client_codec(None).await?;
+    sink.send(Request::Reboot).await?;
+    if matches!(stream.next().await, Some(Ok(Response::ServerDone))) {
+        Ok(())
+    } else {
+        Err(anyhow::anyhow!("could not poweroff"))
+    }
 }
 
-pub(crate) fn handle_poweroff() -> Result<(), anyhow::Error> {
-    todo!()
+pub(crate) async fn handle_poweroff() -> Result<(), anyhow::Error> {
+    let (mut sink, mut stream) = tboot::message::get_client_codec(None).await?;
+    sink.send(Request::Poweroff).await?;
+    if matches!(stream.next().await, Some(Ok(Response::ServerDone))) {
+        Ok(())
+    } else {
+        Err(anyhow::anyhow!("could not poweroff"))
+    }
 }
