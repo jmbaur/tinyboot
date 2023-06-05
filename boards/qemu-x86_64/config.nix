@@ -4,7 +4,7 @@
   kernel.configFile = lib.mkDefault (pkgs.concatText "qemu-x86_64-kernel.config" [ ../generic-kernel.config ../qemu-kernel.config ../x86_64-kernel.config ./kernel.config ]);
   tinyboot = {
     debug = lib.mkDefault true;
-    ttys = lib.mkDefault [ "tty0" "ttyS0" ];
+    ttys = lib.mkDefault [ "tty1" "ttyS0" ];
     verifiedBoot = {
       enable = lib.mkDefault true;
       publicKey = lib.mkDefault ../../test/keys/pubkey;

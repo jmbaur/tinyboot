@@ -5,7 +5,7 @@
   boot.loader.tinyboot.privateKey = ./keys/privkey;
   environment.etc.tboot-pubkey.source = ./keys/pubkey;
   environment.systemPackages = [ pkgs.tinyboot-client ];
-  specialisation.alternate.configuration.boot.kernelParams = [ "console=tty0" ]; # to provide more menu options
+  specialisation.alternate.configuration.boot.kernelParams = [ "console=tty1" ]; # to provide more menu options
   boot.growPartition = true;
   boot.loader.timeout = lib.mkDefault 15;
   boot.loader.efi.canTouchEfiVariables = false;

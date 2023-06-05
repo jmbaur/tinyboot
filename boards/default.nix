@@ -52,7 +52,7 @@ let
       };
       ttys = lib.mkOption {
         type = lib.types.listOf lib.types.str;
-        default = [ "tty0" ];
+        default = [ "tty1" ];
       };
       extraInit = lib.mkOption {
         type = lib.types.lines;
