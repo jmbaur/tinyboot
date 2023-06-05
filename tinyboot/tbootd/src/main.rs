@@ -48,17 +48,28 @@ async fn handle_client(
     let codec: ServerCodec = Codec::new();
     let (mut sink, mut stream) = codec.framed(stream).split();
 
+    let mut streaming = false;
+
     loop {
         tokio::select! {
             Some(Ok(req)) = stream.next() => {
                 if req == Request::Ping {
                     _ = sink.send(Response::Pong).await;
+                } else if req == Request::StartStreaming {
+                    streaming = true;
+                } else if req == Request::StopStreaming {
+                    streaming = false;
                 } else {
                     _ = client_tx.send(req);
                 }
             }
             Ok(msg) = client_rx.recv() => {
-                _ = sink.send(msg).await;
+                match msg {
+                    Response::NewDevice(_) | Response::TimeLeft(_) if !streaming => {
+                        // don't send these responses if the client is not streaming
+                    },
+                    msg => _ = sink.send(msg).await,
+                }
             }
             else => break,
         }
@@ -117,11 +128,11 @@ async fn select_entry(
         tokio::select! {
             Ok(msg) = request_rx.recv() => {
                 match msg {
+                    Request::StartStreaming | Request::StopStreaming | Request::Ping => {/* this is handled by the client task */}
                     Request::ListBlockDevices => {
                         _ = response_tx.send(Response::ListBlockDevices(block_devices.clone()));
                     },
                     Request::Boot(entry) => return Ok(entry),
-                    Request::Ping => {/* this is handled by the client task */}
                     Request::UserIsPresent => {
                         has_user_interaction = true;
                     }

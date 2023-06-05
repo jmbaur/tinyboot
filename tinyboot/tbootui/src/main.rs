@@ -105,145 +105,142 @@ async fn run_client(
 
         let mut stdout = std::io::stdout().into_raw_mode()?;
 
+        let (tx, mut rx) = mpsc::channel::<Action>(200);
 
-            let (tx, mut rx) = mpsc::channel::<Action>(200);
+        let keys_handle = tokio::spawn(async move {
+            let stdin = std::io::stdin();
+            for key in stdin.keys() {
+                let Ok(key) = key else {
+                break;
+            };
 
-            let keys_handle = tokio::spawn(async move {
-                let stdin = std::io::stdin();
-                for key in stdin.keys() {
-                    let Ok(key) = key else {
+                if match key {
+                    Key::Char('j') | Key::Down => tx.send(Action::Next).await,
+                    Key::Char('k') | Key::Up => tx.send(Action::Prev).await,
+                    Key::Char('s') => tx.send(Action::ExitToShell).await,
+                    Key::Char('r') => tx.send(Action::Reboot).await,
+                    Key::Char('p') => tx.send(Action::Poweroff).await,
+                    Key::Char('\n') => tx.send(Action::SelectCurrentEntry).await,
+                    _ => Ok(()),
+                }
+                .is_err()
+                {
                     break;
-                };
-
-                    if match key {
-                        Key::Char('j') | Key::Down => tx.send(Action::Next).await,
-                        Key::Char('k') | Key::Up => tx.send(Action::Prev).await,
-                        Key::Char('s') => tx.send(Action::ExitToShell).await,
-                        Key::Char('r') => tx.send(Action::Reboot).await,
-                        Key::Char('p') => tx.send(Action::Poweroff).await,
-                        Key::Char('\n') => tx.send(Action::SelectCurrentEntry).await,
-                        _ => Ok(()),
-                    }
-                    .is_err()
-                    {
-                        break;
-                    }
-                }
-            });
-
-            'inner: loop {
-                write!(
-                    stdout,
-                    "{}{}{}tinyboot{}{}",
-                    termion::clear::All,
-                    termion::cursor::Goto(1, 1),
-                    termion::style::Bold,
-                    termion::style::Reset,
-                    termion::cursor::Hide,
-                )?;
-
-                write!(
-                    stdout,
-                    "{}<s> Shell | <r> Reboot | <p> Poweroff",
-                    termion::cursor::Goto(1, 3)
-                )?;
-                stdout.flush()?;
-                
-
-        sink.send(Request::ListBlockDevices).await?;
-        if let Some(Ok(Response::ListBlockDevices(devs))) = stream.next().await {
-            for dev in devs {
-                print_dev(
-                    &mut stdout,
-                    dev,
-                    &mut print_offset,
-                    &mut entries,
-                    &mut boot_cursor,
-                )?;
-            }
-        }
-            sink.send(Request::StartStreaming).await?;
-
-                loop {
-                    tokio::select! {
-                        Some(action) = rx.recv() => {
-                            if !recorded_user_interaction {
-                                sink.send(Request::UserIsPresent).await?;
-                                recorded_user_interaction = true;
-                                write!(stdout, "{}{}", termion::cursor::Goto(1, rows - 1), termion::clear::AfterCursor)?;
-                                stdout.flush()?;
-                            }
-
-                            match action {
-                                Action::Next => {
-                                    if let Some(current_boot_cursor) = boot_cursor {
-                                        if let Some((next_boot_cursor, _)) = entries
-                                            .iter()
-                                            .find(|(print_offset, _)| print_offset > &current_boot_cursor ) {
-                                                boot_cursor = Some(*next_boot_cursor);
-                                                write!(stdout, "{}  ", termion::cursor::Goto(1, current_boot_cursor))?;
-                                                write!(stdout, "{}->", termion::cursor::Goto(1, *next_boot_cursor))?;
-                                                stdout.flush()?;
-                                            }
-                                    }
-                                }
-                                Action::Prev => {
-                                    if let Some(current_boot_cursor) = boot_cursor {
-                                        if let Some((next_boot_cursor, _)) = entries
-                                            .iter()
-                                            .rev()
-                                            .find(|(print_offset, _)| print_offset < &current_boot_cursor) {
-                                                boot_cursor = Some(*next_boot_cursor);
-                                                write!(stdout, "{}  ", termion::cursor::Goto(1, current_boot_cursor))?;
-                                                write!(stdout, "{}->", termion::cursor::Goto(1, *next_boot_cursor))?;
-                                                stdout.flush()?;
-                                            }
-                                    }
-                                }
-                                Action::SelectCurrentEntry => {
-                                    if let Some(boot_cursor) = boot_cursor {
-                                        if let Some((_, entry)) = entries.iter().find(|(i, _)| *i == boot_cursor) {
-                                            _ = sink.send(Request::Boot(entry.clone())).await;
-                                        }
-                                    }
-                                },
-                                Action::Reboot => sink.send(Request::Reboot).await?,
-                                Action::Poweroff => sink.send(Request::Poweroff).await?,
-                                Action::ExitToShell => break 'inner,
-                            }
-                        }
-                        Some(Ok(msg)) = stream.next() => {
-                            match msg {
-                                Response::NewDevice(dev) => print_dev(&mut stdout, dev, &mut print_offset, &mut entries, &mut boot_cursor)?,
-                                Response::TimeLeft(time) => {
-                                    write!(stdout, "{}{}Boot in {}s", termion::cursor::Goto(1, rows-1), termion::clear::CurrentLine, time.as_secs())?;
-                                    stdout.flush()?;
-                                }
-                                Response::ServerDone => {
-                                    break 'outer;
-                                },
-                                _ => {},
-                            }
-                        }
-                        else => break 'inner,
-                    }
                 }
             }
+        });
 
-            sink.send(Request::StopStreaming).await?;
-            keys_handle.abort();
+        'inner: loop {
             write!(
                 stdout,
-                "{}{}{}",
+                "{}{}{}tinyboot{}{}",
                 termion::clear::All,
                 termion::cursor::Goto(1, 1),
-                termion::cursor::Show,
+                termion::style::Bold,
+                termion::style::Reset,
+                termion::cursor::Hide,
+            )?;
+
+            write!(
+                stdout,
+                "{}<s> Shell | <r> Reboot | <p> Poweroff",
+                termion::cursor::Goto(1, 3)
             )?;
             stdout.flush()?;
-            stdout.suspend_raw_mode()?;
-            shell()?;
-            stdout.activate_raw_mode()?;
+
+            sink.send(Request::ListBlockDevices).await?;
+            if let Some(Ok(Response::ListBlockDevices(devs))) = stream.next().await {
+                for dev in devs {
+                    print_dev(
+                        &mut stdout,
+                        dev,
+                        &mut print_offset,
+                        &mut entries,
+                        &mut boot_cursor,
+                    )?;
+                }
+            }
+            sink.send(Request::StartStreaming).await?;
+
+            loop {
+                tokio::select! {
+                    Some(action) = rx.recv() => {
+                        if !recorded_user_interaction {
+                            sink.send(Request::UserIsPresent).await?;
+                            recorded_user_interaction = true;
+                            write!(stdout, "{}{}", termion::cursor::Goto(1, rows - 1), termion::clear::AfterCursor)?;
+                            stdout.flush()?;
+                        }
+
+                        match action {
+                            Action::Next => {
+                                if let Some(current_boot_cursor) = boot_cursor {
+                                    if let Some((next_boot_cursor, _)) = entries
+                                        .iter()
+                                        .find(|(print_offset, _)| print_offset > &current_boot_cursor ) {
+                                            boot_cursor = Some(*next_boot_cursor);
+                                            write!(stdout, "{}  ", termion::cursor::Goto(1, current_boot_cursor))?;
+                                            write!(stdout, "{}->", termion::cursor::Goto(1, *next_boot_cursor))?;
+                                            stdout.flush()?;
+                                        }
+                                }
+                            }
+                            Action::Prev => {
+                                if let Some(current_boot_cursor) = boot_cursor {
+                                    if let Some((next_boot_cursor, _)) = entries
+                                        .iter()
+                                        .rev()
+                                        .find(|(print_offset, _)| print_offset < &current_boot_cursor) {
+                                            boot_cursor = Some(*next_boot_cursor);
+                                            write!(stdout, "{}  ", termion::cursor::Goto(1, current_boot_cursor))?;
+                                            write!(stdout, "{}->", termion::cursor::Goto(1, *next_boot_cursor))?;
+                                            stdout.flush()?;
+                                        }
+                                }
+                            }
+                            Action::SelectCurrentEntry => {
+                                if let Some(boot_cursor) = boot_cursor {
+                                    if let Some((_, entry)) = entries.iter().find(|(i, _)| *i == boot_cursor) {
+                                        _ = sink.send(Request::Boot(entry.clone())).await;
+                                    }
+                                }
+                            },
+                            Action::Reboot => sink.send(Request::Reboot).await?,
+                            Action::Poweroff => sink.send(Request::Poweroff).await?,
+                            Action::ExitToShell => break 'inner,
+                        }
+                    }
+                    Some(Ok(msg)) = stream.next() => {
+                        match msg {
+                            Response::NewDevice(dev) => print_dev(&mut stdout, dev, &mut print_offset, &mut entries, &mut boot_cursor)?,
+                            Response::TimeLeft(time) => {
+                                write!(stdout, "{}{}Boot in {}s", termion::cursor::Goto(1, rows-1), termion::clear::CurrentLine, time.as_secs())?;
+                                stdout.flush()?;
+                            }
+                            Response::ServerDone => {
+                                break 'outer;
+                            },
+                            _ => {},
+                        }
+                    }
+                    else => break 'inner,
+                }
+            }
         }
+
+        sink.send(Request::StopStreaming).await?;
+        keys_handle.abort();
+        write!(
+            stdout,
+            "{}{}{}",
+            termion::clear::All,
+            termion::cursor::Goto(1, 1),
+            termion::cursor::Show,
+        )?;
+        stdout.flush()?;
+        stdout.suspend_raw_mode()?;
+        shell()?;
+        stdout.activate_raw_mode()?;
     }
 
     Ok(())
