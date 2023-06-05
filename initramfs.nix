@@ -1,7 +1,7 @@
 { debug
+, ttys
 , measuredBoot
 , verifiedBoot
-, tty
 , extraInit
 , extraInittab
 , lib
@@ -32,8 +32,8 @@ let
     mount -t tmpfs tmpfs /tmp
     mount -t devpts devpts /dev/pts
     mdev -s
-    mkdir -p /home/tinyuser
-    chown -R tinyuser:tinyuser /home/tinyuser
+    mkdir -p /home/tinyuser /tmp/tinyboot
+    chown -R tinyuser:tinygroup /home/tinyuser /tmp/tinyboot
   '' + extraInit);
   inittab = writeText "inittab" (''
     ::sysinit:/etc/init.d/rcS
@@ -41,16 +41,15 @@ let
     ::shutdown:/bin/umount -ar -t ext4,vfat
     ::restart:/init
     ::respawn:/bin/mdev -df
-    ${tty}::respawn:/bin/tbootd --log-level=${if debug then "debug" else "info"}
-    ${tty}::respawn:/bin/tbootui
-  '' + extraInittab);
+    ::respawn:/bin/tbootd --log-level=${if debug then "debug" else "info"}
+  '' + (lib.concatLines (map (tty: "${tty}::respawn:/bin/tbootui") ttys)) + extraInittab);
   passwd = writeText "passwd" ''
     root:x:0:0:System administrator:/root:/bin/sh
     tinyuser:x:1000:1000:TinyUser:/home/tinyuser:/bin/sh
   '';
   group = writeText "passwd" ''
     root:x:0:
-    tinyuser:x:1000:
+    tinygroup:x:1000:
   '';
   mdevConf = writeText "mdev.conf" ''
     ([vs]d[a-z])             root:root  660  >disk/%1/0

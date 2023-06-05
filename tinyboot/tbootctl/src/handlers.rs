@@ -3,7 +3,7 @@ use log::{debug, info};
 use std::fs;
 use tboot::verified_boot;
 
-pub fn handle_verified_boot_sign(args: &SignCommand) -> anyhow::Result<()> {
+pub(crate) fn handle_verified_boot_sign(args: &SignCommand) -> anyhow::Result<()> {
     let target_file = tboot::verified_boot::signature_file_path(&args.file);
 
     debug!("signing {:?}", args.file);
@@ -20,10 +20,18 @@ pub fn handle_verified_boot_sign(args: &SignCommand) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn handle_verified_boot_verify(args: &VerifyCommand) -> anyhow::Result<()> {
+pub(crate) fn handle_verified_boot_verify(args: &VerifyCommand) -> anyhow::Result<()> {
     let pem = fs::read_to_string(&args.public_key)?;
 
     verified_boot::verify(&pem, &args.file, &args.signature_file)?;
 
     Ok(())
+}
+
+pub(crate) fn handle_reboot() -> Result<(), anyhow::Error> {
+    todo!()
+}
+
+pub(crate) fn handle_poweroff() -> Result<(), anyhow::Error> {
+    todo!()
 }

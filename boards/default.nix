@@ -50,9 +50,9 @@ let
           default = "/dev/null";
         };
       };
-      tty = lib.mkOption {
-        type = lib.types.str;
-        default = "tty0";
+      ttys = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [ "tty0" ];
       };
       extraInit = lib.mkOption {
         type = lib.types.lines;
@@ -77,7 +77,7 @@ lib.mapAttrs
         meta = { inherit (finalConfig.config) platforms; };
       };
       linux = pkgs.callPackage ../kernel.nix { inherit (finalConfig.config.kernel) basePackage configFile; };
-      initrd = pkgs.callPackage ../initramfs.nix { inherit (finalConfig.config.tinyboot) measuredBoot verifiedBoot debug tty extraInit extraInittab; };
+      initrd = pkgs.callPackage ../initramfs.nix { inherit (finalConfig.config.tinyboot) measuredBoot verifiedBoot debug ttys extraInit extraInittab; };
       fitImage = buildFitImage { inherit board linux initrd; inherit (finalConfig.config.kernel) dtb dtbPattern; };
     in
     (buildPackages.runCommand "tinyboot-${coreboot.name}"

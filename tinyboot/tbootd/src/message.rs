@@ -1,8 +1,8 @@
-use crate::block_device::BlockDevice;
-use termion::event::Key;
+use tboot::block_device::BlockDevice;
 
-pub enum Msg {
-    Key(Key),
+/// InternalMsg is a message that is only used internally.
+#[derive(Clone, Debug)]
+pub enum InternalMsg {
     Device(BlockDevice),
     Tick,
 }

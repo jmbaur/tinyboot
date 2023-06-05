@@ -1,5 +1,7 @@
-use crate::boot_loader::{BootLoader, Error, LinuxBootEntry};
-use log::{debug, info};
+use crate::{
+    boot_loader::{BootLoader, Error},
+    linux::LinuxBootEntry,
+};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -16,7 +18,6 @@ struct BootEntry {
 }
 
 pub struct SyslinuxBootLoader {
-    config_file: PathBuf,
     entries: Vec<BootEntry>,
     timeout: Duration,
 }
@@ -139,57 +140,11 @@ fn syslinux_parse_from_source(
     Ok((entries, timeout))
 }
 
-fn syslinux_parse(config_file: impl AsRef<Path>) -> Result<(Vec<BootEntry>, Duration), Error> {
-    let syslinux_root = config_file.as_ref().parent().unwrap();
-    let source = fs::read_to_string(config_file.as_ref())?;
-    let source = expand_includes(source, syslinux_root)?;
-    syslinux_parse_from_source(source, syslinux_root)
-}
-
 impl SyslinuxBootLoader {
-    pub fn get_config(mountpoint: &Path) -> Result<PathBuf, Error> {
-        for path in [
-            "boot/extlinux/extlinux.conf",
-            "extlinux/extlinux.conf",
-            "extlinux.conf",
-            "boot/syslinux/extlinux.conf",
-            "boot/syslinux/syslinux.cfg",
-            "syslinux/extlinux.conf",
-            "syslinux/syslinux.cfg",
-            "syslinux.cfg",
-        ] {
-            let search_path = mountpoint.join(path);
-
-            debug!(
-                "searching for syslinux configuration at {}",
-                search_path.display()
-            );
-
-            if fs::metadata(&search_path).is_ok() {
-                info!("found syslinux configuration at {}", search_path.display());
-                return Ok(search_path);
-            }
-        }
-
-        Err(Error::BootConfigNotFound)
-    }
-
-    #[allow(clippy::new_ret_no_self)]
-    pub fn new(config_file: &Path) -> Result<Box<dyn BootLoader + Send>, Error> {
-        let mut s = Self {
-            config_file: config_file.to_path_buf(),
-            entries: Vec::new(),
-            timeout: Duration::from_secs(10),
-        };
-        s.parse()?;
-        Ok(Box::new(s))
-    }
-
-    fn parse(&mut self) -> Result<(), Error> {
-        let (entries, timeout) = syslinux_parse(&self.config_file)?;
-        self.entries = entries;
-        self.timeout = timeout;
-        Ok(())
+    pub fn parse_syslinux(syslinux_root: &Path, config_source: String) -> Result<Self, Error> {
+        let source = expand_includes(config_source, syslinux_root)?;
+        let (entries, timeout) = syslinux_parse_from_source(source, syslinux_root)?;
+        Ok(Self { entries, timeout })
     }
 }
 
@@ -220,7 +175,7 @@ mod tests {
     #[test]
     fn syslinux_parse() {
         let (entries, timeout) = super::syslinux_parse_from_source(
-            include_str!("./testdata/extlinux.conf"),
+            include_str!("../testdata/extlinux.conf"),
             Path::new("/dev/null"),
         )
         .unwrap();

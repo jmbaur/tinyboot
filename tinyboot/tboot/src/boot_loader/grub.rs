@@ -1,10 +1,13 @@
-use super::fs::FsType;
-use crate::block_device::find_disk_partitions;
-use crate::boot_loader::{BootLoader, Error, LinuxBootEntry};
-use crate::util::*;
+use crate::{
+    block_device::find_disk_partitions,
+    boot_loader::{BootLoader, Error},
+    fs::FsType,
+    linux::LinuxBootEntry,
+};
 use clap::{ArgAction, Parser};
-use grub::{GrubEnvironment, GrubEvaluator};
+use grub::GrubEnvironment;
 use log::{debug, error};
+use std::str::FromStr;
 use std::{
     collections::HashMap,
     fs,
@@ -79,7 +82,7 @@ impl From<clap::error::Error> for GrubEnvironmentError {
     }
 }
 
-struct TinybootGrubEnvironment {
+pub struct TinybootGrubEnvironment {
     env: HashMap<String, String>,
 }
 
@@ -462,114 +465,8 @@ impl GrubEnvironment for TinybootGrubEnvironment {
 }
 
 pub struct GrubBootLoader {
-    timeout: Duration,
-    entries: Vec<LinuxBootEntry>,
-}
-
-impl GrubBootLoader {
-    pub fn get_config(mountpoint: &Path) -> Result<PathBuf, Error> {
-        for path in ["boot/grub/grub.cfg", "grub/grub.cfg", "EFI/boot/grub.cfg"] {
-            let search_path = mountpoint.join(path);
-
-            debug!(
-                "searching for grub configuration at {}",
-                search_path.display()
-            );
-
-            if fs::metadata(&search_path).is_ok() {
-                return Ok(search_path);
-            }
-        }
-
-        Err(Error::BootConfigNotFound)
-    }
-
-    #[allow(clippy::new_ret_no_self)]
-    pub fn new(mountpoint: &Path, config_file: &Path) -> Result<Box<dyn BootLoader + Send>, Error> {
-        let source = fs::read_to_string(config_file)?;
-
-        let mut evaluator = GrubEvaluator::new_from_source(
-            source,
-            TinybootGrubEnvironment::new(
-                mountpoint.to_str().ok_or(Error::InvalidMountpoint)?,
-                PathBuf::from(config_file)
-                    .parent()
-                    .ok_or(Error::BootConfigNotFound)?
-                    .to_str()
-                    .ok_or(Error::InvalidMountpoint)?,
-            ),
-        )
-        .map_err(Error::Eval)?;
-
-        let entries: Vec<LinuxBootEntry> = evaluator
-            .menu
-            .clone()
-            .into_iter()
-            .flat_map(|grub_entry| {
-                if let Some(entries) = grub_entry.menuentries {
-                    // is submenu entry
-                    entries
-                } else {
-                    // is boot entry
-                    vec![grub_entry]
-                }
-            })
-            .filter_map(|grub_entry| {
-                // use mountpoint as implicit value for $root
-                let root = evaluator
-                    .get_env("root")
-                    .map(Path::new)
-                    .unwrap_or(mountpoint)
-                    .to_path_buf();
-
-                let Ok((kernel, initrd, cmdline)) = evaluator.eval_grub_entry(&grub_entry) else {
-                    return None;
-                };
-
-                let linux = if kernel.starts_with("/mnt") {
-                    kernel.to_path_buf()
-                } else {
-                    let kernel = kernel.to_path_buf();
-                    let mut linux = root.clone();
-                    linux.push(kernel.strip_prefix("/").unwrap_or(&kernel));
-                    linux
-                };
-
-                let initrd = if initrd.starts_with("/mnt") {
-                    Some(initrd.to_path_buf())
-                } else {
-                    let initrd = initrd.to_path_buf();
-                    let mut final_initrd = root;
-                    final_initrd.push(initrd.strip_prefix("/").unwrap_or(&initrd));
-                    Some(final_initrd)
-                };
-
-                let cmdline = Some(cmdline.to_string());
-
-                let is_default = 'block: {
-                    if let Some(default_id) = evaluator.get_env("default") {
-                        if let Some(id) = &grub_entry.id {
-                            break 'block default_id == id;
-                        }
-                    }
-                    break 'block false;
-                };
-
-                Some(LinuxBootEntry {
-                    default: is_default,
-                    display: grub_entry.title,
-                    linux,
-                    initrd,
-                    cmdline,
-                })
-            })
-            .collect();
-
-        Ok(Box::new(Self {
-            entries,
-            timeout: evaluator.timeout(),
-        }))
-    }
+    pub timeout: Duration,
+    pub entries: Vec<LinuxBootEntry>,
 }
 
 impl BootLoader for GrubBootLoader {
@@ -577,7 +474,7 @@ impl BootLoader for GrubBootLoader {
         self.timeout
     }
 
-    fn boot_entries(&self) -> Result<Vec<crate::boot_loader::LinuxBootEntry>, Error> {
+    fn boot_entries(&self) -> Result<Vec<LinuxBootEntry>, Error> {
         Ok(self.entries.to_vec())
     }
 }
@@ -675,7 +572,7 @@ mod tests {
 
     #[test]
     fn grub_environment_block() {
-        let testdata_env_block = include_str!("./testdata/grubenv");
+        let testdata_env_block = include_str!("../testdata/grubenv");
 
         let expected = vec![
             ("foo".to_string(), "bar".to_string()),
@@ -722,4 +619,128 @@ mod tests {
                 == *"/mnt/dev-vda1"
         );
     }
+}
+
+pub fn strings_equal(string1: &str, string2: &str) -> bool {
+    string1 == string2
+}
+
+pub fn strings_not_equal(string1: &str, string2: &str) -> bool {
+    string1 != string2
+}
+
+pub fn strings_lexographically_less_than(string1: &str, string2: &str) -> bool {
+    string1 < string2
+}
+
+pub fn strings_lexographically_less_than_or_equal_to(string1: &str, string2: &str) -> bool {
+    string1 <= string2
+}
+
+pub fn strings_lexographically_greater_than(string1: &str, string2: &str) -> bool {
+    string1 > string2
+}
+
+pub fn strings_lexographically_greater_than_or_equal_to(string1: &str, string2: &str) -> bool {
+    string1 >= string2
+}
+
+type TestParseResult = Result<bool, <i64 as FromStr>::Err>;
+
+pub fn integers_equal(integer1: &str, integer2: &str) -> TestParseResult {
+    let integer1 = integer1.parse::<i64>()?;
+    let integer2 = integer2.parse::<i64>()?;
+    Ok(integer1 == integer2)
+}
+
+pub fn integers_greater_than_or_equal_to(integer1: &str, integer2: &str) -> TestParseResult {
+    let integer1 = integer1.parse::<i64>()?;
+    let integer2 = integer2.parse::<i64>()?;
+    Ok(integer1 >= integer2)
+}
+
+pub fn integers_greater_than(integer1: &str, integer2: &str) -> TestParseResult {
+    let integer1 = integer1.parse::<i64>()?;
+    let integer2 = integer2.parse::<i64>()?;
+    Ok(integer1 > integer2)
+}
+
+pub fn integers_less_than_or_equal_to(integer1: &str, integer2: &str) -> TestParseResult {
+    let integer1 = integer1.parse::<i64>()?;
+    let integer2 = integer2.parse::<i64>()?;
+    Ok(integer1 <= integer2)
+}
+
+pub fn integers_less_than(integer1: &str, integer2: &str) -> TestParseResult {
+    let integer1 = integer1.parse::<i64>()?;
+    let integer2 = integer2.parse::<i64>()?;
+    Ok(integer1 < integer2)
+}
+
+pub fn integers_not_equal(integer1: &str, integer2: &str) -> TestParseResult {
+    let integer1 = integer1.parse::<i64>()?;
+    let integer2 = integer2.parse::<i64>()?;
+    Ok(integer1 != integer2)
+}
+
+pub fn integers_prefix_greater_than(integer1: &str, integer2: &str) -> TestParseResult {
+    let integer1 = integer1.trim_start_matches(char::is_alphabetic);
+    let integer2 = integer2.trim_start_matches(char::is_alphabetic);
+    let integer1 = integer1.parse::<i64>()?;
+    let integer2 = integer2.parse::<i64>()?;
+    Ok(integer1 > integer2)
+}
+
+pub fn integers_prefix_less_than(integer1: &str, integer2: &str) -> TestParseResult {
+    let integer1 = integer1.trim_start_matches(char::is_alphabetic);
+    let integer2 = integer2.trim_start_matches(char::is_alphabetic);
+    let integer1 = integer1.parse::<i64>()?;
+    let integer2 = integer2.parse::<i64>()?;
+    Ok(integer1 < integer2)
+}
+
+type TestIoResult = Result<bool, io::Error>;
+
+pub fn file_exists(file: &str) -> TestIoResult {
+    _ = fs::metadata(file)?;
+    Ok(true)
+}
+
+pub fn file_newer_than(file1: &str, file2: &str) -> TestIoResult {
+    let file1_metadata = fs::metadata(file1)?;
+    let file2_metadata = fs::metadata(file2)?;
+    let file1_modified = file1_metadata.modified()?;
+    let file2_modified = file2_metadata.modified()?;
+    Ok(file1_modified > file2_modified)
+}
+
+pub fn file_older_than(file1: &str, file2: &str) -> TestIoResult {
+    let file1_metadata = fs::metadata(file1)?;
+    let file2_metadata = fs::metadata(file2)?;
+    let file1_modified = file1_metadata.modified()?;
+    let file2_modified = file2_metadata.modified()?;
+    Ok(file1_modified < file2_modified)
+}
+
+pub fn file_exists_and_is_directory(file: &str) -> TestIoResult {
+    let metadata = fs::metadata(file)?;
+    Ok(metadata.is_dir())
+}
+
+pub fn file_exists_and_is_not_directory(file: &str) -> TestIoResult {
+    let metadata = fs::metadata(file)?;
+    Ok(!metadata.is_dir())
+}
+
+pub fn file_exists_and_size_greater_than_zero(file: &str) -> TestIoResult {
+    let metadata = fs::metadata(file)?;
+    Ok(metadata.len() > 0)
+}
+
+pub fn string_nonzero_length(string: &str) -> bool {
+    !string.is_empty()
+}
+
+pub fn string_zero_length(string: &str) -> bool {
+    string.is_empty()
 }

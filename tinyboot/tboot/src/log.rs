@@ -1,7 +1,21 @@
-use std::io;
+use std::{io, path::Path};
 
-pub fn setup_logging(level: log::LevelFilter) -> Result<(), log::SetLoggerError> {
-    fern::Dispatch::new()
+pub const TBOOTD_LOG_FILE: &str = "/tmp/tinyboot/tbootd.log";
+pub const TBOOTUI_LOG_FILE: &str = "/tmp/tinyboot/tbootui.log";
+
+#[derive(thiserror::Error, Debug)]
+pub enum LogError {
+    #[error("failed to setup logging")]
+    FailedSetup,
+    #[error("failed to open log file")]
+    LogFileFailed,
+}
+
+pub fn setup_logging(
+    level: log::LevelFilter,
+    log_file: Option<impl AsRef<Path>>,
+) -> Result<(), LogError> {
+    let mut dispatch = fern::Dispatch::new()
         .format(|out, message, record| {
             out.finish(format_args!(
                 "[{}][{}] {}",
@@ -10,7 +24,13 @@ pub fn setup_logging(level: log::LevelFilter) -> Result<(), log::SetLoggerError>
                 message
             ))
         })
-        .level(level)
-        .chain(io::stderr())
-        .apply()
+        .level(level);
+
+    if let Some(file) = log_file {
+        dispatch = dispatch.chain(fern::log_file(file).map_err(|_| LogError::LogFileFailed)?);
+    } else {
+        dispatch = dispatch.chain(io::stderr());
+    }
+
+    dispatch.apply().map_err(|_| LogError::FailedSetup)
 }

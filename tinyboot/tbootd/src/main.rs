@@ -1,215 +1,193 @@
 pub(crate) mod block_device;
-pub(crate) mod bls;
 pub(crate) mod boot_loader;
-pub(crate) mod fs;
-pub(crate) mod grub;
 pub(crate) mod message;
-pub(crate) mod syslinux;
 pub(crate) mod tpm;
-pub(crate) mod util;
 pub(crate) mod verify;
 
-use crate::block_device::{handle_unmounting, mount_all_devs, MountMsg};
-use crate::bls::BlsBootLoader;
-use crate::boot_loader::{kexec_execute, kexec_load, LinuxBootEntry};
-use crate::grub::GrubBootLoader;
-use crate::syslinux::SyslinuxBootLoader;
+const TICK_DURATION: Duration = Duration::from_secs(1);
+
+use crate::{
+    block_device::{handle_unmounting, mount_all_devs, MountMsg},
+    boot_loader::{kexec_execute, kexec_load},
+};
 use clap::Parser;
-use crc::{Crc, CRC_32_ISCSI};
-use futures::StreamExt;
+use futures::prelude::*;
 use log::{debug, error, info, LevelFilter};
-use message::Msg;
+use message::InternalMsg;
 use nix::{
     libc,
     unistd::{chown, Gid, Uid},
 };
 use sha2::{Digest, Sha256};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::{
-    collections::HashMap,
-    io::{self, Write},
-    os::unix::{net::UnixListener, process::CommandExt},
-    process::{self, Command},
-    sync::Arc,
+    path::Path,
+    process,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     time::{Duration, Instant},
 };
-use termion::{clear, cursor, event::Key, raw::IntoRawMode};
-use termion_input_tokio::TermReadAsync;
-use tokio::sync::mpsc::{self, Receiver, Sender};
+use tboot::{
+    linux::LinuxBootEntry,
+    message::{Request, Response, ServerCodec},
+};
+use tokio::{
+    net::{UnixListener, UnixStream},
+    sync::broadcast,
+    sync::mpsc,
+};
+use tokio_serde_cbor::Codec;
+use tokio_util::codec::Decoder;
 
-pub const CASTAGNOLI: Crc<u32> = Crc::<u32>::new(&CRC_32_ISCSI);
-
-async fn select_entry(mut rx: Receiver<Msg>) -> anyhow::Result<LinuxBootEntry> {
-    let start = Instant::now();
-
-    let mut boot_entries = Vec::new();
-    let mut default_entry: Option<LinuxBootEntry> = None;
-    let mut has_internal_device = false;
-    let mut has_user_interaction = false;
-    let mut seen_config_files = HashMap::new();
-    let mut stdout = io::stdout().into_raw_mode()?;
-    let mut timeout = Duration::from_secs(10);
-    let mut user_input = String::new();
+// State machine that handles tinyboot request/response protocol.
+async fn handle_client(
+    stream: UnixStream,
+    mut client_rx: broadcast::Receiver<Response>,
+    client_tx: broadcast::Sender<Request>,
+) {
+    let codec: ServerCodec = Codec::new();
+    let (mut sink, mut stream) = codec.framed(stream).split();
 
     loop {
-        stdout.flush()?;
-        match rx.recv().await.ok_or(anyhow::anyhow!("TODO"))? {
-            Msg::Device(device) => {
-                for (part_path, mount) in device.partition_mounts {
-                    debug!("getting boot entries on {:?}", part_path);
-
-                    // TODO(jared): cleanup, dedup
-                    let bl = if let Ok(Some(Ok(bls))) =
-                        BlsBootLoader::get_config(&mount).map(|config| {
-                            if let Ok(config_contents) = std::fs::read_to_string(&config) {
-                                let checksum = CASTAGNOLI.checksum(config_contents.as_bytes());
-                                if seen_config_files.get(&checksum).is_some() {
-                                    None
-                                } else {
-                                    seen_config_files.insert(checksum, Some(()));
-                                    Some(BlsBootLoader::new(&mount, &config))
-                                }
-                            } else {
-                                None
-                            }
-                        }) {
-                        bls
-                    } else if let Ok(Some(Ok(grub))) =
-                        GrubBootLoader::get_config(&mount).map(|config| {
-                            if let Ok(config_contents) = std::fs::read_to_string(&config) {
-                                let checksum = CASTAGNOLI.checksum(config_contents.as_bytes());
-                                if seen_config_files.get(&checksum).is_some() {
-                                    None
-                                } else {
-                                    seen_config_files.insert(checksum, Some(()));
-                                    Some(GrubBootLoader::new(&mount, &config))
-                                }
-                            } else {
-                                None
-                            }
-                        })
-                    {
-                        grub
-                    } else if let Ok(Some(Ok(syslinux))) = SyslinuxBootLoader::get_config(&mount)
-                        .map(|config| {
-                            if let Ok(config_contents) = std::fs::read_to_string(&config) {
-                                let checksum = CASTAGNOLI.checksum(config_contents.as_bytes());
-                                if seen_config_files.get(&checksum).is_some() {
-                                    None
-                                } else {
-                                    seen_config_files.insert(checksum, Some(()));
-                                    Some(SyslinuxBootLoader::new(&config))
-                                }
-                            } else {
-                                None
-                            }
-                        })
-                    {
-                        syslinux
-                    } else {
-                        continue;
-                    };
-
-                    let new_timeout = bl.timeout();
-                    if new_timeout > timeout {
-                        timeout = new_timeout;
-                    }
-
-                    let new_entries = bl.boot_entries()?;
-                    let start_num = boot_entries.len();
-
-                    // TODO(jared): improve selection of default device
-                    if default_entry.is_none() && !has_internal_device {
-                        default_entry = new_entries.iter().find(|&entry| entry.default).cloned();
-
-                        // Ensure that if none of the entries from the bootloader were marked as
-                        // default, we still have some default entry to boot into.
-                        if default_entry.is_none() {
-                            default_entry = new_entries.first().cloned();
-                        }
-
-                        if let Some(entry) = &default_entry {
-                            debug!("assigned default entry: {}", entry.display);
-                        }
-                    }
-
-                    if !device.removable {
-                        has_internal_device = true;
-                    }
-
-                    // print entries
-                    {
-                        write!(stdout, "{}\r\n", "-".repeat(120))?;
-                        write!(stdout, "{} {}\r\n", part_path.display(), device.name)?;
-                        for (i, entry) in new_entries.iter().enumerate() {
-                            let is_default = default_entry
-                                .as_ref()
-                                .map(|e| e == entry)
-                                .unwrap_or_default();
-
-                            write!(
-                                stdout,
-                                "{}{}:      {}\r\n",
-                                if is_default { "*" } else { " " },
-                                start_num + i + 1,
-                                entry.display
-                            )?;
-                        }
-                    }
-
-                    boot_entries.extend(new_entries);
+        tokio::select! {
+            Some(Ok(req)) = stream.next() => {
+                if req == Request::Ping {
+                    _ = sink.send(Response::Pong).await;
+                } else {
+                    _ = client_tx.send(req);
                 }
             }
-            Msg::Key(key) => {
-                has_user_interaction = true;
-                match key {
-                    Key::Backspace => {
-                        _ = user_input.pop();
-                        write!(stdout, "{}{}", cursor::Left(1), clear::AfterCursor)?;
-                    }
-                    Key::Ctrl('u') => {
-                        write!(
-                            stdout,
-                            "{}{}",
-                            cursor::Left(user_input.len() as u16),
-                            clear::AfterCursor
-                        )?;
-                        user_input.clear();
-                    }
-                    Key::Char('\n') => {
-                        if user_input.is_empty() {
-                            anyhow::bail!("no choice selected");
-                        }
-
-                        let Ok(num) = str::parse::<usize>(&user_input) else {
-                                anyhow::bail!("did not input a number");
-                            };
-
-                        let Some(entry) = boot_entries.get(num - 1) else {
-                                anyhow::bail!("boot entry does not exist");
-                            };
-
-                        return Ok(entry.clone());
-                    }
-                    Key::Char(c) => {
-                        if c.is_ascii_digit() {
-                            user_input.push(c);
-                            write!(stdout, "{c}")?;
-                        } else {
-                            anyhow::bail!("not a numeric input");
-                        }
-                    }
-                    Key::Ctrl('[') | Key::Ctrl('c') | Key::Ctrl('g') => anyhow::bail!("exit"),
-                    _ => {}
-                };
+            Ok(msg) = client_rx.recv() => {
+                _ = sink.send(msg).await;
             }
-            Msg::Tick => {
-                // Timeout has occurred without any user interaction
-                if !has_user_interaction && start.elapsed() >= timeout {
-                    if let Some(default_entry) = default_entry {
-                        return Ok(default_entry);
-                    } else {
-                        anyhow::bail!("no default entry");
+            else => break,
+        }
+    }
+}
+
+#[derive(thiserror::Error, Debug)]
+enum SelectEntryError {
+    #[error("reboot")]
+    Reboot,
+    #[error("poweroff")]
+    Poweroff,
+    #[error("no default entry")]
+    NoDefaultEntry,
+    #[error("io error")]
+    Io(tokio::io::Error),
+    #[error("nix")]
+    Nix(nix::Error),
+}
+
+impl From<tokio::io::Error> for SelectEntryError {
+    fn from(value: tokio::io::Error) -> Self {
+        Self::Io(value)
+    }
+}
+
+impl From<nix::Error> for SelectEntryError {
+    fn from(value: nix::Error) -> Self {
+        Self::Nix(value)
+    }
+}
+
+async fn select_entry(
+    mut internal_rx: mpsc::Receiver<InternalMsg>,
+    response_tx: broadcast::Sender<Response>,
+) -> Result<LinuxBootEntry, SelectEntryError> {
+    let mut start = Instant::now();
+
+    let mut block_devices = Vec::new();
+    let mut found_first_device = false;
+    let mut default_entry: Option<LinuxBootEntry> = None;
+    let mut has_internal_device = false;
+    let mut has_user_interaction = false; // can only be set to true, not back to false
+    let mut timeout = Duration::from_secs(10);
+
+    let listener = UnixListener::bind(tboot::TINYBOOT_SOCKET)?;
+    chown(
+        tboot::TINYBOOT_SOCKET,
+        Some(Uid::from_raw(tboot::TINYUSER_UID)),
+        Some(Gid::from_raw(tboot::TINYUSER_GID)),
+    )?;
+
+    let (request_tx, mut request_rx) = broadcast::channel::<Request>(200);
+
+    loop {
+        tokio::select! {
+            Ok(msg) = request_rx.recv() => {
+                match msg {
+                    Request::Boot(entry) => return Ok(entry),
+                    Request::Ping => {/* this is handled by the client task */}
+                    Request::UserIsPresent => {
+                        has_user_interaction = true;
+                    }
+                    Request::Reboot => {
+                        return Err(SelectEntryError::Reboot);
+                    },
+                    Request::Poweroff => {
+                        return Err(SelectEntryError::Poweroff);
+                    },
+                }
+            }
+            Ok((stream, _)) = listener.accept() => {
+                tokio::spawn(handle_client(stream, response_tx.subscribe(), request_tx.clone()));
+            },
+            Some(internal_msg) = internal_rx.recv() => {
+                match internal_msg {
+                    InternalMsg::Device(device) => {
+                            // only start timeout when we actually have a device to boot
+                            if !found_first_device {
+                                found_first_device = true;
+                                start = Instant::now();
+                            }
+
+                            let new_timeout = device.timeout;
+                            if new_timeout > timeout {
+                                timeout = new_timeout;
+                            }
+
+                            let new_entries = &device.boot_entries;
+
+                            // TODO(jared): improve selection of default device
+                            if default_entry.is_none() && !has_internal_device {
+                                default_entry = new_entries.iter().find(|&entry| entry.default).cloned();
+
+                                // Ensure that if none of the entries from the bootloader were marked as
+                                // default, we still have some default entry to boot into.
+                                if default_entry.is_none() {
+                                    default_entry = new_entries.first().cloned();
+                                }
+
+                                if let Some(entry) = &default_entry {
+                                    debug!("assigned default entry: {}", entry.display);
+                                }
+                            }
+
+                            if !device.removable {
+                                has_internal_device = true;
+                            }
+
+                            _ = response_tx.send(Response::NewDevice(device.clone()));
+                            block_devices.push(device);
+                    }
+                    InternalMsg::Tick => {
+                        let elapsed = start.elapsed();
+
+                        // don't send TimeLeft response if timeout <= elapsed, this will panic
+                        if !has_user_interaction && timeout > elapsed {
+                            _ = response_tx.send(Response::TimeLeft(timeout - elapsed));
+                        }
+
+                        // Timeout has occurred without any user interaction
+                        if !has_user_interaction && elapsed >= timeout {
+                            if let Some(default_entry) = default_entry {
+                                return Ok(default_entry);
+                            } else {
+                                return Err(SelectEntryError::NoDefaultEntry);
+                            }
+                        }
                     }
                 }
             }
@@ -217,29 +195,55 @@ async fn select_entry(mut rx: Receiver<Msg>) -> anyhow::Result<LinuxBootEntry> {
     }
 }
 
-async fn prepare_boot(tx: Sender<Msg>, rx: Receiver<Msg>) -> anyhow::Result<()> {
-    let tick_tx = tx.clone();
+#[derive(thiserror::Error, Debug)]
+enum PrepareBootError {
+    #[error("failed to select entry")]
+    SelectEntry(SelectEntryError),
+    #[error("io")]
+    Io(std::io::Error),
+}
+
+impl From<SelectEntryError> for PrepareBootError {
+    fn from(value: SelectEntryError) -> Self {
+        Self::SelectEntry(value)
+    }
+}
+
+impl From<std::io::Error> for PrepareBootError {
+    fn from(value: std::io::Error) -> Self {
+        Self::Io(value)
+    }
+}
+
+async fn prepare_boot(
+    internal_tx: mpsc::Sender<InternalMsg>,
+    internal_rx: mpsc::Receiver<InternalMsg>,
+) -> Result<(), PrepareBootError> {
+    let (response_tx, _) = broadcast::channel::<Response>(200);
+
+    let tick_tx = internal_tx.clone();
     tokio::spawn(async move {
-        let tick_duration = Duration::from_secs(1);
         loop {
-            tokio::time::sleep(tick_duration).await;
-            if tick_tx.send(Msg::Tick).await.is_err() {
+            tokio::time::sleep(TICK_DURATION).await;
+            if tick_tx.send(InternalMsg::Tick).await.is_err() {
                 break;
             }
         }
     });
 
-    tokio::spawn(async move {
-        let _raw_term = std::io::stdout().into_raw_mode().unwrap();
-        let mut keys = tokio::io::stdin().keys_stream();
-        while let Some(Ok(key)) = keys.next().await {
-            if tx.send(Msg::Key(key)).await.is_err() {
-                break;
+    let res = select_entry(internal_rx, response_tx.clone()).await;
+    let entry = match res {
+        Err(e) => {
+            if matches!(e, SelectEntryError::Reboot | SelectEntryError::Poweroff) {
+                _ = response_tx.send(Response::ServerDone);
+                // TODO(jared): find a better way to do this
+                // give the client time to shutdown
+                // time::sleep(Duration::from_secs(1)).await;
             }
+            return Err(e.into());
         }
-    });
-
-    let entry = select_entry(rx).await?;
+        Ok(entry) => entry,
+    };
 
     let linux = entry.linux.as_path();
     let initrd = entry.initrd.as_deref();
@@ -263,6 +267,8 @@ async fn prepare_boot(tx: Sender<Msg>, rx: Receiver<Msg>) -> anyhow::Result<()> 
                 .iter()
                 .filter_map(|e| if let Err(e) = e { Some(e) } else { None })
                 .for_each(|e| error!("Failed to verify boot payload: {}", e));
+
+            _ = response_tx.send(Response::VerifiedBootFailure);
         } else {
             info!("Verified boot artifacts");
         }
@@ -297,6 +303,8 @@ async fn prepare_boot(tx: Sender<Msg>, rx: Receiver<Msg>) -> anyhow::Result<()> 
         }
     }
 
+    _ = response_tx.send(Response::ServerDone);
+
     Ok(())
 }
 
@@ -308,25 +316,11 @@ struct Config {
 
 const VERSION: Option<&'static str> = option_env!("version");
 
-pub fn shell() -> anyhow::Result<()> {
-    let mut cmd = Command::new("/bin/sh");
-    let cmd = cmd
-        .env_clear()
-        .current_dir("/home/tinyuser")
-        .uid(1000)
-        .gid(1000)
-        .arg("-l");
-    let mut child = cmd.spawn()?;
-    child.wait()?;
-
-    Ok(())
-}
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cfg = Config::parse();
 
-    tboot::log::setup_logging(cfg.log_level).expect("failed to setup logging");
+    tboot::log::setup_logging(cfg.log_level, Some(Path::new(tboot::log::TBOOTD_LOG_FILE)))?;
 
     info!("running version {}", VERSION.unwrap_or("devel"));
     debug!("config: {:?}", cfg);
@@ -336,24 +330,16 @@ async fn main() -> anyhow::Result<()> {
         process::exit(1);
     }
 
-    let sock_path = "/tmp/tinyboot.sock";
-    let _sock = UnixListener::bind(sock_path)?;
-    chown(
-        sock_path,
-        Some(Uid::from_raw(1000)),
-        Some(Gid::from_raw(1000)),
-    )?;
-
     loop {
-        let (tx, rx) = mpsc::channel::<Msg>(100);
+        let (internal_tx, internal_rx) = mpsc::channel::<InternalMsg>(100);
         let (mount_tx, mount_rx) = mpsc::channel::<MountMsg>(100);
 
         let done = Arc::new(AtomicBool::new(false));
-        let mount_handle = mount_all_devs(tx.clone(), mount_tx.clone(), done.clone());
+        let mount_handle = mount_all_devs(internal_tx.clone(), mount_tx.clone(), done.clone());
 
         let unmount_handle = handle_unmounting(mount_rx);
 
-        let res = prepare_boot(tx, rx).await;
+        let res = prepare_boot(internal_tx, internal_rx).await;
 
         done.store(true, Ordering::Relaxed);
 
@@ -363,14 +349,15 @@ async fn main() -> anyhow::Result<()> {
             _ = unmount_handle.await;
         }
 
-        if let Err(e) = res {
-            error!("failed to prepare boot: {e}");
-        } else {
-            kexec_execute()?;
-        }
-
-        if let Err(e) = shell() {
-            error!("{e}");
+        match res {
+            Err(PrepareBootError::SelectEntry(SelectEntryError::Reboot)) => unsafe {
+                libc::reboot(libc::LINUX_REBOOT_CMD_RESTART);
+            },
+            Err(PrepareBootError::SelectEntry(SelectEntryError::Poweroff)) => unsafe {
+                libc::reboot(libc::LINUX_REBOOT_CMD_POWER_OFF);
+            },
+            Err(e) => error!("failed to prepare boot: {e}"),
+            Ok(_) => kexec_execute().unwrap(),
         }
     }
 }

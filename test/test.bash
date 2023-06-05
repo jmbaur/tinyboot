@@ -27,11 +27,11 @@ fi
 # -device tpm-tis,tpmdev=tpm0 \
 
 @qemu@ @qemuFlags@ \
-	-no-reboot \
-	-nographic \
 	-smp 2 \
 	-m 2G \
 	-bios @corebootROM@/coreboot.rom \
+	-device virtio-vga \
+	-serial stdio \
 	-device nec-usb-xhci,id=xhci \
 	-device usb-storage,bus=xhci.0,drive=stick,removable=true \
 	-drive if=none,id=stick,format=raw,file=nixos-@system@.iso \

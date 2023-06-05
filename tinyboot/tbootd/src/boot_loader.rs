@@ -1,53 +1,8 @@
 use log::debug;
 use nix::libc;
-use std::{
-    error, ffi,
-    fmt::{self, Display},
-    io,
-    os::fd::AsRawFd,
-    path::{Path, PathBuf},
-    time::Duration,
-};
+use std::{ffi, io, os::fd::AsRawFd, path::Path};
 use syscalls::{syscall, Sysno};
 use tokio::{fs, time};
-
-#[derive(Debug)]
-pub enum Error {
-    BootConfigNotFound,
-    Eval(grub::EvalError),
-    InvalidEntry,
-    InvalidMountpoint,
-    Io(io::Error),
-}
-
-impl Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{self:?}")
-    }
-}
-
-impl error::Error for Error {}
-
-impl From<io::Error> for Error {
-    fn from(e: io::Error) -> Self {
-        Error::Io(e)
-    }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct LinuxBootEntry {
-    pub default: bool,
-    pub display: String,
-    pub linux: PathBuf,
-    pub initrd: Option<PathBuf>,
-    pub cmdline: Option<String>,
-}
-
-pub trait BootLoader {
-    fn timeout(&self) -> Duration;
-
-    fn boot_entries(&self) -> Result<Vec<LinuxBootEntry>, Error>;
-}
 
 pub async fn kexec_load(
     kernel: impl AsRef<Path>,

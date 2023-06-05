@@ -1,5 +1,6 @@
-*.qcow2
 *.iso
+*.qcow2
 .direnv
+out
 result*
 target

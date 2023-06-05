@@ -1,5 +1,8 @@
-use crate::boot_loader::{BootLoader, Error, LinuxBootEntry};
-use log::{debug, error};
+use crate::{
+    boot_loader::{BootLoader, Error},
+    linux::LinuxBootEntry,
+};
+use log::error;
 use std::{
     cmp::Ordering,
     fs,
@@ -60,29 +63,7 @@ pub struct BlsBootLoader {
 }
 
 impl BlsBootLoader {
-    pub fn get_config(mountpoint: &Path) -> Result<PathBuf, Error> {
-        let path = "loader/loader.conf";
-        let search_path = mountpoint.join(path);
-
-        debug!(
-            "searching for BootLoaderSpecification configuration at {}",
-            search_path.display()
-        );
-
-        if fs::metadata(&search_path).is_ok() {
-            Ok(search_path)
-        } else {
-            Err(Error::BootConfigNotFound)
-        }
-    }
-
-    #[allow(clippy::new_ret_no_self)]
-    pub fn new(mountpoint: &Path, config_file: &Path) -> Result<Box<dyn BootLoader + Send>, Error> {
-        let source = fs::read_to_string(config_file)?;
-        Ok(Box::new(Self::parse_loader_conf(mountpoint, source)?))
-    }
-
-    fn parse_loader_conf(mountpoint: &Path, loader_conf: String) -> Result<Self, Error> {
+    pub fn parse_loader_conf(mountpoint: &Path, loader_conf: String) -> Result<Self, Error> {
         let mut default_entry = String::new();
         let mut timeout = Duration::from_secs(5);
         let mut entries = Vec::new();

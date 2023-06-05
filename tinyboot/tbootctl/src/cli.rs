@@ -13,6 +13,8 @@ pub struct TopLevel {
 #[derive(Subcommand)]
 pub enum TopLevelCommand {
     VerifiedBoot(VerifiedBoot),
+    Reboot,
+    Poweroff,
 }
 
 #[derive(Args)]

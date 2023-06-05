@@ -9,7 +9,7 @@
   coreboot.configFile = lib.mkDefault ./coreboot.config;
   tinyboot = {
     debug = lib.mkDefault true;
-    tty = lib.mkDefault "ttyAMA0";
+    ttys = lib.mkDefault [ "ttyAMA0" ];
     verifiedBoot = {
       enable = lib.mkDefault true;
       publicKey = lib.mkDefault ../../test/keys/pubkey;
