@@ -4,7 +4,10 @@ use futures::{
 };
 use log::{debug, error, LevelFilter};
 use nix::libc;
-use std::{io::Write, process::Command};
+use std::{
+    io::{self, Write},
+    process::Command,
+};
 use tboot::{
     block_device::BlockDevice,
     linux::LinuxBootEntry,
@@ -19,7 +22,7 @@ const START_OFFSET: u16 = 5;
 
 fn shell() -> anyhow::Result<()> {
     let mut cmd = Command::new("/bin/sh");
-    let cmd = cmd.env_clear().current_dir("/home/tinyuser").arg("-l");
+    let cmd = cmd.current_dir("/home/tinyuser").arg("-l");
     let mut child = cmd.spawn()?;
     child.wait()?;
 
@@ -246,6 +249,37 @@ async fn run_client(
     Ok(())
 }
 
+fn set_terminal_default_size() -> io::Result<()> {
+    let mut size = std::mem::MaybeUninit::<libc::winsize>::uninit();
+
+    let res = unsafe { libc::ioctl(libc::STDOUT_FILENO, libc::TIOCGWINSZ as _, &mut size) };
+    if res < 0 {
+        return Err(io::Error::last_os_error());
+    }
+
+    let mut size = unsafe { size.assume_init() };
+
+    if size.ws_row == 0 {
+        size.ws_row = 24;
+    }
+    if size.ws_col == 0 {
+        size.ws_col = 80;
+    }
+
+    let res = unsafe {
+        libc::ioctl(
+            libc::STDOUT_FILENO,
+            libc::TIOCSWINSZ as _,
+            &size as *const _,
+        )
+    };
+    if res < 0 {
+        return Err(io::Error::last_os_error());
+    }
+
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // drop permissions immediately
@@ -253,6 +287,11 @@ async fn main() -> anyhow::Result<()> {
     unsafe { libc::setreuid(tboot::TINYUSER_UID, tboot::TINYUSER_UID) };
 
     tboot::log::setup_logging(LevelFilter::Debug, Some(tboot::log::TBOOTUI_LOG_FILE))?;
+
+    set_terminal_default_size()?;
+
+    // let backend = ratatui::backend::TermionBackend::new(std::io::stdout());
+    // let mut terminal = Terminal::new(backend)?;
 
     let stream = UnixStream::connect(tboot::TINYBOOT_SOCKET).await?;
     let codec: ClientCodec = Codec::new();

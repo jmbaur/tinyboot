@@ -65,7 +65,8 @@ pub async fn kexec_load(
 pub fn kexec_execute() -> io::Result<()> {
     let ret = unsafe { libc::reboot(libc::LINUX_REBOOT_CMD_KEXEC) };
     if ret < 0 {
-        return Err(io::Error::last_os_error());
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
     }
-    Ok(())
 }

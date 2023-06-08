@@ -32,6 +32,9 @@ let
     mount -t sysfs sysfs /sys
     mount -t tmpfs tmpfs /tmp
     mount -t devpts devpts /dev/pts
+    ln -sf /proc/self/fd/0 /dev/stdin
+    ln -sf /proc/self/fd/1 /dev/stdout
+    ln -sf /proc/self/fd/2 /dev/stderr
     mdev -s
     mkdir -p /home/tinyuser /tmp/tinyboot
     chown -R tinyuser:tinygroup /home/tinyuser /tmp/tinyboot
