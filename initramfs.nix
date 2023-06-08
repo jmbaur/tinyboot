@@ -16,7 +16,6 @@ let
   initrdEnv = buildEnv {
     name = "initrd-env";
     paths = [
-      pkgsStatic.ncurses
       (busybox.override { useMusl = true; enableStatic = true; })
       (pkgsStatic.callPackage ./tinyboot {
         measuredBoot = measuredBoot.enable;
@@ -71,7 +70,7 @@ makeInitrdNG {
     { object = "${initrdEnv}/bin"; symlink = "/bin"; }
     { object = "${initrdEnv}/bin"; symlink = "/sbin"; }
     { object = "${initrdEnv}/bin/init"; symlink = "/init"; }
-    { object = "${initrdEnv}/share/terminfo/l/linux"; symlink = "/etc/terminfo/l/linux"; }
+    { object = "${pkgsStatic.ncurses}/share/terminfo/l/linux"; symlink = "/etc/terminfo/l/linux"; }
     { object = "${group}"; symlink = "/etc/group"; }
     { object = "${inittab}"; symlink = "/etc/inittab"; }
     { object = "${mdevConf}"; symlink = "/etc/mdev.conf"; }
