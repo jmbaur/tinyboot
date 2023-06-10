@@ -4,21 +4,116 @@ use futures::{
 };
 use log::{debug, error, LevelFilter};
 use nix::libc;
-use std::{
-    io::{self, Write},
-    process::Command,
+use ratatui::{
+    backend::TermionBackend,
+    layout::{Alignment, Constraint, Layout},
+    style::{Color, Style},
+    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
+    Terminal,
 };
+use std::{io, process::Command, time::Duration};
 use tboot::{
     block_device::BlockDevice,
-    linux::LinuxBootEntry,
     message::{ClientCodec, Request, Response},
 };
-use termion::{event::Key, input::TermRead, raw::IntoRawMode};
+use termion::{event::Key, input::TermRead, raw::IntoRawMode, screen::IntoAlternateScreen};
 use tokio::{net::UnixStream, sync::mpsc};
 use tokio_serde_cbor::Codec;
 use tokio_util::codec::{Decoder, Framed};
 
-const START_OFFSET: u16 = 5;
+struct Device {
+    pub state: ListState,
+    pub device: BlockDevice,
+}
+
+#[derive(Default)]
+struct DeviceList {
+    pub devices: Vec<Device>,
+    pub selected: Option<usize>,
+}
+
+impl DeviceList {
+    pub fn add(&mut self, device: BlockDevice) {
+        let mut state = ListState::default();
+
+        if self.selected.is_none() {
+            self.selected = Some(0usize);
+
+            if let Some((i, _)) = device
+                .boot_entries
+                .iter()
+                .enumerate()
+                .find(|(_, d)| d.default)
+            {
+                state.select(Some(i));
+            }
+        }
+
+        self.devices.push(Device { state, device });
+    }
+
+    pub fn next(&mut self) {
+        if let Some(dev) = self
+            .selected
+            .and_then(|selected| self.devices.get_mut(selected))
+        {
+            if let Some(selected) = dev.state.selected() {
+                if selected < dev.device.boot_entries.len() - 1 {
+                    // select the next entry within the same device
+                    dev.state.select(Some(selected + 1));
+                } else {
+                    // unselect previously selected entry in last device
+                    dev.state.select(None);
+
+                    // select the first entry within the next device
+                    // unwrap safe here because we wouldn't be in this block unless it was not None
+                    let selected = self.selected.unwrap();
+                    let dev = if selected < self.devices.len() - 1 {
+                        self.selected = Some(selected + 1);
+                        self.devices.get_mut(selected + 1).unwrap()
+                    } else {
+                        // wrap around to first device
+                        self.selected = Some(0usize);
+                        self.devices.get_mut(0usize).unwrap()
+                    };
+                    dev.state.select(Some(0usize));
+                }
+            }
+        }
+    }
+
+    pub fn prev(&mut self) {
+        if let Some(dev) = self
+            .selected
+            .and_then(|selected| self.devices.get_mut(selected))
+        {
+            if let Some(selected) = dev.state.selected() {
+                if selected > 0 {
+                    // select the next entry within the same device
+                    dev.state.select(Some(selected - 1));
+                } else {
+                    // unselect previously selected entry in last device
+                    dev.state.select(None);
+
+                    // select the first entry within the next device
+                    // unwrap safe here because we wouldn't be in this block unless it was not None
+                    let selected = self.selected.unwrap();
+                    let dev = if selected > 0 {
+                        self.selected = Some(selected - 1);
+                        self.devices.get_mut(self.selected.unwrap()).unwrap()
+                        // select the last entry in the previous device
+                    } else {
+                        // wrap around to last device
+                        self.selected = Some(self.devices.len() - 1);
+                        self.devices.get_mut(self.selected.unwrap()).unwrap()
+                    };
+                    // select the last entry in the previous device
+                    dev.state.select(Some(dev.device.boot_entries.len() - 1));
+                }
+            }
+        }
+    }
+}
 
 fn shell() -> anyhow::Result<()> {
     let mut cmd = Command::new("/bin/sh");
@@ -29,67 +124,10 @@ fn shell() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[derive(Debug)]
-enum Action {
-    Next,
-    Prev,
-    ExitToShell,
-    Poweroff,
-    Reboot,
-    SelectCurrentEntry,
-}
-
-fn print_dev<W>(
-    stdout: &mut W,
-    dev: BlockDevice,
-    print_offset: &mut u16,
-    entries: &mut Vec<(u16, LinuxBootEntry)>,
-    boot_cursor: &mut Option<u16>,
-) -> std::io::Result<()>
-where
-    W: Write,
-{
-    write!(
-        stdout,
-        "{}{}",
-        termion::cursor::Goto(1, *print_offset),
-        dev.name
-    )?;
-    *print_offset += 1;
-
-    for entry in dev.boot_entries {
-        entries.push((*print_offset, entry.clone()));
-
-        // TODO(jared): make sure the server marks all default entries from
-        // non-default devices as false, or else we will get multiple default
-        // entries here
-        if entry.default {
-            write!(stdout, "{}->", termion::cursor::Goto(1, *print_offset))?;
-            *boot_cursor = Some(*print_offset);
-        }
-
-        write!(
-            stdout,
-            "{}{}",
-            termion::cursor::Goto(3, *print_offset),
-            entry.display
-        )?;
-        *print_offset += 1;
-    }
-
-    stdout.flush()?;
-
-    *print_offset += 1; // leave a line between devices
-
-    Ok(())
-}
-
 async fn run_client(
     sink: &mut SplitSink<Framed<UnixStream, ClientCodec>, Request>,
     stream: &mut SplitStream<Framed<UnixStream, ClientCodec>>,
 ) -> anyhow::Result<()> {
-    let (_columns, rows) = termion::terminal_size()?;
-
     sink.send(Request::Ping).await?;
     debug!("sent ping to server");
 
@@ -100,156 +138,157 @@ async fn run_client(
     }
 
     let mut recorded_user_interaction = false;
+    let mut devs = DeviceList::default();
 
     'outer: loop {
-        let mut boot_cursor = None::<u16>;
-        let mut entries: Vec<(u16, LinuxBootEntry)> = Vec::new();
-        let mut print_offset = START_OFFSET;
+        let mut terminal = Terminal::new(TermionBackend::new(
+            std::io::stdout().into_raw_mode()?.into_alternate_screen()?,
+        ))?;
 
-        let mut stdout = std::io::stdout().into_raw_mode()?;
+        terminal.clear()?;
 
-        let (tx, mut rx) = mpsc::channel::<Action>(200);
+        let mut time_left = None::<Duration>;
+
+        let (tx, mut rx) = mpsc::channel::<Key>(200);
 
         let keys_handle = tokio::spawn(async move {
             let stdin = std::io::stdin();
             for key in stdin.keys() {
                 let Ok(key) = key else {
-                break;
-            };
+                    break;
+                };
 
-                if match key {
-                    Key::Char('j') | Key::Down => tx.send(Action::Next).await,
-                    Key::Char('k') | Key::Up => tx.send(Action::Prev).await,
-                    Key::Char('s') => tx.send(Action::ExitToShell).await,
-                    Key::Char('r') => tx.send(Action::Reboot).await,
-                    Key::Char('p') => tx.send(Action::Poweroff).await,
-                    Key::Char('\n') => tx.send(Action::SelectCurrentEntry).await,
-                    _ => Ok(()),
+                if tx.send(key).await.is_err() {
+                    break;
                 }
-                .is_err()
-                {
+
+                if key == Key::Char('s') {
                     break;
                 }
             }
         });
 
-        'inner: loop {
-            write!(
-                stdout,
-                "{}{}{}tinyboot{}{}",
-                termion::clear::All,
-                termion::cursor::Goto(1, 1),
-                termion::style::Bold,
-                termion::style::Reset,
-                termion::cursor::Hide,
-            )?;
-
-            write!(
-                stdout,
-                "{}<s> Shell | <r> Reboot | <p> Poweroff",
-                termion::cursor::Goto(1, 3)
-            )?;
-            stdout.flush()?;
-
-            sink.send(Request::ListBlockDevices).await?;
-            if let Some(Ok(Response::ListBlockDevices(devs))) = stream.next().await {
-                for dev in devs {
-                    print_dev(
-                        &mut stdout,
-                        dev,
-                        &mut print_offset,
-                        &mut entries,
-                        &mut boot_cursor,
-                    )?;
-                }
+        sink.send(Request::ListBlockDevices).await?;
+        if let Some(Ok(Response::ListBlockDevices(new_devs))) = stream.next().await {
+            for d in new_devs {
+                devs.add(d);
             }
-            sink.send(Request::StartStreaming).await?;
+        }
 
-            loop {
-                tokio::select! {
-                    Some(action) = rx.recv() => {
-                        if !recorded_user_interaction {
-                            sink.send(Request::UserIsPresent).await?;
-                            recorded_user_interaction = true;
-                            write!(stdout, "{}{}", termion::cursor::Goto(1, rows - 1), termion::clear::AfterCursor)?;
-                            stdout.flush()?;
-                        }
+        sink.send(Request::StartStreaming).await?;
 
-                        match action {
-                            Action::Next => {
-                                if let Some(current_boot_cursor) = boot_cursor {
-                                    if let Some((next_boot_cursor, _)) = entries
-                                        .iter()
-                                        .find(|(print_offset, _)| print_offset > &current_boot_cursor ) {
-                                            boot_cursor = Some(*next_boot_cursor);
-                                            write!(stdout, "{}  ", termion::cursor::Goto(1, current_boot_cursor))?;
-                                            write!(stdout, "{}->", termion::cursor::Goto(1, *next_boot_cursor))?;
-                                            stdout.flush()?;
-                                        }
-                                }
-                            }
-                            Action::Prev => {
-                                if let Some(current_boot_cursor) = boot_cursor {
-                                    if let Some((next_boot_cursor, _)) = entries
-                                        .iter()
-                                        .rev()
-                                        .find(|(print_offset, _)| print_offset < &current_boot_cursor) {
-                                            boot_cursor = Some(*next_boot_cursor);
-                                            write!(stdout, "{}  ", termion::cursor::Goto(1, current_boot_cursor))?;
-                                            write!(stdout, "{}->", termion::cursor::Goto(1, *next_boot_cursor))?;
-                                            stdout.flush()?;
-                                        }
-                                }
-                            }
-                            Action::SelectCurrentEntry => {
-                                if let Some(boot_cursor) = boot_cursor {
-                                    if let Some((_, entry)) = entries.iter().find(|(i, _)| *i == boot_cursor) {
-                                        _ = sink.send(Request::Boot(entry.clone())).await;
-                                    }
-                                }
-                            },
-                            Action::Reboot => sink.send(Request::Reboot).await?,
-                            Action::Poweroff => sink.send(Request::Poweroff).await?,
-                            Action::ExitToShell => break 'inner,
-                        }
+        'inner: loop {
+            terminal.draw(|frame| {
+                let num_of_lists = devs.devices.len();
+                let constraints = [
+                    Constraint::Percentage(5),
+                    Constraint::Percentage(95),
+                    Constraint::Percentage(5),
+                ]
+                .as_ref();
+
+                let chunks = Layout::default()
+                    .constraints(constraints)
+                    .split(frame.size());
+
+                frame.render_widget(
+                    Block::default()
+                        .title("tinyboot")
+                        .title_alignment(Alignment::Center)
+                        .borders(Borders::TOP),
+                    chunks[0],
+                );
+
+                if num_of_lists > 0 {
+                    let num_of_options = devs
+                        .devices
+                        .iter()
+                        .fold(0usize, |n, d| n + d.device.boot_entries.len());
+
+                    let chunks = Layout::default()
+                        .constraints(
+                            devs.devices
+                                .iter()
+                                .map(|d| {
+                                    Constraint::Ratio(
+                                        d.device.boot_entries.len() as u32,
+                                        num_of_options as u32,
+                                    )
+                                })
+                                .collect::<Vec<Constraint>>(),
+                        )
+                        .split(chunks[1]);
+
+                    for (i, dev) in devs.devices.iter_mut().enumerate() {
+                        let list: Vec<ListItem> = dev
+                            .device
+                            .boot_entries
+                            .iter()
+                            .map(|e| ListItem::new(e.display.clone()))
+                            .collect();
+                        let list = List::new(list)
+                            .block(Block::default().title(dev.device.name.clone()))
+                            .highlight_style(Style::new().fg(Color::Black).bg(Color::White));
+
+                        frame.render_stateful_widget(list, chunks[i], &mut dev.state);
                     }
-                    Some(Ok(msg)) = stream.next() => {
-                        match msg {
-                            Response::NewDevice(dev) => print_dev(&mut stdout, dev, &mut print_offset, &mut entries, &mut boot_cursor)?,
-                            Response::TimeLeft(time) => {
-                                write!(stdout, "{}{}Boot in {}s", termion::cursor::Goto(1, rows-1), termion::clear::CurrentLine, time.as_secs())?;
-                                stdout.flush()?;
-                            }
-                            Response::ServerDone => {
-                                break 'outer;
-                            },
-                            _ => {},
-                        }
-                    }
-                    else => break 'inner,
+                } else {
+                    frame.render_widget(Paragraph::new("no boot devices"), chunks[1]);
                 }
+
+                if let Some(time_left) = time_left {
+                    let timeout = Paragraph::new(format!("Boot in {}s", time_left.as_secs()));
+                    frame.render_widget(timeout, chunks[2]);
+                }
+            })?;
+
+            tokio::select! {
+                Some(key) = rx.recv() => {
+                    if !recorded_user_interaction {
+                        sink.send(Request::UserIsPresent).await?;
+                        recorded_user_interaction = true;
+                        time_left = None;
+                    }
+
+                    match key {
+                        Key::Char('j') | Key::Down => devs.next(),
+                        Key::Char('k') | Key::Up => devs.prev(),
+                        Key::Char('\n') => {
+                            if let Some(dev) = devs.selected.and_then(|selected| devs.devices.get(selected)) {
+                                if let Some(entry) = dev.state.selected().and_then(|selected| dev.device.boot_entries.get(selected)) {
+                                     _ = sink.send(Request::Boot(entry.clone())).await;
+                                }
+                            }
+                        },
+                        Key::Char('s') => break 'inner,
+                        Key::Char('r') => sink.send(Request::Reboot).await?,
+                        Key::Char('p') => sink.send(Request::Poweroff).await?,
+                        _ => {}
+                    }
+                }
+                Some(Ok(msg)) = stream.next() => {
+                    match msg {
+                        Response::NewDevice(dev) => devs.add(dev),
+                        Response::TimeLeft(time) => time_left = Some(time),
+                        Response::ServerDone => break 'outer,
+                        _ => {},
+                    }
+                }
+                else => break 'inner,
             }
         }
 
         sink.send(Request::StopStreaming).await?;
-        keys_handle.abort();
-        write!(
-            stdout,
-            "{}{}{}",
-            termion::clear::All,
-            termion::cursor::Goto(1, 1),
-            termion::cursor::Show,
-        )?;
-        stdout.flush()?;
-        stdout.suspend_raw_mode()?;
+        keys_handle.await?;
+        drop(terminal);
+
         shell()?;
-        stdout.activate_raw_mode()?;
     }
 
     Ok(())
 }
 
-fn set_terminal_default_size() -> io::Result<()> {
+fn fix_zero_size_terminal() -> io::Result<()> {
     let mut size = std::mem::MaybeUninit::<libc::winsize>::uninit();
 
     let res = unsafe { libc::ioctl(libc::STDOUT_FILENO, libc::TIOCGWINSZ as _, &mut size) };
@@ -286,12 +325,14 @@ async fn main() -> anyhow::Result<()> {
     unsafe { libc::setregid(tboot::TINYUSER_GID, tboot::TINYUSER_GID) };
     unsafe { libc::setreuid(tboot::TINYUSER_UID, tboot::TINYUSER_UID) };
 
+    // set correct env vars
+    std::env::set_var("USER", "tinyuser");
+    std::env::set_var("PATH", "/bin");
+    std::env::set_var("HOME", "/home/tinyuser");
+
     tboot::log::setup_logging(LevelFilter::Debug, Some(tboot::log::TBOOTUI_LOG_FILE))?;
 
-    set_terminal_default_size()?;
-
-    // let backend = ratatui::backend::TermionBackend::new(std::io::stdout());
-    // let mut terminal = Terminal::new(backend)?;
+    fix_zero_size_terminal()?;
 
     let stream = UnixStream::connect(tboot::TINYBOOT_SOCKET).await?;
     let codec: ClientCodec = Codec::new();

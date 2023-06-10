@@ -68,8 +68,7 @@ makeInitrdNG {
   compressor = "xz";
   contents = [
     { object = "${initrdEnv}/bin"; symlink = "/bin"; }
-    { object = "${initrdEnv}/bin"; symlink = "/sbin"; }
-    { object = "${initrdEnv}/bin/init"; symlink = "/init"; }
+    { object = "${initrdEnv}/bin/busybox"; symlink = "/init"; }
     { object = "${pkgsStatic.ncurses}/share/terminfo/l/linux"; symlink = "/etc/terminfo/l/linux"; }
     { object = "${group}"; symlink = "/etc/group"; }
     { object = "${inittab}"; symlink = "/etc/inittab"; }

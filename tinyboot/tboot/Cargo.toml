@@ -9,7 +9,7 @@ mktemp = "0.5.0"
 
 [dependencies]
 anyhow = "1.0.71"
-clap = { version = "4.3.2", features = ["derive"] }
+clap = { version = "4.3.3", features = ["derive"] }
 crc = "3.0.1"
 ed25519-dalek = { version = "2.0.0-rc.2", features = [
   "alloc",
@@ -23,7 +23,7 @@ grub = { path = "../grub" }
 kobject-uevent = "0.1.0"
 log = "0.4.18"
 nix = "0.26.2"
-serde = { version = "1.0.163", features = ["derive"] }
+serde = { version = "1.0.164", features = ["derive"] }
 serde_cbor = "0.10"
 sha2 = "0.10.6"
 thiserror = "1.0.40"

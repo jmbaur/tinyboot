@@ -11,7 +11,7 @@ clap_complete = "*"
 
 [dependencies]
 anyhow = "1.0.71"
-clap = { version = "4.3.2", features = ["derive"] }
+clap = { version = "4.3.3", features = ["derive"] }
 futures = "0.3.28"
 log = "0.4.18"
 tboot = { path = "../tboot" }
