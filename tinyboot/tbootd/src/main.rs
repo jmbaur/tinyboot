@@ -249,9 +249,6 @@ async fn prepare_boot(
         Err(e) => {
             if matches!(e, SelectEntryError::Reboot | SelectEntryError::Poweroff) {
                 _ = response_tx.send(Response::ServerDone);
-                // TODO(jared): find a better way to do this
-                // give the client time to shutdown
-                // time::sleep(Duration::from_secs(1)).await;
             }
             return Err(e.into());
         }
@@ -263,7 +260,7 @@ async fn prepare_boot(
     let cmdline = entry.cmdline.unwrap_or_default();
     let cmdline = cmdline.as_str();
 
-    let mut needs_pcr_reset = false;
+    let mut verification_failed = false;
 
     let verified_digest = if cfg!(feature = "verified-boot") {
         let key_digest = Sha256::digest(verify::PEM).to_vec();
@@ -273,9 +270,9 @@ async fn prepare_boot(
             verify_errors.push(verify::verify_boot_payload(initrd));
         }
 
-        needs_pcr_reset = verify_errors.iter().any(|e| e.is_err());
+        verification_failed = verify_errors.iter().any(|e| e.is_err());
 
-        if needs_pcr_reset {
+        if verification_failed {
             verify_errors
                 .iter()
                 .filter_map(|e| if let Err(e) = e { Some(e) } else { None })
@@ -293,27 +290,23 @@ async fn prepare_boot(
 
     kexec_load(linux, initrd, cmdline).await?;
 
-    if cfg!(feature = "measured-boot") {
-        if !needs_pcr_reset {
-            let kernel_digest = tboot::hash::sha256_digest_file(linux)?;
-            let initrd_digest = initrd.map(tboot::hash::sha256_digest_file).transpose()?;
-            let cmdline_digest = Sha256::digest(cmdline).to_vec();
+    if cfg!(feature = "measured-boot") && !verification_failed {
+        let kernel_digest = tboot::hash::sha256_digest_file(linux)?;
+        let initrd_digest = initrd.map(tboot::hash::sha256_digest_file).transpose()?;
+        let cmdline_digest = Sha256::digest(cmdline).to_vec();
 
-            match tpm::measure_boot(
-                verified_digest,
-                (linux, kernel_digest),
-                (initrd, initrd_digest),
-                (cmdline, cmdline_digest),
-            ) {
-                Ok(()) => info!("Measured boot artifacts"),
-                Err(e) => {
-                    error!("Failed to measure boot artifacts: {e}");
-                    error!("This board may be misconfigured!!");
-                }
-            };
-        } else if let Err(e) = tpm::reset_pcr_slots() {
-            error!("Failed to reset tinyboot-managed PCR slots: {e}");
-        }
+        match tpm::measure_boot(
+            verified_digest,
+            (linux, kernel_digest),
+            (initrd, initrd_digest),
+            (cmdline, cmdline_digest),
+        ) {
+            Ok(()) => info!("Measured boot artifacts"),
+            Err(e) => {
+                error!("Failed to measure boot artifacts: {e}");
+                error!("This board may be misconfigured!!");
+            }
+        };
     }
 
     _ = response_tx.send(Response::ServerDone);
