@@ -6,9 +6,9 @@ use log::{debug, error, LevelFilter};
 use nix::libc;
 use ratatui::{
     backend::TermionBackend,
-    layout::{Alignment, Constraint, Layout},
+    layout::{Constraint, Layout},
     style::{Color, Style},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
+    widgets::{Block, List, ListItem, ListState, Paragraph},
     Terminal,
 };
 use std::{io, process::Command, time::Duration};
@@ -189,24 +189,11 @@ async fn run_client(
         let break_type = 'inner: loop {
             terminal.draw(|frame| {
                 let num_of_lists = devs.devices.len();
-                let constraints = [
-                    Constraint::Percentage(5),
-                    Constraint::Percentage(95),
-                    Constraint::Percentage(5),
-                ]
-                .as_ref();
+                let constraints = [Constraint::Percentage(95), Constraint::Percentage(5)].as_ref();
 
                 let chunks = Layout::default()
                     .constraints(constraints)
                     .split(frame.size());
-
-                frame.render_widget(
-                    Block::default()
-                        .title("tinyboot")
-                        .title_alignment(Alignment::Center)
-                        .borders(Borders::TOP),
-                    chunks[0],
-                );
 
                 if num_of_lists > 0 {
                     let num_of_options = devs
@@ -226,7 +213,7 @@ async fn run_client(
                                 })
                                 .collect::<Vec<Constraint>>(),
                         )
-                        .split(chunks[1]);
+                        .split(chunks[0]);
 
                     for (i, dev) in devs.devices.iter_mut().enumerate() {
                         let list: Vec<ListItem> = dev
@@ -247,7 +234,7 @@ async fn run_client(
 
                 if let Some(time_left) = time_left {
                     let timeout = Paragraph::new(format!("Boot in {}s", time_left.as_secs()));
-                    frame.render_widget(timeout, chunks[2]);
+                    frame.render_widget(timeout, chunks[1]);
                 }
             })?;
 
