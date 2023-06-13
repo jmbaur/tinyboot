@@ -15,16 +15,21 @@ pub fn edit<W: Write>(
 
     let mut input = entry.cmdline.clone().unwrap_or_default();
     let mut pos = input.len();
-    let mut scroll = (0, 1);
+    let mut scroll = (0, 0); // (y, x)
     let mut keys = stdin.keys();
 
     loop {
         terminal
             .draw(|f| {
+                // let input = input.as_str();
                 let rect = f.size();
                 let pos = pos as u16;
                 let pos = if pos > scroll.1 + rect.width - 1 {
-                    scroll.1 = pos - rect.width;
+                    // text overflows rect width
+
+                    // add one so that the cursor is always one position to the right of the last
+                    // character of input
+                    scroll.1 = pos - rect.width + 1;
                     rect.width
                 } else if scroll.1 >= pos {
                     scroll.1 = pos;
@@ -37,7 +42,7 @@ pub fn edit<W: Write>(
                     .block(Block::default().title("edit kernel params:"))
                     .scroll(scroll);
                 f.render_widget(widget, f.size());
-                f.set_cursor(pos, 1);
+                f.set_cursor(pos, 1); // (x, y)
             })
             .ok()?;
 
@@ -46,7 +51,7 @@ pub fn edit<W: Write>(
         };
 
         match key {
-            Key::Esc | Key::Ctrl('[') => return None,
+            Key::Esc | Key::Ctrl('[') | Key::Ctrl('c') => return None,
             Key::Backspace | Key::Ctrl('h') if pos > 0 => {
                 pos -= 1;
                 input = format!("{}{}", &input[..pos], &input[pos + 1..]);
