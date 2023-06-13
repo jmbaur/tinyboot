@@ -30,9 +30,12 @@ pub fn edit<W: Write>(
                     // add one so that the cursor is always one position to the right of the last
                     // character of input
                     scroll.1 = pos - rect.width + 1;
-                    rect.width
+
+                    rect.width - 1
                 } else if scroll.1 >= pos {
+                    // text underflows rect width
                     scroll.1 = pos;
+
                     0
                 } else {
                     pos - scroll.1
@@ -68,6 +71,25 @@ pub fn edit<W: Write>(
             Key::Ctrl('f') | Key::Right if pos < input.len() => pos += 1,
             Key::Ctrl('a') | Key::Home => pos = 0,
             Key::Ctrl('e') | Key::End => pos = input.len(),
+            Key::Alt('b') if pos > 0 => {
+                if let Some((next_pos, _)) = input[..pos - 1]
+                    .char_indices()
+                    .rev()
+                    .find(|(_, c)| !char::is_ascii_alphanumeric(c))
+                {
+                    pos -= input[..pos].len() - next_pos - 1;
+                } else {
+                    pos = 0;
+                }
+            }
+            Key::Alt('f') if pos < input.len() => {
+                if let Some(next_pos) = input[pos + 1..].find(|c| !char::is_ascii_alphanumeric(&c))
+                {
+                    pos += next_pos + 1;
+                } else {
+                    pos = input.len();
+                }
+            }
             Key::Char(c) if c != '\n' => {
                 input = format!("{}{}{}", &input[..pos], c, &input[pos..]);
                 pos += 1;

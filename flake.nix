@@ -31,6 +31,7 @@
         nixpkgs.lib.foldAttrs (curr: acc: acc // curr) { } (map (b: extend b baseConfig) [ "bls" "grub" "extlinux" ]);
       overlays.default = final: prev: {
         wolftpm = prev.callPackage ./wolftpm.nix { };
+        tinyboot = prev.callPackage ./tinyboot { };
         tinyboot-client = prev.callPackage ./tinyboot { clientOnly = true; };
         coreboot = prev.callPackage ./boards {
           buildFitImage = prev.callPackage ./fitimage { };

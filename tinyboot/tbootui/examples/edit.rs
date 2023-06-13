@@ -22,7 +22,7 @@ fn main() {
             display: String::from("foo entry"),
             linux: PathBuf::from("/vmlinuz"),
             initrd: None,
-            cmdline: None,
+            cmdline: Some("asdf".repeat(40)),
         },
         &mut terminal,
     );
