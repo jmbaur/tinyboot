@@ -1,8 +1,8 @@
 { testName, lib, substituteAll, pkgsBuildBuild, stdenv, coreboot }:
 let
   systemConfig = builtins.getAttr stdenv.hostPlatform.qemuArch {
-    x86_64 = { qemuFlags = [ ]; };
-    aarch64 = { qemuFlags = [ "-M" "virt,secure=on" "-cpu" "cortex-a53" ]; };
+    x86_64 = { qemuFlags = [ "-M q35" ]; };
+    aarch64 = { qemuFlags = [ "-M virt,secure=on" "-cpu cortex-a53" ]; };
   };
   corebootROM = coreboot."qemu-${stdenv.hostPlatform.qemuArch}";
   qemuFlags = toString (systemConfig.qemuFlags ++ lib.optional (stdenv.hostPlatform == stdenv.buildPlatform) "-enable-kvm");

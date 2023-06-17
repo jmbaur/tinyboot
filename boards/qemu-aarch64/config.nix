@@ -14,6 +14,6 @@
       enable = lib.mkDefault true;
       publicKey = lib.mkDefault ../../test/keys/pubkey;
     };
-    measuredBoot.enable = lib.mkDefault false;
+    measuredBoot.enable = lib.mkDefault true;
   };
 }

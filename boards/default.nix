@@ -81,7 +81,7 @@ lib.mapAttrs
       fitImage = buildFitImage { inherit board linux initrd; inherit (finalConfig.config.kernel) dtb dtbPattern; };
     in
     (buildPackages.runCommand "tinyboot-${coreboot.name}"
-    { nativeBuildInputs = with buildPackages; [ coreboot-utils ]; }
+    { nativeBuildInputs = with buildPackages; [ coreboot-utils ]; passthru = { inherit linux initrd; }; }
       ''
         mkdir -p $out
         dd if=${coreboot}/coreboot.rom of=$out/coreboot.rom
