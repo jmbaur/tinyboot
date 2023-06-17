@@ -8,8 +8,7 @@ trap stop EXIT SIGINT
 mkdir -p /tmp/mytpm1
 swtpm socket --tpmstate dir=/tmp/mytpm1 \
 	--ctrl type=unixio,path=/tmp/mytpm1/swtpm-sock \
-	--tpm2 \
-	--log level=20 &
+	--tpm2 &
 
 if [[ ! -f nixos-@system@.iso ]]; then
 	curl -L -o nixos-@system@.iso https://channels.nixos.org/nixos-22.11/latest-nixos-minimal-@system@.iso

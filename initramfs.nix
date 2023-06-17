@@ -1,30 +1,16 @@
-{ debug
-, ttys
-, measuredBoot
-, verifiedBoot
-, extraInit
-, extraInittab
-, lib
-, makeInitrdNG
-, busybox
-, tinyboot
-, pkgsStatic
-, writeScript
-, writeText
-}:
+{ debug, ttys, nameservers, measuredBoot, verifiedBoot, extraInit, extraInittab, lib, makeInitrdNG, ncurses, pkgsStatic, writeScript, writeText }:
 let
-  myBusybox = (busybox.override {
-    useMusl = true;
-    enableStatic = true;
+  myBusybox = (pkgsStatic.busybox.override {
     enableMinimal = true;
     extraConfig = lib.concatLines (map (lib.replaceStrings [ "=" ] [ " " ])
       (lib.filter (lib.hasPrefix "CONFIG") (lib.splitString "\n" (builtins.readFile ./busybox.config))));
   });
-  myTinyboot = tinyboot.override {
+  myTinyboot = pkgsStatic.tinyboot.override {
     measuredBoot = measuredBoot.enable;
     verifiedBoot = verifiedBoot.enable;
     verifiedBootPublicKey = verifiedBoot.publicKey;
   };
+  staticResolvConf = writeText "resolv.conf.static" (lib.concatLines (map (n: "nameserver ${n}") nameservers));
   rcS = writeScript "rcS" (''
     #!/bin/sh
     /bin/busybox mkdir -p /dev/pts /sys /proc /tmp /mnt
@@ -38,6 +24,7 @@ let
     /bin/busybox mdev -s
     /bin/busybox mkdir -p /home/tinyuser /tmp/tinyboot
     /bin/busybox chown -R tinyuser:tinygroup /home/tinyuser /tmp/tinyboot
+    /bin/busybox cat /etc/resolv.conf.static >/etc/resolv.conf
   '' + extraInit);
   inittab = writeText "inittab" (''
     ::sysinit:/etc/init.d/rcS
@@ -74,11 +61,12 @@ makeInitrdNG {
     { object = "${myBusybox}/bin/busybox"; symlink = "/bin/busybox"; }
     { object = "${myBusybox}/bin/busybox"; symlink = "/bin/sh"; }
     { object = "${myBusybox}/bin/busybox"; symlink = "/init"; }
-    { object = "${pkgsStatic.ncurses}/share/terminfo/l/linux"; symlink = "/etc/terminfo/l/linux"; }
+    { object = "${ncurses}/share/terminfo/l/linux"; symlink = "/etc/terminfo/l/linux"; }
     { object = "${group}"; symlink = "/etc/group"; }
     { object = "${inittab}"; symlink = "/etc/inittab"; }
     { object = "${mdevConf}"; symlink = "/etc/mdev.conf"; }
     { object = "${passwd}"; symlink = "/etc/passwd"; }
     { object = "${rcS}"; symlink = "/etc/init.d/rcS"; }
+    { object = "${staticResolvConf}"; symlink = "/etc/resolv.conf.static"; }
   ];
 }

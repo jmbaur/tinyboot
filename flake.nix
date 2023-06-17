@@ -31,8 +31,8 @@
         nixpkgs.lib.foldAttrs (curr: acc: acc // curr) { } (map (b: extend b baseConfig) [ "bls" "grub" "extlinux" ]);
       overlays.default = final: prev: {
         wolftpm = prev.callPackage ./wolftpm.nix { };
-        tinyboot = prev.pkgsStatic.pkgsMusl.callPackage ./tinyboot { };
-        tinyboot-client = prev.pkgsStatic.pkgsMusl.callPackage ./tinyboot { clientOnly = true; };
+        tinyboot = prev.callPackage ./tinyboot { };
+        tinyboot-client = prev.callPackage ./tinyboot { clientOnly = true; };
         coreboot = prev.callPackage ./boards {
           buildFitImage = prev.callPackage ./fitimage { };
           buildCoreboot = prev.callPackage ./coreboot.nix { flashrom = prev.callPackage ./flashrom.nix { }; };
@@ -40,7 +40,7 @@
       };
       devShells = forAllSystems ({ pkgs, ... }: {
         default = with pkgs; mkShell {
-          inputsFrom = [ tinyboot-client ];
+          inputsFrom = [ pkgsStatic.tinyboot-client ];
           nativeBuildInputs = [ bashInteractive grub2 cargo-insta rustfmt cargo-watch cargo-edit clippy ];
           VERIFIED_BOOT_PUBLIC_KEY = ./test/keys/pubkey;
         };

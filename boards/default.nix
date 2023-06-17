@@ -62,6 +62,10 @@ let
         type = lib.types.lines;
         default = "";
       };
+      nameservers = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [ "8.8.8.8" "8.8.4.4" "2001:4860:4860::8888" "2001:4860:4860::8844" ];
+      };
     };
   };
 in
@@ -77,7 +81,7 @@ lib.mapAttrs
         meta = { inherit (finalConfig.config) platforms; };
       };
       linux = pkgs.callPackage ../kernel.nix { inherit (finalConfig.config.kernel) basePackage configFile; };
-      initrd = pkgs.callPackage ../initramfs.nix { inherit (finalConfig.config.tinyboot) measuredBoot verifiedBoot debug ttys extraInit extraInittab; };
+      initrd = pkgs.callPackage ../initramfs.nix { inherit (finalConfig.config.tinyboot) measuredBoot verifiedBoot debug ttys nameservers extraInit extraInittab; };
       fitImage = buildFitImage { inherit board linux initrd; inherit (finalConfig.config.kernel) dtb dtbPattern; };
     in
     (buildPackages.runCommand "tinyboot-${coreboot.name}"
