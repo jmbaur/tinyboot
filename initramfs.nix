@@ -20,7 +20,7 @@ let
     extraConfig = lib.concatLines (map (lib.replaceStrings [ "=" ] [ " " ])
       (lib.filter (lib.hasPrefix "CONFIG") (lib.splitString "\n" (builtins.readFile ./busybox.config))));
   });
-  tinyboot = pkgsStatic.tinyboot.override {
+  tinyboot = pkgsStatic.pkgsMusl.tinyboot.override {
     measuredBoot = measuredBoot.enable;
     verifiedBoot = verifiedBoot.enable;
     verifiedBootPublicKey = verifiedBoot.publicKey;
