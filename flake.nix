@@ -31,8 +31,8 @@
         nixpkgs.lib.foldAttrs (curr: acc: acc // curr) { } (map (b: extend b baseConfig) [ "bls" "grub" "extlinux" ]);
       overlays.default = final: prev: {
         wolftpm = prev.callPackage ./wolftpm.nix { };
-        tinyboot = prev.callPackage ./tinyboot { };
-        tinyboot-client = prev.callPackage ./tinyboot { clientOnly = true; };
+        tinyboot = prev.pkgsStatic.pkgsMusl.callPackage ./tinyboot { };
+        tinyboot-client = prev.pkgsStatic.pkgsMusl.callPackage ./tinyboot { clientOnly = true; };
         coreboot = prev.callPackage ./boards {
           buildFitImage = prev.callPackage ./fitimage { };
           buildCoreboot = prev.callPackage ./coreboot.nix { flashrom = prev.callPackage ./flashrom.nix { }; };

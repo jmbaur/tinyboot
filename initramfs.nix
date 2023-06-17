@@ -7,7 +7,7 @@
 , lib
 , makeInitrdNG
 , busybox
-, buildEnv
+, tinyboot
 , pkgsStatic
 , writeScript
 , writeText
@@ -20,7 +20,7 @@ let
     extraConfig = lib.concatLines (map (lib.replaceStrings [ "=" ] [ " " ])
       (lib.filter (lib.hasPrefix "CONFIG") (lib.splitString "\n" (builtins.readFile ./busybox.config))));
   });
-  tinyboot = pkgsStatic.pkgsMusl.tinyboot.override {
+  myTinyboot = tinyboot.override {
     measuredBoot = measuredBoot.enable;
     verifiedBoot = verifiedBoot.enable;
     verifiedBootPublicKey = verifiedBoot.publicKey;
@@ -68,9 +68,9 @@ in
 makeInitrdNG {
   compressor = "xz";
   contents = [
-    { object = "${tinyboot}/bin/tbootui"; symlink = "/bin/tbootui"; }
-    { object = "${tinyboot}/bin/tbootd"; symlink = "/bin/tbootd"; }
-    { object = "${tinyboot}/bin/tbootctl"; symlink = "/bin/tbootctl"; }
+    { object = "${myTinyboot}/bin/tbootui"; symlink = "/bin/tbootui"; }
+    { object = "${myTinyboot}/bin/tbootd"; symlink = "/bin/tbootd"; }
+    { object = "${myTinyboot}/bin/tbootctl"; symlink = "/bin/tbootctl"; }
     { object = "${myBusybox}/bin/busybox"; symlink = "/bin/busybox"; }
     { object = "${myBusybox}/bin/busybox"; symlink = "/bin/sh"; }
     { object = "${myBusybox}/bin/busybox"; symlink = "/init"; }
