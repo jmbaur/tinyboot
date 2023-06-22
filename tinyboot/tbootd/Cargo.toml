@@ -9,12 +9,12 @@ measured-boot = []
 verified-boot = []
 
 [build-dependencies]
-bindgen = { version = "0.65.1" }
+bindgen = "0.66.1"
 
 [dependencies]
 anyhow = "1.0.71"
 bytes = "1.4.0"
-clap = { version = "4.3.4", features = ["derive"] }
+clap = { version = "4.3.5", features = ["derive"] }
 futures = "0.3.28"
 hex = "0.4.3"
 kobject-uevent = "0.1.0"
@@ -22,7 +22,7 @@ log = "0.4.19"
 netlink-sys = { version = "0.8.5" }
 nix = "0.26.2"
 sha2 = "0.10.7"
-syscalls = "0.6.12"
+syscalls = "0.6.13"
 tboot = { path = "../tboot" }
 thiserror = "1.0.40"
 tokio = { version = "1.28.2", features = ["full"] }

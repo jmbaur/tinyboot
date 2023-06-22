@@ -104,7 +104,6 @@ pub fn verify(
 
 #[cfg(test)]
 mod tests {
-    use mktemp::Temp;
     use std::{fs, path::PathBuf};
 
     const PRIVATE_KEY: &str = r#"-----BEGIN PRIVATE KEY-----
@@ -118,7 +117,7 @@ MCowBQYDK2VwAyEAKPiHYO0He9hagQI1wwRes0y5P79JF4FDhkq890Uhobs=
     // TODO(jared): don't write to filesystem
     #[test]
     fn test_sign_and_verify() {
-        let temp_file = Temp::new_file().unwrap();
+        let temp_file = PathBuf::from("/tmp/foobar");
         fs::write(temp_file.as_path(), "foobar").unwrap();
         super::sign(
             PRIVATE_KEY,
@@ -132,5 +131,12 @@ MCowBQYDK2VwAyEAKPiHYO0He9hagQI1wwRes0y5P79JF4FDhkq890Uhobs=
             PathBuf::from(format!("{}.sig", temp_file.as_path().to_str().unwrap())),
         )
         .expect("verify failed");
+
+        fs::remove_file(PathBuf::from(format!(
+            "{}.sig",
+            temp_file.as_path().to_str().unwrap()
+        )))
+        .unwrap();
+        fs::remove_file(temp_file).unwrap();
     }
 }
