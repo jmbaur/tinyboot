@@ -20,6 +20,7 @@ use nix::{
 };
 use sha2::{Digest, Sha256};
 use std::{
+    collections::VecDeque,
     path::Path,
     process,
     sync::{
@@ -50,6 +51,8 @@ async fn handle_client(
 
     let mut streaming = false;
 
+    let mut unsent_events: VecDeque<Response> = VecDeque::new();
+
     loop {
         tokio::select! {
             Some(Ok(req)) = stream.next() => {
@@ -57,6 +60,9 @@ async fn handle_client(
                     _ = sink.send(Response::Pong).await;
                 } else if req == Request::StartStreaming {
                     streaming = true;
+                    while let Some(msg) = unsent_events.pop_front() {
+                         _ = sink.send(msg).await;
+                    }
                 } else if req == Request::StopStreaming {
                     streaming = false;
                 } else {
@@ -64,11 +70,11 @@ async fn handle_client(
                 }
             }
             Ok(msg) = client_rx.recv() => {
-                match msg {
-                    Response::NewDevice(_) | Response::TimeLeft(_) if !streaming => {
-                        // don't send these responses if the client is not streaming
-                    },
-                    msg => _ = sink.send(msg).await,
+                if !streaming && matches!(msg, Response::NewDevice(_) | Response::TimeLeft(_)) {
+                    // don't send these responses if the client is not streaming
+                    unsent_events.push_back(msg);
+                } else {
+                    _ = sink.send(msg).await;
                 }
             }
             else => break,
