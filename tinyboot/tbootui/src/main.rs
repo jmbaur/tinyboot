@@ -6,9 +6,9 @@ use log::{debug, error, LevelFilter};
 use nix::libc;
 use ratatui::{
     backend::TermionBackend,
-    layout::{Constraint, Layout},
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Style},
-    widgets::{Block, List, ListItem, ListState, Paragraph},
+    widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph},
     Terminal,
 };
 use std::{io, process::Command, time::Duration};
@@ -22,6 +22,12 @@ use termion::{event::Key, input::TermRead, raw::IntoRawMode, screen::IntoAlterna
 use tokio::{net::UnixStream, sync::mpsc};
 use tokio_serde_cbor::Codec;
 use tokio_util::codec::{Decoder, Framed};
+
+const HELP: &str = r#"<s> Shell
+<p> Poweroff
+<r> Reboot
+<e> Edit entry
+<Enter> Select entry"#;
 
 struct Device {
     pub state: ListState,
@@ -162,6 +168,7 @@ async fn run_client(
 
         terminal.clear()?;
 
+        let mut show_help = false;
         let mut time_left = None::<Duration>;
 
         let (tx, mut rx) = mpsc::channel::<Key>(200);
@@ -236,6 +243,14 @@ async fn run_client(
                     let timeout = Paragraph::new(format!("Boot in {}s", time_left.as_secs()));
                     frame.render_widget(timeout, chunks[1]);
                 }
+
+                if show_help {
+                    let paragraph =
+                        Paragraph::new(HELP).block(Block::default().borders(Borders::ALL));
+                    let area = centered_rect(50, 50, frame.size());
+                    frame.render_widget(Clear, area); //this clears out the background
+                    frame.render_widget(paragraph, area);
+                }
             })?;
 
             tokio::select! {
@@ -247,25 +262,27 @@ async fn run_client(
                     }
 
                     match key {
-                        Key::Char('j') | Key::Ctrl('n') | Key::Down => devs.next(),
-                        Key::Char('k') | Key::Ctrl('p') | Key::Up => devs.prev(),
-                        Key::Char('\n') => {
+                        Key::Char('?') | Key::Char('h') => show_help = !show_help,
+                        Key::Esc | Key::Char('[') => show_help = false,
+                        Key::Char('j') | Key::Ctrl('n') | Key::Down if !show_help => devs.next(),
+                        Key::Char('k') | Key::Ctrl('p') | Key::Up if !show_help => devs.prev(),
+                        Key::Char('\n') if !show_help => {
                             if let Some(dev) = devs.selected.and_then(|selected| devs.devices.get(selected)) {
                                 if let Some(entry) = dev.state.selected().and_then(|selected| dev.device.boot_entries.get(selected)) {
                                      _ = sink.send(Request::Boot(entry.clone())).await;
                                 }
                             }
                         },
-                        Key::Char('s') => break 'inner BreakType::ExitToShell,
-                        Key::Char('e') => {
+                        Key::Char('s') if !show_help => break 'inner BreakType::ExitToShell,
+                        Key::Char('e') if !show_help => {
                             if let Some(dev) = devs.selected.and_then(|selected| devs.devices.get(selected)) {
                                 if let Some(entry) = dev.state.selected().and_then(|selected| dev.device.boot_entries.get(selected)) {
                                     break 'inner BreakType::Edit(entry.clone());
                                 }
                             }
                         },
-                        Key::Char('r') => sink.send(Request::Reboot).await?,
-                        Key::Char('p') => sink.send(Request::Poweroff).await?,
+                        Key::Char('r') if !show_help => sink.send(Request::Reboot).await?,
+                        Key::Char('p') if !show_help => sink.send(Request::Poweroff).await?,
                         _ => {}
                     }
                 }
@@ -339,6 +356,34 @@ fn fix_zero_size_terminal() -> io::Result<()> {
     }
 
     Ok(())
+}
+
+/// NOTE: from ratatui examples/popup.rs
+/// helper function to create a centered rect using up certain percentage of the available rect `r`
+fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
+    let popup_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(
+            [
+                Constraint::Percentage((100 - percent_y) / 2),
+                Constraint::Percentage(percent_y),
+                Constraint::Percentage((100 - percent_y) / 2),
+            ]
+            .as_ref(),
+        )
+        .split(r);
+
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints(
+            [
+                Constraint::Percentage((100 - percent_x) / 2),
+                Constraint::Percentage(percent_x),
+                Constraint::Percentage((100 - percent_x) / 2),
+            ]
+            .as_ref(),
+        )
+        .split(popup_layout[1])[1]
 }
 
 #[tokio::main]
