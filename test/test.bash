@@ -23,7 +23,7 @@ fi
 
 @qemu@ @qemuFlags@ \
 	-smp 2 \
-	-m 2G \
+	-m 4G \
 	-bios @corebootROM@/coreboot.rom \
 	-nographic \
 	-netdev user,id=n1 -device virtio-net-pci,netdev=n1 \
