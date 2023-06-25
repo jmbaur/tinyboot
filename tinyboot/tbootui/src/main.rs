@@ -241,6 +241,7 @@ async fn run_client(
 
                 if let Some(time_left) = time_left {
                     let timeout = Paragraph::new(format!("Boot in {}s", time_left.as_secs()));
+                    frame.render_widget(Clear, chunks[1]);
                     frame.render_widget(timeout, chunks[1]);
                 }
 
@@ -248,7 +249,7 @@ async fn run_client(
                     let paragraph =
                         Paragraph::new(HELP).block(Block::default().borders(Borders::ALL));
                     let area = centered_rect(50, 50, frame.size());
-                    frame.render_widget(Clear, area); //this clears out the background
+                    frame.render_widget(Clear, area);
                     frame.render_widget(paragraph, area);
                 }
             })?;

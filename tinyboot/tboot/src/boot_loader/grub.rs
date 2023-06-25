@@ -84,6 +84,7 @@ impl From<clap::error::Error> for GrubEnvironmentError {
 
 pub struct TinybootGrubEnvironment {
     env: HashMap<String, String>,
+    scope: Option<HashMap<String, String>>,
 }
 
 // https://www.gnu.org/software/grub/manual/grub/grub.html#search
@@ -131,7 +132,7 @@ impl TinybootGrubEnvironment {
 
         debug!("creating new tinyboot grub environment: {env:?}");
 
-        Self { env }
+        Self { env, scope: None }
     }
 
     // TODO(jared): the docs mention being able to load multiple initrds, we need to support that
@@ -152,7 +153,11 @@ impl TinybootGrubEnvironment {
         let initrd = initrd.replace(|c| matches!(c, '(' | ')'), "");
 
         debug!("setting 'initrd' to '{}'", initrd);
-        self.env.insert("initrd".to_string(), initrd);
+        if let Some(scope) = &mut self.scope {
+            scope.insert("initrd".to_string(), initrd);
+        } else {
+            self.env.insert("initrd".to_string(), initrd);
+        }
 
         Ok(())
     }
@@ -170,7 +175,11 @@ impl TinybootGrubEnvironment {
         };
 
         debug!("setting 'linux' to '{}'", kernel);
-        self.env.insert("linux".to_string(), kernel.to_string());
+        if let Some(scope) = &mut self.scope {
+            scope.insert("linux".to_string(), kernel.to_string());
+        } else {
+            self.env.insert("linux".to_string(), kernel.to_string());
+        }
 
         let mut cmdline = Vec::new();
         for next in args {
@@ -179,7 +188,11 @@ impl TinybootGrubEnvironment {
         let cmdline = cmdline.join(" ");
 
         debug!("setting 'linux_cmdline' to '{}'", cmdline);
-        self.env.insert("linux_cmdline".to_string(), cmdline);
+        if let Some(scope) = &mut self.scope {
+            scope.insert("linux_cmdline".to_string(), cmdline);
+        } else {
+            self.env.insert("linux_cmdline".to_string(), cmdline);
+        }
 
         Ok(())
     }
@@ -420,15 +433,26 @@ impl GrubEnvironment for TinybootGrubEnvironment {
             "setting env '{key}' to '{}'",
             val.as_deref().unwrap_or_default()
         );
-        if let Some(val) = val {
+
+        if let Some(scope_env) = &mut self.scope {
+            if let Some(val) = val {
+                scope_env.insert(key, val);
+            } else {
+                scope_env.remove(&key);
+            }
+        } else if let Some(val) = val {
             self.env.insert(key, val);
         } else {
             self.env.remove(&key);
         }
     }
 
-    fn get_env(&self, _key: &str) -> Option<&String> {
-        self.env.get(_key)
+    fn get_env(&self, key: &str) -> Option<&String> {
+        if let Some(scope_env) = &self.scope {
+            scope_env.get(key)
+        } else {
+            self.env.get(key)
+        }
     }
 
     fn run_command(&mut self, command: String, args_wo_command: Vec<String>) -> u8 {
@@ -461,6 +485,14 @@ impl GrubEnvironment for TinybootGrubEnvironment {
 
         debug!("command '{command}' exited with code {exit_code}");
         exit_code
+    }
+
+    fn make_scope(&mut self) {
+        self.scope = Some(self.env.clone());
+    }
+
+    fn delete_scope(&mut self) {
+        self.scope = None;
     }
 }
 

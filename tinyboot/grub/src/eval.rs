@@ -5,7 +5,7 @@ use crate::{
         Parser, ParserError, Statement, WhileStatement,
     },
 };
-use std::{collections::HashMap, io, path::Path, time::Duration};
+use std::{collections::HashMap, io, path::PathBuf, time::Duration};
 
 #[derive(thiserror::Error, Debug)]
 pub enum EvalError {
@@ -125,6 +125,12 @@ pub trait GrubEnvironment {
 
     /// Get an enviroment variable (Mostly for being able to expand interpolated values).
     fn get_env(&self, key: &str) -> Option<&String>;
+
+    /// Make a new scope for use within a grub entry.
+    fn make_scope(&mut self);
+
+    /// Delete a grub entry scope.
+    fn delete_scope(&mut self);
 }
 
 /// MenuEntry is a target that can be selected by a user to boot into or expand into more entries
@@ -404,7 +410,7 @@ where
     pub fn eval_grub_entry(
         &mut self,
         entry: &GrubEntry,
-    ) -> Result<(&Path, &Path, &str), EvalError> {
+    ) -> Result<(PathBuf, Option<PathBuf>, Option<String>), EvalError> {
         let Some(consequence) = &entry.consequence else {
             return Err(EvalError::Eval("not a boot entry".to_string()));
         };
@@ -413,20 +419,21 @@ where
         // https://www.gnu.org/software/grub/manual/grub/html_node/menuentry.html
         self.env.set_env("chosen".to_string(), entry.id.to_owned());
 
+        self.env.make_scope();
+
         self.eval(consequence.to_vec())?;
-        let linux = self
-            .env
-            .get_env("linux")
-            .ok_or_else(|| EvalError::Eval("no linux found".to_string()))?;
-        let initrd = self
-            .env
-            .get_env("initrd")
-            .ok_or_else(|| EvalError::Eval("no initrd found".to_string()))?;
-        let cmdline = self
-            .env
-            .get_env("linux_cmdline")
-            .ok_or_else(|| EvalError::Eval("no cmdline found".to_string()))?;
-        Ok((Path::new(linux), Path::new(initrd), cmdline.as_str()))
+
+        let linux = PathBuf::from(
+            self.env
+                .get_env("linux")
+                .ok_or_else(|| EvalError::Eval("no linux found".to_string()))?,
+        );
+        let initrd = self.env.get_env("initrd").map(PathBuf::from);
+        let cmdline = self.env.get_env("linux_cmdline").map(String::from);
+
+        self.env.delete_scope();
+
+        Ok((linux, initrd, cmdline))
     }
 }
 
@@ -454,6 +461,10 @@ mod tests {
         fn get_env(&self, _key: &str) -> Option<&String> {
             self.env.get(_key)
         }
+
+        fn make_scope(&mut self) {}
+
+        fn delete_scope(&mut self) {}
     }
 
     #[test]

@@ -1,11 +1,11 @@
-{ debug, ttys, nameservers, measuredBoot, verifiedBoot, extraInit, extraInittab, lib, makeInitrdNG, ncurses, pkgsStatic, writeScript, writeText }:
+{ debug, ttys, nameservers, measuredBoot, verifiedBoot, extraInit, extraInittab, lib, makeInitrdNG, ncurses, pkgsStatic, tinyboot, writeScript, writeText }:
 let
   myBusybox = (pkgsStatic.busybox.override {
-    enableMinimal = true;
-    extraConfig = lib.concatLines (map (lib.replaceStrings [ "=" ] [ " " ])
-      (lib.filter (lib.hasPrefix "CONFIG") (lib.splitString "\n" (builtins.readFile ./busybox.config))));
+    enableMinimal = false;
+    # extraConfig = lib.concatLines (map (lib.replaceStrings [ "=" ] [ " " ])
+    #   (lib.filter (lib.hasPrefix "CONFIG") (lib.splitString "\n" (builtins.readFile ./busybox.config))));
   });
-  myTinyboot = pkgsStatic.tinyboot.override {
+  myTinyboot = tinyboot.override {
     measuredBoot = measuredBoot.enable;
     verifiedBoot = verifiedBoot.enable;
     verifiedBootPublicKey = verifiedBoot.publicKey;

@@ -351,29 +351,25 @@ pub fn find_grub(
                 .unwrap_or(mount)
                 .to_path_buf();
 
-            let Ok((kernel, initrd, cmdline)) = evaluator.eval_grub_entry(&grub_entry) else {
-                return None;
-            };
+            let (kernel, initrd, cmdline) = evaluator.eval_grub_entry(&grub_entry).ok()?;
 
             let linux = if kernel.starts_with("/mnt") {
-                kernel.to_path_buf()
+                kernel
             } else {
-                let kernel = kernel.to_path_buf();
                 let mut linux = root.clone();
                 linux.push(kernel.strip_prefix("/").unwrap_or(&kernel));
                 linux
             };
 
-            let initrd = if initrd.starts_with("/mnt") {
-                Some(initrd.to_path_buf())
-            } else {
-                let initrd = initrd.to_path_buf();
-                let mut final_initrd = root;
-                final_initrd.push(initrd.strip_prefix("/").unwrap_or(&initrd));
-                Some(final_initrd)
-            };
-
-            let cmdline = Some(cmdline.to_string());
+            let initrd = initrd.map(|initrd| {
+                if initrd.starts_with("/mnt") {
+                    initrd
+                } else {
+                    let mut final_initrd = root;
+                    final_initrd.push(initrd.strip_prefix("/").unwrap_or(&initrd));
+                    final_initrd
+                }
+            });
 
             let is_default = 'block: {
                 if let Some(default_id) = evaluator.get_env("default") {
