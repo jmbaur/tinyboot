@@ -369,7 +369,7 @@ async fn main() -> anyhow::Result<()> {
                 libc::reboot(libc::LINUX_REBOOT_CMD_POWER_OFF);
             },
             Err(e) => error!("failed to prepare boot: {e}"),
-            Ok(_) => kexec_execute().unwrap(),
+            Ok(()) => kexec_execute().unwrap(),
         }
     }
 }
