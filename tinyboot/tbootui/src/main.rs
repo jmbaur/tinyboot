@@ -203,21 +203,11 @@ async fn run_client(
                     .split(frame.size());
 
                 if num_of_lists > 0 {
-                    let num_of_options = devs
-                        .devices
-                        .iter()
-                        .fold(0usize, |n, d| n + d.device.boot_entries.len());
-
                     let chunks = Layout::default()
                         .constraints(
                             devs.devices
                                 .iter()
-                                .map(|d| {
-                                    Constraint::Ratio(
-                                        d.device.boot_entries.len() as u32,
-                                        num_of_options as u32,
-                                    )
-                                })
+                                .map(|d| Constraint::Length(d.device.boot_entries.len() as u16 + 2))
                                 .collect::<Vec<Constraint>>(),
                         )
                         .split(chunks[0]);
