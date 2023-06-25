@@ -236,7 +236,7 @@ async fn run_client(
                         frame.render_stateful_widget(list, chunks[i], &mut dev.state);
                     }
                 } else {
-                    frame.render_widget(Paragraph::new("no boot devices"), chunks[1]);
+                    frame.render_widget(Paragraph::new("no boot devices"), chunks[0]);
                 }
 
                 if let Some(time_left) = time_left {

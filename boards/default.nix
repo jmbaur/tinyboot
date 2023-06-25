@@ -80,7 +80,7 @@ lib.mapAttrs
         inherit (finalConfig.config.coreboot) configFile extraConfig;
         meta = { inherit (finalConfig.config) platforms; };
       };
-      linux = pkgs.callPackage ../kernel.nix { inherit (finalConfig.config.kernel) basePackage configFile; };
+      linux = pkgs.callPackage ../linux.nix { inherit (finalConfig.config.kernel) basePackage configFile; };
       initrd = pkgs.callPackage ../initramfs.nix { inherit (finalConfig.config.tinyboot) measuredBoot verifiedBoot debug ttys nameservers extraInit extraInittab; };
       fitImage = buildFitImage { inherit board linux initrd; inherit (finalConfig.config.kernel) dtb dtbPattern; };
     in

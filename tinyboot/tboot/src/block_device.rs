@@ -160,13 +160,17 @@ impl TryFrom<UEvent> for BlockDevice {
                     boot_entries
                 });
 
-        Ok(BlockDevice {
-            name,
-            removable,
-            partition_mounts,
-            boot_entries,
-            timeout,
-        })
+        if boot_entries.is_empty() {
+            anyhow::bail!("no boot entries");
+        } else {
+            Ok(BlockDevice {
+                name,
+                removable,
+                partition_mounts,
+                boot_entries,
+                timeout,
+            })
+        }
     }
 }
 

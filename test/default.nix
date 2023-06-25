@@ -2,7 +2,7 @@
 let
   qemuFlags = toString (builtins.getAttr stdenv.hostPlatform.qemuArch {
     x86_64 = [ "-M q35" ] ++ lib.optional (stdenv.hostPlatform == stdenv.buildPlatform) "-enable-kvm";
-    aarch64 = [ "-M virt,secure=on,virtualization=on" "-cpu cortex-a53" ]; # kvm not available with machine settings secure=on
+    aarch64 = [ "-M virt,secure=on" "-cpu cortex-a53" ]; # kvm not available with machine settings secure=on
   });
   corebootROM = coreboot."qemu-${stdenv.hostPlatform.qemuArch}";
 in

@@ -18,7 +18,7 @@ stdenv.mkDerivation {
   preBuild = ''
     makeFlagsArray+=("-j$NIX_BUILD_CORES")
   '';
-  buildFlags = [ stdenv.hostPlatform.linux-kernel.target ];
+  buildFlags = [ "DTC_FLAGS=-@" "KBUILD_BUILD_VERSION=1-TinyBoot" stdenv.hostPlatform.linux-kernel.target ];
   preInstall =
     let
       installkernel = buildPackages.writeShellScriptBin "installkernel" ''
@@ -29,4 +29,8 @@ stdenv.mkDerivation {
       export HOME=${installkernel}
     '';
   installFlags = [ "INSTALL_PATH=$(out)" ] ++ lib.optionals stdenv.hostPlatform.isAarch [ "dtbs_install" "INSTALL_DTBS_PATH=$(out)/dtbs" ];
+  postInstall = ''
+    cp .config $out/config
+    cp vmlinux $out/vmlinux
+  '';
 }
