@@ -8,6 +8,7 @@ stdenv.mkDerivation rec {
     rev = "v${version}";
     hash = "sha256-HaQPMwzCvv1TqNE70d470y3HsYkQJFKYhtxtgFFXdco=";
   };
+  strictDeps = true;
   preConfigure = ''
     ./autogen.sh
   '';

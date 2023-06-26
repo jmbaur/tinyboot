@@ -22,14 +22,11 @@ if [[ ! -f nixos-@testName@.qcow2 ]]; then
 fi
 
 @qemu@ @qemuFlags@ \
-	-smp 2 \
-	-m 2G \
-	-bios @corebootROM@/coreboot.rom \
 	-nographic \
+	-smp 2 -m 2G \
+	-kernel @linux@/@kernelFile@ -initrd @initrd@/initrd \
 	-netdev user,id=n1 -device virtio-net-pci,netdev=n1 \
 	-device nec-usb-xhci,id=xhci -device usb-storage,bus=xhci.0,drive=stick,removable=true -drive if=none,id=stick,format=raw,file=nixos-@system@.iso \
 	-drive if=virtio,file=nixos-@testName@.qcow2,format=qcow2,media=disk \
 	-chardev socket,id=chrtpm,path=/tmp/mytpm1/swtpm-sock -tpmdev emulator,id=tpm0,chardev=chrtpm -device tpm-tis,tpmdev=tpm0 \
 	"$@"
-
-# -device virtio-vga

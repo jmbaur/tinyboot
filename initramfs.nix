@@ -1,44 +1,41 @@
-{ debug, ttys, nameservers, measuredBoot, verifiedBoot, extraInit, extraInittab, lib, makeInitrdNG, ncurses, pkgsStatic, tinyboot, writeScript, writeText }:
+{ debug, ttys, nameservers, measuredBoot, verifiedBoot, extraInit, extraInittab, lib, buildEnv, makeInitrdNG, ncurses, busybox, tinyboot, writeScript, writeText }:
 let
-  myBusybox = (pkgsStatic.busybox.override {
-    enableMinimal = false;
-    # extraConfig = lib.concatLines (map (lib.replaceStrings [ "=" ] [ " " ])
-    #   (lib.filter (lib.hasPrefix "CONFIG") (lib.splitString "\n" (builtins.readFile ./busybox.config))));
-  });
+  myBusybox = (busybox.override { enableStatic = true; }).overrideAttrs (_: { stripDebugFlags = [ "--strip-all" ]; });
   myTinyboot = tinyboot.override {
     measuredBoot = measuredBoot.enable;
     verifiedBoot = verifiedBoot.enable;
     verifiedBootPublicKey = verifiedBoot.publicKey;
   };
+  bin = buildEnv { name = "tinyboot-initrd-bin"; pathsToLink = [ "/bin" ]; paths = [ myBusybox myTinyboot ]; };
   staticResolvConf = writeText "resolv.conf.static" (lib.concatLines (map (n: "nameserver ${n}") nameservers));
   rcS = writeScript "rcS" (''
     #!/bin/sh
-    /bin/busybox mkdir -p /dev/pts /sys /proc /tmp /mnt
-    /bin/busybox mount -t proc proc /proc
-    /bin/busybox mount -t sysfs sysfs /sys
-    /bin/busybox mount -t tmpfs tmpfs /tmp
-    /bin/busybox mount -t devpts devpts /dev/pts
-    /bin/busybox ln -sf /proc/self/fd/0 /dev/stdin
-    /bin/busybox ln -sf /proc/self/fd/1 /dev/stdout
-    /bin/busybox ln -sf /proc/self/fd/2 /dev/stderr
-    /bin/busybox mdev -s
-    /bin/busybox mkdir -p /home/tinyuser /tmp/tinyboot
-    /bin/busybox chown -R tinyuser:tinygroup /home/tinyuser /tmp/tinyboot
-    /bin/busybox cat /etc/resolv.conf.static >/etc/resolv.conf
+    mkdir -p /dev/pts /sys /proc /tmp /mnt
+    mount -t proc proc /proc
+    mount -t sysfs sysfs /sys
+    mount -t tmpfs tmpfs /tmp
+    mount -t devpts devpts /dev/pts
+    ln -sf /proc/self/fd/0 /dev/stdin
+    ln -sf /proc/self/fd/1 /dev/stdout
+    ln -sf /proc/self/fd/2 /dev/stderr
+    mdev -s
+    mkdir -p /home/tinyuser /tmp/tinyboot
+    chown -R tinyuser:tinygroup /home/tinyuser /tmp/tinyboot
+    cat /etc/resolv.conf.static >/etc/resolv.conf
   '' + extraInit);
   inittab = writeText "inittab" (''
     ::sysinit:/etc/init.d/rcS
-    ::ctrlaltdel:/bin/busybox reboot
-    ::shutdown:/bin/busybox umount -ar -t ext4,vfat
+    ::ctrlaltdel:/bin/reboot
+    ::shutdown:/bin/umount -ar -t ext4,vfat
     ::restart:/init
-    ::respawn:/bin/busybox mdev -df
+    ::respawn:/bin/mdev -df
     ::respawn:/bin/tbootd --log-level=${if debug then "debug" else "info"}
   '' + (lib.concatLines (map (tty: "${tty}::respawn:/bin/tbootui") ttys)) + extraInittab);
   passwd = writeText "passwd" ''
     root:x:0:0:System administrator:/root:/bin/sh
     tinyuser:x:1000:1000:TinyUser:/home/tinyuser:/bin/sh
   '';
-  group = writeText "passwd" ''
+  group = writeText "group" ''
     root:x:0:
     tinygroup:x:1000:
   '';
@@ -55,11 +52,7 @@ in
 makeInitrdNG {
   compressor = "xz";
   contents = [
-    { object = "${myTinyboot}/bin/tbootui"; symlink = "/bin/tbootui"; }
-    { object = "${myTinyboot}/bin/tbootd"; symlink = "/bin/tbootd"; }
-    { object = "${myTinyboot}/bin/tbootctl"; symlink = "/bin/tbootctl"; }
-    { object = "${myBusybox}/bin/busybox"; symlink = "/bin/busybox"; }
-    { object = "${myBusybox}/bin/busybox"; symlink = "/bin/sh"; }
+    { object = "${bin}/bin"; symlink = "/bin"; }
     { object = "${myBusybox}/bin/busybox"; symlink = "/init"; }
     { object = "${ncurses}/share/terminfo/l/linux"; symlink = "/etc/terminfo/l/linux"; }
     { object = "${group}"; symlink = "/etc/group"; }

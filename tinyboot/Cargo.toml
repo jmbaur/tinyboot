@@ -4,4 +4,3 @@ members = ["tbootd", "tbootctl", "tbootui", "tboot", "grub"]
 [profile.release]
 lto = true
 opt-level = "z"
-strip = true

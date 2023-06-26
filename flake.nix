@@ -31,7 +31,7 @@
         nixpkgs.lib.foldAttrs (curr: acc: acc // curr) { } (map (b: extend b baseConfig) [ "bls" "grub" "extlinux" ]);
       overlays.default = final: prev: {
         wolftpm = prev.callPackage ./wolftpm.nix { };
-        tinyboot = prev.pkgsStatic.pkgsMusl.callPackage ./tinyboot { };
+        tinyboot = prev.pkgsStatic.callPackage ./tinyboot { };
         tinyboot-client = final.tinyboot.override { clientOnly = true; };
         coreboot = prev.callPackage ./boards {
           buildFitImage = prev.callPackage ./fitimage { };
@@ -54,8 +54,8 @@
               program =
                 let
                   myPkgs = if nixosSystem.config.nixpkgs.hostPlatform.system == system then pkgs else {
-                    x86_64-linux = myPkgs.pkgsCross.gnu64;
-                    aarch64-linux = myPkgs.pkgsCross.aarch64-multiplatform;
+                    x86_64-linux = pkgs.pkgsCross.gnu64;
+                    aarch64-linux = pkgs.pkgsCross.aarch64-multiplatform;
                   }.${nixosSystem.config.nixpkgs.hostPlatform.system};
                 in
                 toString (myPkgs.callPackage ./test { inherit testName; });
