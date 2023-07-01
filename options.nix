@@ -99,7 +99,7 @@ in
       };
       commandLine = lib.mkOption {
         type = lib.types.listOf lib.types.str;
-        default = [ "quiet" ];
+        default = [ ];
       };
       dtb = lib.mkOption {
         type = lib.types.nullOr lib.types.path;
