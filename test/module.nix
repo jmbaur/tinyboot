@@ -2,13 +2,13 @@
   imports = [ "${modulesPath}/profiles/qemu-guest.nix" ];
   boot.kernelParams = [ "console=${{ x86_64 = "ttyS0"; arm64 = "ttyAMA0"; }.${config.nixpkgs.hostPlatform.linuxArch}}" ];
   system.stateVersion = "23.05";
-  boot.loader.tinyboot.privateKey = ./keys/privkey;
-  environment.etc.tboot-pubkey.source = ./keys/pubkey;
+  environment.etc."keys/x509_ima.der".source = ./keys/x509_ima.der;
   environment.systemPackages = [ pkgs.tinyboot-client ];
   specialisation.alternate.configuration.boot.kernelParams = [ "console=tty1" ]; # to provide more menu options
   boot.growPartition = true;
   boot.loader.timeout = lib.mkDefault 15;
   boot.loader.efi.canTouchEfiVariables = false;
+  boot.loader.grub.device = lib.mkVMOverride "/dev/vda";
   users.users.root.password = "";
   fileSystems."/boot" = {
     device = "/dev/disk/by-label/ESP";

@@ -18,7 +18,10 @@
         let
           baseConfig = forAllSystems ({ system, ... }: {
             imports = [
-              ({ nixpkgs.hostPlatform = system; })
+              ({
+                nixpkgs.hostPlatform = system;
+                tinyboot.board = { x86_64-linux = "qemu-x86_64"; aarch64-linux = "qemu-aarch64"; }.${system};
+              })
               self.nixosModules.default
               ./test/module.nix
             ];
@@ -30,19 +33,14 @@
         in
         nixpkgs.lib.foldAttrs (curr: acc: acc // curr) { } (map (b: extend b baseConfig) [ "bls" "grub" "extlinux" ]);
       overlays.default = final: prev: {
-        wolftpm = prev.callPackage ./wolftpm.nix { };
         tinyboot = prev.pkgsStatic.callPackage ./tinyboot { };
         tinyboot-client = final.tinyboot.override { clientOnly = true; };
-        coreboot = prev.callPackage ./boards {
-          buildFitImage = prev.callPackage ./fitimage { };
-          buildCoreboot = prev.callPackage ./coreboot.nix { flashrom = prev.callPackage ./flashrom.nix { }; };
-        };
+        coreboot = prev.callPackage ./boards { };
       };
       devShells = forAllSystems ({ pkgs, ... }: {
         default = with pkgs; mkShell {
           inputsFrom = [ tinyboot ];
           nativeBuildInputs = [ rustPlatform.bindgenHook bashInteractive grub2 cargo-insta rustfmt cargo-watch cargo-edit clippy ];
-          VERIFIED_BOOT_PUBLIC_KEY = ./test/keys/pubkey;
         };
       });
       legacyPackages = forAllSystems ({ pkgs, ... }: pkgs);

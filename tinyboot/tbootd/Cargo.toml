@@ -5,7 +5,6 @@ edition = "2021"
 
 [features]
 default = []
-measured-boot = []
 verified-boot = []
 
 [build-dependencies]
@@ -14,17 +13,15 @@ bindgen = "0.66.1"
 [dependencies]
 anyhow = "1.0.71"
 bytes = "1.4.0"
-clap = { version = "4.3.8", features = ["derive"] }
+clap = { version = "4.3.10", features = ["derive"] }
 futures = "0.3.28"
-hex = "0.4.3"
 kobject-uevent = "0.1.0"
 log = "0.4.19"
-netlink-sys = { version = "0.8.5" }
+netlink-sys = "0.8.5"
 nix = "0.26.2"
-sha2 = "0.10.7"
 syscalls = "0.6.13"
 tboot = { path = "../tboot" }
 thiserror = "1.0.40"
-tokio = { version = "1.28.2", features = ["full"] }
+tokio = { version = "1.29.1", features = ["full"] }
 tokio-serde-cbor = "0.7.0"
 tokio-util = "0.7.8"

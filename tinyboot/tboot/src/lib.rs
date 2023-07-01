@@ -1,7 +1,6 @@
 pub mod block_device;
 pub mod boot_loader;
 pub mod fs;
-pub mod hash;
 pub mod linux;
 pub mod log;
 pub mod message;

@@ -1,6 +1,8 @@
-{ basePackage, configFile, lib, stdenv, buildPackages }:
+{ linuxKernel, basePackage ? linuxKernel.kernels.linux_6_1, configFile, extraConfig, lib, stdenv, buildPackages }:
 stdenv.mkDerivation {
   inherit (basePackage) pname version src buildInputs nativeBuildInputs depsBuildBuild;
+  inherit extraConfig;
+  passAsFile = [ "extraConfig" ];
   makeFlags = [
     "CC=${stdenv.cc}/bin/${stdenv.cc.targetPrefix}cc"
     "HOSTCC=${buildPackages.stdenv.cc}/bin/${buildPackages.stdenv.cc.targetPrefix}cc"
@@ -12,6 +14,7 @@ stdenv.mkDerivation {
     runHook preConfigure
     make ARCH=${stdenv.hostPlatform.linuxArch} tinyconfig
     cat ${configFile} >> .config
+    cat $extraConfigPath >> .config
     make ARCH=${stdenv.hostPlatform.linuxArch} olddefconfig
     runHook postConfigure
   '';
@@ -29,8 +32,4 @@ stdenv.mkDerivation {
       export HOME=${installkernel}
     '';
   installFlags = [ "INSTALL_PATH=$(out)" ] ++ lib.optionals stdenv.hostPlatform.isAarch [ "dtbs_install" "INSTALL_DTBS_PATH=$(out)/dtbs" ];
-  postInstall = ''
-    cp .config $out/config
-    cp vmlinux $out/vmlinux
-  '';
 }

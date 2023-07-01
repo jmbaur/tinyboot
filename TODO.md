@@ -1,3 +1,6 @@
+- move client connection to outside of disk boot phase (a client can be
+  connected to the server regardless of where we are trying to boot from, e.g.
+  the network)
 - respond to kobject uevent Add and Remove events, don't just assume it is
   always add
 - better bootloader interface

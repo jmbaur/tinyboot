@@ -15,7 +15,7 @@ use std::{io, process::Command, time::Duration};
 use tboot::{
     block_device::BlockDevice,
     linux::LinuxBootEntry,
-    message::{ClientCodec, Request, Response},
+    message::{ClientCodec, Request, Response, ServerError},
 };
 use tbootui::edit;
 use termion::{event::Key, input::TermRead, raw::IntoRawMode, screen::IntoAlternateScreen};
@@ -28,6 +28,8 @@ const HELP: &str = r#"<s> Shell
 <r> Reboot
 <e> Edit entry
 <Enter> Select entry"#;
+
+const POPUP_FOOTER: &str = r#"press any key to exit"#;
 
 struct Device {
     pub state: ListState,
@@ -168,7 +170,7 @@ async fn run_client(
 
         terminal.clear()?;
 
-        let mut show_help = false;
+        let mut popup = None::<&str>;
         let mut time_left = None::<Duration>;
 
         let (tx, mut rx) = mpsc::channel::<Key>(200);
@@ -235,9 +237,9 @@ async fn run_client(
                     frame.render_widget(timeout, chunks[1]);
                 }
 
-                if show_help {
-                    let paragraph =
-                        Paragraph::new(HELP).block(Block::default().borders(Borders::ALL));
+                if let Some(popup_msg) = popup {
+                    let paragraph = Paragraph::new(format!("{}\n\n{}", popup_msg, POPUP_FOOTER))
+                        .block(Block::default().borders(Borders::ALL));
                     let area = centered_rect(50, 50, frame.size());
                     frame.render_widget(Clear, area);
                     frame.render_widget(paragraph, area);
@@ -249,38 +251,49 @@ async fn run_client(
                     if !recorded_user_interaction {
                         sink.send(Request::UserIsPresent).await?;
                         recorded_user_interaction = true;
-                        time_left = None;
+                    }
+
+                    // allow for acknowledging popup with any key
+                    if popup.is_some() {
+                        popup = None;
+                        continue;
                     }
 
                     match key {
-                        Key::Char('?') | Key::Char('h') => show_help = !show_help,
-                        Key::Esc | Key::Char('[') => show_help = false,
-                        Key::Char('j') | Key::Ctrl('n') | Key::Down if !show_help => devs.next(),
-                        Key::Char('k') | Key::Ctrl('p') | Key::Up if !show_help => devs.prev(),
-                        Key::Char('\n') if !show_help => {
+                        Key::Char('?') | Key::Char('h') => popup = Some(HELP),
+                        Key::Char('j') | Key::Ctrl('n') | Key::Down => devs.next(),
+                        Key::Char('k') | Key::Ctrl('p') | Key::Up => devs.prev(),
+                        Key::Char('\n') => {
                             if let Some(dev) = devs.selected.and_then(|selected| devs.devices.get(selected)) {
                                 if let Some(entry) = dev.state.selected().and_then(|selected| dev.device.boot_entries.get(selected)) {
                                      _ = sink.send(Request::Boot(entry.clone())).await;
                                 }
                             }
                         },
-                        Key::Char('s') if !show_help => break 'inner BreakType::ExitToShell,
-                        Key::Char('e') if !show_help => {
+                        Key::Char('s') => break 'inner BreakType::ExitToShell,
+                        Key::Char('e') => {
                             if let Some(dev) = devs.selected.and_then(|selected| devs.devices.get(selected)) {
                                 if let Some(entry) = dev.state.selected().and_then(|selected| dev.device.boot_entries.get(selected)) {
                                     break 'inner BreakType::Edit(entry.clone());
                                 }
                             }
                         },
-                        Key::Char('r') if !show_help => sink.send(Request::Reboot).await?,
-                        Key::Char('p') if !show_help => sink.send(Request::Poweroff).await?,
+                        Key::Char('r') => sink.send(Request::Reboot).await?,
+                        Key::Char('p') => sink.send(Request::Poweroff).await?,
                         _ => {}
                     }
                 }
                 Some(Ok(msg)) = stream.next() => {
                     match msg {
                         Response::NewDevice(dev) => devs.add(dev),
-                        Response::TimeLeft(time) => time_left = Some(time),
+                        Response::TimeLeft(time) => time_left = time,
+                        Response::ServerError(error) => {
+                            popup = Some(match error {
+                                ServerError::ValidationFailed => "Validation of boot files failed",
+                                ServerError::Unknown => "Unknown error occurred",
+                            });
+
+                        }
                         Response::ServerDone => {
                             terminal.clear()?;
                             terminal.set_cursor(0, 0)?;

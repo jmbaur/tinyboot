@@ -11,7 +11,7 @@ swtpm socket --tpmstate dir=/tmp/mytpm1 \
 	--tpm2 &
 
 if [[ ! -f nixos-@system@.iso ]]; then
-	curl -L -o nixos-@system@.iso https://channels.nixos.org/nixos-22.11/latest-nixos-minimal-@system@.iso
+	curl -L -o nixos-@system@.iso https://channels.nixos.org/nixos-23.05/latest-nixos-minimal-@system@.iso
 fi
 
 if [[ ! -f nixos-@testName@.qcow2 ]]; then

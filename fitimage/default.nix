@@ -1,5 +1,5 @@
 { buildPackages, ... }:
-{ board, linux, initrd, dtb ? null, dtbPattern ? null, }:
+{ board ? null, linux, initrd, dtb ? null, dtbPattern ? null, }:
 let
   copyDtbs =
     if dtbPattern != null then ''
@@ -9,7 +9,7 @@ let
         rsync -a --include="*/" --include-from=- --exclude="*" ${linux}/dtbs/ dtbs/
     '' else "cp ${dtb} dtbs";
 in
-buildPackages.runCommand "fitimage-${board}"
+buildPackages.runCommand "fitimage-${if (board != null) then board else "unknown"}"
 { nativeBuildInputs = with buildPackages; [ rsync ubootTools dtc xz ]; }
   ''
     mkdir -p dtbs $out

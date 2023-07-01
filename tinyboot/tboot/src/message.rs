@@ -32,13 +32,20 @@ pub enum Request {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum ServerError {
+    ValidationFailed,
+    Unknown,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Response {
     Pong,
     NewDevice(BlockDevice),
-    TimeLeft(Duration),
+    TimeLeft(Option<Duration>),
     VerifiedBootFailure,
     ServerDone,
     ListBlockDevices(Vec<BlockDevice>),
+    ServerError(ServerError),
 }
 
 pub type ClientCodec = Codec<Response, Request>;

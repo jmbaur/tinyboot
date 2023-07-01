@@ -15,6 +15,6 @@ ratatui = { version = "0.21.0", default-features = false, features = [
 ] }
 tboot = { path = "../tboot" }
 termion = "2.0.1"
-tokio = { version = "1.28.2", features = ["full"] }
+tokio = { version = "1.29.1", features = ["full"] }
 tokio-serde-cbor = "0.7.0"
 tokio-util = "0.7.8"

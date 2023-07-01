@@ -12,21 +12,8 @@ pub struct TopLevel {
 
 #[derive(Subcommand)]
 pub enum TopLevelCommand {
-    VerifiedBoot(VerifiedBoot),
     Reboot,
     Poweroff,
-}
-
-#[derive(Args)]
-pub struct VerifiedBoot {
-    #[command(subcommand)]
-    pub command: VerifiedBootCommand,
-}
-
-#[derive(Subcommand)]
-pub enum VerifiedBootCommand {
-    Sign(SignCommand),
-    Verify(VerifyCommand),
 }
 
 #[derive(Args, Debug)]

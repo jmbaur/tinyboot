@@ -1,9 +1,6 @@
 pub(crate) mod block_device;
 pub(crate) mod boot_loader;
 pub(crate) mod message;
-pub(crate) mod tpm;
-pub(crate) mod verify;
-
 const TICK_DURATION: Duration = Duration::from_secs(1);
 
 use crate::{
@@ -18,9 +15,9 @@ use nix::{
     libc,
     unistd::{chown, Gid, Uid},
 };
-use sha2::{Digest, Sha256};
 use std::{
     collections::VecDeque,
+    io::ErrorKind,
     path::Path,
     process,
     sync::{
@@ -31,7 +28,7 @@ use std::{
 };
 use tboot::{
     linux::LinuxBootEntry,
-    message::{Request, Response, ServerCodec},
+    message::{Request, Response, ServerCodec, ServerError},
 };
 use tokio::{
     net::{UnixListener, UnixStream},
@@ -90,9 +87,9 @@ enum SelectEntryError {
     Poweroff,
     #[error("no default entry")]
     NoDefaultEntry,
-    #[error("io error")]
+    #[error("io error: {0}")]
     Io(tokio::io::Error),
-    #[error("nix")]
+    #[error("nix error: {0}")]
     Nix(nix::Error),
 }
 
@@ -121,6 +118,11 @@ async fn select_entry(
     let mut has_user_interaction = false; // can only be set to true, not back to false
     let mut timeout = Duration::from_secs(10);
 
+    // TODO(jared): do this cleanup elsewhere?
+    if Path::new(tboot::TINYBOOT_SOCKET).exists() {
+        tokio::fs::remove_file(tboot::TINYBOOT_SOCKET).await?;
+    }
+
     let listener = UnixListener::bind(tboot::TINYBOOT_SOCKET)?;
     chown(
         tboot::TINYBOOT_SOCKET,
@@ -141,6 +143,7 @@ async fn select_entry(
                     Request::Boot(entry) => return Ok(entry),
                     Request::UserIsPresent => {
                         has_user_interaction = true;
+                        _ = response_tx.send(Response::TimeLeft(None));
                     }
                     Request::Reboot => {
                         return Err(SelectEntryError::Reboot);
@@ -196,7 +199,7 @@ async fn select_entry(
 
                         // don't send TimeLeft response if timeout <= elapsed, this will panic
                         if !has_user_interaction && timeout > elapsed {
-                            _ = response_tx.send(Response::TimeLeft(timeout - elapsed));
+                            _ = response_tx.send(Response::TimeLeft(Some(timeout - elapsed)));
                         }
 
                         // Timeout has occurred without any user interaction
@@ -216,9 +219,9 @@ async fn select_entry(
 
 #[derive(thiserror::Error, Debug)]
 enum PrepareBootError {
-    #[error("failed to select entry")]
+    #[error("failed to select entry: {0}")]
     SelectEntry(SelectEntryError),
-    #[error("io")]
+    #[error("io error: {0}")]
     Io(std::io::Error),
 }
 
@@ -266,56 +269,16 @@ async fn prepare_boot(
     let cmdline = entry.cmdline.unwrap_or_default();
     let cmdline = cmdline.as_str();
 
-    let mut verification_failed = false;
-
-    let verified_digest = if cfg!(feature = "verified-boot") {
-        let key_digest = Sha256::digest(verify::PEM).to_vec();
-
-        let mut verify_errors = vec![verify::verify_boot_payload(linux)];
-        if let Some(initrd) = initrd {
-            verify_errors.push(verify::verify_boot_payload(initrd));
+    match kexec_load(linux, initrd, cmdline).await {
+        Ok(()) => _ = response_tx.send(Response::ServerDone),
+        Err(e) => {
+            _ = response_tx.send(Response::ServerError(match e.kind() {
+                ErrorKind::PermissionDenied => ServerError::ValidationFailed,
+                _ => ServerError::Unknown,
+            }));
+            return Err(PrepareBootError::Io(e));
         }
-
-        verification_failed = verify_errors.iter().any(|e| e.is_err());
-
-        if verification_failed {
-            verify_errors
-                .iter()
-                .filter_map(|e| if let Err(e) = e { Some(e) } else { None })
-                .for_each(|e| error!("Failed to verify boot payload: {}", e));
-
-            _ = response_tx.send(Response::VerifiedBootFailure);
-        } else {
-            info!("Verified boot artifacts");
-        }
-
-        Some(key_digest)
-    } else {
-        None
     };
-
-    kexec_load(linux, initrd, cmdline).await?;
-
-    if cfg!(feature = "measured-boot") && !verification_failed {
-        let kernel_digest = tboot::hash::sha256_digest_file(linux)?;
-        let initrd_digest = initrd.map(tboot::hash::sha256_digest_file).transpose()?;
-        let cmdline_digest = Sha256::digest(cmdline).to_vec();
-
-        match tpm::measure_boot(
-            verified_digest,
-            (linux, kernel_digest),
-            (initrd, initrd_digest),
-            (cmdline, cmdline_digest),
-        ) {
-            Ok(()) => info!("Measured boot artifacts"),
-            Err(e) => {
-                error!("Failed to measure boot artifacts: {e}");
-                error!("This board may be misconfigured!!");
-            }
-        };
-    }
-
-    _ = response_tx.send(Response::ServerDone);
 
     Ok(())
 }
@@ -357,19 +320,29 @@ async fn main() -> anyhow::Result<()> {
 
         if mount_tx.send(MountMsg::UnmountAll).await.is_ok() {
             // wait for unmounting to finish
+            info!("waiting for disks to be unmounted");
             _ = mount_handle.await;
             _ = unmount_handle.await;
         }
 
         match res {
-            Err(PrepareBootError::SelectEntry(SelectEntryError::Reboot)) => unsafe {
-                libc::reboot(libc::LINUX_REBOOT_CMD_RESTART);
-            },
-            Err(PrepareBootError::SelectEntry(SelectEntryError::Poweroff)) => unsafe {
-                libc::reboot(libc::LINUX_REBOOT_CMD_POWER_OFF);
-            },
+            Err(PrepareBootError::SelectEntry(SelectEntryError::Reboot)) => {
+                info!("rebooting");
+                unsafe {
+                    libc::reboot(libc::LINUX_REBOOT_CMD_RESTART);
+                }
+            }
+            Err(PrepareBootError::SelectEntry(SelectEntryError::Poweroff)) => {
+                info!("powering off");
+                unsafe {
+                    libc::reboot(libc::LINUX_REBOOT_CMD_POWER_OFF);
+                }
+            }
             Err(e) => error!("failed to prepare boot: {e}"),
-            Ok(()) => kexec_execute().unwrap(),
+            Ok(()) => {
+                info!("kexec'ing");
+                kexec_execute()?
+            }
         }
     }
 }
