@@ -6,7 +6,7 @@ let cfg = config.tinyboot; in
     default = null;
   };
   config = lib.mkIf (cfg != null) {
-    system.build.firmare = cfg.build.firmware;
+    system.build.firmware = cfg.build.firmware;
     boot.loader.systemd-boot.extraInstallCommands = lib.optionalString cfg.verifiedBoot.enable ''
       echo "signing boot files"
       find /boot/EFI/nixos -type f -name "*.efi" \
