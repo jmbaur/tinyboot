@@ -1,19 +1,15 @@
-{ clientOnly ? false, lib, rustPlatform, installShellFiles }:
-rustPlatform.buildRustPackage ({
+{ rustPlatform, installShellFiles }:
+rustPlatform.buildRustPackage {
+  pname = "tinyboot";
   version = "0.1.0";
   src = ./.;
   cargoLock.lockFile = ./Cargo.lock;
   strictDeps = true;
+  nativeBuildInputs = [ installShellFiles ];
   stripDebugFlags = [ "--strip-all" ];
+  cargoBuildFlags = [ "--package" "tbootbb" ];
   postInstall = ''
     installShellCompletion ./target/release/$cargoBuildType/build/tbootctl-*/out/{tbootctl.bash,tbootctl.fish,_tbootctl}
+    for exe in tbootd tbootctl tbootui; do ln -s $out/bin/tbootbb $out/bin/$exe; done
   '';
-} // (if clientOnly then {
-  pname = "tinyboot-client";
-  nativeBuildInputs = [ installShellFiles ];
-  cargoBuildFlags = lib.optional clientOnly [ "--package" "tbootctl" ];
-  cargoTestFlags = lib.optional clientOnly [ "--package" "tbootctl" ];
-} else {
-  pname = "tinyboot";
-  nativeBuildInputs = [ installShellFiles ];
-}))
+}

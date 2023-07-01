@@ -920,6 +920,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "tbootbb"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "tbootctl",
+ "tbootd",
+ "tbootui",
+ "tokio",
+]
+
+[[package]]
 name = "tbootctl"
 version = "0.1.0"
 dependencies = [

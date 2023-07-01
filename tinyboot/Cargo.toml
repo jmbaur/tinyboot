@@ -1,5 +1,5 @@
 [workspace]
-members = ["tbootd", "tbootctl", "tbootui", "tboot", "grub"]
+members = ["tbootbb", "tbootd", "tbootctl", "tbootui", "tboot", "grub"]
 
 [profile.release]
 lto = true

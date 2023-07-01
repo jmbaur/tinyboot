@@ -34,7 +34,6 @@
         nixpkgs.lib.foldAttrs (curr: acc: acc // curr) { } (map (b: extend b baseConfig) [ "bls" "grub" "extlinux" ]);
       overlays.default = final: prev: {
         tinyboot = prev.pkgsStatic.callPackage ./tinyboot { };
-        tinyboot-client = final.tinyboot.override { clientOnly = true; };
         coreboot = prev.callPackage ./boards { };
       };
       devShells = forAllSystems ({ pkgs, ... }: {
