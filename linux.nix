@@ -3,6 +3,7 @@ stdenv.mkDerivation {
   inherit (basePackage) pname version src buildInputs nativeBuildInputs depsBuildBuild;
   inherit extraConfig;
   passAsFile = [ "extraConfig" ];
+  patches = [ ./patches/linux-tpm-probe.patch ];
   makeFlags = [
     "CC=${stdenv.cc}/bin/${stdenv.cc.targetPrefix}cc"
     "HOSTCC=${buildPackages.stdenv.cc}/bin/${buildPackages.stdenv.cc.targetPrefix}cc"
