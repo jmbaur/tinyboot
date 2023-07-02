@@ -6,6 +6,11 @@ let cfg = config.tinyboot; in
     default = null;
   };
   config = lib.mkIf (cfg != null) {
+    boot.kernelPatches = [{
+      name = "enable-ima";
+      patch = null;
+      extraStructuredConfig = with lib.kernel; { IMA = yes; };
+    }];
     system.build.firmware = cfg.build.firmware;
     boot.loader.systemd-boot.extraInstallCommands = lib.optionalString cfg.verifiedBoot.enable ''
       echo "signing boot files"

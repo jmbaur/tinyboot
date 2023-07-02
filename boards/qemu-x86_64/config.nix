@@ -6,7 +6,7 @@
     debug = lib.mkDefault true;
     verifiedBoot = {
       enable = lib.mkDefault true;
-      caCertificate = ../../test/keys/x509_ima.pem;
+      caCertificate = lib.mkDefault ../../test/keys/x509_ima.pem;
       signingPublicKey = lib.mkDefault ../../test/keys/x509_ima.der;
       signingPrivateKey = lib.mkDefault ../../test/keys/privkey_ima.pem;
     };
