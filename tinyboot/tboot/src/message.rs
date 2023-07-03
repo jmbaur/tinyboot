@@ -20,7 +20,7 @@ pub struct ListBootEntriesResponse {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub enum Request {
+pub enum ClientMessage {
     Boot(LinuxBootEntry),
     Ping,
     Poweroff,
@@ -38,7 +38,7 @@ pub enum ServerError {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub enum Response {
+pub enum ServerMessage {
     Pong,
     NewDevice(BlockDevice),
     TimeLeft(Option<Duration>),
@@ -48,13 +48,13 @@ pub enum Response {
     ServerError(ServerError),
 }
 
-pub type ClientCodec = Codec<Response, Request>;
-pub type ServerCodec = Codec<Request, Response>;
+pub type ClientCodec = Codec<ServerMessage, ClientMessage>;
+pub type ServerCodec = Codec<ClientMessage, ServerMessage>;
 
 pub async fn get_client_codec(
     unix_stream: Option<UnixStream>,
 ) -> io::Result<(
-    SplitSink<Framed<UnixStream, ClientCodec>, Request>,
+    SplitSink<Framed<UnixStream, ClientCodec>, ClientMessage>,
     SplitStream<Framed<UnixStream, ClientCodec>>,
 )> {
     let stream = if let Some(stream) = unix_stream {

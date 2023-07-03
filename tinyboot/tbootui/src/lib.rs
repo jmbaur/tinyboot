@@ -16,7 +16,7 @@ use std::{io, process::Command, time::Duration};
 use tboot::{
     block_device::BlockDevice,
     linux::LinuxBootEntry,
-    message::{ClientCodec, Request, Response, ServerError},
+    message::{ClientCodec, ClientMessage, ServerMessage, ServerError},
 };
 use termion::{event::Key, input::TermRead, raw::IntoRawMode, screen::IntoAlternateScreen};
 use tokio::{net::UnixStream, sync::mpsc};
@@ -240,13 +240,13 @@ enum BreakType {
 }
 
 async fn run_client(
-    sink: &mut SplitSink<Framed<UnixStream, ClientCodec>, Request>,
+    sink: &mut SplitSink<Framed<UnixStream, ClientCodec>, ClientMessage>,
     stream: &mut SplitStream<Framed<UnixStream, ClientCodec>>,
 ) -> anyhow::Result<()> {
-    sink.send(Request::Ping).await?;
+    sink.send(ClientMessage::Ping).await?;
     debug!("sent ping to server");
 
-    if matches!(stream.next().await, Some(Ok(Response::Pong))) {
+    if matches!(stream.next().await, Some(Ok(ServerMessage::Pong))) {
         debug!("got pong from server");
     } else {
         anyhow::bail!("could not communicate with server")
@@ -255,8 +255,8 @@ async fn run_client(
     let mut recorded_user_interaction = false;
     let mut devs = DeviceList::default();
 
-    sink.send(Request::ListBlockDevices).await?;
-    if let Some(Ok(Response::ListBlockDevices(new_devs))) = stream.next().await {
+    sink.send(ClientMessage::ListBlockDevices).await?;
+    if let Some(Ok(ServerMessage::ListBlockDevices(new_devs))) = stream.next().await {
         for d in new_devs {
             devs.add(d);
         }
@@ -292,7 +292,7 @@ async fn run_client(
             }
         });
 
-        sink.send(Request::StartStreaming).await?;
+        sink.send(ClientMessage::StartStreaming).await?;
 
         let break_type = 'inner: loop {
             terminal.draw(|frame| {
@@ -348,7 +348,7 @@ async fn run_client(
             tokio::select! {
                 Some(key) = rx.recv() => {
                     if !recorded_user_interaction {
-                        sink.send(Request::UserIsPresent).await?;
+                        sink.send(ClientMessage::UserIsPresent).await?;
                         recorded_user_interaction = true;
                     }
 
@@ -365,7 +365,7 @@ async fn run_client(
                         Key::Char('\n') => {
                             if let Some(dev) = devs.selected.and_then(|selected| devs.devices.get(selected)) {
                                 if let Some(entry) = dev.state.selected().and_then(|selected| dev.device.boot_entries.get(selected)) {
-                                     _ = sink.send(Request::Boot(entry.clone())).await;
+                                     _ = sink.send(ClientMessage::Boot(entry.clone())).await;
                                 }
                             }
                         },
@@ -377,23 +377,23 @@ async fn run_client(
                                 }
                             }
                         },
-                        Key::Char('r') => sink.send(Request::Reboot).await?,
-                        Key::Char('p') => sink.send(Request::Poweroff).await?,
+                        Key::Char('r') => sink.send(ClientMessage::Reboot).await?,
+                        Key::Char('p') => sink.send(ClientMessage::Poweroff).await?,
                         _ => {}
                     }
                 }
                 Some(Ok(msg)) = stream.next() => {
                     match msg {
-                        Response::NewDevice(dev) => devs.add(dev),
-                        Response::TimeLeft(time) => time_left = time,
-                        Response::ServerError(error) => {
+                        ServerMessage::NewDevice(dev) => devs.add(dev),
+                        ServerMessage::TimeLeft(time) => time_left = time,
+                        ServerMessage::ServerError(error) => {
                             popup = Some(match error {
                                 ServerError::ValidationFailed => "Validation of boot files failed",
                                 ServerError::Unknown => "Unknown error occurred",
                             });
 
                         }
-                        Response::ServerDone => {
+                        ServerMessage::ServerDone => {
                             terminal.clear()?;
                             terminal.set_cursor(0, 0)?;
                             break 'outer
@@ -405,7 +405,7 @@ async fn run_client(
             }
         };
 
-        sink.send(Request::StopStreaming).await?;
+        sink.send(ClientMessage::StopStreaming).await?;
         keys_handle.await?;
 
         match break_type {
@@ -414,7 +414,7 @@ async fn run_client(
                 let edited = edit(entry, &mut terminal);
                 terminal.hide_cursor()?;
                 if let Some(entry) = edited {
-                    _ = sink.send(Request::Boot(entry)).await;
+                    _ = sink.send(ClientMessage::Boot(entry)).await;
                 }
             }
             BreakType::ExitToShell => {

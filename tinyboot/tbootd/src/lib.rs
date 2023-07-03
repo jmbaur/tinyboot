@@ -28,7 +28,7 @@ use std::{
 };
 use tboot::{
     linux::LinuxBootEntry,
-    message::{Request, Response, ServerCodec, ServerError},
+    message::{ClientMessage, ServerCodec, ServerError, ServerMessage},
 };
 use tokio::{
     net::{UnixListener, UnixStream},
@@ -40,34 +40,34 @@ use tokio_util::codec::Decoder;
 
 async fn handle_client(
     stream: UnixStream,
-    mut client_rx: broadcast::Receiver<Response>,
-    client_tx: broadcast::Sender<Request>,
+    mut client_rx: broadcast::Receiver<ServerMessage>,
+    client_tx: broadcast::Sender<ClientMessage>,
 ) {
     let codec: ServerCodec = Codec::new();
     let (mut sink, mut stream) = codec.framed(stream).split();
 
     let mut streaming = false;
 
-    let mut unsent_events: VecDeque<Response> = VecDeque::new();
+    let mut unsent_events: VecDeque<ServerMessage> = VecDeque::new();
 
     loop {
         tokio::select! {
             Some(Ok(req)) = stream.next() => {
-                if req == Request::Ping {
-                    _ = sink.send(Response::Pong).await;
-                } else if req == Request::StartStreaming {
+                if req == ClientMessage::Ping {
+                    _ = sink.send(ServerMessage::Pong).await;
+                } else if req == ClientMessage::StartStreaming {
                     streaming = true;
                     while let Some(msg) = unsent_events.pop_front() {
                          _ = sink.send(msg).await;
                     }
-                } else if req == Request::StopStreaming {
+                } else if req == ClientMessage::StopStreaming {
                     streaming = false;
                 } else {
                     _ = client_tx.send(req);
                 }
             }
             Ok(msg) = client_rx.recv() => {
-                if !streaming && matches!(msg, Response::NewDevice(_) | Response::TimeLeft(_)) {
+                if !streaming && matches!(msg, ServerMessage::NewDevice(_) | ServerMessage::TimeLeft(_)) {
                     // don't send these responses if the client is not streaming
                     unsent_events.push_back(msg);
                 } else {
@@ -107,7 +107,7 @@ impl From<nix::Error> for SelectEntryError {
 
 async fn select_entry(
     mut internal_rx: mpsc::Receiver<InternalMsg>,
-    response_tx: broadcast::Sender<Response>,
+    response_tx: broadcast::Sender<ServerMessage>,
 ) -> Result<LinuxBootEntry, SelectEntryError> {
     let mut start = Instant::now();
 
@@ -130,31 +130,31 @@ async fn select_entry(
         Some(Gid::from_raw(tboot::TINYUSER_GID)),
     )?;
 
-    let (request_tx, mut request_rx) = broadcast::channel::<Request>(200);
+    let (client_msg_tx, mut client_msg_rx) = broadcast::channel::<ClientMessage>(200);
 
     loop {
         tokio::select! {
-            Ok(msg) = request_rx.recv() => {
+            Ok(msg) = client_msg_rx.recv() => {
                 match msg {
-                    Request::StartStreaming | Request::StopStreaming | Request::Ping => {/* this is handled by the client task */}
-                    Request::ListBlockDevices => {
-                        _ = response_tx.send(Response::ListBlockDevices(block_devices.clone()));
+                    ClientMessage::StartStreaming | ClientMessage::StopStreaming | ClientMessage::Ping => {/* this is handled by the client task */}
+                    ClientMessage::ListBlockDevices => {
+                        _ = response_tx.send(ServerMessage::ListBlockDevices(block_devices.clone()));
                     },
-                    Request::Boot(entry) => return Ok(entry),
-                    Request::UserIsPresent => {
+                    ClientMessage::Boot(entry) => return Ok(entry),
+                    ClientMessage::UserIsPresent => {
                         has_user_interaction = true;
-                        _ = response_tx.send(Response::TimeLeft(None));
+                        _ = response_tx.send(ServerMessage::TimeLeft(None));
                     }
-                    Request::Reboot => {
+                    ClientMessage::Reboot => {
                         return Err(SelectEntryError::Reboot);
                     },
-                    Request::Poweroff => {
+                    ClientMessage::Poweroff => {
                         return Err(SelectEntryError::Poweroff);
                     },
                 }
             }
             Ok((stream, _)) = listener.accept() => {
-                tokio::spawn(handle_client(stream, response_tx.subscribe(), request_tx.clone()));
+                tokio::spawn(handle_client(stream, response_tx.subscribe(), client_msg_tx.clone()));
             },
             Some(internal_msg) = internal_rx.recv() => {
                 match internal_msg {
@@ -191,7 +191,7 @@ async fn select_entry(
                                 has_internal_device = true;
                             }
 
-                            _ = response_tx.send(Response::NewDevice(device.clone()));
+                            _ = response_tx.send(ServerMessage::NewDevice(device.clone()));
                             block_devices.push(device);
                     }
                     InternalMsg::Tick => {
@@ -199,7 +199,7 @@ async fn select_entry(
 
                         // don't send TimeLeft response if timeout <= elapsed, this will panic
                         if !has_user_interaction && timeout > elapsed {
-                            _ = response_tx.send(Response::TimeLeft(Some(timeout - elapsed)));
+                            _ = response_tx.send(ServerMessage::TimeLeft(Some(timeout - elapsed)));
                         }
 
                         // Timeout has occurred without any user interaction
@@ -241,7 +241,7 @@ async fn prepare_boot(
     internal_tx: mpsc::Sender<InternalMsg>,
     internal_rx: mpsc::Receiver<InternalMsg>,
 ) -> Result<(), PrepareBootError> {
-    let (response_tx, _) = broadcast::channel::<Response>(200);
+    let (server_msg_tx, _) = broadcast::channel::<ServerMessage>(200);
 
     let tick_tx = internal_tx.clone();
     tokio::spawn(async move {
@@ -253,11 +253,11 @@ async fn prepare_boot(
         }
     });
 
-    let res = select_entry(internal_rx, response_tx.clone()).await;
+    let res = select_entry(internal_rx, server_msg_tx.clone()).await;
     let entry = match res {
         Err(e) => {
             if matches!(e, SelectEntryError::Reboot | SelectEntryError::Poweroff) {
-                _ = response_tx.send(Response::ServerDone);
+                _ = server_msg_tx.send(ServerMessage::ServerDone);
             }
             return Err(e.into());
         }
@@ -270,9 +270,9 @@ async fn prepare_boot(
     let cmdline = cmdline.as_str();
 
     match kexec_load(linux, initrd, cmdline).await {
-        Ok(()) => _ = response_tx.send(Response::ServerDone),
+        Ok(()) => _ = server_msg_tx.send(ServerMessage::ServerDone),
         Err(e) => {
-            _ = response_tx.send(Response::ServerError(match e.kind() {
+            _ = server_msg_tx.send(ServerMessage::ServerError(match e.kind() {
                 ErrorKind::PermissionDenied => ServerError::ValidationFailed,
                 _ => ServerError::Unknown,
             }));
