@@ -86,8 +86,6 @@ enum SelectEntryError {
     Reboot,
     #[error("poweroff")]
     Poweroff,
-    #[error("no default entry")]
-    NoDefaultEntry,
     #[error("io error: {0}")]
     Io(tokio::io::Error),
 }
@@ -180,8 +178,6 @@ async fn select_entry(
                         if !state.has_user_interaction && elapsed >= state.timeout {
                             if let Some(default_entry) = &state.default_entry {
                                 return Ok(default_entry.clone());
-                            } else {
-                                return Err(SelectEntryError::NoDefaultEntry);
                             }
                         }
                     }
@@ -282,17 +278,12 @@ async fn prepare_boot(
         .await;
 
         let entry = match res {
-            Err(e) => match e {
-                SelectEntryError::NoDefaultEntry => {
-                    continue;
+            Err(e) => {
+                if matches!(e, SelectEntryError::Reboot | SelectEntryError::Poweroff) {
+                    _ = server_msg_tx.send(ServerMessage::ServerDone);
                 }
-                _ => {
-                    if matches!(e, SelectEntryError::Reboot | SelectEntryError::Poweroff) {
-                        _ = server_msg_tx.send(ServerMessage::ServerDone);
-                    }
-                    return Err(e.into());
-                }
-            },
+                return Err(e.into());
+            }
             Ok(entry) => entry,
         };
 
