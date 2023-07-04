@@ -13,10 +13,11 @@ in
       with lib.kernel;
       with (lib.kernel.whenHelpers config.boot.kernelPackages.kernel.version);
       [
+        pkgs.kernelPatches.ima_tpm_early_init
         {
           name = "enable-ima";
           patch = null;
-          extraStructuredConfig = { IMA = yes; };
+          extraStructuredConfig = { IMA = yes; IMA_DEFAULT_HASH_SHA256 = yes; };
         }
         {
           name = "enable-coreboot";

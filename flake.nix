@@ -35,6 +35,9 @@
       overlays.default = final: prev: {
         tinyboot = prev.pkgsStatic.callPackage ./tinyboot { };
         coreboot = prev.callPackage ./boards { };
+        kernelPatches = prev.kernelPatches // {
+          ima_tpm_early_init = { name = "ima_tpm_early_init"; patch = ./patches/linux-tpm-probe.patch; };
+        };
       };
       devShells = forAllSystems ({ pkgs, ... }: {
         default = with pkgs; mkShell {
