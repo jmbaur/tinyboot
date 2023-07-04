@@ -8,4 +8,4 @@ edition = "2021"
 insta = { version = "1.30.0", features = ["yaml"] }
 
 [dependencies]
-thiserror = "1.0.40"
+thiserror = "1.0.41"
