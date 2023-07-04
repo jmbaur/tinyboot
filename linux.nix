@@ -1,16 +1,9 @@
-{ linuxKernel, basePackage ? linuxKernel.kernels.linux_6_1, configFile, extraConfig, lib, stdenv, buildPackages }:
+{ linux, basePackage ? linux, configFile, extraConfig, lib, stdenv }:
 stdenv.mkDerivation {
-  inherit (basePackage) pname version src buildInputs nativeBuildInputs depsBuildBuild;
+  inherit (basePackage) pname version src buildInputs nativeBuildInputs depsBuildBuild makeFlags preInstall enableParallelBuilding;
   inherit extraConfig;
   passAsFile = [ "extraConfig" ];
   patches = [ ./patches/linux-tpm-probe.patch ];
-  makeFlags = [
-    "CC=${stdenv.cc}/bin/${stdenv.cc.targetPrefix}cc"
-    "HOSTCC=${buildPackages.stdenv.cc}/bin/${buildPackages.stdenv.cc.targetPrefix}cc"
-    "HOSTLD=${buildPackages.stdenv.cc.bintools}/bin/${buildPackages.stdenv.cc.targetPrefix}ld"
-    "ARCH=${stdenv.hostPlatform.linuxArch}"
-  ] ++ lib.optional (stdenv.hostPlatform != stdenv.buildPlatform)
-    "CROSS_COMPILE=${stdenv.cc.targetPrefix}";
   configurePhase = ''
     runHook preConfigure
     make ARCH=${stdenv.hostPlatform.linuxArch} tinyconfig
@@ -19,18 +12,6 @@ stdenv.mkDerivation {
     make ARCH=${stdenv.hostPlatform.linuxArch} olddefconfig
     runHook postConfigure
   '';
-  preBuild = ''
-    makeFlagsArray+=("-j$NIX_BUILD_CORES")
-  '';
-  buildFlags = [ "DTC_FLAGS=-@" "KBUILD_BUILD_VERSION=1-TinyBoot" stdenv.hostPlatform.linux-kernel.target ];
-  preInstall =
-    let
-      installkernel = buildPackages.writeShellScriptBin "installkernel" ''
-        cp -av $2 $4; cp -av $3 $4
-      '';
-    in
-    ''
-      export HOME=${installkernel}
-    '';
+  buildFlags = [ "DTC_FLAGS=-@" "KBUILD_BUILD_VERSION=1-TinyBoot" ];
   installFlags = [ "INSTALL_PATH=$(out)" ] ++ lib.optionals stdenv.hostPlatform.isAarch [ "dtbs_install" "INSTALL_DTBS_PATH=$(out)/dtbs" ];
 }

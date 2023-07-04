@@ -354,9 +354,9 @@ impl TinybootGrubEnvironment {
             },
             3 => match (args[0].as_str(), args[1].as_str(), args[2].as_str()) {
                 // the strings are equal
-                (string1, "=", string2) => strings_equal(string1, string2),
-                // the strings are equal
-                (string1, "==", string2) => strings_equal(string1, string2),
+                (string1, "=", string2) | (string1, "==", string2) => {
+                    strings_equal(string1, string2)
+                }
                 // the strings are not equal
                 (string1, "!=", string2) => strings_not_equal(string1, string2),
                 // string1 is lexicographically less than string2
@@ -415,7 +415,10 @@ impl TinybootGrubEnvironment {
                 }
                 // expression is true
                 ("(", _expression, ")") => todo!("implement 'expression is true'"),
-                _ => return Err(GrubEnvironmentError::InvalidArgs),
+                _ => {
+                    error!("unknown argument pattern {:?}", args);
+                    return Err(GrubEnvironmentError::InvalidArgs);
+                }
             },
             _ => return Err(GrubEnvironmentError::InvalidArgs),
         };

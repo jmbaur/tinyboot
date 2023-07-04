@@ -1,0 +1,13 @@
+diff --git a/src/arch/arm64/Makefile.inc b/src/arch/arm64/Makefile.inc
+index 6b49743633..fc37f28c24 100644
+--- a/src/arch/arm64/Makefile.inc
++++ b/src/arch/arm64/Makefile.inc
+@@ -153,7 +153,7 @@ BL31_MAKEARGS += DEBUG=1
+ endif # CONFIG_CONSOLE_SERIAL
+ 
+ # ARM TF's VERBOSE (50) is *very* spammy, so default to INFO (40)
+-BL31_MAKEARGS += LOG_LEVEL=40
++BL31_MAKEARGS += LOG_LEVEL=50
+ 
+ # Always enable crash reporting, even on a release build
+ BL31_MAKEARGS += CRASH_REPORTING=1

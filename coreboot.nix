@@ -1,5 +1,5 @@
 { lib, stdenv, fetchgit, pkgsBuildBuild, python3, pkg-config, flashrom, openssl, ... }:
-lib.makeOverridable ({ board ? null, configFile, extraConfig ? "", ... }@args:
+lib.makeOverridable ({ board ? null, configFile, extraConfig ? "", extraArgs ? { } }:
 let
   toolchain = pkgsBuildBuild.coreboot-toolchain.${{ x86_64 = "i386"; arm64 = "aarch64"; arm = "arm"; riscv = "riscv"; powerpc = "ppc64"; }.${stdenv.hostPlatform.linuxArch}};
 in
@@ -8,15 +8,15 @@ stdenv.mkDerivation ({
   inherit (toolchain) version;
   src = fetchgit {
     inherit (toolchain.src) url rev;
-    leaveDotGit = false;
     fetchSubmodules = true;
-    sha256 = "sha256-DPaudCeK9SKu2eN1fad6a52ICs5d/GXCUFMdqAl65BE=";
+    hash = "sha256-DPaudCeK9SKu2eN1fad6a52ICs5d/GXCUFMdqAl65BE=";
   };
+  patches = [ ./patches/coreboot-fitimage-memlayout.patch ./patches/coreboot-atf-loglevel.patch ];
   depsBuildBuild = [ pkgsBuildBuild.stdenv.cc ];
   nativeBuildInputs = [ python3 pkg-config ];
   buildInputs = [ flashrom openssl ];
   postPatch = ''
-    patchShebangs util
+    patchShebangs util 3rdparty/chromeec/util
   '';
   inherit extraConfig;
   passAsFile = [ "extraConfig" ];
@@ -34,4 +34,4 @@ stdenv.mkDerivation ({
     cp build/coreboot.rom $out/coreboot.rom
     runHook postInstall
   '';
-} // (builtins.removeAttrs args [ "board" "configfile" "extraConfig" ])))
+} // extraArgs))

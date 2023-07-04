@@ -1,0 +1,30 @@
+diff --git a/src/soc/mediatek/mt8183/memlayout.ld b/src/soc/mediatek/mt8183/memlayout.ld
+index 390842693f..786031a458 100644
+--- a/src/soc/mediatek/mt8183/memlayout.ld
++++ b/src/soc/mediatek/mt8183/memlayout.ld
+@@ -43,8 +43,8 @@ SECTIONS
+ 
+ 	DRAM_START(0x40000000)
+ 	DRAM_DMA(0x40000000, 1M)
+-	POSTRAM_CBFS_CACHE(0x40100000, 1M)
+-	RAMSTAGE(0x40200000, 256K)
++	POSTRAM_CBFS_CACHE(0x40100000, 10M)
++	RAMSTAGE(0x41100000, 2M)
+ 
+ 	BL31(0x54600000, 0x60000)
+ }
+diff --git a/src/soc/mediatek/mt8192/include/soc/memlayout.ld b/src/soc/mediatek/mt8192/include/soc/memlayout.ld
+index 6c238c7d8f..2442e307c5 100644
+--- a/src/soc/mediatek/mt8192/include/soc/memlayout.ld
++++ b/src/soc/mediatek/mt8192/include/soc/memlayout.ld
+@@ -53,8 +53,8 @@ SECTIONS
+ 
+ 	DRAM_START(0x40000000)
+ 	DRAM_DMA(0x40000000, 1M)
+-	POSTRAM_CBFS_CACHE(0x40100000, 2M)
+-	RAMSTAGE(0x40300000, 256K)
++	POSTRAM_CBFS_CACHE(0x40100000, 10M)
++	RAMSTAGE(0x41100000, 2M)
+ 
+ 	BL31(0x54600000, 0x60000)
+ }

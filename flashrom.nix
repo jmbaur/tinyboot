@@ -4,8 +4,8 @@ stdenv.mkDerivation rec {
   version = builtins.substring 0 7 src.rev;
   src = fetchgit {
     url = "https://chromium.googlesource.com/chromiumos/third_party/flashrom";
-    rev = "7524d7f4c89293c6a75353220036ddabaa844383";
-    sha256 = "sha256-/6hObz7Lf4t61nTyFAtyOm4a37dikr7luHS/QqpnUDc=";
+    rev = "4564183f4f3a48dfd34b99ba576b721230224a71";
+    hash = "sha256-PPLyjudiEGauvWdZvaJsDMItbo96GF1BpwFxkobEGPA=";
   };
   dontUseCmakeConfigure = true;
   nativeBuildInputs = [ cmake meson ninja pkg-config sphinx bash-completion ];

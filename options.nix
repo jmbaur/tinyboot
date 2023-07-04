@@ -55,7 +55,7 @@ in
         readOnly = true;
         default = buildCoreboot {
           inherit (config) board;
-          inherit (config.coreboot) configFile extraConfig;
+          inherit (config.coreboot) configFile extraConfig extraArgs;
         };
       };
       firmware = lib.mkOption {
@@ -64,7 +64,7 @@ in
         default = pkgs.runCommand "tinyboot-${config.build.coreboot.name}"
           {
             nativeBuildInputs = with pkgs.buildPackages; [ coreboot-utils ];
-            passthru = { inherit (config.build) linux initrd; };
+            passthru = { inherit (config.build) linux initrd coreboot; };
             meta.platforms = config.platforms;
           }
           ''
@@ -81,43 +81,19 @@ in
           '';
       };
     };
-    platforms = lib.mkOption {
-      type = lib.types.listOf lib.types.str;
-      default = [ ];
-    };
+    platforms = lib.mkOption { type = lib.types.listOf lib.types.str; default = [ ]; };
     linux = {
-      basePackage = lib.mkOption {
-        type = lib.types.package;
-        default = pkgs.linuxKernel.kernels.linux_6_1;
-      };
-      configFile = lib.mkOption {
-        type = lib.types.path;
-      };
-      extraConfig = lib.mkOption {
-        type = lib.types.lines;
-        default = "";
-      };
-      commandLine = lib.mkOption {
-        type = lib.types.listOf lib.types.str;
-        default = [ ];
-      };
-      dtb = lib.mkOption {
-        type = lib.types.nullOr lib.types.path;
-        default = null;
-      };
-      dtbPattern = lib.mkOption {
-        type = lib.types.nullOr lib.types.str;
-        default = null;
-      };
+      basePackage = lib.mkOption { type = lib.types.package; default = pkgs.linux; };
+      configFile = lib.mkOption { type = lib.types.path; };
+      extraConfig = lib.mkOption { type = lib.types.lines; default = ""; };
+      commandLine = lib.mkOption { type = lib.types.listOf lib.types.str; default = [ ]; };
+      dtb = lib.mkOption { type = lib.types.nullOr lib.types.path; default = null; };
+      dtbPattern = lib.mkOption { type = lib.types.nullOr lib.types.str; default = null; };
     };
     coreboot = {
-      configFile = lib.mkOption {
-        type = lib.types.path;
-      };
-      extraConfig = lib.mkOption {
-        type = lib.types.lines;
-        default = "";
-      };
+      extraArgs = lib.mkOption { type = lib.types.attrsOf lib.types.anything; default = { }; };
+      configFile = lib.mkOption { type = lib.types.path; };
+      extraConfig = lib.mkOption { type = lib.types.lines; default = ""; };
     };
     verifiedBoot = {
       enable = lib.mkEnableOption "verified boot";
@@ -127,18 +103,9 @@ in
     };
     debug = lib.mkEnableOption "debug mode";
     tinyboot = {
-      ttys = lib.mkOption {
-        type = lib.types.listOf lib.types.str;
-        default = [ "tty1" ];
-      };
-      extraInit = lib.mkOption {
-        type = lib.types.lines;
-        default = "";
-      };
-      extraInittab = lib.mkOption {
-        type = lib.types.lines;
-        default = "";
-      };
+      ttys = lib.mkOption { type = lib.types.listOf lib.types.str; default = [ "tty1" ]; };
+      extraInit = lib.mkOption { type = lib.types.lines; default = ""; };
+      extraInittab = lib.mkOption { type = lib.types.lines; default = ""; };
       nameservers = lib.mkOption {
         type = lib.types.listOf lib.types.str;
         default = [ "8.8.8.8" "8.8.4.4" "2001:4860:4860::8888" "2001:4860:4860::8844" ];
