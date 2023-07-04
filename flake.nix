@@ -18,10 +18,7 @@
         let
           baseConfig = forAllSystems ({ system, ... }: {
             imports = [
-              ({
-                nixpkgs.hostPlatform = system;
-                tinyboot.board = { x86_64-linux = "qemu-x86_64"; aarch64-linux = "qemu-aarch64"; }.${system};
-              })
+              ({ nixpkgs.hostPlatform = system; })
               self.nixosModules.default
               ./test/module.nix
             ];
