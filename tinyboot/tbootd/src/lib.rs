@@ -27,6 +27,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tboot::{
+    block_device::BlockDevice,
     linux::LinuxBootEntry,
     message::{ClientMessage, ServerCodec, ServerError, ServerMessage},
 };
@@ -89,8 +90,6 @@ enum SelectEntryError {
     NoDefaultEntry,
     #[error("io error: {0}")]
     Io(tokio::io::Error),
-    #[error("nix error: {0}")]
-    Nix(nix::Error),
 }
 
 impl From<tokio::io::Error> for SelectEntryError {
@@ -99,50 +98,25 @@ impl From<tokio::io::Error> for SelectEntryError {
     }
 }
 
-impl From<nix::Error> for SelectEntryError {
-    fn from(value: nix::Error) -> Self {
-        Self::Nix(value)
-    }
-}
-
 async fn select_entry(
+    state: &mut ServerState,
+    listener: &UnixListener,
     internal_rx: &mut mpsc::Receiver<InternalMsg>,
     response_tx: broadcast::Sender<ServerMessage>,
     client_msg_rx: &mut broadcast::Receiver<ClientMessage>,
     client_msg_tx: broadcast::Sender<ClientMessage>,
 ) -> Result<LinuxBootEntry, SelectEntryError> {
-    let mut start = Instant::now();
-
-    let mut block_devices = Vec::new();
-    let mut found_first_device = false;
-    let mut default_entry: Option<LinuxBootEntry> = None;
-    let mut has_internal_device = false;
-    let mut has_user_interaction = false; // can only be set to true, not back to false
-    let mut timeout = Duration::from_secs(10);
-
-    // TODO(jared): do this cleanup elsewhere?
-    if Path::new(tboot::TINYBOOT_SOCKET).exists() {
-        tokio::fs::remove_file(tboot::TINYBOOT_SOCKET).await?;
-    }
-
-    let listener = UnixListener::bind(tboot::TINYBOOT_SOCKET)?;
-    chown(
-        tboot::TINYBOOT_SOCKET,
-        Some(Uid::from_raw(tboot::TINYUSER_UID)),
-        Some(Gid::from_raw(tboot::TINYUSER_GID)),
-    )?;
-
     loop {
         tokio::select! {
             Ok(msg) = client_msg_rx.recv() => {
                 match msg {
                     ClientMessage::StartStreaming | ClientMessage::StopStreaming | ClientMessage::Ping => {/* this is handled by the client task */}
                     ClientMessage::ListBlockDevices => {
-                        _ = response_tx.send(ServerMessage::ListBlockDevices(block_devices.clone()));
+                        _ = response_tx.send(ServerMessage::ListBlockDevices(state.block_devices.clone()));
                     },
                     ClientMessage::Boot(entry) => return Ok(entry),
                     ClientMessage::UserIsPresent => {
-                        has_user_interaction = true;
+                        state.has_user_interaction = true;
                         _ = response_tx.send(ServerMessage::TimeLeft(None));
                     }
                     ClientMessage::Reboot => {
@@ -160,52 +134,52 @@ async fn select_entry(
                 match internal_msg {
                     InternalMsg::Device(device) => {
                             // only start timeout when we actually have a device to boot
-                            if !found_first_device {
-                                found_first_device = true;
-                                start = Instant::now();
+                            if !state.found_first_device {
+                                state.found_first_device = true;
+                                state.start = Instant::now();
                             }
 
                             let new_timeout = device.timeout;
-                            if new_timeout > timeout {
-                                timeout = new_timeout;
+                            if new_timeout > state.timeout {
+                                state.timeout = new_timeout;
                             }
 
                             let new_entries = &device.boot_entries;
 
                             // TODO(jared): improve selection of default device
-                            if default_entry.is_none() && !has_internal_device {
-                                default_entry = new_entries.iter().find(|&entry| entry.default).cloned();
+                            if state.default_entry.is_none() && !state.has_internal_device {
+                                state.default_entry = new_entries.iter().find(|&entry| entry.default).cloned();
 
                                 // Ensure that if none of the entries from the bootloader were marked as
                                 // default, we still have some default entry to boot into.
-                                if default_entry.is_none() {
-                                    default_entry = new_entries.first().cloned();
+                                if state.default_entry.is_none() {
+                                    state.default_entry = new_entries.first().cloned();
                                 }
 
-                                if let Some(entry) = &default_entry {
+                                if let Some(entry) = &state.default_entry {
                                     debug!("assigned default entry: {}", entry.display);
                                 }
                             }
 
                             if !device.removable {
-                                has_internal_device = true;
+                                state.has_internal_device = true;
                             }
 
                             _ = response_tx.send(ServerMessage::NewDevice(device.clone()));
-                            block_devices.push(device);
+                            state.block_devices.push(device);
                     }
                     InternalMsg::Tick => {
-                        let elapsed = start.elapsed();
+                        let elapsed = state.start.elapsed();
 
                         // don't send TimeLeft response if timeout <= elapsed, this will panic
-                        if !has_user_interaction && timeout > elapsed {
-                            _ = response_tx.send(ServerMessage::TimeLeft(Some(timeout - elapsed)));
+                        if !state.has_user_interaction && state.timeout > elapsed {
+                            _ = response_tx.send(ServerMessage::TimeLeft(Some(state.timeout - elapsed)));
                         }
 
                         // Timeout has occurred without any user interaction
-                        if !has_user_interaction && elapsed >= timeout {
-                            if let Some(default_entry) = default_entry {
-                                return Ok(default_entry);
+                        if !state.has_user_interaction && elapsed >= state.timeout {
+                            if let Some(default_entry) = &state.default_entry {
+                                return Ok(default_entry.clone());
                             } else {
                                 return Err(SelectEntryError::NoDefaultEntry);
                             }
@@ -223,6 +197,8 @@ enum PrepareBootError {
     SelectEntry(SelectEntryError),
     #[error("io error: {0}")]
     Io(std::io::Error),
+    #[error("nix error: {0}")]
+    Nix(nix::Error),
 }
 
 impl From<SelectEntryError> for PrepareBootError {
@@ -237,6 +213,36 @@ impl From<std::io::Error> for PrepareBootError {
     }
 }
 
+impl From<nix::Error> for PrepareBootError {
+    fn from(value: nix::Error) -> Self {
+        Self::Nix(value)
+    }
+}
+
+struct ServerState {
+    start: Instant,
+    block_devices: Vec<BlockDevice>,
+    found_first_device: bool,
+    default_entry: Option<LinuxBootEntry>,
+    has_internal_device: bool,
+    has_user_interaction: bool,
+    timeout: Duration,
+}
+
+impl Default for ServerState {
+    fn default() -> Self {
+        Self {
+            timeout: Duration::from_secs(10),
+            start: Instant::now(),
+            block_devices: Vec::new(),
+            found_first_device: false,
+            default_entry: None,
+            has_internal_device: false,
+            has_user_interaction: false,
+        }
+    }
+}
+
 async fn prepare_boot(
     internal_tx: mpsc::Sender<InternalMsg>,
     mut internal_rx: mpsc::Receiver<InternalMsg>,
@@ -244,19 +250,30 @@ async fn prepare_boot(
     let (server_msg_tx, _) = broadcast::channel::<ServerMessage>(200);
     let (client_msg_tx, mut client_msg_rx) = broadcast::channel::<ClientMessage>(200);
 
-    loop {
-        // TODO(jared): don't start ticking until we have at least one thing to boot from
-        let tick_tx = internal_tx.clone();
-        tokio::spawn(async move {
-            loop {
-                tokio::time::sleep(TICK_DURATION).await;
-                if tick_tx.send(InternalMsg::Tick).await.is_err() {
-                    break;
-                }
-            }
-        });
+    let listener = UnixListener::bind(tboot::TINYBOOT_SOCKET)?;
+    chown(
+        tboot::TINYBOOT_SOCKET,
+        Some(Uid::from_raw(tboot::TINYUSER_UID)),
+        Some(Gid::from_raw(tboot::TINYUSER_GID)),
+    )?;
 
+    // TODO(jared): don't start ticking until we have at least one thing to boot from
+    tokio::spawn(async move {
+        let tick_tx = internal_tx.clone();
+        loop {
+            tokio::time::sleep(TICK_DURATION).await;
+            if tick_tx.send(InternalMsg::Tick).await.is_err() {
+                break;
+            }
+        }
+    });
+
+    let mut state = ServerState::default();
+
+    loop {
         let res = select_entry(
+            &mut state,
+            &listener,
             &mut internal_rx,
             server_msg_tx.clone(),
             &mut client_msg_rx,
@@ -265,12 +282,17 @@ async fn prepare_boot(
         .await;
 
         let entry = match res {
-            Err(e) => {
-                if matches!(e, SelectEntryError::Reboot | SelectEntryError::Poweroff) {
-                    _ = server_msg_tx.send(ServerMessage::ServerDone);
+            Err(e) => match e {
+                SelectEntryError::NoDefaultEntry => {
+                    continue;
                 }
-                return Err(e.into());
-            }
+                _ => {
+                    if matches!(e, SelectEntryError::Reboot | SelectEntryError::Poweroff) {
+                        _ = server_msg_tx.send(ServerMessage::ServerDone);
+                    }
+                    return Err(e.into());
+                }
+            },
             Ok(entry) => entry,
         };
 
@@ -283,8 +305,14 @@ async fn prepare_boot(
             Ok(()) => break,
             Err(e) => {
                 _ = server_msg_tx.send(ServerMessage::ServerError(match e.kind() {
-                    ErrorKind::PermissionDenied => ServerError::ValidationFailed,
-                    _ => ServerError::Unknown,
+                    ErrorKind::PermissionDenied => {
+                        error!("permission denied performing kexec load");
+                        ServerError::ValidationFailed
+                    }
+                    k => {
+                        error!("kexec load resulted in unknown error kind: {k}");
+                        ServerError::Unknown
+                    }
                 }));
                 continue;
             }
