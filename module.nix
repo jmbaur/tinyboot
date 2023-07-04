@@ -6,6 +6,7 @@ let cfg = config.tinyboot; in
     default = null;
   };
   config = lib.mkIf (cfg != null) {
+    environment.systemPackages = with pkgs; [ coreboot-utils tinyboot ];
     boot.kernelPatches = [{
       name = "enable-ima";
       patch = null;
