@@ -7,11 +7,24 @@ let cfg = config.tinyboot; in
   };
   config = lib.mkIf (cfg != null) {
     environment.systemPackages = with pkgs; [ coreboot-utils tinyboot ];
-    boot.kernelPatches = [{
-      name = "enable-ima";
-      patch = null;
-      extraStructuredConfig = with lib.kernel; { IMA = yes; };
-    }];
+    boot.kernelPatches = [
+      {
+        name = "enable-ima";
+        patch = null;
+        extraStructuredConfig = with lib.kernel; { IMA = yes; };
+      }
+      {
+        name = "enable-coreboot";
+        patch = null;
+        extraStructuredConfig = with lib.kernel; {
+          GOOGLE_FIRMWARE = yes;
+          GOOGLE_CBMEM = yes;
+          GOOGLE_COREBOOT_TABLE = yes;
+          GOOGLE_MEMCONSOLE_COREBOOT = yes;
+          GOOGLE_VPD = yes;
+        };
+      }
+    ];
     system.build.firmware = cfg.build.firmware;
     boot.loader.systemd-boot.extraInstallCommands = lib.optionalString cfg.verifiedBoot.enable ''
       echo "signing boot files"
