@@ -6,5 +6,6 @@
       commandLine = [ "quiet" ];
     };
     coreboot.configFile = lib.mkDefault ./coreboot.config;
+    flashrom.extraArgs = lib.mkDefault [ "--ifd" "-i bios" ];
   };
 }

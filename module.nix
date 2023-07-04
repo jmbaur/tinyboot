@@ -8,7 +8,7 @@ in
     default = null;
   };
   config = lib.mkIf (cfg != null) {
-    environment.systemPackages = with pkgs; [ coreboot-utils tinyboot ];
+    environment.systemPackages = with pkgs; [ coreboot-utils tinyboot config.system.build.flashScript ];
     boot.kernelPatches =
       with lib.kernel;
       with (lib.kernel.whenHelpers config.boot.kernelPackages.kernel.version);
@@ -31,7 +31,7 @@ in
           };
         }
       ];
-    system.build.firmware = cfg.build.firmware;
+    system.build = { inherit (cfg.build) firmware flashScript; };
     boot.loader.systemd-boot.extraInstallCommands = lib.optionalString cfg.verifiedBoot.enable ''
       echo "signing boot files"
       find /boot/EFI/nixos -type f -name "*.efi" \

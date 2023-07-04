@@ -68,20 +68,35 @@ in
             meta.platforms = config.platforms;
           }
           ''
-            mkdir -p $out
-            dd if=${config.build.coreboot}/coreboot.rom of=$out/coreboot.rom
+            dd if=${config.build.coreboot}/coreboot.rom of=$out
             ${if pkgs.stdenv.hostPlatform.linuxArch == "x86_64" then ''
-            cbfstool $out/coreboot.rom add-payload \
+            cbfstool $out add-payload \
               -n fallback/payload \
               -f ${config.build.linux}/${pkgs.stdenv.hostPlatform.linux-kernel.target} \
               -I ${config.build.initrd}/initrd
             '' else if pkgs.stdenv.hostPlatform.linuxArch == "arm64" then ''
-            cbfstool $out/coreboot.rom add -f ${config.build.fitImage}/uImage -n fallback/payload -t fit_payload
+            cbfstool $out add -f ${config.build.fitImage}/uImage -n fallback/payload -t fit_payload
             '' else throw "Unsupported architecture"}
           '';
       };
+      flashScript = lib.mkOption {
+        internal = true;
+        readOnly = true;
+        default = pkgs.writeShellScriptBin "flash-firmware-${config.board}" ''
+          ${config.flashrom.package}/bin/flashrom \
+            --progress \
+            --write ${config.build.firmware} \
+            --programmer ${config.flashrom.programmer} \
+            ${lib.escapeShellArgs config.flashrom.extraArgs}
+        '';
+      };
     };
     platforms = lib.mkOption { type = lib.types.listOf lib.types.str; default = [ ]; };
+    flashrom = {
+      package = lib.mkPackageOptionMD pkgs "flashrom" { };
+      programmer = lib.mkOption { type = lib.types.str; default = "internal"; };
+      extraArgs = lib.mkOption { type = lib.types.listOf lib.types.str; default = [ ]; };
+    };
     linux = {
       basePackage = lib.mkOption { type = lib.types.package; default = pkgs.linux; };
       configFile = lib.mkOption { type = lib.types.path; };
