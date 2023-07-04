@@ -106,8 +106,10 @@ impl From<nix::Error> for SelectEntryError {
 }
 
 async fn select_entry(
-    mut internal_rx: mpsc::Receiver<InternalMsg>,
+    internal_rx: &mut mpsc::Receiver<InternalMsg>,
     response_tx: broadcast::Sender<ServerMessage>,
+    client_msg_rx: &mut broadcast::Receiver<ClientMessage>,
+    client_msg_tx: broadcast::Sender<ClientMessage>,
 ) -> Result<LinuxBootEntry, SelectEntryError> {
     let mut start = Instant::now();
 
@@ -129,8 +131,6 @@ async fn select_entry(
         Some(Uid::from_raw(tboot::TINYUSER_UID)),
         Some(Gid::from_raw(tboot::TINYUSER_GID)),
     )?;
-
-    let (client_msg_tx, mut client_msg_rx) = broadcast::channel::<ClientMessage>(200);
 
     loop {
         tokio::select! {
@@ -239,46 +239,59 @@ impl From<std::io::Error> for PrepareBootError {
 
 async fn prepare_boot(
     internal_tx: mpsc::Sender<InternalMsg>,
-    internal_rx: mpsc::Receiver<InternalMsg>,
+    mut internal_rx: mpsc::Receiver<InternalMsg>,
 ) -> Result<(), PrepareBootError> {
     let (server_msg_tx, _) = broadcast::channel::<ServerMessage>(200);
+    let (client_msg_tx, mut client_msg_rx) = broadcast::channel::<ClientMessage>(200);
 
-    let tick_tx = internal_tx.clone();
-    tokio::spawn(async move {
-        loop {
-            tokio::time::sleep(TICK_DURATION).await;
-            if tick_tx.send(InternalMsg::Tick).await.is_err() {
-                break;
+    loop {
+        // TODO(jared): don't start ticking until we have at least one thing to boot from
+        let tick_tx = internal_tx.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(TICK_DURATION).await;
+                if tick_tx.send(InternalMsg::Tick).await.is_err() {
+                    break;
+                }
             }
-        }
-    });
+        });
 
-    let res = select_entry(internal_rx, server_msg_tx.clone()).await;
-    let entry = match res {
-        Err(e) => {
-            if matches!(e, SelectEntryError::Reboot | SelectEntryError::Poweroff) {
-                _ = server_msg_tx.send(ServerMessage::ServerDone);
+        let res = select_entry(
+            &mut internal_rx,
+            server_msg_tx.clone(),
+            &mut client_msg_rx,
+            client_msg_tx.clone(),
+        )
+        .await;
+
+        let entry = match res {
+            Err(e) => {
+                if matches!(e, SelectEntryError::Reboot | SelectEntryError::Poweroff) {
+                    _ = server_msg_tx.send(ServerMessage::ServerDone);
+                }
+                return Err(e.into());
             }
-            return Err(e.into());
-        }
-        Ok(entry) => entry,
-    };
+            Ok(entry) => entry,
+        };
 
-    let linux = entry.linux.as_path();
-    let initrd = entry.initrd.as_deref();
-    let cmdline = entry.cmdline.unwrap_or_default();
-    let cmdline = cmdline.as_str();
+        let linux = entry.linux.as_path();
+        let initrd = entry.initrd.as_deref();
+        let cmdline = entry.cmdline.unwrap_or_default();
+        let cmdline = cmdline.as_str();
 
-    match kexec_load(linux, initrd, cmdline).await {
-        Ok(()) => _ = server_msg_tx.send(ServerMessage::ServerDone),
-        Err(e) => {
-            _ = server_msg_tx.send(ServerMessage::ServerError(match e.kind() {
-                ErrorKind::PermissionDenied => ServerError::ValidationFailed,
-                _ => ServerError::Unknown,
-            }));
-            return Err(PrepareBootError::Io(e));
-        }
-    };
+        match kexec_load(linux, initrd, cmdline).await {
+            Ok(()) => break,
+            Err(e) => {
+                _ = server_msg_tx.send(ServerMessage::ServerError(match e.kind() {
+                    ErrorKind::PermissionDenied => ServerError::ValidationFailed,
+                    _ => ServerError::Unknown,
+                }));
+                continue;
+            }
+        };
+    }
+
+    _ = server_msg_tx.send(ServerMessage::ServerDone);
 
     Ok(())
 }
