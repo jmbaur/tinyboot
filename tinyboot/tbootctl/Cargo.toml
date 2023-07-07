@@ -3,16 +3,14 @@ name = "tbootctl"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [build-dependencies]
-clap = "*"
-clap_complete = "*"
+clap.workspace = true
+clap_complete = "4.3.2"
 
 [dependencies]
-anyhow = "1.0.71"
-clap = { version = "4.3.10", features = ["derive"] }
-futures = "0.3.28"
-log = "0.4.19"
-tboot = { path = "../tboot" }
-tokio = { version = "1.29.1", features = ["full"] }
+anyhow.workspace = true
+clap.workspace = true
+futures.workspace = true
+log.workspace = true
+tboot.workspace = true
+tokio.workspace = true

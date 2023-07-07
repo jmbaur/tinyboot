@@ -6,15 +6,15 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-anyhow = "1.0.71"
-futures = "0.3.28"
+anyhow = { default-features = false, version = "1.0.71" }
+futures = { default-features = false, version = "0.3.28" }
 log = "0.4.19"
-nix = "0.26.2"
+nix = { default-features = false, version = "0.26.2" }
 ratatui = { version = "0.21.0", default-features = false, features = [
   "termion",
 ] }
 tboot = { path = "../tboot" }
 termion = "2.0.1"
-tokio = { version = "1.29.1", features = ["full"] }
+tokio = { version = "1.29.1", default-features = false, features = ["rt-multi-thread", "macros"] }
 tokio-serde-cbor = "0.7.0"
 tokio-util = "0.7.8"

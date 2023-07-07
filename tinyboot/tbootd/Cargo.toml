@@ -3,25 +3,18 @@ name = "tbootd"
 version = "0.1.0"
 edition = "2021"
 
-[features]
-default = []
-verified-boot = []
-
-[build-dependencies]
-bindgen = "0.66.1"
-
 [dependencies]
-anyhow = "1.0.71"
-bytes = "1.4.0"
-clap = { version = "4.3.10", features = ["derive"] }
-futures = "0.3.28"
+anyhow.workspace = true
+clap.workspace = true
+futures.workspace = true
+log.workspace = true
+nix.workspace = true
+tboot.workspace = true
+thiserror.workspace = true
+tokio-serde-cbor.workspace = true
+tokio-util.workspace = true
+tokio.workspace = true
+bytes = { default-features = false, version = "1.4.0" }
 kobject-uevent = "0.1.0"
-log = "0.4.19"
 netlink-sys = "0.8.5"
-nix = "0.26.2"
-syscalls = "0.6.13"
-tboot = { path = "../tboot" }
-thiserror = "1.0.41"
-tokio = { version = "1.29.1", features = ["full"] }
-tokio-serde-cbor = "0.7.0"
-tokio-util = "0.7.8"
+syscalls = { features = ["std"], default-features = false, version = "0.6.13" }

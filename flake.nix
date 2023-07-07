@@ -39,7 +39,7 @@
       devShells = forAllSystems ({ pkgs, ... }: {
         default = with pkgs; mkShell {
           inputsFrom = [ tinyboot ];
-          nativeBuildInputs = [ rustPlatform.bindgenHook bashInteractive grub2 cargo-insta rustfmt cargo-watch cargo-edit clippy ];
+          nativeBuildInputs = [ bashInteractive grub2 cargo-insta rustfmt cargo-watch cargo-edit clippy ];
         };
       });
       legacyPackages = forAllSystems ({ pkgs, ... }: pkgs);

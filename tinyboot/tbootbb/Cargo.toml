@@ -3,11 +3,9 @@ name = "tbootbb"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
-anyhow = "1.0.71"
+anyhow.workspace = true
 tbootctl = { path = "../tbootctl" }
 tbootd = { path = "../tbootd" }
 tbootui = { path = "../tbootui" }
-tokio = { version = "1.29.1", features = ["full"] }
+tokio.workspace = true
