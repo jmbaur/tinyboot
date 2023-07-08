@@ -24,6 +24,7 @@ fi
 @qemu@ @qemuFlags@ \
 	-nographic \
 	-smp 2 -m 2G \
+	-bios @bios@ \
 	-kernel @linux@/@kernelFile@ -initrd @initrd@/initrd \
 	-netdev user,id=n1 -device virtio-net-pci,netdev=n1 \
 	-device nec-usb-xhci,id=xhci -device usb-storage,bus=xhci.0,drive=stick,removable=true -drive if=none,id=stick,format=raw,file=nixos-@system@.iso \

@@ -6,9 +6,16 @@ in
   options.tinyboot = lib.mkOption {
     type = lib.types.nullOr (lib.types.submodule [ (import ./options.nix { _pkgs = pkgs; _lib = lib; }) ]);
     default = null;
+    apply = opts: lib.recursiveUpdate opts {
+      flashrom.package = config.programs.flashrom.package;
+    };
   };
   config = lib.mkIf (cfg != null) {
-    environment.systemPackages = with pkgs; [ coreboot-utils tinyboot config.system.build.flashScript ];
+    environment.systemPackages = with pkgs; [ cbmem cbfstool nvramtool ectool tinyboot config.system.build.flashScript ];
+    programs.flashrom = {
+      enable = true;
+      package = lib.mkDefault pkgs.flashrom-cros;
+    };
     boot.kernelPatches =
       with lib.kernel;
       with (lib.kernel.whenHelpers config.boot.kernelPackages.kernel.version);

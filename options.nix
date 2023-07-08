@@ -3,7 +3,6 @@
 let
   boards = lib.filterAttrs (_: type: type == "directory") (builtins.readDir ./boards);
   buildFitImage = pkgs.callPackage ./fitimage { };
-  buildCoreboot = pkgs.callPackage ./coreboot.nix { flashrom = pkgs.callPackage ./flashrom.nix { }; };
 in
 {
   imports = lib.mapAttrsToList (board: _: ./boards/${board}/config.nix) boards;
@@ -53,7 +52,7 @@ in
       coreboot = lib.mkOption {
         internal = true;
         readOnly = true;
-        default = buildCoreboot {
+        default = pkgs.buildCoreboot {
           inherit (config) board;
           inherit (config.coreboot) configFile extraConfig extraArgs;
         };
@@ -93,7 +92,7 @@ in
     };
     platforms = lib.mkOption { type = lib.types.listOf lib.types.str; default = [ ]; };
     flashrom = {
-      package = lib.mkPackageOptionMD pkgs "flashrom" { };
+      package = lib.mkPackageOptionMD pkgs "flashrom-cros" { };
       programmer = lib.mkOption { type = lib.types.str; default = "internal"; };
       extraArgs = lib.mkOption { type = lib.types.listOf lib.types.str; default = [ ]; };
     };
