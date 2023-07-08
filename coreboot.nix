@@ -23,7 +23,7 @@ stdenv.mkDerivation ({
     make oldconfig
     runHook postConfigure
   '';
-  makeFlags = [ "XGCCPATH=${toolchain}/bin/" ];
+  makeFlags = [ "XGCCPATH=${toolchain}/bin/" "BUILD_TIMELESS=1" "UPDATED_SUBMODULES=1" ];
   installPhase = ''
     runHook preInstall
     mkdir -p  $out
