@@ -3,14 +3,17 @@ let
   cfg = config.tinyboot;
 in
 {
-  options.tinyboot = lib.mkOption {
-    type = lib.types.nullOr (lib.types.submodule [ (import ./options.nix { _pkgs = pkgs; _lib = lib; }) ]);
-    default = null;
-    apply = opts: lib.recursiveUpdate opts {
-      flashrom.package = config.programs.flashrom.package;
+  options.tinyboot = {
+    enable = lib.mkEnableOption "tinyboot bootloader";
+    settings = lib.mkOption {
+      type = lib.types.submodule [ (import ./options.nix { _pkgs = pkgs; _lib = lib; }) ];
+      default = { };
+      apply = opts: lib.recursiveUpdate opts {
+        settings.flashrom.package = config.programs.flashrom.package;
+      };
     };
   };
-  config = lib.mkIf (cfg != null) {
+  config = lib.mkIf cfg.enable {
     environment.systemPackages = with pkgs; [ cbmem cbfstool nvramtool ectool tinyboot config.system.build.flashScript ];
     programs.flashrom = {
       enable = true;
@@ -38,17 +41,17 @@ in
           };
         }
       ];
-    system.build = { inherit (cfg.build) firmware flashScript; };
-    boot.loader.systemd-boot.extraInstallCommands = lib.optionalString cfg.verifiedBoot.enable ''
+    system.build = { inherit (cfg.settings.build) firmware flashScript; };
+    boot.loader.systemd-boot.extraInstallCommands = lib.optionalString cfg.settings.verifiedBoot.enable ''
       echo "signing boot files"
       find /boot/EFI/nixos -type f -name "*.efi" \
-        -exec ${cfg.build.linux}/bin/sign-file sha256 ${cfg.verifiedBoot.signingPrivateKey} ${cfg.verifiedBoot.signingPublicKey} {} \;
+        -exec ${cfg.settings.build.linux}/bin/sign-file sha256 ${cfg.settings.verifiedBoot.signingPrivateKey} ${cfg.settings.verifiedBoot.signingPublicKey} {} \;
     '';
     boot.loader.grub.device = "nodev"; # just install grub config file
     boot.loader.grub.extraInstallCommands = ''
       echo "signing boot files"
       find /boot/kernels -type f \
-        -exec ${cfg.build.linux}/bin/sign-file sha256 ${cfg.verifiedBoot.signingPrivateKey} ${cfg.verifiedBoot.signingPublicKey} {} \;
+        -exec ${cfg.settings.build.linux}/bin/sign-file sha256 ${cfg.settings.verifiedBoot.signingPrivateKey} ${cfg.settings.verifiedBoot.signingPublicKey} {} \;
     '';
   };
 }

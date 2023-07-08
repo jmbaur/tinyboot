@@ -6,127 +6,109 @@ let
 in
 {
   imports = lib.mapAttrsToList (board: _: ./boards/${board}/config.nix) boards;
-  options = {
-    board = lib.mkOption {
-      type = lib.types.nullOr (lib.types.enum (lib.mapAttrsToList (board: _: board) boards));
+  options = with lib; {
+    platforms = mkOption { type = types.listOf types.str; default = [ ]; };
+    board = mkOption {
+      type = types.nullOr (types.enum (mapAttrsToList (board: _: board) boards));
       default = null;
     };
-    build = {
-      initrd = lib.mkOption {
-        internal = true;
-        readOnly = true;
-        default = pkgs.callPackage ./initramfs.nix {
-          inherit (config) debug;
-          inherit (config.tinyboot) ttys nameservers extraInit extraInittab;
-          imaAppraise = config.verifiedBoot.enable;
-          extraContents = lib.optional config.verifiedBoot.enable {
-            object = config.verifiedBoot.signingPublicKey;
-            symlink = "/etc/keys/x509_ima.der";
-          };
-        };
-      };
-      linux = lib.mkOption {
-        internal = true;
-        readOnly = true;
-        default = (pkgs.callPackage ./linux.nix { inherit (config.linux) basePackage configFile extraConfig; }).overrideAttrs (_: {
-          preConfigure = lib.optionalString config.verifiedBoot.enable ''
-            mkdir tinyboot; cp ${config.verifiedBoot.caCertificate} tinyboot/ca.pem
-          '';
-          postInstall = lib.optionalString config.debug ''
-            cp .config $out/config
-            cp vmlinux $out/vmlinux
-          '' + lib.optionalString config.verifiedBoot.enable ''
-            install -Dm755 -t "$out/bin" scripts/sign-file
-          '';
-        });
-      };
-      fitImage = lib.mkOption {
-        internal = true;
-        readOnly = true;
-        default = buildFitImage {
-          inherit (config) board;
-          inherit (config.build) linux initrd;
-          inherit (config.linux) dtb dtbPattern;
-        };
-      };
-      coreboot = lib.mkOption {
-        internal = true;
-        readOnly = true;
-        default = pkgs.buildCoreboot {
-          inherit (config) board;
-          inherit (config.coreboot) configFile extraConfig extraArgs;
-        };
-      };
-      firmware = lib.mkOption {
-        internal = true;
-        readOnly = true;
-        default = pkgs.runCommand "tinyboot-${config.build.coreboot.name}"
-          {
-            nativeBuildInputs = with pkgs.buildPackages; [ coreboot-utils ];
-            passthru = { inherit (config.build) linux initrd coreboot; };
-            meta.platforms = config.platforms;
-          }
-          ''
-            dd if=${config.build.coreboot}/coreboot.rom of=$out
-            ${if pkgs.stdenv.hostPlatform.linuxArch == "x86_64" then ''
-            cbfstool $out add-payload \
-              -n fallback/payload \
-              -f ${config.build.linux}/${pkgs.stdenv.hostPlatform.linux-kernel.target} \
-              -I ${config.build.initrd}/initrd
-            '' else if pkgs.stdenv.hostPlatform.linuxArch == "arm64" then ''
-            cbfstool $out add -f ${config.build.fitImage}/uImage -n fallback/payload -t fit_payload
-            '' else throw "Unsupported architecture"}
-          '';
-      };
-      flashScript = lib.mkOption {
-        internal = true;
-        readOnly = true;
-        default = pkgs.writeShellScriptBin "flash-firmware-${config.board}" ''
-          ${config.flashrom.package}/bin/flashrom \
-            --progress \
-            --write ${config.build.firmware} \
-            --programmer ${config.flashrom.programmer} \
-            ${lib.escapeShellArgs config.flashrom.extraArgs}
-        '';
+    build = mkOption {
+      default = { };
+      type = types.submoduleWith {
+        modules = [{ freeformType = with types; lazyAttrsOf (uniq unspecified); }];
       };
     };
-    platforms = lib.mkOption { type = lib.types.listOf lib.types.str; default = [ ]; };
     flashrom = {
-      package = lib.mkPackageOptionMD pkgs "flashrom-cros" { };
-      programmer = lib.mkOption { type = lib.types.str; default = "internal"; };
-      extraArgs = lib.mkOption { type = lib.types.listOf lib.types.str; default = [ ]; };
+      package = mkPackageOptionMD pkgs "flashrom-cros" { };
+      programmer = mkOption { type = types.str; default = "internal"; };
+      extraArgs = mkOption { type = types.listOf types.str; default = [ ]; };
     };
     linux = {
-      basePackage = lib.mkOption { type = lib.types.package; default = pkgs.linux; };
-      configFile = lib.mkOption { type = lib.types.path; };
-      extraConfig = lib.mkOption { type = lib.types.lines; default = ""; };
-      commandLine = lib.mkOption { type = lib.types.listOf lib.types.str; default = [ ]; };
-      dtb = lib.mkOption { type = lib.types.nullOr lib.types.path; default = null; };
-      dtbPattern = lib.mkOption { type = lib.types.nullOr lib.types.str; default = null; };
+      basePackage = mkOption { type = types.package; default = pkgs.linux; };
+      configFile = mkOption { type = types.path; };
+      extraConfig = mkOption { type = types.lines; default = ""; };
+      commandLine = mkOption { type = types.listOf types.str; default = [ ]; };
+      dtb = mkOption { type = types.nullOr types.path; default = null; };
+      dtbPattern = mkOption { type = types.nullOr types.str; default = null; };
     };
     coreboot = {
-      extraArgs = lib.mkOption { type = lib.types.attrsOf lib.types.anything; default = { }; };
-      configFile = lib.mkOption { type = lib.types.path; };
-      extraConfig = lib.mkOption { type = lib.types.lines; default = ""; };
+      extraArgs = mkOption { type = types.attrsOf types.anything; default = { }; };
+      configFile = mkOption { type = types.path; };
+      extraConfig = mkOption { type = types.lines; default = ""; };
     };
     verifiedBoot = {
-      enable = lib.mkEnableOption "verified boot";
-      caCertificate = lib.mkOption { type = lib.types.path; };
-      signingPublicKey = lib.mkOption { type = lib.types.path; };
-      signingPrivateKey = lib.mkOption { type = lib.types.path; };
+      enable = mkEnableOption "verified boot";
+      caCertificate = mkOption { type = types.path; };
+      signingPublicKey = mkOption { type = types.path; };
+      signingPrivateKey = mkOption { type = types.path; };
     };
-    debug = lib.mkEnableOption "debug mode";
+    debug = mkEnableOption "debug mode";
     tinyboot = {
-      ttys = lib.mkOption { type = lib.types.listOf lib.types.str; default = [ "tty1" ]; };
-      extraInit = lib.mkOption { type = lib.types.lines; default = ""; };
-      extraInittab = lib.mkOption { type = lib.types.lines; default = ""; };
-      nameservers = lib.mkOption {
-        type = lib.types.listOf lib.types.str;
+      ttys = mkOption { type = types.listOf types.str; default = [ "tty1" ]; };
+      extraInit = mkOption { type = types.lines; default = ""; };
+      extraInittab = mkOption { type = types.lines; default = ""; };
+      nameservers = mkOption {
+        type = types.listOf types.str;
         default = [ "8.8.8.8" "8.8.4.4" "2001:4860:4860::8888" "2001:4860:4860::8844" ];
       };
     };
   };
   config = {
+    build = {
+      initrd = pkgs.callPackage ./initramfs.nix {
+        inherit (config) debug;
+        inherit (config.tinyboot) ttys nameservers extraInit extraInittab;
+        imaAppraise = config.verifiedBoot.enable;
+        extraContents = lib.optional config.verifiedBoot.enable {
+          object = config.verifiedBoot.signingPublicKey;
+          symlink = "/etc/keys/x509_ima.der";
+        };
+      };
+      linux = (pkgs.callPackage ./linux.nix { inherit (config.linux) basePackage configFile extraConfig; }).overrideAttrs (_: {
+        preConfigure = lib.optionalString config.verifiedBoot.enable ''
+          mkdir tinyboot; cp ${config.verifiedBoot.caCertificate} tinyboot/ca.pem
+        '';
+        postInstall = lib.optionalString config.debug ''
+          cp .config $out/config
+          cp vmlinux $out/vmlinux
+        '' + lib.optionalString config.verifiedBoot.enable ''
+          install -Dm755 -t "$out/bin" scripts/sign-file
+        '';
+      });
+      fitImage = buildFitImage {
+        inherit (config) board;
+        inherit (config.build) linux initrd;
+        inherit (config.linux) dtb dtbPattern;
+      };
+      coreboot = pkgs.buildCoreboot {
+        inherit (config) board;
+        inherit (config.coreboot) configFile extraConfig extraArgs;
+      };
+      firmware = pkgs.runCommand "tinyboot-${config.build.coreboot.name}"
+        {
+          nativeBuildInputs = with pkgs.buildPackages; [ coreboot-utils ];
+          passthru = { inherit (config.build) linux initrd coreboot; };
+          meta.platforms = config.platforms;
+        }
+        ''
+          dd if=${config.build.coreboot}/coreboot.rom of=$out
+          ${if pkgs.stdenv.hostPlatform.linuxArch == "x86_64" then ''
+          cbfstool $out add-payload \
+            -n fallback/payload \
+            -f ${config.build.linux}/${pkgs.stdenv.hostPlatform.linux-kernel.target} \
+            -I ${config.build.initrd}/initrd
+          '' else if pkgs.stdenv.hostPlatform.linuxArch == "arm64" then ''
+          cbfstool $out add -f ${config.build.fitImage}/uImage -n fallback/payload -t fit_payload
+          '' else throw "Unsupported architecture"}
+        '';
+      flashScript = pkgs.writeShellScriptBin "flash-firmware-${config.board}" ''
+        ${config.flashrom.package}/bin/flashrom \
+          --progress \
+          --write ${config.build.firmware} \
+          --programmer ${config.flashrom.programmer} \
+          ${lib.escapeShellArgs config.flashrom.extraArgs}
+      '';
+    };
     _module.args = { pkgs = _pkgs; lib = _lib; };
     linux.commandLine = lib.optional config.debug "debug" ++ [ "lsm=integrity" "ima_appraise=enforce" ];
     linux.extraConfig = ''
