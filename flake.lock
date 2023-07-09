@@ -1,40 +1,5 @@
 {
   "nodes": {
-    "coreboot": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1684109766,
-        "narHash": "sha256-q8V+rKm2imf9uEFq0+sTzW7zLn49PaOVQUs5q3Wj9F0=",
-        "ref": "refs/heads/master",
-        "rev": "465fbbe93ee01b4576689a90b7ddbeec23cdace2",
-        "revCount": 52766,
-        "submodules": true,
-        "type": "git",
-        "url": "https://review.coreboot.org/coreboot.git"
-      },
-      "original": {
-        "rev": "465fbbe93ee01b4576689a90b7ddbeec23cdace2",
-        "submodules": true,
-        "type": "git",
-        "url": "https://review.coreboot.org/coreboot.git"
-      }
-    },
-    "flashrom": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1687750657,
-        "narHash": "sha256-GvYpW4h/3ucav57ckC5PFkGntT383gBApLtvViPN+Lo=",
-        "ref": "refs/heads/master",
-        "rev": "4564183f4f3a48dfd34b99ba576b721230224a71",
-        "revCount": 4671,
-        "type": "git",
-        "url": "https://chromium.googlesource.com/chromiumos/third_party/flashrom"
-      },
-      "original": {
-        "type": "git",
-        "url": "https://chromium.googlesource.com/chromiumos/third_party/flashrom"
-      }
-    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1688679045,
@@ -52,8 +17,6 @@
     },
     "root": {
       "inputs": {
-        "coreboot": "coreboot",
-        "flashrom": "flashrom",
         "nixpkgs": "nixpkgs"
       }
     }

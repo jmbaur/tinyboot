@@ -1,17 +1,6 @@
 {
   description = "A small linuxboot payload for coreboot";
-  inputs = {
-    nixpkgs.url = "nixpkgs/nixos-unstable";
-    flashrom = {
-      url = "git+https://chromium.googlesource.com/chromiumos/third_party/flashrom";
-      flake = false;
-    };
-    coreboot = {
-      # 4.20 release
-      url = "git+https://review.coreboot.org/coreboot.git?rev=465fbbe93ee01b4576689a90b7ddbeec23cdace2&submodules=1";
-      flake = false;
-    };
-  };
+  inputs.nixpkgs.url = "nixpkgs/nixos-unstable";
   outputs = inputs: with inputs;
     let
       systems = [ "x86_64-linux" "aarch64-linux" ];
@@ -42,8 +31,8 @@
         nixpkgs.lib.foldAttrs (curr: acc: acc // curr) { } (map (b: extend b baseConfig) [ "bls" "grub" "extlinux" ]);
       overlays.default = final: prev: {
         tinyboot = prev.pkgsStatic.callPackage ./tinyboot { };
-        flashrom-cros = prev.callPackage ./flashrom.nix { src = inputs.flashrom; };
-        buildCoreboot = prev.callPackage ./coreboot.nix { src = inputs.coreboot; flashrom = final.flashrom-cros; };
+        flashrom-cros = prev.callPackage ./flashrom.nix { };
+        buildCoreboot = prev.callPackage ./coreboot.nix { flashrom = final.flashrom-cros; };
         coreboot = prev.callPackage ./boards { };
         kernelPatches = prev.kernelPatches // {
           ima_tpm_early_init = { name = "ima_tpm_early_init"; patch = ./patches/linux-tpm-probe.patch; };
