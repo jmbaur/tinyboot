@@ -7,7 +7,8 @@
       flake = false;
     };
     coreboot = {
-      url = "git+https://github.com/jmbaur/coreboot?ref=tinyboot&submodules=1";
+      # 4.20 release
+      url = "git+https://review.coreboot.org/coreboot.git?rev=465fbbe93ee01b4576689a90b7ddbeec23cdace2&submodules=1";
       flake = false;
     };
   };
