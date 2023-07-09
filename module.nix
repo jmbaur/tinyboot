@@ -42,6 +42,8 @@ in
         }
       ];
     system.build = { inherit (cfg.settings.build) firmware flashScript; };
+    boot.loader.supportsInitrdSecrets = lib.mkForce false;
+    boot.loader.efi.canTouchEfiVariables = lib.mkForce false;
     boot.loader.systemd-boot.extraInstallCommands = lib.optionalString cfg.settings.verifiedBoot.enable ''
       echo "signing boot files"
       find /boot/EFI/nixos -type f -name "*.efi" \

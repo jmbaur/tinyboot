@@ -343,7 +343,8 @@ pub fn find_grub(
                 vec![grub_entry]
             }
         })
-        .filter_map(|grub_entry| {
+        .enumerate()
+        .filter_map(|(idx, grub_entry)| {
             // use mountpoint as implicit value for $root
             let root = evaluator
                 .get_env("root")
@@ -371,14 +372,15 @@ pub fn find_grub(
                 }
             });
 
-            let is_default = 'block: {
-                if let Some(default_id) = evaluator.get_env("default") {
-                    if let Some(id) = &grub_entry.id {
-                        break 'block default_id == id;
-                    }
-                }
-                break 'block false;
-            };
+            let is_default = evaluator
+                .get_env("default")
+                .and_then(|default_idx| {
+                    default_idx
+                        .parse::<usize>()
+                        .map(|default_idx| default_idx == idx)
+                        .ok()
+                })
+                .unwrap_or_default();
 
             Some(LinuxBootEntry {
                 default: is_default,

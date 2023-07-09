@@ -10,7 +10,6 @@
   boot.growPartition = true;
   boot.loader.timeout = lib.mkDefault 15;
   boot.loader.efi.canTouchEfiVariables = false;
-  boot.loader.grub.device = lib.mkVMOverride "/dev/vda";
   users.users.root.password = "";
   fileSystems."/boot" = {
     device = "/dev/disk/by-label/ESP";
