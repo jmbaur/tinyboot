@@ -1,5 +1,40 @@
 {
   "nodes": {
+    "coreboot": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1688879040,
+        "narHash": "sha256-kvUi6HjHQbuVXI0q7Uy//E144rz3AzA2ymrLmgy+mBs=",
+        "ref": "tinyboot",
+        "rev": "7a8529c9c814d205627cc2d85b6fd11cd66e5ae1",
+        "revCount": 52767,
+        "submodules": true,
+        "type": "git",
+        "url": "https://github.com/jmbaur/coreboot"
+      },
+      "original": {
+        "ref": "tinyboot",
+        "submodules": true,
+        "type": "git",
+        "url": "https://github.com/jmbaur/coreboot"
+      }
+    },
+    "flashrom": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1687750657,
+        "narHash": "sha256-GvYpW4h/3ucav57ckC5PFkGntT383gBApLtvViPN+Lo=",
+        "ref": "refs/heads/master",
+        "rev": "4564183f4f3a48dfd34b99ba576b721230224a71",
+        "revCount": 4671,
+        "type": "git",
+        "url": "https://chromium.googlesource.com/chromiumos/third_party/flashrom"
+      },
+      "original": {
+        "type": "git",
+        "url": "https://chromium.googlesource.com/chromiumos/third_party/flashrom"
+      }
+    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1688679045,
@@ -17,6 +52,8 @@
     },
     "root": {
       "inputs": {
+        "coreboot": "coreboot",
+        "flashrom": "flashrom",
         "nixpkgs": "nixpkgs"
       }
     }

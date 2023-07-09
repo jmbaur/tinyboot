@@ -1,15 +1,12 @@
-{ lib, stdenv, fetchgit, pkgsBuildBuild, python3, pkg-config, flashrom, openssl, ... }:
+{ src, lib, stdenv, pkgsBuildBuild, python3, pkg-config, flashrom, openssl, ... }:
 lib.makeOverridable ({ board ? null, configFile, extraConfig ? "", extraArgs ? { } }:
 let
   toolchain = pkgsBuildBuild.coreboot-toolchain.${{ i386 = "i386"; x86_64 = "i386"; arm64 = "aarch64"; arm = "arm"; riscv = "riscv"; powerpc = "ppc64"; }.${stdenv.hostPlatform.linuxArch}};
 in
 stdenv.mkDerivation ({
   pname = "coreboot-${if (board) != null then board else "unknown"}";
-  inherit (toolchain) version;
-  src = fetchgit {
-    inherit (toolchain.src) url rev;
-    hash = "sha256-q8V+rKm2imf9uEFq0+sTzW7zLn49PaOVQUs5q3Wj9F0=";
-  };
+  version = src.shortRev;
+  src = "${src}";
   patches = [ ./patches/coreboot-fitimage-memlayout.patch ./patches/coreboot-atf-loglevel.patch ];
   depsBuildBuild = [ pkgsBuildBuild.stdenv.cc ];
   nativeBuildInputs = [ python3 pkg-config ];
