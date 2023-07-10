@@ -1,4 +1,4 @@
-{ src, lib, stdenv, pkgsBuildBuild, python3, pkg-config, flashrom, openssl, ... }:
+{ src, lib, stdenv, pkgsBuildBuild, python3, pkg-config, openssl, ... }:
 lib.makeOverridable ({ board ? null, configFile, extraConfig ? "", extraArgs ? { } }:
 let
   toolchain = pkgsBuildBuild.coreboot-toolchain.${{ i386 = "i386"; x86_64 = "i386"; arm64 = "aarch64"; arm = "arm"; riscv = "riscv"; powerpc = "ppc64"; }.${stdenv.hostPlatform.linuxArch}};
@@ -10,7 +10,7 @@ stdenv.mkDerivation ({
   patches = [ ./patches/coreboot-fitimage-memlayout.patch ./patches/coreboot-atf-loglevel.patch ];
   depsBuildBuild = [ pkgsBuildBuild.stdenv.cc ];
   nativeBuildInputs = [ python3 pkg-config ];
-  buildInputs = [ flashrom openssl ];
+  buildInputs = [ openssl ];
   postPatch = ''
     patchShebangs util
   '';
