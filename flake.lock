@@ -22,11 +22,11 @@
     "flashrom": {
       "flake": false,
       "locked": {
-        "lastModified": 1687750657,
-        "narHash": "sha256-GvYpW4h/3ucav57ckC5PFkGntT383gBApLtvViPN+Lo=",
+        "lastModified": 1689216637,
+        "narHash": "sha256-cGkPbAOzpqRcYdKHF8zgtrR9oyuy6gTC08mVQrEs5HU=",
         "ref": "refs/heads/master",
-        "rev": "4564183f4f3a48dfd34b99ba576b721230224a71",
-        "revCount": 4671,
+        "rev": "e3be93827087ebf1a6b9ccd42fe31df4cb3f8302",
+        "revCount": 4673,
         "type": "git",
         "url": "https://chromium.googlesource.com/chromiumos/third_party/flashrom"
       },
@@ -37,11 +37,11 @@
     },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1688679045,
-        "narHash": "sha256-t3xGEfYIwhaLTPU8FLtN/pLPytNeDwbLI6a7XFFBlGo=",
+        "lastModified": 1689282004,
+        "narHash": "sha256-VNhuyb10c9SV+3hZOlxwJwzEGytZ31gN9w4nPCnNvdI=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "3c7487575d9445185249a159046cc02ff364bff8",
+        "rev": "e74e68449c385db82de3170288a28cd0f608544f",
         "type": "github"
       },
       "original": {

@@ -11,7 +11,7 @@ codegen-units = 1
 [workspace.dependencies]
 anyhow = { default-features = false, version = "1.0.71" }
 tboot = { path = "./tboot" }
-clap = { version = "4.3.11", features = [
+clap = { version = "4.3.12", features = [
   "std",
   "derive",
 ], default-features = false }
