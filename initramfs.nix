@@ -1,7 +1,6 @@
-{ imaAppraise ? false, ttys ? [ "tty0" ], nameservers ? [ ], extraInit ? "", extraInittab ? "", prepend ? [ ], extraContents ? [ ], lib, makeInitrdNG, ncurses, busybox, tinyboot, writeText, substituteAll }:
+{ extraInit ? "", extraInittab ? "", prepend ? [ ], extraContents ? [ ], makeInitrdNG, ncurses, busybox, substituteAll }:
 let
   myBusybox = (busybox.override { enableStatic = true; }).overrideAttrs (_: { stripDebugFlags = [ "--strip-all" ]; });
-  staticResolvConf = writeText "resolv.conf.static" (lib.concatLines (map (n: "nameserver ${n}") nameservers));
   rcS = substituteAll {
     name = "rcS";
     src = ./etc/rcS.in;
@@ -11,31 +10,17 @@ let
   inittab = substituteAll {
     name = "inittab";
     src = ./etc/inittab.in;
-    extraInittab = (lib.concatLines (map (tty: "${tty}::respawn:/sbin/tbootui") ttys)) + extraInittab;
-  };
-  imaPolicy = substituteAll {
-    name = "ima_policy.conf";
-    src = ./etc/ima_policy.conf.in;
-    extraPolicy = lib.optionalString imaAppraise ''
-      appraise func=KEXEC_KERNEL_CHECK appraise_type=imasig|modsig
-      appraise func=KEXEC_INITRAMFS_CHECK appraise_type=imasig|modsig
-    '';
+    extraInittab = extraInittab;
   };
 in
 makeInitrdNG {
   compressor = "xz";
   inherit prepend;
   contents = [
-    { object = "${tinyboot}/bin"; symlink = "/sbin"; }
     { object = "${myBusybox}/bin"; symlink = "/bin"; }
     { object = "${myBusybox}/bin/busybox"; symlink = "/init"; }
     { object = "${ncurses}/share/terminfo/l/linux"; symlink = "/etc/terminfo/l/linux"; }
     { object = inittab; symlink = "/etc/inittab"; }
     { object = rcS; symlink = "/etc/init.d/rcS"; }
-    { object = staticResolvConf; symlink = "/etc/resolv.conf.static"; }
-    { object = ./etc/group; symlink = "/etc/group"; }
-    { object = ./etc/mdev.conf; symlink = "/etc/mdev.conf"; }
-    { object = ./etc/passwd; symlink = "/etc/passwd"; }
-    { object = imaPolicy; symlink = "/etc/ima/policy.conf"; }
   ] ++ extraContents;
 }

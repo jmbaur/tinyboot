@@ -27,7 +27,7 @@ let
         reboot
       '';
     in
-    pkgs.callPackage ./update-initramfs.nix {
+    pkgs.callPackage ./initramfs.nix {
       extraInittab = ''
         kmsg::once:/sbin/flash-update
       '';
@@ -95,21 +95,38 @@ in
   config = {
     build = {
       initrd = pkgs.callPackage ./initramfs.nix {
-        inherit (config.tinyboot) ttys nameservers;
         extraInittab = ''
           ::respawn:/sbin/tbootd --log-level=${if config.debug then "debug" else "info"}
-        '' + config.tinyboot.extraInittab;
+        '' + (lib.concatLines (map (tty: "${tty}::respawn:/sbin/tbootui") config.tinyboot.ttys)) + config.tinyboot.extraInittab;
         extraInit = ''
           mkdir -p /home/tinyuser /tmp/tinyboot
           chown -R tinyuser:tinygroup /home/tinyuser /tmp/tinyboot
           cat /etc/resolv.conf.static >/etc/resolv.conf
           cat /etc/ima/policy.conf >/sys/kernel/security/ima/policy
         '' + config.tinyboot.extraInit;
-        imaAppraise = config.verifiedBoot.enable;
-        extraContents = lib.optional config.verifiedBoot.enable {
-          object = config.verifiedBoot.signingPublicKey;
-          symlink = "/etc/keys/x509_ima.der";
-        };
+        extraContents =
+          let
+            staticResolvConf = pkgs.writeText "resolv.conf.static" (lib.concatLines (map (n: "nameserver ${n}") config.tinyboot.nameservers));
+            imaPolicy = pkgs.substituteAll {
+              name = "ima_policy.conf";
+              src = ./etc/ima_policy.conf.in;
+              extraPolicy = lib.optionalString config.verifiedBoot.enable ''
+                appraise func=KEXEC_KERNEL_CHECK appraise_type=imasig|modsig
+                appraise func=KEXEC_INITRAMFS_CHECK appraise_type=imasig|modsig
+              '';
+            };
+          in
+          [
+            { object = "${pkgs.tinyboot}/bin"; symlink = "/sbin"; }
+            { object = ./etc/group; symlink = "/etc/group"; }
+            { object = ./etc/mdev.conf; symlink = "/etc/mdev.conf"; }
+            { object = ./etc/passwd; symlink = "/etc/passwd"; }
+            { object = staticResolvConf; symlink = "/etc/resolv.conf.static"; }
+            { object = imaPolicy; symlink = "/etc/ima/policy.conf"; }
+          ] ++ (lib.optional config.verifiedBoot.enable {
+            object = config.verifiedBoot.signingPublicKey;
+            symlink = "/etc/keys/x509_ima.der";
+          });
       };
       linux = (pkgs.callPackage ./linux.nix { inherit (config.linux) basePackage configFile extraConfig; }).overrideAttrs (_: {
         preConfigure = lib.optionalString config.verifiedBoot.enable ''
