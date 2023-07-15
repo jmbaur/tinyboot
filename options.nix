@@ -68,8 +68,16 @@ in
   config = {
     build = {
       initrd = pkgs.callPackage ./initramfs.nix {
-        inherit (config) debug;
-        inherit (config.tinyboot) ttys nameservers extraInit extraInittab;
+        inherit (config.tinyboot) ttys nameservers;
+        extraInittab = ''
+          ::respawn:/bin/tbootd --log-level=${if config.debug then "debug" else "info"}
+        '' + config.tinyboot.extraInittab;
+        extraInit = ''
+          mkdir -p /home/tinyuser /tmp/tinyboot
+          chown -R tinyuser:tinygroup /home/tinyuser /tmp/tinyboot
+          cat /etc/resolv.conf.static >/etc/resolv.conf
+          cat /etc/ima/policy.conf >/sys/kernel/security/ima/policy
+        '' + config.tinyboot.extraInit;
         imaAppraise = config.verifiedBoot.enable;
         extraContents = lib.optional config.verifiedBoot.enable {
           object = config.verifiedBoot.signingPublicKey;
@@ -116,12 +124,26 @@ in
           cbfstool $out add -f ${config.build.fitImage}/uImage -n fallback/payload -t fit_payload
           '' else throw "Unsupported architecture"}
         '';
-      flashScript = pkgs.writeShellScriptBin "flash-firmware-${config.board}" ''
-        ${config.flashrom.package}/bin/flashrom \
-          --progress \
-          --write ${config.build.firmware} \
-          --programmer ${config.flashrom.programmer} \
-          ${lib.escapeShellArgs config.flashrom.extraArgs}
+      updateInitrd = pkgs.callPackage ./update-initramfs.nix {
+        flashScript = pkgs.writeShellScript "flash-script" ''
+          if ${config.flashrom.package}/bin/flashrom \
+            --write ${config.build.firmware} \
+            --programmer ${config.flashrom.programmer} \
+            ${lib.escapeShellArgs config.flashrom.extraArgs}; then
+            echo "flashing succeeded"
+            sleep 2
+          else
+            echo "flashing failed"
+            sleep 10
+          fi
+          reboot
+        '';
+      };
+      updateScript = pkgs.writeShellScriptBin "update-firmware" ''
+        kexec -l ${config.build.linux}/${pkgs.stdenv.hostPlatform.linux-kernel.target} \
+          --initrd=${config.build.updateInitrd}/initrd \
+          --command-line="${lib.concatStringsSep " " (map (tty: "console=/dev/${tty}") config.tinyboot.ttys)}"
+        systemctl kexec
       '';
     };
     _module.args = { pkgs = _pkgs; lib = _lib; };

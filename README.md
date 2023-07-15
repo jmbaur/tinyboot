@@ -9,7 +9,7 @@ boards, contributions for more configs are welcome!
 ## Usage
 
 ```
-nix run github:jmbaur/tinyboot#coreboot.<your_board>.config.build.flashScript
+nix run github:jmbaur/tinyboot#coreboot.<your_board>.config.build.updateScript
 ```
 
 ## Hacking

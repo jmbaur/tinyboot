@@ -9,8 +9,4 @@ ln -sf /proc/self/fd/0 /dev/stdin
 ln -sf /proc/self/fd/1 /dev/stdout
 ln -sf /proc/self/fd/2 /dev/stderr
 mdev -s
-mkdir -p /home/tinyuser /tmp/tinyboot
-chown -R tinyuser:tinygroup /home/tinyuser /tmp/tinyboot
-cat /etc/resolv.conf.static >/etc/resolv.conf
-cat /etc/ima/policy.conf >/sys/kernel/security/ima/policy
 @extraInit@

@@ -14,7 +14,7 @@ in
     };
   };
   config = lib.mkIf cfg.enable {
-    environment.systemPackages = with pkgs; [ cbmem cbfstool nvramtool ectool tinyboot config.system.build.flashScript ];
+    environment.systemPackages = with pkgs; [ cbmem cbfstool nvramtool ectool tinyboot config.system.build.updateScript ];
     programs.flashrom = {
       enable = true;
       package = lib.mkDefault pkgs.flashrom-cros;
@@ -41,7 +41,7 @@ in
           };
         }
       ];
-    system.build = { inherit (cfg.settings.build) firmware flashScript; };
+    system.build = { inherit (cfg.settings.build) firmware updateScript; };
     boot.loader.supportsInitrdSecrets = lib.mkForce false;
     boot.loader.efi.canTouchEfiVariables = lib.mkForce false;
     boot.loader.systemd-boot.extraInstallCommands = lib.optionalString cfg.settings.verifiedBoot.enable ''
