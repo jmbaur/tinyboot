@@ -4,7 +4,7 @@ let
     x86_64 = [ "-M q35" ];
     aarch64 = [ "-M virt" "-cpu cortex-a53" ];
   }) ++ lib.optional (stdenv.hostPlatform == stdenv.buildPlatform) "-enable-kvm");
-  bios = coreboot."qemu-${stdenv.hostPlatform.qemuArch}";
+  bios = coreboot."qemu-${stdenv.hostPlatform.qemuArch}".config.build.firmware;
   inherit (bios) linux initrd;
 in
 substituteAll {
