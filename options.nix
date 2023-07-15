@@ -97,7 +97,7 @@ in
       initrd = pkgs.callPackage ./initramfs.nix {
         inherit (config.tinyboot) ttys nameservers;
         extraInittab = ''
-          ::respawn:/bin/tbootd --log-level=${if config.debug then "debug" else "info"}
+          ::respawn:/sbin/tbootd --log-level=${if config.debug then "debug" else "info"}
         '' + config.tinyboot.extraInittab;
         extraInit = ''
           mkdir -p /home/tinyuser /tmp/tinyboot
