@@ -5,7 +5,7 @@
       configFile = lib.mkDefault (pkgs.concatText "volteer-elemi-kernel.config" [ ../generic-kernel.config ../x86_64-kernel.config ../chromebook-kernel.config ]);
       commandLine = [ "quiet" ];
     };
-    coreboot.configFile = lib.mkDefault ./coreboot.config;
+    coreboot = { configFile = lib.mkDefault ./coreboot.config; bootsplash.enable = true; };
     flashrom.extraArgs = lib.mkDefault [ "--ifd" "-i" "bios" ];
   };
 }

@@ -3,6 +3,13 @@
 let
   boards = lib.filterAttrs (_: type: type == "directory") (builtins.readDir ./boards);
   buildFitImage = pkgs.callPackage ./fitimage { };
+  inherit (config.coreboot.bootsplash) width height;
+  bootsplash = pkgs.buildPackages.runCommand "bootsplash-${toString width}x${toString height}"
+    { nativeBuildInputs = [ pkgs.buildPackages.imagemagick ]; }
+    ''
+      mkdir -p $out
+      magick ${./boards/bootsplash.jpg} -resize ${toString width}x${toString height}\\! $out/bootsplash.jpg
+    '';
 in
 {
   imports = lib.mapAttrsToList (board: _: ./boards/${board}/config.nix) boards;
@@ -35,6 +42,11 @@ in
       extraArgs = mkOption { type = types.attrsOf types.anything; default = { }; };
       configFile = mkOption { type = types.path; };
       extraConfig = mkOption { type = types.lines; default = ""; };
+      bootsplash = {
+        enable = mkEnableOption "bootsplash";
+        width = mkOption { type = types.int; default = 1024; };
+        height = mkOption { type = types.int; default = 768; };
+      };
     };
     verifiedBoot = {
       enable = mkEnableOption "verified boot";
@@ -92,6 +104,9 @@ in
         }
         ''
           dd if=${config.build.coreboot}/coreboot.rom of=$out
+          ${lib.optionalString config.coreboot.bootsplash.enable ''
+          cbfstool $out add -t bootsplash -n bootsplash.jpg -f ${bootsplash}/bootsplash.jpg
+          ''}
           ${if pkgs.stdenv.hostPlatform.linuxArch == "x86_64" then ''
           cbfstool $out add-payload \
             -n fallback/payload \
