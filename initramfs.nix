@@ -1,7 +1,6 @@
-{ debug ? false, imaAppraise ? false, ttys ? [ "tty0" ], nameservers ? [ ], extraInit ? "", extraInittab ? "", prepend ? [ ], extraContents ? [ ], lib, buildEnv, makeInitrdNG, ncurses, busybox, tinyboot, writeText, substituteAll }:
+{ imaAppraise ? false, ttys ? [ "tty0" ], nameservers ? [ ], extraInit ? "", extraInittab ? "", prepend ? [ ], extraContents ? [ ], lib, makeInitrdNG, ncurses, busybox, tinyboot, writeText, substituteAll }:
 let
   myBusybox = (busybox.override { enableStatic = true; }).overrideAttrs (_: { stripDebugFlags = [ "--strip-all" ]; });
-  bin = buildEnv { name = "tinyboot-initrd-bin"; pathsToLink = [ "/bin" ]; paths = [ myBusybox tinyboot ]; };
   staticResolvConf = writeText "resolv.conf.static" (lib.concatLines (map (n: "nameserver ${n}") nameservers));
   rcS = substituteAll {
     name = "rcS";
@@ -12,8 +11,7 @@ let
   inittab = substituteAll {
     name = "inittab";
     src = ./etc/inittab.in;
-    logLevel = if debug then "debug" else "info";
-    extraInittab = (lib.concatLines (map (tty: "${tty}::respawn:/bin/tbootui") ttys)) + extraInittab;
+    extraInittab = (lib.concatLines (map (tty: "${tty}::respawn:/sbin/tbootui") ttys)) + extraInittab;
   };
   imaPolicy = substituteAll {
     name = "ima_policy.conf";
@@ -28,7 +26,8 @@ makeInitrdNG {
   compressor = "xz";
   inherit prepend;
   contents = [
-    { object = "${bin}/bin"; symlink = "/bin"; }
+    { object = "${tinyboot}/bin"; symlink = "/sbin"; }
+    { object = "${myBusybox}/bin"; symlink = "/bin"; }
     { object = "${myBusybox}/bin/busybox"; symlink = "/init"; }
     { object = "${ncurses}/share/terminfo/l/linux"; symlink = "/etc/terminfo/l/linux"; }
     { object = inittab; symlink = "/etc/inittab"; }

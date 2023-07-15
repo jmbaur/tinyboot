@@ -10,6 +10,33 @@ let
       mkdir -p $out
       magick ${./boards/bootsplash.jpg} -resize ${toString width}x${toString height}\\! $out/bootsplash.jpg
     '';
+  updateInitrd =
+    let
+      flashScript = pkgs.writeScript "flash-script" ''
+        #!/bin/sh
+        if flashrom \
+          --write /update.rom \
+          --programmer ${config.flashrom.programmer} \
+          ${lib.escapeShellArgs config.flashrom.extraArgs}; then
+          echo "flashing succeeded"
+          sleep 2
+        else
+          echo "flashing failed"
+          sleep 10
+        fi
+        reboot
+      '';
+    in
+    pkgs.callPackage ./update-initramfs.nix {
+      extraInittab = ''
+        kmsg::once:/sbin/flash-update
+      '';
+      extraContents = [
+        { object = config.build.firmware; symlink = "/update.rom"; }
+        { object = "${config.flashrom.package}/bin/flashrom"; symlink = "/sbin/flashrom"; }
+        { object = flashScript; symlink = "/sbin/flash-update"; }
+      ];
+    };
 in
 {
   imports = lib.mapAttrsToList (board: _: ./boards/${board}/config.nix) boards;
@@ -124,24 +151,9 @@ in
           cbfstool $out add -f ${config.build.fitImage}/uImage -n fallback/payload -t fit_payload
           '' else throw "Unsupported architecture"}
         '';
-      updateInitrd = pkgs.callPackage ./update-initramfs.nix {
-        flashScript = pkgs.writeShellScript "flash-script" ''
-          if ${config.flashrom.package}/bin/flashrom \
-            --write ${config.build.firmware} \
-            --programmer ${config.flashrom.programmer} \
-            ${lib.escapeShellArgs config.flashrom.extraArgs}; then
-            echo "flashing succeeded"
-            sleep 2
-          else
-            echo "flashing failed"
-            sleep 10
-          fi
-          reboot
-        '';
-      };
       updateScript = pkgs.writeShellScriptBin "update-firmware" ''
         kexec -l ${config.build.linux}/${pkgs.stdenv.hostPlatform.linux-kernel.target} \
-          --initrd=${config.build.updateInitrd}/initrd \
+          --initrd=${updateInitrd}/initrd \
           --command-line="${lib.concatStringsSep " " (map (tty: "console=/dev/${tty}") config.tinyboot.ttys)}"
         systemctl kexec
       '';

@@ -1,4 +1,4 @@
-{ flashScript, makeInitrdNG, ncurses, busybox, substituteAll }:
+{ extraInittab ? "", extraContents ? [ ], makeInitrdNG, ncurses, busybox, substituteAll }:
 let
   myBusybox = (busybox.override { enableStatic = true; }).overrideAttrs (_: { stripDebugFlags = [ "--strip-all" ]; });
   rcS = substituteAll {
@@ -10,9 +10,7 @@ let
   inittab = substituteAll {
     name = "update-inittab";
     src = ./etc/inittab.in;
-    extraInittab = ''
-      kmsg::once:${flashScript}
-    '';
+    inherit extraInittab;
   };
 in
 makeInitrdNG {
@@ -23,5 +21,5 @@ makeInitrdNG {
     { object = "${ncurses}/share/terminfo/l/linux"; symlink = "/etc/terminfo/l/linux"; }
     { object = inittab; symlink = "/etc/inittab"; }
     { object = rcS; symlink = "/etc/init.d/rcS"; }
-  ];
+  ] ++ extraContents;
 }
