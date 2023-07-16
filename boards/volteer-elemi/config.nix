@@ -10,7 +10,7 @@
       bootsplash = { enable = true; width = 1920; height = 1080; };
     };
     flashrom = {
-      extraArgs = lib.mkDefault [ "--fmap" "-i" "BIOS" ];
+      extraArgs = lib.mkDefault [ "-i" "BIOS" ];
       package = (pkgs.flashrom-cros.overrideAttrs (old: {
         buildFlags = [ "CFLAGS=-Wno-unused-variable" ];
         src = pkgs.fetchgit {
