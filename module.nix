@@ -8,16 +8,13 @@ in
     settings = lib.mkOption {
       type = lib.types.submodule [ (import ./options.nix { _pkgs = pkgs; _lib = lib; }) ];
       default = { };
-      apply = opts: lib.recursiveUpdate opts {
-        settings.flashrom.package = config.programs.flashrom.package;
-      };
     };
   };
   config = lib.mkIf cfg.enable {
     environment.systemPackages = with pkgs; [ cbmem cbfstool nvramtool ectool tinyboot config.system.build.updateScript ];
     programs.flashrom = {
       enable = true;
-      package = lib.mkDefault pkgs.flashrom-cros;
+      package = lib.mkDefault cfg.settings.flashrom.package;
     };
     boot.kernelPatches =
       with lib.kernel;

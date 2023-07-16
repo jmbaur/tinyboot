@@ -6,10 +6,6 @@
       url = "git+https://github.com/jmbaur/coreboot?ref=tinyboot&submodules=1";
       flake = false;
     };
-    flashrom = {
-      url = "git+https://chromium.googlesource.com/chromiumos/third_party/flashrom";
-      flake = false;
-    };
   };
   outputs = inputs: with inputs;
     let
@@ -41,7 +37,7 @@
         nixpkgs.lib.foldAttrs (curr: acc: acc // curr) { } (map (b: extend b baseConfig) [ "bls" "grub" "extlinux" ]);
       overlays.default = final: prev: {
         tinyboot = prev.pkgsStatic.callPackage ./tinyboot { };
-        flashrom-cros = prev.callPackage ./flashrom.nix { src = inputs.flashrom; };
+        flashrom-cros = prev.callPackage ./flashrom-cros.nix { };
         buildCoreboot = prev.callPackage ./coreboot.nix { src = inputs.coreboot; flashrom = final.flashrom-cros; };
         coreboot = prev.callPackage ./boards { };
         kernelPatches = prev.kernelPatches // {

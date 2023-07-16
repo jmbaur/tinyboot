@@ -3,11 +3,11 @@
     "coreboot": {
       "flake": false,
       "locked": {
-        "lastModified": 1688879040,
-        "narHash": "sha256-kvUi6HjHQbuVXI0q7Uy//E144rz3AzA2ymrLmgy+mBs=",
+        "lastModified": 1689460792,
+        "narHash": "sha256-w0q3jC94pMT5W7QK13w5z8EkfXMb10uMSYI5S62YIRw=",
         "ref": "tinyboot",
-        "rev": "7a8529c9c814d205627cc2d85b6fd11cd66e5ae1",
-        "revCount": 52767,
+        "rev": "0dd64ae54a305342061a708f07eea93404066682",
+        "revCount": 52769,
         "submodules": true,
         "type": "git",
         "url": "https://github.com/jmbaur/coreboot"
@@ -17,31 +17,15 @@
         "submodules": true,
         "type": "git",
         "url": "https://github.com/jmbaur/coreboot"
-      }
-    },
-    "flashrom": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1689216637,
-        "narHash": "sha256-cGkPbAOzpqRcYdKHF8zgtrR9oyuy6gTC08mVQrEs5HU=",
-        "ref": "refs/heads/master",
-        "rev": "e3be93827087ebf1a6b9ccd42fe31df4cb3f8302",
-        "revCount": 4673,
-        "type": "git",
-        "url": "https://chromium.googlesource.com/chromiumos/third_party/flashrom"
-      },
-      "original": {
-        "type": "git",
-        "url": "https://chromium.googlesource.com/chromiumos/third_party/flashrom"
       }
     },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1689282004,
-        "narHash": "sha256-VNhuyb10c9SV+3hZOlxwJwzEGytZ31gN9w4nPCnNvdI=",
+        "lastModified": 1689373857,
+        "narHash": "sha256-mtBksyvhhT98Zsm9tYHuMKuLwUKDwv+BGTl6K5nOGhY=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "e74e68449c385db82de3170288a28cd0f608544f",
+        "rev": "dfdbcc428f365071f0ca3888f6ec8c25c3792885",
         "type": "github"
       },
       "original": {
@@ -53,7 +37,6 @@
     "root": {
       "inputs": {
         "coreboot": "coreboot",
-        "flashrom": "flashrom",
         "nixpkgs": "nixpkgs"
       }
     }

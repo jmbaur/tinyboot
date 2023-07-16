@@ -9,6 +9,17 @@
       configFile = lib.mkDefault ./coreboot.config;
       bootsplash = { enable = true; width = 1920; height = 1080; };
     };
-    flashrom.extraArgs = lib.mkDefault [ "--ifd" "-i" "bios" ];
+    flashrom = {
+      extraArgs = lib.mkDefault [ "--fmap" "-i" "BIOS" ];
+      package = (pkgs.flashrom-cros.overrideAttrs (old: {
+        buildFlags = [ "CFLAGS=-Wno-unused-variable" ];
+        src = pkgs.fetchgit {
+          url = "https://chromium.googlesource.com/chromiumos/third_party/flashrom";
+          branchName = "factory-volteer-13600.B";
+          rev = "a33454948c1064b3ea0f3f376c7ba4a98a435497";
+          hash = "sha256-cjJRzuJMXmmxwCTn2nGqAAtgSG9RdSZ1JH4AngDVoWc=";
+        };
+      })).override { useMeson = false; };
+    };
   };
 }
