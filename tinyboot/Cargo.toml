@@ -9,9 +9,9 @@ opt-level = "z"
 codegen-units = 1
 
 [workspace.dependencies]
-anyhow = { default-features = false, version = "1.0.71" }
+anyhow = { default-features = false, version = "1.0.72" }
 tboot = { path = "./tboot" }
-clap = { version = "4.3.12", features = [
+clap = { version = "4.3.15", features = [
   "std",
   "derive",
 ], default-features = false }

@@ -38,6 +38,7 @@
       overlays.default = final: prev: {
         tinyboot = prev.pkgsStatic.callPackage ./tinyboot { };
         flashrom-cros = prev.callPackage ./flashrom-cros.nix { };
+        libpayload = prev.callPackage ./libpayload.nix { src = inputs.coreboot; flashrom = final.flashrom-cros; };
         buildCoreboot = prev.callPackage ./coreboot.nix { src = inputs.coreboot; flashrom = final.flashrom-cros; };
         coreboot = prev.callPackage ./boards { };
         kernelPatches = prev.kernelPatches // {

@@ -19,4 +19,4 @@ grub = { path = "../grub" }
 kobject-uevent = "0.1.0"
 serde = { version = "1.0.171", features = ["derive"], default-features = false }
 serde_cbor = { default-features = false, version = "0.11.2" }
-uuid = { default-features = false, version = "1.4.0" }
+uuid = { default-features = false, version = "1.4.1" }

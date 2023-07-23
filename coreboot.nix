@@ -12,7 +12,7 @@ stdenv.mkDerivation ({
   nativeBuildInputs = [ python3 pkg-config ];
   buildInputs = [ openssl ];
   postPatch = ''
-    patchShebangs util
+    patchShebangs util 3rdparty/vboot/scripts
   '';
   inherit extraConfig;
   passAsFile = [ "extraConfig" ];

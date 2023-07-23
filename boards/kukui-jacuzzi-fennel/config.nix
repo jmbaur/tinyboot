@@ -7,9 +7,6 @@
       commandLine = [ "console=ttyS0" ];
       dtbPattern = "mt8183-kukui-jacuzzi-fennel*";
     };
-    coreboot = {
-      configFile = lib.mkDefault ./coreboot.config;
-      bootsplash.enable = true;
-    };
+    coreboot.configFile = lib.mkDefault ./coreboot.config;
   };
 }

@@ -3,13 +3,6 @@
 let
   boards = lib.filterAttrs (_: type: type == "directory") (builtins.readDir ./boards);
   buildFitImage = pkgs.callPackage ./fitimage { };
-  inherit (config.coreboot.bootsplash) width height;
-  bootsplash = pkgs.buildPackages.runCommand "bootsplash-${toString width}x${toString height}"
-    { nativeBuildInputs = [ pkgs.buildPackages.imagemagick ]; }
-    ''
-      mkdir -p $out
-      magick ${./boards/bootsplash.jpg} -resize ${toString width}x${toString height}\\! $out/bootsplash.jpg
-    '';
   updateInitrd =
     let
       flashScript = pkgs.writeScript "flash-script" ''
@@ -70,17 +63,20 @@ in
       extraArgs = mkOption { type = types.attrsOf types.anything; default = { }; };
       configFile = mkOption { type = types.path; };
       extraConfig = mkOption { type = types.lines; default = ""; };
-      bootsplash = {
-        enable = mkEnableOption "bootsplash";
-        width = mkOption { type = types.int; default = 1024; };
-        height = mkOption { type = types.int; default = 768; };
-      };
     };
     verifiedBoot = {
-      enable = mkEnableOption "verified boot";
-      caCertificate = mkOption { type = types.path; };
-      signingPublicKey = mkOption { type = types.path; };
-      signingPrivateKey = mkOption { type = types.path; };
+      requiredSystemFeatures = mkOption { type = types.listOf types.str; default = [ ]; };
+      # TODO(jared): integrate IMA and vboot keys (they can come from the same RSA key?)
+      caCertificate = mkOption { type = types.path; default = ./test/keys/x509_ima.pem; };
+      signingPublicKey = mkOption { type = types.path; default = ./test/keys/x509_ima.der; };
+      signingPrivateKey = mkOption { type = types.path; default = ./test/keys/privkey_ima.pem; };
+      vbootRootKey = mkOption { type = types.path; default = "${pkgs.vboot_reference}/share/vboot/devkeys/root_key.vbpubk"; };
+      vbootRecoveryKey = mkOption { type = types.path; default = "${pkgs.vboot_reference}/share/vboot/devkeys/recovery_key.vbpubk"; };
+      vbootFirmwarePrivkey = mkOption { type = types.path; default = "${pkgs.vboot_reference}/share/vboot/devkeys/firmware_data_key.vbprivk"; };
+      vbootKeyblock = mkOption { type = types.path; default = "${pkgs.vboot_reference}/share/vboot/devkeys/firmware.keyblock"; };
+      vbootKernelKey = mkOption { type = types.path; default = "${pkgs.vboot_reference}/share/vboot/devkeys/kernel_subkey.vbpubk"; };
+      vbootKeyblockVersion = mkOption { type = types.str; default = "1"; };
+      vbootKeyblockPreambleFlags = mkOption { type = types.str; default = "0x0"; };
     };
     debug = mkEnableOption "debug mode";
     tinyboot = {
@@ -94,24 +90,51 @@ in
     };
   };
   config = {
+    _module.args = { pkgs = _pkgs; lib = _lib; };
+
+    tinyboot.extraInit = ''
+      mkdir -p /home/tinyuser /tmp/tinyboot
+      chown -R tinyuser:tinygroup /home/tinyuser /tmp/tinyboot
+      cat /etc/resolv.conf.static >/etc/resolv.conf
+      cat /etc/ima/policy.conf >/sys/kernel/security/ima/policy
+    '';
+    tinyboot.extraInittab = ''
+      ::respawn:/sbin/tbootd --log-level=${if config.debug then "debug" else "info"}
+    '' + (lib.concatLines (map (tty: "${tty}::respawn:/sbin/tbootui") config.tinyboot.ttys));
+
+    linux.commandLine = lib.optional config.debug "debug" ++ [ "lsm=integrity" "ima_appraise=enforce" ];
+    linux.extraConfig = ''
+      CONFIG_CMDLINE="${toString config.linux.commandLine}"
+      CONFIG_SYSTEM_TRUSTED_KEYS="tinyboot/ca.pem"
+      CONFIG_IMA_LOAD_X509=y
+      CONFIG_IMA_X509_PATH="/etc/keys/x509_ima.der"
+    '' + (lib.optionalString config.debug ''
+      CONFIG_DEBUG_DRIVER=y
+      CONFIG_DEBUG_INFO_DWARF5=y
+      CONFIG_DEBUG_KERNEL=y
+      CONFIG_DYNAMIC_DEBUG=y
+    '');
+
+    coreboot.extraConfig = ''
+      CONFIG_VBOOT_ROOT_KEY="${config.verifiedBoot.vbootRootKey}"
+      CONFIG_VBOOT_RECOVERY_KEY="${config.verifiedBoot.vbootRecoveryKey}"
+      CONFIG_VBOOT_FIRMWARE_PRIVKEY="${config.verifiedBoot.vbootFirmwarePrivkey}"
+      CONFIG_VBOOT_KERNEL_KEY="${config.verifiedBoot.vbootKernelKey}"
+      CONFIG_VBOOT_KEYBLOCK="${config.verifiedBoot.vbootKeyblock}"
+      CONFIG_VBOOT_KEYBLOCK_VERSION=${config.verifiedBoot.vbootKeyblockVersion}
+      CONFIG_VBOOT_KEYBLOCK_PREAMBLE_FLAGS=${config.verifiedBoot.vbootKeyblockPreambleFlags}
+    '';
+
     build = {
       initrd = pkgs.callPackage ./initramfs.nix {
-        extraInittab = ''
-          ::respawn:/sbin/tbootd --log-level=${if config.debug then "debug" else "info"}
-        '' + (lib.concatLines (map (tty: "${tty}::respawn:/sbin/tbootui") config.tinyboot.ttys)) + config.tinyboot.extraInittab;
-        extraInit = ''
-          mkdir -p /home/tinyuser /tmp/tinyboot
-          chown -R tinyuser:tinygroup /home/tinyuser /tmp/tinyboot
-          cat /etc/resolv.conf.static >/etc/resolv.conf
-          cat /etc/ima/policy.conf >/sys/kernel/security/ima/policy
-        '' + config.tinyboot.extraInit;
+        inherit (config.tinyboot) extraInit extraInittab;
         extraContents =
           let
             staticResolvConf = pkgs.writeText "resolv.conf.static" (lib.concatLines (map (n: "nameserver ${n}") config.tinyboot.nameservers));
             imaPolicy = pkgs.substituteAll {
               name = "ima_policy.conf";
               src = ./etc/ima_policy.conf.in;
-              extraPolicy = lib.optionalString config.verifiedBoot.enable ''
+              extraPolicy = ''
                 appraise func=KEXEC_KERNEL_CHECK appraise_type=imasig|modsig
                 appraise func=KEXEC_INITRAMFS_CHECK appraise_type=imasig|modsig
               '';
@@ -124,20 +147,18 @@ in
             { object = ./etc/passwd; symlink = "/etc/passwd"; }
             { object = staticResolvConf; symlink = "/etc/resolv.conf.static"; }
             { object = imaPolicy; symlink = "/etc/ima/policy.conf"; }
-          ] ++ (lib.optional config.verifiedBoot.enable {
-            object = config.verifiedBoot.signingPublicKey;
-            symlink = "/etc/keys/x509_ima.der";
-          });
+            { object = config.verifiedBoot.signingPublicKey; symlink = "/etc/keys/x509_ima.der"; }
+          ];
       };
       linux = (pkgs.callPackage ./linux.nix { inherit (config.linux) basePackage configFile extraConfig; }).overrideAttrs (_: {
-        preConfigure = lib.optionalString config.verifiedBoot.enable ''
+        preConfigure = ''
           mkdir tinyboot; cp ${config.verifiedBoot.caCertificate} tinyboot/ca.pem
         '';
-        postInstall = lib.optionalString config.debug ''
+        postInstall = ''
+          install -Dm755 -t "$out/bin" scripts/sign-file
+        '' + lib.optionalString config.debug ''
           cp .config $out/config
           cp vmlinux $out/vmlinux
-        '' + lib.optionalString config.verifiedBoot.enable ''
-          install -Dm755 -t "$out/bin" scripts/sign-file
         '';
       });
       fitImage = buildFitImage {
@@ -151,23 +172,43 @@ in
       };
       firmware = pkgs.runCommand "tinyboot-${config.build.coreboot.name}"
         {
-          nativeBuildInputs = with pkgs.buildPackages; [ coreboot-utils ];
+          inherit (config.verifiedBoot) requiredSystemFeatures;
+          nativeBuildInputs = with pkgs.buildPackages; [ coreboot-utils vboot_reference ];
           passthru = { inherit (config.build) linux initrd coreboot; };
           meta.platforms = config.platforms;
+          env.CBFSTOOL = "${pkgs.buildPackages.coreboot-utils}/bin/cbfstool"; # needed by futility
         }
         ''
           dd if=${config.build.coreboot}/coreboot.rom of=$out
-          ${lib.optionalString config.coreboot.bootsplash.enable ''
-          cbfstool $out add -t bootsplash -n bootsplash.jpg -f ${bootsplash}/bootsplash.jpg
-          ''}
+
+          cbfstool $out expand -r FW_MAIN_A
           ${if pkgs.stdenv.hostPlatform.linuxArch == "x86_64" then ''
           cbfstool $out add-payload \
+            -r FW_MAIN_A \
             -n fallback/payload \
             -f ${config.build.linux}/${pkgs.stdenv.hostPlatform.linux-kernel.target} \
             -I ${config.build.initrd}/initrd
           '' else if pkgs.stdenv.hostPlatform.linuxArch == "arm64" then ''
-          cbfstool $out add -f ${config.build.fitImage}/uImage -n fallback/payload -t fit_payload
+          cbfstool $out add \
+            -r FW_MAIN_A \
+            -n fallback/payload \
+            -t fit_payload \
+            -f ${config.build.fitImage}/uImage
           '' else throw "Unsupported architecture"}
+          cbfstool $out truncate -r FW_MAIN_A
+
+          cbfstool $out add-payload \
+            -r COREBOOT \
+            -n fallback/payload \
+            -f ${pkgs.libpayload}/libexec/hello.elf
+
+          futility sign \
+            --signprivate "${config.verifiedBoot.vbootFirmwarePrivkey}" \
+            --keyblock "${config.verifiedBoot.vbootKeyblock}" \
+            --kernelkey "${config.verifiedBoot.vbootKernelKey}" \
+            --version ${config.verifiedBoot.vbootKeyblockVersion} \
+            --flags ${config.verifiedBoot.vbootKeyblockPreambleFlags} \
+            $out
         '';
       updateScript = pkgs.writeShellScriptBin "update-firmware" ''
         kexec -l ${config.build.linux}/${pkgs.stdenv.hostPlatform.linux-kernel.target} \
@@ -176,19 +217,5 @@ in
         systemctl kexec
       '';
     };
-    _module.args = { pkgs = _pkgs; lib = _lib; };
-    linux.commandLine = lib.optional config.debug "debug" ++ [ "lsm=integrity" "ima_appraise=enforce" ];
-    linux.extraConfig = ''
-      CONFIG_CMDLINE="${toString config.linux.commandLine}"
-    '' + (lib.optionalString config.debug ''
-      CONFIG_DEBUG_DRIVER=y
-      CONFIG_DEBUG_INFO_DWARF5=y
-      CONFIG_DEBUG_KERNEL=y
-      CONFIG_DYNAMIC_DEBUG=y
-    '') + (lib.optionalString config.verifiedBoot.enable ''
-      CONFIG_SYSTEM_TRUSTED_KEYS="tinyboot/ca.pem"
-      CONFIG_IMA_LOAD_X509=y
-      CONFIG_IMA_X509_PATH="/etc/keys/x509_ima.der"
-    '');
   };
 }

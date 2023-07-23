@@ -41,7 +41,7 @@ in
     system.build = { inherit (cfg.settings.build) firmware updateScript; };
     boot.loader.supportsInitrdSecrets = lib.mkForce false;
     boot.loader.efi.canTouchEfiVariables = lib.mkForce false;
-    boot.loader.systemd-boot.extraInstallCommands = lib.optionalString cfg.settings.verifiedBoot.enable ''
+    boot.loader.systemd-boot.extraInstallCommands = ''
       echo "signing boot files"
       find /boot/EFI/nixos -type f -name "*.efi" \
         -exec ${cfg.settings.build.linux}/bin/sign-file sha256 ${cfg.settings.verifiedBoot.signingPrivateKey} ${cfg.settings.verifiedBoot.signingPublicKey} {} \;
