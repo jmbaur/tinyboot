@@ -7,14 +7,15 @@ let
     let
       flashScript = pkgs.writeScript "flash-script" ''
         #!/bin/sh
+        logger "started flashing new firmware"
         if flashrom \
           --write /update.rom \
           --programmer ${config.flashrom.programmer} \
           ${lib.escapeShellArgs config.flashrom.extraArgs}; then
-          echo "flashing succeeded"
+          logger "flashing succeeded"
           sleep 2
         else
-          echo "flashing failed"
+          logger "flashing failed"
           sleep 10
         fi
         reboot
@@ -22,7 +23,7 @@ let
     in
     pkgs.callPackage ./initramfs.nix {
       extraInittab = ''
-        kmsg::once:/sbin/flash-update
+        ::once:/sbin/flash-update
       '';
       extraContents = [
         { object = config.build.firmware; symlink = "/update.rom"; }

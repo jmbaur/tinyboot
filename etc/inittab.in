@@ -3,4 +3,5 @@
 ::shutdown:/bin/umount -ar -t ext4,vfat
 ::restart:/init
 ::respawn:/bin/mdev -df
+::respawn:/bin/syslogd -Kn
 @extraInittab@

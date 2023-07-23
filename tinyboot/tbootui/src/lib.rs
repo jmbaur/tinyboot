@@ -16,7 +16,7 @@ use std::{io, process::Command, time::Duration};
 use tboot::{
     block_device::BlockDevice,
     linux::LinuxBootEntry,
-    message::{ClientCodec, ClientMessage, ServerMessage, ServerError},
+    message::{ClientCodec, ClientMessage, ServerError, ServerMessage},
 };
 use termion::{event::Key, input::TermRead, raw::IntoRawMode, screen::IntoAlternateScreen};
 use tokio::{net::UnixStream, sync::mpsc};
@@ -496,7 +496,6 @@ pub async fn run(_args: Vec<String>) -> anyhow::Result<()> {
 
     // set correct env vars
     std::env::set_var("USER", "tinyuser");
-    std::env::set_var("PATH", "/bin");
     std::env::set_var("HOME", "/home/tinyuser");
 
     tboot::log::setup_logging(LevelFilter::Debug, Some(tboot::log::TBOOTUI_LOG_FILE))?;
