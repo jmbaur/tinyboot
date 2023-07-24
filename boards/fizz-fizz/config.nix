@@ -7,6 +7,6 @@
       commandLine = [ "quiet" ];
     };
     coreboot.configFile = lib.mkDefault ./coreboot.config;
-    flashrom.extraArgs = lib.mkDefault [ "--ifd" "-i" "bios" ];
+    flashrom.extraArgs = lib.mkDefault [ "-i" "RW_SECTION_A" ];
   };
 }
