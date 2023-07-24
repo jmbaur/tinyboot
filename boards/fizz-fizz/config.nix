@@ -3,7 +3,7 @@
     platforms = [ "x86_64-linux" ];
     tinyboot.ttys = lib.mkDefault [ "ttyS0" "tty1" ];
     linux = {
-      configFile = lib.mkDefault (pkgs.concatText "fizz-fizz-kernel.config" [ ../generic-kernel.config ../x86_64-kernel.config ../chromebook-kernel.config ]);
+      configFile = lib.mkDefault (pkgs.concatText "fizz-fizz-kernel.config" [ ../generic-kernel.config ../x86_64-kernel.config ../chromebook-kernel.config ./kernel.config ]);
       commandLine = [ "quiet" ];
     };
     coreboot.configFile = lib.mkDefault ./coreboot.config;
