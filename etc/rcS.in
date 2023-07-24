@@ -1,14 +1,12 @@
 #!/bin/sh
-mkdir -p /dev/pts /sys /proc /tmp /run /mnt
+mkdir -p /dev/pts /sys /proc /tmp /mnt
 mount -t proc proc /proc
 mount -t sysfs sysfs /sys
 mount -t tmpfs tmpfs /tmp
-mount -t tmpfs tmpfs /run
 mount -t devpts devpts /dev/pts
 mount -t securityfs security /sys/kernel/security
 ln -sf /proc/self/fd/0 /dev/stdin
 ln -sf /proc/self/fd/1 /dev/stdout
 ln -sf /proc/self/fd/2 /dev/stderr
-mkdir -p /run/lock
 mdev -s
 @extraInit@
