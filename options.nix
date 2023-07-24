@@ -9,8 +9,8 @@ let
         #!/bin/sh
         logger "started flashing new firmware"
         if flashrom \
-          --write /update.rom \
           --programmer ${config.flashrom.programmer} \
+          --write /update.rom \
           ${lib.escapeShellArgs config.flashrom.extraArgs}; then
           logger "flashing succeeded"
           sleep 2
@@ -214,7 +214,7 @@ in
       updateScript = pkgs.writeShellScriptBin "update-firmware" ''
         kexec -l ${config.build.linux}/${pkgs.stdenv.hostPlatform.linux-kernel.target} \
           --initrd=${updateInitrd}/initrd \
-          --command-line="${lib.concatStringsSep " " (map (tty: "console=/dev/${tty}") config.tinyboot.ttys)}"
+          --command-line="${lib.concatStringsSep " " (map (tty: "console=${tty}") config.tinyboot.ttys)}"
         systemctl kexec
       '';
     };
