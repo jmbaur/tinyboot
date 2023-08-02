@@ -1,3 +1,4 @@
+- configure baud rate to 115200 for serial consoles
 - find clap alternative for smaller binary sizes
 - find tokio alternative for smaller binary sizes
 - integrate IMA keys with vboot keys
