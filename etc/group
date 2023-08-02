@@ -1,2 +1,4 @@
 root:x:0:
-tinygroup:x:1000:
+tty:x:3:tboot
+disk:x:6:
+tboot:x:1000:

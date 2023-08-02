@@ -11,14 +11,18 @@ use ratatui::{
     widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph},
     Terminal,
 };
-use std::io::Write;
 use std::{io, process::Command, time::Duration};
+use std::{io::Write, os::fd::AsRawFd};
 use tboot::{
     block_device::BlockDevice,
     linux::LinuxBootEntry,
     message::{ClientCodec, ClientMessage, ServerError, ServerMessage},
 };
 use termion::{event::Key, input::TermRead, raw::IntoRawMode, screen::IntoAlternateScreen};
+use termios::{
+    cfgetispeed, cfgetospeed, cfsetispeed, cfsetospeed, os::linux::B115200, tcsetattr, Termios,
+    TCSANOW,
+};
 use tokio::{net::UnixStream, sync::mpsc};
 use tokio_serde_cbor::Codec;
 use tokio_util::codec::{Decoder, Framed};
@@ -226,7 +230,7 @@ impl DeviceList {
 
 fn shell() -> anyhow::Result<()> {
     let mut cmd = Command::new("/bin/sh");
-    let cmd = cmd.current_dir("/home/tinyuser").arg("-l");
+    let cmd = cmd.current_dir("/home/tboot").arg("-l");
     let mut child = cmd.spawn()?;
     child.wait()?;
 
@@ -489,17 +493,37 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
         .split(popup_layout[1])[1]
 }
 
+/// Ensure that the baud rate on TTYs is at least 115200. This occurs on serial ports where the
+/// default baud rate on linux is 9600.
+fn fix_serial_baud_rate() -> anyhow::Result<()> {
+    let tty = termion::get_tty()?;
+    let fd = tty.as_raw_fd();
+    let mut termios = Termios::from_fd(fd)?;
+
+    if cfgetispeed(&termios) < B115200 {
+        cfsetispeed(&mut termios, B115200)?;
+    }
+    if cfgetospeed(&termios) < B115200 {
+        cfsetospeed(&mut termios, B115200)?;
+    }
+
+    tcsetattr(fd, TCSANOW, &termios)?;
+
+    Ok(())
+}
+
 pub async fn run(_args: Vec<String>) -> anyhow::Result<()> {
     // drop permissions immediately
     unsafe { libc::setregid(tboot::TINYUSER_GID, tboot::TINYUSER_GID) };
     unsafe { libc::setreuid(tboot::TINYUSER_UID, tboot::TINYUSER_UID) };
 
     // set correct env vars
-    std::env::set_var("USER", "tinyuser");
-    std::env::set_var("HOME", "/home/tinyuser");
+    std::env::set_var("USER", "tboot");
+    std::env::set_var("HOME", "/home/tboot");
 
     tboot::log::setup_logging(LevelFilter::Debug, Some(tboot::log::TBOOTUI_LOG_FILE))?;
 
+    fix_serial_baud_rate()?;
     fix_zero_size_terminal()?;
 
     let stream = UnixStream::connect(tboot::TINYBOOT_SOCKET).await?;

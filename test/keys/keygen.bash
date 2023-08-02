@@ -15,7 +15,7 @@ x509_extensions = myexts
 [ req_distinguished_name ]
 O = tinyhost
 CN = tinyboot test signing key
-emailAddress = tinyuser@tinyhost
+emailAddress = tboot@tinyhost
 
 [ myexts ]
 basicConstraints=critical,CA:FALSE
