@@ -211,12 +211,18 @@ in
             --flags ${config.verifiedBoot.vbootKeyblockPreambleFlags} \
             $out
         '';
-      updateScript = pkgs.writeShellScriptBin "update-firmware" ''
-        kexec -l ${config.build.linux}/${pkgs.stdenv.hostPlatform.linux-kernel.target} \
-          --initrd=${updateInitrd}/initrd \
-          --command-line="${lib.concatStringsSep " " (map (tty: "console=${tty}") config.tinyboot.ttys)}"
-        systemctl kexec
-      '';
+      updateScript =
+        let
+          serialPortMatch = builtins.match "tty[A-Z]+[0-9]+";
+          applyBaud = baud: tty: "${tty}${lib.optionalString (serialPortMatch tty != null) ",${toString baud}"}";
+          applyStandardBaud = applyBaud 115200;
+        in
+        pkgs.writeShellScriptBin "update-firmware" ''
+          kexec -l ${config.build.linux}/${pkgs.stdenv.hostPlatform.linux-kernel.target} \
+            --initrd=${updateInitrd}/initrd \
+            --command-line="${lib.concatStringsSep " " (map (tty: "console=${applyStandardBaud tty}") config.tinyboot.ttys)}"
+          systemctl kexec
+        '';
     };
   };
 }
