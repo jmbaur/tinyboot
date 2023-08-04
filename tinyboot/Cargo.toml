@@ -13,6 +13,7 @@ anyhow = { default-features = false, version = "1.0.72" }
 tboot = { path = "./tboot" }
 clap = { version = "4.3.19", features = [
   "std",
+  "help",
   "derive",
 ], default-features = false }
 futures = { features = ["std"], default-features = false, version = "0.3.28" }

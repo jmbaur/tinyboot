@@ -13,7 +13,7 @@ async fn run_top_level(args: TopLevel) -> anyhow::Result<()> {
 }
 
 pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
-    let top_level = TopLevel::parse_from(args);
+    let top_level = TopLevel::try_parse_from(args)?;
 
     tboot::log::setup_logging(
         if top_level.verbose {

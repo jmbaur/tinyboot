@@ -1,19 +1,29 @@
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let args: Vec<String> = std::env::args().collect();
+    let mut args: Vec<String> = std::env::args().collect();
 
-    let prog = args
-        .first()
-        .map(std::path::Path::new)
-        .and_then(|p| p.file_name())
-        .and_then(std::ffi::OsStr::to_str);
+    loop {
+        let prog = args
+            .first()
+            .map(std::path::Path::new)
+            .and_then(|p| p.file_name())
+            .and_then(std::ffi::OsStr::to_str);
 
-    match prog {
-        Some("tbootd") => tbootd::run(args).await,
-        Some("tbootctl") => tbootctl::run(args).await,
-        Some("tbootui") => tbootui::run(args).await,
-        _ => Err(anyhow::anyhow!(
-            "program must be tbootd, tbootctl, or tbootui"
-        )),
+        match prog {
+            Some("tbootbb") => {
+                args = args[1..].to_vec();
+                continue;
+            }
+            Some("tbootd") => tbootd::run(args).await?,
+            Some("tbootctl") => tbootctl::run(args).await?,
+            Some("tbootui") => tbootui::run(args).await?,
+            _ => {
+                return Err(anyhow::anyhow!(
+                    "program must be tbootbb, tbootd, tbootctl, or tbootui"
+                ))
+            }
+        };
+
+        return Ok(());
     }
 }

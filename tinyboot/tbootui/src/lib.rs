@@ -1,3 +1,4 @@
+use clap::Parser;
 use futures::{
     stream::{SplitSink, SplitStream},
     SinkExt, StreamExt,
@@ -11,8 +12,12 @@ use ratatui::{
     widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph},
     Terminal,
 };
-use std::{io, process::Command, time::Duration};
-use std::{io::Write, os::fd::AsRawFd};
+use std::{
+    io::{self, Write},
+    os::fd::AsRawFd,
+    process::Command,
+    time::Duration,
+};
 use tboot::{
     block_device::BlockDevice,
     linux::LinuxBootEntry,
@@ -20,8 +25,9 @@ use tboot::{
 };
 use termion::{event::Key, input::TermRead, raw::IntoRawMode, screen::IntoAlternateScreen};
 use termios::{
-    cfgetispeed, cfgetospeed, cfsetispeed, cfsetospeed, os::linux::B115200, tcsetattr, Termios,
-    TCSANOW,
+    cfgetispeed, cfgetospeed, cfsetispeed, cfsetospeed,
+    os::linux::{B115200, B576000},
+    speed_t, tcsetattr, Termios, B38400, B9600, TCSANOW,
 };
 use tokio::{net::UnixStream, sync::mpsc};
 use tokio_serde_cbor::Codec;
@@ -495,16 +501,16 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
 
 /// Ensure that the baud rate on TTYs is at least 115200. This occurs on serial ports where the
 /// default baud rate on linux is 9600.
-fn fix_serial_baud_rate() -> anyhow::Result<()> {
+fn fix_serial_baud_rate(baud_rate: speed_t) -> anyhow::Result<()> {
     let tty = termion::get_tty()?;
     let fd = tty.as_raw_fd();
     let mut termios = Termios::from_fd(fd)?;
 
-    if cfgetispeed(&termios) < B115200 {
-        cfsetispeed(&mut termios, B115200)?;
+    if cfgetispeed(&termios) != baud_rate {
+        cfsetispeed(&mut termios, baud_rate)?;
     }
-    if cfgetospeed(&termios) < B115200 {
-        cfsetospeed(&mut termios, B115200)?;
+    if cfgetospeed(&termios) != baud_rate {
+        cfsetospeed(&mut termios, baud_rate)?;
     }
 
     tcsetattr(fd, TCSANOW, &termios)?;
@@ -512,18 +518,43 @@ fn fix_serial_baud_rate() -> anyhow::Result<()> {
     Ok(())
 }
 
-pub async fn run(_args: Vec<String>) -> anyhow::Result<()> {
-    // drop permissions immediately
+fn baud_to_speed_t(baud: u32) -> speed_t {
+    match baud {
+        9600 => B9600,
+        38400 => B38400,
+        115200 => B115200,
+        576000 => B576000,
+        _ => {
+            error!("unknown baud rate, using 115200");
+            B115200
+        }
+    }
+}
+
+#[derive(Parser)]
+struct Config {
+    #[arg(short, long, default_value_t = 115200)]
+    baud_rate: u32,
+
+    #[arg(short, long, value_parser, default_value_t = LevelFilter::Info)]
+    log_level: LevelFilter,
+}
+
+pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
+    let cfg = Config::try_parse_from(args)?;
+
+    // drop permissions
     unsafe { libc::setregid(tboot::TINYUSER_GID, tboot::TINYUSER_GID) };
     unsafe { libc::setreuid(tboot::TINYUSER_UID, tboot::TINYUSER_UID) };
+
+    fix_serial_baud_rate(baud_to_speed_t(cfg.baud_rate))?;
+
+    tboot::log::setup_logging(cfg.log_level, Some(tboot::log::TBOOTUI_LOG_FILE))?;
 
     // set correct env vars
     std::env::set_var("USER", "tboot");
     std::env::set_var("HOME", "/home/tboot");
 
-    tboot::log::setup_logging(LevelFilter::Debug, Some(tboot::log::TBOOTUI_LOG_FILE))?;
-
-    fix_serial_baud_rate()?;
     fix_zero_size_terminal()?;
 
     let stream = UnixStream::connect(tboot::TINYBOOT_SOCKET).await?;

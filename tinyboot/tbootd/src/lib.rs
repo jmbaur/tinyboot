@@ -317,14 +317,14 @@ async fn prepare_boot(
 
 #[derive(Debug, Parser)]
 struct Config {
-    #[arg(long, value_parser, default_value_t = LevelFilter::Info)]
+    #[arg(short, long, value_parser, default_value_t = LevelFilter::Info)]
     log_level: LevelFilter,
 }
 
 const VERSION: Option<&'static str> = option_env!("version");
 
 pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
-    let cfg = Config::parse_from(args);
+    let cfg = Config::try_parse_from(args)?;
 
     tboot::log::setup_logging(cfg.log_level, Some(Path::new(tboot::log::TBOOTD_LOG_FILE)))?;
 
