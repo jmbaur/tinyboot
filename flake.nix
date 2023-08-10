@@ -47,6 +47,7 @@
       };
       devShells = forAllSystems ({ pkgs, ... }: {
         default = with pkgs; mkShell {
+          env.CARGO_BUILD_TARGET = pkgsStatic.stdenv.hostPlatform.config;
           inputsFrom = [ tinyboot ];
           nativeBuildInputs = [ bashInteractive grub2 cargo-insta rustfmt cargo-watch cargo-edit clippy ];
         };
