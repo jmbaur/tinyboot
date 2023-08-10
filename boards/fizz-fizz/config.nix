@@ -5,6 +5,9 @@
     linux = {
       configFile = lib.mkDefault (pkgs.concatText "fizz-fizz-kernel.config" [ ../generic-kernel.config ../x86_64-kernel.config ../chromebook-kernel.config ./kernel.config ]);
       commandLine = [ "quiet" ];
+      firmware = pkgs.runCommand "fizz-firmware" { } ''
+        mkdir -p $out; cp -r ${pkgs.linux-firmware}/lib/firmware/rtl_nic $out/rtl_nic
+      '';
     };
     coreboot.configFile = lib.mkDefault ./coreboot.config;
     flashrom.extraArgs = lib.mkDefault [ "-i" "RW_SECTION_A" ];

@@ -59,6 +59,7 @@ in
       commandLine = mkOption { type = types.listOf types.str; default = [ ]; };
       dtb = mkOption { type = types.nullOr types.path; default = null; };
       dtbPattern = mkOption { type = types.nullOr types.str; default = null; };
+      firmware = mkOption { type = types.nullOr types.path; default = null; };
     };
     coreboot = {
       extraArgs = mkOption { type = types.attrsOf types.anything; default = { }; };
@@ -149,7 +150,7 @@ in
             { object = staticResolvConf; symlink = "/etc/resolv.conf.static"; }
             { object = imaPolicy; symlink = "/etc/ima/policy.conf"; }
             { object = config.verifiedBoot.signingPublicKey; symlink = "/etc/keys/x509_ima.der"; }
-          ];
+          ] ++ (lib.optional (config.linux.firmware != null) { object = config.linux.firmware; symlink = "/lib/firmware"; });
       };
       linux = (pkgs.callPackage ./linux.nix { inherit (config.linux) basePackage configFile extraConfig; }).overrideAttrs (_: {
         preConfigure = ''
