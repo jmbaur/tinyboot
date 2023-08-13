@@ -11,19 +11,19 @@ codegen-units = 1
 [workspace.dependencies]
 anyhow = { default-features = false, version = "1.0.72" }
 tboot = { path = "./tboot" }
-clap = { version = "4.3.19", features = [
+clap = { version = "4.3.21", features = [
   "std",
   "help",
   "derive",
 ], default-features = false }
 futures = { features = ["std"], default-features = false, version = "0.3.28" }
-log = "0.4.19"
+log = "0.4.20"
 nix = { default-features = false, version = "0.26.2", features = [
   "mount",
   "fs",
   "user",
 ] }
-tokio = { version = "1.29.1", default-features = false, features = [
+tokio = { version = "1.31.0", default-features = false, features = [
   "rt-multi-thread",
   "macros",
   "time",
