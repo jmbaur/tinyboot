@@ -36,7 +36,7 @@
         in
         nixpkgs.lib.foldAttrs (curr: acc: acc // curr) { } (map (b: extend b baseConfig) [ "bls" "grub" "extlinux" ]);
       overlays.default = final: prev: {
-        tinyboot = prev.pkgsStatic.callPackage ./tinyboot { };
+        tinyboot = prev.pkgsStatic.callPackage ./. { };
         flashrom-cros = prev.callPackage ./flashrom-cros.nix { };
         libpayload = prev.callPackage ./libpayload.nix { src = inputs.coreboot; flashrom = final.flashrom-cros; };
         buildCoreboot = prev.callPackage ./coreboot.nix { src = inputs.coreboot; flashrom = final.flashrom-cros; };

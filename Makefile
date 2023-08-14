@@ -22,11 +22,11 @@ out/tinyboot-coreboot.rom: $(src) out out/initrd out/kernel out/tinyboot.cpio ou
 	echo use cbfs to create out/tinyboot-coreboot.rom
 
 out/tinyboot.cpio: out/bin
-	cargo build --manifest-path tinyboot/Cargo.toml
+	cargo build
 	cd out && find ./bin | cpio -ov > tinyboot.cpio
 
 out/bin:
-	cargo build --manifest-path tinyboot/Cargo.toml
+	cargo build
 	mkdir -p out/bin
 	cp tinyboot/target/debug/{tbootd,tbootui,tbootctl} out/bin/
 
