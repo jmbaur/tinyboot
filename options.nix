@@ -11,6 +11,7 @@ let
         if flashrom \
           --programmer ${config.flashrom.programmer} \
           --write /update.rom \
+          --fmap -i RW_SECTION_A \
           ${lib.escapeShellArgs config.flashrom.extraArgs}; then
           logger "flashing succeeded"
           sleep 2
