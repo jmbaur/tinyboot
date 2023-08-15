@@ -5,8 +5,8 @@ stdenv.mkDerivation rec {
   src = fetchgit {
     url = "https://chromium.googlesource.com/chromiumos/third_party/flashrom";
     branchName = "master";
-    rev = "4c1670bca6e4ea5b8f6a4d9e8f2d90884045ca8c";
-    hash = "sha256-5xvlxniJmz/u7O1mkkr4lP0n1sY0RI+kMsf0OXcE7K8=";
+    rev = "4e79d1e8f3259e5c91652e562464b684605661bc";
+    hash = "sha256-2taTnBbnr4mWQ9HkSOksEeHdJmtEjW4k2rizsrq3/Oc=";
   };
   outputs = [ "out" ] ++ lib.optionals useMeson [ "lib" "dev" ];
   dontUseCmakeConfigure = useMeson;
