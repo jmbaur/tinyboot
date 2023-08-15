@@ -43,11 +43,11 @@ pub fn edit<W: Write>(
     let mut pos = input.len();
     let mut scroll = (0, 0); // (y, x)
     let mut keys = stdin.keys();
+    let scroll_off = 8;
 
     loop {
         terminal
             .draw(|f| {
-                // let input = input.as_str();
                 let rect = f.size();
                 let pos = pos as u16;
                 let pos = if pos > scroll.1 + rect.width - 1 {
@@ -58,12 +58,18 @@ pub fn edit<W: Write>(
                     scroll.1 = pos - rect.width + 1;
 
                     rect.width - 1
+                } else if pos > scroll.1 && 0 < scroll.1 && (pos - scroll.1) < scroll_off {
+                    // text is closer to beginning than scroll off width
+                    scroll.1 = pos - scroll_off;
+
+                    scroll_off
                 } else if scroll.1 >= pos {
                     // text underflows rect width
                     scroll.1 = pos;
 
                     0
                 } else {
+                    // text is somewhere greater than the scroll off width and less than the end
                     pos - scroll.1
                 };
 
