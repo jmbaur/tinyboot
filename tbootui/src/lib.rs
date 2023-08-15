@@ -33,6 +33,29 @@ use tokio::{net::UnixStream, sync::mpsc};
 use tokio_serde_cbor::Codec;
 use tokio_util::codec::{Decoder, Framed};
 
+const SCROLL_OFF: u16 = 5;
+
+pub fn next_pos_and_scroll(pos: u16, scroll: u16, width: u16) -> (u16, u16) {
+    if width == 0 {
+        // nowhere to go
+        return (0, 0);
+    } else if pos > scroll + width - 1 {
+        // text overflows rect width
+        // add one so that the cursor is always one position to the right of the last
+        // character of input
+        (width - 1, pos - width + 1)
+    } else if pos > scroll && 0 < scroll && (pos - scroll) < SCROLL_OFF && pos >= SCROLL_OFF {
+        // text is closer to beginning than scroll off width
+        (SCROLL_OFF, pos - SCROLL_OFF)
+    } else if scroll >= pos {
+        // text underflows rect width
+        (0, pos)
+    } else {
+        // text is somewhere greater than the scroll off width and less than the end
+        (pos - scroll, scroll)
+    }
+}
+
 pub fn edit<W: Write>(
     entry: LinuxBootEntry,
     terminal: &mut Terminal<TermionBackend<W>>,
@@ -43,35 +66,15 @@ pub fn edit<W: Write>(
     let mut pos = input.len();
     let mut scroll = (0, 0); // (y, x)
     let mut keys = stdin.keys();
-    let scroll_off = 8;
 
     loop {
         terminal
             .draw(|f| {
                 let rect = f.size();
                 let pos = pos as u16;
-                let pos = if pos > scroll.1 + rect.width - 1 {
-                    // text overflows rect width
+                let (pos, new_scroll) = next_pos_and_scroll(pos, scroll.1, rect.width);
 
-                    // add one so that the cursor is always one position to the right of the last
-                    // character of input
-                    scroll.1 = pos - rect.width + 1;
-
-                    rect.width - 1
-                } else if pos > scroll.1 && 0 < scroll.1 && (pos - scroll.1) < scroll_off {
-                    // text is closer to beginning than scroll off width
-                    scroll.1 = pos - scroll_off;
-
-                    scroll_off
-                } else if scroll.1 >= pos {
-                    // text underflows rect width
-                    scroll.1 = pos;
-
-                    0
-                } else {
-                    // text is somewhere greater than the scroll off width and less than the end
-                    pos - scroll.1
-                };
+                scroll.1 = new_scroll;
 
                 let widget = Paragraph::new(input.as_str())
                     .block(Block::default().title("edit kernel params:"))
@@ -572,4 +575,27 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+
+    #[test]
+    fn next_pos_and_scroll() {
+        // zero
+        assert_eq!(super::next_pos_and_scroll(0, 0, 0), (0, 0));
+
+        // overflow
+        assert_eq!(super::next_pos_and_scroll(11, 0, 10), (9, 2));
+        assert_eq!(super::next_pos_and_scroll(100, 0, 5), (4, 96));
+
+        // underflow
+        assert_eq!(super::next_pos_and_scroll(0, 5, 5), (0, 0));
+
+        // scroll off underflow
+        assert_eq!(super::next_pos_and_scroll(6, 5, 5), (5, 1));
+
+        // somewhere in-between
+        assert_eq!(super::next_pos_and_scroll(15, 0, 80), (15, 0));
+    }
 }
