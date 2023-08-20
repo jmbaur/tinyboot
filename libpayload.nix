@@ -1,10 +1,10 @@
-{ src, pkgsBuildBuild, stdenv, pkg-config, flashrom, openssl }:
+{ src, pkgsBuildBuild, stdenvNoCC, pkg-config, flashrom, openssl }:
 let
-  toolchainArch = { i386 = "i386"; x86_64 = "i386"; arm64 = "aarch64"; arm = "arm"; riscv = "riscv"; powerpc = "ppc64"; }.${stdenv.hostPlatform.linuxArch};
+  toolchainArch = { i386 = "i386"; x86_64 = "i386"; arm64 = "aarch64"; arm = "arm"; riscv = "riscv"; powerpc = "ppc64"; }.${stdenvNoCC.hostPlatform.linuxArch};
   toolchain = pkgsBuildBuild.coreboot-toolchain.${toolchainArch};
-  defconfig = { i386 = "defconfig"; x86_64 = "defconfig"; arm64 = "config.arm64-generic"; arm = "defconfig-arm"; riscv = "defconfig"; powerpc = "defconfig"; }.${stdenv.hostPlatform.linuxArch};
+  defconfig = { i386 = "defconfig"; x86_64 = "defconfig"; arm64 = "config.arm64-generic"; arm = "defconfig-arm"; riscv = "defconfig"; powerpc = "defconfig"; }.${stdenvNoCC.hostPlatform.linuxArch};
 in
-stdenv.mkDerivation {
+stdenvNoCC.mkDerivation {
   pname = "libpayload";
   version = src.shortRev or src.dirtyShortRev; # allow for --override-input
   src = "${src}";
