@@ -6,7 +6,7 @@ let
 in
 stdenv.mkDerivation {
   pname = "libpayload";
-  version = src.shortRev;
+  version = src.shortRev or src.dirtyShortRev; # allow for --override-input
   src = "${src}";
   postPatch = ''
     patchShebangs util 3rdparty/vboot/scripts
