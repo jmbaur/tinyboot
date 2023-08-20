@@ -1,16 +1,16 @@
-{ src, lib, stdenv, pkgsBuildBuild, python3, pkg-config, openssl, ... }:
+{ src, lib, stdenvNoCC, pkgsBuildBuild, python3, pkg-config, openssl, ... }:
 lib.makeOverridable ({ board ? null, configFile, extraConfig ? "", extraArgs ? { } }:
 let
-  toolchain = pkgsBuildBuild.coreboot-toolchain.${{ i386 = "i386"; x86_64 = "i386"; arm64 = "aarch64"; arm = "arm"; riscv = "riscv"; powerpc = "ppc64"; }.${stdenv.hostPlatform.linuxArch}};
+  toolchain = pkgsBuildBuild.coreboot-toolchain.${{ i386 = "i386"; x86_64 = "i386"; arm64 = "aarch64"; arm = "arm"; riscv = "riscv"; powerpc = "ppc64"; }.${stdenvNoCC.hostPlatform.linuxArch}};
 in
-stdenv.mkDerivation ({
+stdenvNoCC.mkDerivation ({
   pname = "coreboot-${if (board) != null then board else "unknown"}";
   version = src.shortRev;
   src = "${src}";
   patches = [ ./patches/coreboot-fitimage-memlayout.patch ./patches/coreboot-atf-loglevel.patch ];
-  depsBuildBuild = [ pkgsBuildBuild.stdenv.cc ];
-  nativeBuildInputs = [ python3 pkg-config ];
-  buildInputs = [ openssl ];
+  depsBuildBuild = [ pkgsBuildBuild.stdenv.cc pkg-config openssl ];
+  nativeBuildInputs = [ python3 ];
+  buildInputs = [ ];
   postPatch = ''
     patchShebangs util 3rdparty/vboot/scripts
   '';
