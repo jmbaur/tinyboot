@@ -8,5 +8,6 @@
       dtbPattern = "sc7180-trogdor-wormdingler*";
     };
     coreboot.configFile = lib.mkDefault ./coreboot.config;
+    tinyboot.ttys = [ "ttyMSM0" ];
   };
 }

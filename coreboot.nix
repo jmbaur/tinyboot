@@ -7,7 +7,7 @@ stdenvNoCC.mkDerivation ({
   pname = "coreboot-${if (board) != null then board else "unknown"}";
   version = src.shortRev or src.dirtyShortRev; # allow for --override-input
   src = "${src}";
-  patches = [ ./patches/coreboot-fitimage-memlayout.patch ./patches/coreboot-atf-loglevel.patch ];
+  patches = [ ./patches/coreboot-fitimage-memlayout.patch ];
   depsBuildBuild = [ pkgsBuildBuild.stdenv.cc pkg-config openssl ];
   nativeBuildInputs = [ python3 ];
   buildInputs = [ ];

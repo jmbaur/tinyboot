@@ -511,7 +511,14 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
 /// Ensure that the baud rate on TTYs is at least 115200. This occurs on serial ports where the
 /// default baud rate on linux is 9600.
 fn fix_serial_baud_rate(baud_rate: speed_t) -> anyhow::Result<()> {
-    let tty = termion::get_tty()?;
+    let tty = match termion::get_tty() {
+        Ok(tty) => tty,
+        Err(e) => match e.kind() {
+            io::ErrorKind::NotFound => return Ok(()),
+            _ => return Err(e)?,
+        },
+    };
+
     let fd = tty.as_raw_fd();
     let mut termios = Termios::from_fd(fd)?;
 
