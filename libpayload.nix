@@ -9,7 +9,7 @@ stdenvNoCC.mkDerivation {
   version = src.shortRev or src.dirtyShortRev; # allow for --override-input
   src = "${src}";
   postPatch = ''
-    patchShebangs util 3rdparty/vboot/scripts
+    patchShebangs util 3rdparty/vboot/scripts payloads/libpayload
   '';
   configurePhase = ''
     runHook preConfigure
