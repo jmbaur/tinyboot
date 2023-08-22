@@ -11,7 +11,7 @@ in
     };
   };
   config = lib.mkIf cfg.enable {
-    environment.systemPackages = with pkgs; [ cbmem cbfstool nvramtool ectool tinyboot config.system.build.updateScript ];
+    environment.systemPackages = with pkgs; [ cbmem cbfstool nvramtool tinyboot config.system.build.updateScript ];
     programs.flashrom = {
       enable = true;
       package = lib.mkDefault cfg.settings.flashrom.package;
