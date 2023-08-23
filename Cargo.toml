@@ -9,9 +9,9 @@ opt-level = "z"
 codegen-units = 1
 
 [workspace.dependencies]
-anyhow = { default-features = false, version = "1.0.72" }
+anyhow = { default-features = false, version = "1.0.75" }
 tboot = { path = "./tboot" }
-clap = { version = "4.3.21", features = [
+clap = { version = "4.3.23", features = [
   "std",
   "help",
   "derive",
@@ -23,13 +23,13 @@ nix = { default-features = false, version = "0.26.2", features = [
   "fs",
   "user",
 ] }
-tokio = { version = "1.31.0", default-features = false, features = [
+tokio = { version = "1.32.0", default-features = false, features = [
   "rt-multi-thread",
   "macros",
   "time",
   "fs",
   "net",
 ] }
-thiserror = "1.0.44"
+thiserror = "1.0.47"
 tokio-serde-cbor = "0.7.0"
 tokio-util = "0.7.8"
