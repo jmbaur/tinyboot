@@ -4,7 +4,8 @@
     linux = {
       basePackage = pkgs.linuxKernel.kernels.linux_6_4;
       configFile = lib.mkDefault (pkgs.concatText "trogdor-wormdingler-kernel.config" [ ../generic-kernel.config ../aarch64-kernel.config ../chromebook-kernel.config ../qcom-kernel.config ./kernel.config ]);
-      commandLine = [ "quiet" ];
+      # https://gitlab.freedesktop.org/drm/msm/-/issues/13
+      commandLine = [ "pd_ignore_unused" "clk_ignore_unused" "quiet" ];
       dtbPattern = "sc7180-trogdor-wormdingler*";
     };
     coreboot.configFile = lib.mkDefault ./coreboot.config;
