@@ -9,7 +9,6 @@ let
         #!/bin/sh
         logger -s "started flashing new firmware"
         if flashrom \
-          --progress \
           --programmer ${config.flashrom.programmer} \
           --write /update.rom \
           --fmap -i RW_SECTION_A \
