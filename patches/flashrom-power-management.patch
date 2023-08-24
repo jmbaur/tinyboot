@@ -1,0 +1,30 @@
+diff --git a/flashrom.c b/flashrom.c
+index 9f1a898a..02e2a772 100644
+--- a/flashrom.c
++++ b/flashrom.c
+@@ -2391,10 +2391,12 @@ int prepare_flash_access(struct flashctx *const flash,
+ 		return 1;
+ 	}
+ 
++#if 0
+ 	/* FIXME(b/207787495): replace this with locking in futility. */
+ 	/* Let powerd know that we're updating firmware so machine stays awake. */
+ 	if (write_it || erase_it)
+ 		disable_power_management();
++#endif
+ 
+ 	if (map_flash(flash) != 0)
+ 		return 1;
+@@ -2452,10 +2454,12 @@ void finalize_flash_access(struct flashctx *const flash)
+ 	deregister_chip_restore(flash);
+ 	unmap_flash(flash);
+ 
++#if 0
+ 	/* FIXME(b/207787495): replace this with locking in futility. */
+ 	if (restore_power_management()) {
+ 		msg_gerr("Unable to re-enable power management\n");
+ 	}
++#endif
+ }
+ 
+ static int setup_curcontents(struct flashctx *flashctx, void *curcontents,

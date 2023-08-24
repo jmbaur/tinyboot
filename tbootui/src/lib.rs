@@ -3,7 +3,7 @@ use futures::{
     stream::{SplitSink, SplitStream},
     SinkExt, StreamExt,
 };
-use log::{debug, error, LevelFilter};
+use log::{debug, error, info, LevelFilter};
 use nix::libc;
 use ratatui::{
     backend::TermionBackend,
@@ -529,7 +529,7 @@ fn set_baud_rate(baud_rate: speed_t) -> anyhow::Result<()> {
 
     tcsetattr(fd, TCSANOW, &termios)?;
 
-    info!("set baud rate");
+    info!("set baud rate to {}", baud_rate);
 
     Ok(())
 }
