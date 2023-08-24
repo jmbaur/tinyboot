@@ -7,16 +7,17 @@ let
     let
       flashScript = pkgs.writeScript "flash-script" ''
         #!/bin/sh
-        logger "started flashing new firmware"
+        logger -s "started flashing new firmware"
         if flashrom \
+          --progress \
           --programmer ${config.flashrom.programmer} \
           --write /update.rom \
           --fmap -i RW_SECTION_A \
           ${lib.escapeShellArgs config.flashrom.extraArgs}; then
-          logger "flashing succeeded"
+          logger -s "flashing succeeded"
           sleep 2
         else
-          logger "flashing failed"
+          logger -s "flashing failed"
           sleep 10
         fi
         reboot
