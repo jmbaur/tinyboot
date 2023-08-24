@@ -508,9 +508,7 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
         .split(popup_layout[1])[1]
 }
 
-/// Ensure that the baud rate on TTYs is at least 115200. This occurs on serial ports where the
-/// default baud rate on linux is 9600.
-fn fix_serial_baud_rate(baud_rate: speed_t) -> anyhow::Result<()> {
+fn set_baud_rate(baud_rate: speed_t) -> anyhow::Result<()> {
     let tty = match termion::get_tty() {
         Ok(tty) => tty,
         Err(e) => match e.kind() {
@@ -530,6 +528,8 @@ fn fix_serial_baud_rate(baud_rate: speed_t) -> anyhow::Result<()> {
     }
 
     tcsetattr(fd, TCSANOW, &termios)?;
+
+    info!("set baud rate");
 
     Ok(())
 }
@@ -559,19 +559,18 @@ struct Config {
 pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
     let cfg = Config::try_parse_from(args)?;
 
+    tboot::log::setup_logging(cfg.log_level, Some(tboot::log::TBOOTUI_LOG_FILE))?;
+
     // drop permissions
     unsafe { libc::setregid(tboot::TINYUSER_GID, tboot::TINYUSER_GID) };
     unsafe { libc::setreuid(tboot::TINYUSER_UID, tboot::TINYUSER_UID) };
 
-    fix_serial_baud_rate(baud_to_speed_t(cfg.baud_rate))?;
-
-    tboot::log::setup_logging(cfg.log_level, Some(tboot::log::TBOOTUI_LOG_FILE))?;
+    set_baud_rate(baud_to_speed_t(cfg.baud_rate))?;
+    fix_zero_size_terminal()?;
 
     // set correct env vars
     std::env::set_var("USER", "tboot");
     std::env::set_var("HOME", "/home/tboot");
-
-    fix_zero_size_terminal()?;
 
     let stream = UnixStream::connect(tboot::TINYBOOT_SOCKET).await?;
     let codec: ClientCodec = Codec::new();

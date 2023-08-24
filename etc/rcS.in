@@ -1,8 +1,9 @@
 #!/bin/sh
-mkdir -p /dev/pts /sys /proc /tmp /mnt
+mkdir -p /dev/pts /sys /proc /run /mnt
+chmod 777 /run
 mount -t proc proc /proc
 mount -t sysfs sysfs /sys
-mount -t tmpfs tmpfs /tmp
+mount -t tmpfs tmpfs /run
 mount -t devpts devpts /dev/pts
 mount -t securityfs security /sys/kernel/security
 ln -sf /proc/self/fd/0 /dev/stdin

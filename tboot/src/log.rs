@@ -1,7 +1,7 @@
 use std::{io, path::Path};
 
-pub const TBOOTD_LOG_FILE: &str = "/tmp/tinyboot/tbootd.log";
-pub const TBOOTUI_LOG_FILE: &str = "/tmp/tinyboot/tbootui.log";
+pub const TBOOTD_LOG_FILE: &str = "/run/tbootd.log";
+pub const TBOOTUI_LOG_FILE: &str = "/run/tbootui.log";
 
 #[derive(thiserror::Error, Debug)]
 pub enum LogError {

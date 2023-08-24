@@ -96,8 +96,8 @@ in
     _module.args = { pkgs = _pkgs; lib = _lib; };
 
     tinyboot.extraInit = ''
-      mkdir -p /home/tboot /tmp/tinyboot
-      chown -R tboot:tboot /home/tboot /tmp/tinyboot
+      mkdir -p /home/tboot
+      chown -R tboot:tboot /home/tboot
       cat /etc/resolv.conf.static >/etc/resolv.conf
       cat /etc/ima/policy.conf >/sys/kernel/security/ima/policy
     '';
