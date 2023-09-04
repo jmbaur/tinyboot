@@ -357,6 +357,10 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
         }
 
         match res {
+            Ok(()) => {
+                info!("kexec'ing");
+                kexec_execute()?
+            }
             Err(PrepareBootError::SelectEntry(SelectEntryError::Reboot)) => {
                 info!("rebooting");
                 unsafe {
@@ -370,10 +374,6 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
                 }
             }
             Err(e) => error!("failed to prepare boot: {e}"),
-            Ok(()) => {
-                info!("kexec'ing");
-                kexec_execute()?
-            }
         }
     }
 }

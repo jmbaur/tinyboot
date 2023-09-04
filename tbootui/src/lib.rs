@@ -508,7 +508,7 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
         .split(popup_layout[1])[1]
 }
 
-fn set_baud_rate(baud_rate: speed_t) -> anyhow::Result<()> {
+fn set_baud_rate(baud_rate: u32) -> anyhow::Result<()> {
     let tty = match termion::get_tty() {
         Ok(tty) => tty,
         Err(e) => match e.kind() {
@@ -521,10 +521,10 @@ fn set_baud_rate(baud_rate: speed_t) -> anyhow::Result<()> {
     let mut termios = Termios::from_fd(fd)?;
 
     if cfgetispeed(&termios) != baud_rate {
-        cfsetispeed(&mut termios, baud_rate)?;
+        cfsetispeed(&mut termios, baud_to_speed_t(baud_rate))?;
     }
     if cfgetospeed(&termios) != baud_rate {
-        cfsetospeed(&mut termios, baud_rate)?;
+        cfsetospeed(&mut termios, baud_to_speed_t(baud_rate))?;
     }
 
     tcsetattr(fd, TCSANOW, &termios)?;
@@ -565,7 +565,7 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
     unsafe { libc::setregid(tboot::TINYUSER_GID, tboot::TINYUSER_GID) };
     unsafe { libc::setreuid(tboot::TINYUSER_UID, tboot::TINYUSER_UID) };
 
-    set_baud_rate(baud_to_speed_t(cfg.baud_rate))?;
+    set_baud_rate(cfg.baud_rate)?;
     fix_zero_size_terminal()?;
 
     // set correct env vars
