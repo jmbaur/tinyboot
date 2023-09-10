@@ -1,7 +1,6 @@
-{ _pkgs, _lib }:
 { config, pkgs, lib, ... }:
 let
-  boards = lib.filterAttrs (_: type: type == "directory") (builtins.readDir ./boards);
+  boards = builtins.readDir ./boards;
   buildFitImage = pkgs.callPackage ./fitimage { };
   updateInitrd =
     let
@@ -93,8 +92,6 @@ in
     };
   };
   config = {
-    _module.args = { pkgs = _pkgs; lib = _lib; };
-
     tinyboot.extraInit = ''
       mkdir -p /home/tboot
       chown -R tboot:tboot /home/tboot

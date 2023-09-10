@@ -37,10 +37,11 @@
         nixpkgs.lib.foldAttrs (curr: acc: acc // curr) { } (map (b: extend b baseConfig) [ "bls" "grub" "extlinux" ]);
       overlays.default = final: prev: {
         tinyboot = prev.pkgsStatic.callPackage ./. { };
+        tinybootKernelPatches = prev.lib.mapAttrs (config: _: ./kernel-configs/${config}) (builtins.readDir ./kernel-configs);
         flashrom-cros = prev.callPackage ./flashrom-cros.nix { };
         libpayload = prev.callPackage ./libpayload.nix { src = inputs.coreboot; flashrom = final.flashrom-cros; };
         buildCoreboot = prev.callPackage ./coreboot.nix { src = inputs.coreboot; flashrom = final.flashrom-cros; };
-        coreboot = prev.callPackage ./boards { };
+        coreboot = import ./boards.nix final;
         kernelPatches = prev.kernelPatches // {
           ima_tpm_early_init = { name = "ima_tpm_early_init"; patch = ./patches/linux-tpm-probe.patch; };
         };
