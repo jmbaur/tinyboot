@@ -7,7 +7,7 @@ lib.mapAttrs
     ({ config ? { } }:
     lib.evalModules {
       modules = [
-        ({ _module.args = { inherit pkgs lib; }; })
+        ({ _module.args = { inherit pkgs; }; })
         ./options.nix
         ({ inherit board; })
         config

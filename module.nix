@@ -3,10 +3,10 @@ let
   cfg = config.tinyboot;
 in
 {
-  options.tinyboot = {
-    enable = lib.mkEnableOption "tinyboot bootloader";
-    settings = lib.mkOption {
-      type = lib.types.submodule [ (import ./options.nix { _pkgs = pkgs; _lib = lib; }) ];
+  options.tinyboot = with lib; {
+    enable = mkEnableOption "tinyboot bootloader";
+    settings = mkOption {
+      type = types.submodule [ ({ _module.args = { inherit pkgs; }; }) (import ./options.nix) ];
       default = { };
     };
   };
