@@ -8,7 +8,7 @@ clap.workspace = true
 anyhow = { default-features = false, version = "1.0.75" }
 futures = { default-features = false, version = "0.3.28" }
 log = "0.4.20"
-nix = { default-features = false, version = "0.26.2" }
+nix = { default-features = false, version = "0.26.4" }
 ratatui = { version = "0.22.0", default-features = false, features = [
   "termion",
 ] }

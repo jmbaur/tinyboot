@@ -1,4 +1,5 @@
 [workspace]
+resolver = "2"
 members = ["tbootbb", "tbootd", "tbootctl", "tbootui", "tboot", "grub"]
 
 # optimize release builds for size (see https://github.com/johnthagen/min-sized-rust)
@@ -11,14 +12,14 @@ codegen-units = 1
 [workspace.dependencies]
 anyhow = { default-features = false, version = "1.0.75" }
 tboot = { path = "./tboot" }
-clap = { version = "4.4.0", features = [
+clap = { version = "4.4.2", features = [
   "std",
   "help",
   "derive",
 ], default-features = false }
 futures = { features = ["std"], default-features = false, version = "0.3.28" }
 log = "0.4.20"
-nix = { default-features = false, version = "0.26.2", features = [
+nix = { default-features = false, version = "0.26.4", features = [
   "mount",
   "fs",
   "user",
@@ -30,6 +31,6 @@ tokio = { version = "1.32.0", default-features = false, features = [
   "fs",
   "net",
 ] }
-thiserror = "1.0.47"
+thiserror = "1.0.48"
 tokio-serde-cbor = "0.7.0"
 tokio-util = "0.7.8"

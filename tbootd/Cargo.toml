@@ -14,7 +14,7 @@ thiserror.workspace = true
 tokio-serde-cbor.workspace = true
 tokio-util.workspace = true
 tokio.workspace = true
-bytes = { default-features = false, version = "1.4.0" }
+bytes = { default-features = false, version = "1.5.0" }
 kobject-uevent = "0.1.0"
 netlink-sys = "0.8.5"
-syscalls = { features = ["std"], default-features = false, version = "0.6.13" }
+syscalls = { features = ["std"], default-features = false, version = "0.6.14" }
