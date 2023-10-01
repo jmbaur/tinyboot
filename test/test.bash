@@ -23,7 +23,7 @@ fi
 
 @qemu@ @qemuFlags@ \
 	-no-reboot \
-	-serial stdio \
+	-nographic \
 	-smp 2 -m 2G \
 	-bios @bios@ \
 	-netdev user,id=n1 -device virtio-net-pci,netdev=n1 \
