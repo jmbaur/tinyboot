@@ -5,17 +5,18 @@ edition = "2021"
 
 [dependencies]
 anyhow.workspace = true
-clap.workspace = true
+bytes = { default-features = false, version = "1.5.0" }
 futures.workspace = true
+keyutils-raw = { path = "../keyutils-raw" }
+kobject-uevent = "0.1.0"
+linux-raw-sys.workspace = true
 log.workspace = true
+netlink-sys = "0.8.5"
 nix.workspace = true
+syscalls = { features = ["std"], default-features = false, version = "0.6.14" }
 tboot.workspace = true
+termios.workspace = true
 thiserror.workspace = true
 tokio-serde-cbor.workspace = true
 tokio-util.workspace = true
 tokio.workspace = true
-keyutils-raw = { path = "../keyutils-raw" }
-bytes = { default-features = false, version = "1.5.0" }
-kobject-uevent = "0.1.0"
-netlink-sys = "0.8.5"
-syscalls = { features = ["std"], default-features = false, version = "0.6.14" }

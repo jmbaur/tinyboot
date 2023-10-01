@@ -15,10 +15,11 @@ async fn main() -> anyhow::Result<()> {
                 continue;
             }
             Some("tbootd") => tbootd::run(args).await?,
+            Some("init") => tbootd::run(args).await?,
             Some("tbootui") => tbootui::run(args).await?,
             _ => {
                 return Err(anyhow::anyhow!(
-                    "program must be tbootbb, tbootd, or tbootui"
+                    "program must be tbootbb, init, tbootd, or tbootui"
                 ))
             }
         };

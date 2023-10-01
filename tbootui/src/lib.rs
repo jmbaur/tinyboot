@@ -1,9 +1,8 @@
-use clap::Parser;
 use futures::{
     stream::{SplitSink, SplitStream},
     SinkExt, StreamExt,
 };
-use log::{debug, error, info, LevelFilter};
+use log::{debug, error, LevelFilter};
 use nix::libc;
 use ratatui::{
     backend::TermionBackend,
@@ -12,23 +11,13 @@ use ratatui::{
     widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph},
     Terminal,
 };
-use std::{
-    io::{self, Write},
-    os::fd::AsRawFd,
-    process::Command,
-    time::Duration,
-};
+use std::{fs::File, io::Write, os::fd::AsRawFd, time::Duration};
 use tboot::{
     block_device::BlockDevice,
     linux::LinuxBootEntry,
     message::{ClientCodec, ClientMessage, ServerError, ServerMessage},
 };
 use termion::{event::Key, input::TermRead, raw::IntoRawMode, screen::IntoAlternateScreen};
-use termios::{
-    cfgetispeed, cfgetospeed, cfsetispeed, cfsetospeed,
-    os::linux::{B115200, B576000},
-    speed_t, tcsetattr, Termios, B38400, B9600, TCSANOW,
-};
 use tokio::{net::UnixStream, sync::mpsc};
 use tokio_serde_cbor::Codec;
 use tokio_util::codec::{Decoder, Framed};
@@ -141,8 +130,7 @@ pub fn edit<W: Write>(
     None
 }
 
-const HELP: &str = r#"<s> Shell
-<p> Poweroff
+const HELP: &str = r#"<p> Poweroff
 <r> Reboot
 <e> Edit entry
 <Enter> Select entry"#;
@@ -243,17 +231,7 @@ impl DeviceList {
     }
 }
 
-fn shell() -> anyhow::Result<()> {
-    let mut cmd = Command::new("/bin/sh");
-    let cmd = cmd.current_dir("/home/tboot").arg("-l");
-    let mut child = cmd.spawn()?;
-    child.wait()?;
-
-    Ok(())
-}
-
 enum BreakType {
-    ExitToShell,
     Edit(LinuxBootEntry),
     Unknown,
 }
@@ -282,9 +260,9 @@ async fn run_client(
     }
 
     'outer: loop {
-        let mut terminal = Terminal::new(TermionBackend::new(
-            std::io::stdout().into_raw_mode()?.into_alternate_screen()?,
-        ))?;
+        let backend =
+            TermionBackend::new(std::io::stdout().into_raw_mode()?.into_alternate_screen()?);
+        let mut terminal = Terminal::new(TermionBackend::new(backend))?;
 
         terminal.clear()?;
 
@@ -304,8 +282,8 @@ async fn run_client(
                     break;
                 }
 
-                // 's' -> shell, 'e' -> edit
-                if matches!(key, Key::Char('s') | Key::Char('e')) {
+                // 'e' -> edit
+                if key == Key::Char('e') {
                     break;
                 }
             }
@@ -388,7 +366,6 @@ async fn run_client(
                                 }
                             }
                         },
-                        Key::Char('s') => break 'inner BreakType::ExitToShell,
                         Key::Char('e') => {
                             if let Some(dev) = devs.selected.and_then(|selected| devs.devices.get(selected)) {
                                 if let Some(entry) = dev.state.selected().and_then(|selected| dev.device.boot_entries.get(selected)) {
@@ -436,45 +413,8 @@ async fn run_client(
                     _ = sink.send(ClientMessage::Boot(entry)).await;
                 }
             }
-            BreakType::ExitToShell => {
-                terminal.clear()?;
-                terminal.set_cursor(0, 0)?;
-                drop(terminal);
-                shell()?
-            }
             _ => {}
         }
-    }
-
-    Ok(())
-}
-
-fn fix_zero_size_terminal() -> io::Result<()> {
-    let mut size = std::mem::MaybeUninit::<libc::winsize>::uninit();
-
-    let res = unsafe { libc::ioctl(libc::STDOUT_FILENO, libc::TIOCGWINSZ as _, &mut size) };
-    if res < 0 {
-        return Err(io::Error::last_os_error());
-    }
-
-    let mut size = unsafe { size.assume_init() };
-
-    if size.ws_row == 0 {
-        size.ws_row = 24;
-    }
-    if size.ws_col == 0 {
-        size.ws_col = 80;
-    }
-
-    let res = unsafe {
-        libc::ioctl(
-            libc::STDOUT_FILENO,
-            libc::TIOCSWINSZ as _,
-            &size as *const _,
-        )
-    };
-    if res < 0 {
-        return Err(io::Error::last_os_error());
     }
 
     Ok(())
@@ -508,71 +448,33 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
         .split(popup_layout[1])[1]
 }
 
-fn set_baud_rate(baud_rate: u32) -> anyhow::Result<()> {
-    let tty = match termion::get_tty() {
-        Ok(tty) => tty,
-        Err(e) => match e.kind() {
-            io::ErrorKind::NotFound => return Ok(()),
-            _ => return Err(e)?,
-        },
-    };
+// links stdio to files that are read/written to by console devices.
+#[allow(dead_code)]
+fn link_io() -> anyhow::Result<(File, File)> {
+    let stdin = std::fs::OpenOptions::new()
+        .read(true)
+        .create(true)
+        .open("/run/in")?;
 
-    let fd = tty.as_raw_fd();
-    let mut termios = Termios::from_fd(fd)?;
+    let stdout = std::fs::OpenOptions::new()
+        .read(true)
+        .create(true)
+        .open("/run/out")?;
 
-    if cfgetispeed(&termios) != baud_rate {
-        cfsetispeed(&mut termios, baud_to_speed_t(baud_rate))?;
-    }
-    if cfgetospeed(&termios) != baud_rate {
-        cfsetospeed(&mut termios, baud_to_speed_t(baud_rate))?;
-    }
+    unsafe { libc::dup2(stdin.as_raw_fd(), libc::STDIN_FILENO) };
+    unsafe { libc::dup2(stdout.as_raw_fd(), libc::STDOUT_FILENO) };
+    unsafe { libc::dup2(stdout.as_raw_fd(), libc::STDERR_FILENO) };
 
-    tcsetattr(fd, TCSANOW, &termios)?;
-
-    info!("set baud rate to {}", baud_rate);
-
-    Ok(())
+    Ok((stdin, stdout))
 }
 
-fn baud_to_speed_t(baud: u32) -> speed_t {
-    match baud {
-        9600 => B9600,
-        38400 => B38400,
-        115200 => B115200,
-        576000 => B576000,
-        _ => {
-            error!("unknown baud rate, using 115200");
-            B115200
-        }
-    }
-}
+pub async fn run(_args: Vec<String>) -> anyhow::Result<()> {
+    tboot::log::setup_logging(LevelFilter::Info, Some(tboot::log::TBOOTUI_LOG_FILE))
+        .expect("failed to setup logging");
 
-#[derive(Parser)]
-struct Config {
-    #[arg(short, long, default_value_t = 115200)]
-    baud_rate: u32,
-
-    #[arg(short, long, value_parser, default_value_t = LevelFilter::Info)]
-    log_level: LevelFilter,
-}
-
-pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
-    let cfg = Config::try_parse_from(args)?;
-
-    tboot::log::setup_logging(cfg.log_level, Some(tboot::log::TBOOTUI_LOG_FILE))?;
-
-    set_baud_rate(cfg.baud_rate)?;
-    fix_zero_size_terminal()?;
-
-    // // drop permissions
-    // unsafe { libc::setregid(tboot::TINYUSER_GID, tboot::TINYUSER_GID) };
-    // unsafe { libc::setreuid(tboot::TINYUSER_UID, tboot::TINYUSER_UID) };
-
-    // // set correct env vars
-    // std::env::set_var("USER", "tboot");
-    // std::env::set_var("HOME", "/home/tboot");
-
-    let stream = UnixStream::connect(tboot::TINYBOOT_SOCKET).await?;
+    let stream = UnixStream::connect(tboot::TINYBOOT_SOCKET)
+        .await
+        .expect("failed to connect to socket");
     let codec: ClientCodec = Codec::new();
     let (mut sink, mut stream) = codec.framed(stream).split();
 

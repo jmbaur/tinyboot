@@ -22,13 +22,10 @@ let
       '';
     in
     pkgs.callPackage ./initramfs.nix {
-      extraInittab = ''
-        ::once:/sbin/flash-update
-      '';
       extraContents = [
         { object = config.build.firmware; symlink = "/update.rom"; }
-        { object = "${config.flashrom.package}/bin/flashrom"; symlink = "/sbin/flashrom"; }
-        { object = flashScript; symlink = "/sbin/flash-update"; }
+        { object = "${config.flashrom.package}/bin/flashrom"; symlink = "/bin/flashrom"; }
+        { object = flashScript; symlink = "/init"; }
       ];
     };
 in
@@ -82,9 +79,7 @@ in
     };
     debug = mkEnableOption "debug mode";
     tinyboot = {
-      ttys = mkOption { type = types.listOf types.str; default = [ "tty1" ]; };
-      extraInit = mkOption { type = types.lines; default = ""; };
-      extraInittab = mkOption { type = types.lines; default = ""; };
+      tty = mkOption { type = types.str; default = "tty1"; };
       nameservers = mkOption {
         type = types.listOf types.str;
         default = [ "8.8.8.8" "8.8.4.4" "2001:4860:4860::8888" "2001:4860:4860::8844" ];
@@ -92,16 +87,7 @@ in
     };
   };
   config = {
-    tinyboot.extraInit = ''
-      mkdir -p /home/tboot
-      chown -R tboot:tboot /home/tboot
-      cat /etc/resolv.conf.static >/etc/resolv.conf
-      cat /etc/ima/policy.conf >/sys/kernel/security/ima/policy
-    '';
-    tinyboot.extraInittab = ''
-      ::respawn:/sbin/tbootd --log-level=${if config.debug then "debug" else "info"}
-    '' + (lib.concatLines (map (tty: "${tty}::respawn:/sbin/tbootui") config.tinyboot.ttys));
-
+    linux.commandLine = [ "tbootd.loglevel=${if config.debug then "debug" else "info"}" "tbootd.tty=${config.tinyboot.tty}" ];
     linux.extraConfig = ''
       CONFIG_CMDLINE="${toString config.linux.commandLine}"
       CONFIG_SYSTEM_TRUSTED_KEYS="tinyboot/ca.pem"
@@ -119,7 +105,6 @@ in
 
     build = {
       initrd = pkgs.callPackage ./initramfs.nix {
-        inherit (config.tinyboot) extraInit extraInittab;
         extraContents =
           let
             staticResolvConf = pkgs.writeText "resolv.conf.static" (lib.concatLines (map (n: "nameserver ${n}") config.tinyboot.nameservers));
@@ -133,7 +118,8 @@ in
             };
           in
           [
-            { object = "${pkgs.tinyboot}/bin"; symlink = "/sbin"; }
+            { object = "${pkgs.tinyboot}/bin/tbootd"; symlink = "/init"; }
+            { object = "${pkgs.tinyboot}/bin/tbootui"; symlink = "/bin/tbootui"; }
             { object = ./etc/group; symlink = "/etc/group"; }
             { object = ./etc/mdev.conf; symlink = "/etc/mdev.conf"; }
             { object = ./etc/passwd; symlink = "/etc/passwd"; }
@@ -142,11 +128,11 @@ in
             { object = config.verifiedBoot.signingPublicKey; symlink = "/etc/keys/x509_ima.der"; }
           ] ++ (lib.optional (config.linux.firmware != null) { object = config.linux.firmware; symlink = "/lib/firmware"; });
       };
-      linux = (pkgs.callPackage ./linux.nix { linux = config.linux.package; inherit (config.linux) configFile extraConfig; }).overrideAttrs (_: {
-        preConfigure = ''
+      linux = (pkgs.callPackage ./linux.nix { linux = config.linux.package; inherit (config.linux) configFile extraConfig; }).overrideAttrs (old: {
+        preConfigure = (old.preConfigure or "") + ''
           mkdir tinyboot; cp ${config.verifiedBoot.caCertificate} tinyboot/ca.pem
         '';
-        postInstall = ''
+        postInstall = (old.postInstall or "") + ''
           install -Dm755 -t "$out/bin" scripts/sign-file
         '';
       });
@@ -208,7 +194,7 @@ in
         pkgs.writeShellScriptBin "update-firmware" ''
           kexec -l ${config.build.linux}/${pkgs.stdenv.hostPlatform.linux-kernel.target} \
             --initrd=${updateInitrd}/initrd \
-            --command-line="${lib.concatStringsSep " " (map (tty: "console=${applyStandardBaud tty}") config.tinyboot.ttys)}"
+            --command-line="console=${applyStandardBaud config.tinyboot.tty}"
           systemctl kexec
         '';
     };

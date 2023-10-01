@@ -5,6 +5,6 @@
     linux.configFile = with pkgs.tinybootKernelPatches; lib.mkDefault (pkgs.concatText "qemu-x86_64-kernel.config" [ generic qemu x86_64 ]);
     linux.commandLine = [ "quiet" ];
     debug = lib.mkDefault true;
-    tinyboot.ttys = lib.mkDefault [ "ttyS0" ];
+    tinyboot.tty = lib.mkDefault "ttyS0";
   };
 }

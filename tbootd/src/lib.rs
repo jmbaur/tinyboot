@@ -7,21 +7,30 @@ use crate::{
     block_device::{handle_unmounting, mount_all_devs, MountMsg},
     boot_loader::{kexec_execute, kexec_load},
 };
-use clap::Parser;
 use futures::prelude::*;
 use log::{debug, error, info, LevelFilter};
 use message::InternalMsg;
 use nix::{
-    libc,
+    libc::{
+        self, B115200, CBAUD, CBAUDEX, CLOCAL, CREAD, CRTSCTS, CSIZE, CSTOPB, ECHO, ECHOCTL, ECHOE,
+        ECHOK, ECHOKE, HUPCL, ICANON, ICRNL, IEXTEN, ISIG, IXOFF, IXON, ONLCR, OPOST, PARENB,
+        PARODD, TCSANOW, VEOF, VERASE, VINTR, VKILL, VQUIT, VSTART, VSTOP, VSUSP,
+    },
+    mount::MsFlags,
     unistd::{chown, Gid, Uid},
 };
 use std::{
-    collections::VecDeque,
+    collections::{HashMap, VecDeque},
     ffi::CString,
     io::ErrorKind,
-    os::raw::{c_char, c_void},
+    os::{
+        fd::AsRawFd,
+        raw::{c_char, c_void},
+        unix::{fs::PermissionsExt, process::CommandExt},
+    },
     path::Path,
-    process,
+    process::Child,
+    str::FromStr,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -33,6 +42,7 @@ use tboot::{
     linux::LinuxBootEntry,
     message::{ClientMessage, ServerCodec, ServerError, ServerMessage},
 };
+use termios::{cfgetispeed, cfgetospeed, cfsetispeed, cfsetospeed, tcsetattr, Termios};
 use tokio::{
     net::{UnixListener, UnixStream},
     sync::broadcast,
@@ -255,6 +265,8 @@ async fn prepare_boot(
         Some(Gid::from_raw(tboot::TINYUSER_GID)),
     )?;
 
+    _ = setup_client();
+
     // TODO(jared): don't start ticking until we have at least one thing to boot from
     tokio::spawn(async move {
         let tick_tx = internal_tx.clone();
@@ -350,6 +362,89 @@ fn parse_proc_keys(contents: &str) -> Vec<(i32, &str, &str)> {
         .collect()
 }
 
+fn setup_system() -> anyhow::Result<Child> {
+    std::fs::create_dir_all("/proc").expect("faield to create /proc");
+    std::fs::create_dir_all("/sys").expect("faield to create /sys");
+    std::fs::create_dir_all("/dev").expect("faield to create /dev");
+    std::fs::create_dir_all("/run").expect("faield to create /run");
+    std::fs::create_dir_all("/mnt").expect("faield to create /mnt");
+
+    nix::mount::mount(
+        None::<&str>,
+        "/proc",
+        Some("proc"),
+        MsFlags::MS_NOSUID | MsFlags::MS_NODEV | MsFlags::MS_NOEXEC,
+        None::<&str>,
+    )
+    .expect("failed to mount to /proc");
+
+    nix::mount::mount(
+        None::<&str>,
+        "/dev",
+        Some("devtmpfs"),
+        MsFlags::MS_NOSUID,
+        None::<&str>,
+    )
+    .expect("failed to mount to /dev");
+
+    nix::mount::mount(
+        None::<&str>,
+        "/sys",
+        Some("sysfs"),
+        MsFlags::MS_NOSUID | MsFlags::MS_NODEV | MsFlags::MS_NOEXEC | MsFlags::MS_RELATIME,
+        None::<&str>,
+    )
+    .expect("failed to mount to /sys");
+
+    nix::mount::mount(
+        None::<&str>,
+        "/run",
+        Some("tmpfs"),
+        MsFlags::MS_NOSUID | MsFlags::MS_NODEV,
+        None::<&str>,
+    )
+    .expect("failed to mount to /run");
+
+    nix::mount::mount(
+        None::<&str>,
+        "/sys/kernel/security",
+        Some("securityfs"),
+        MsFlags::MS_NOSUID | MsFlags::MS_NODEV | MsFlags::MS_NOEXEC | MsFlags::MS_RELATIME,
+        None::<&str>,
+    )
+    .expect("failed to mount to /sys/kernel/securityfs");
+
+    std::os::unix::fs::symlink("/proc/self/fd/0", "/dev/stdin")
+        .expect("failed to link to /dev/stdin");
+    std::os::unix::fs::symlink("/proc/self/fd/1", "/dev/stdout")
+        .expect("failed to link to /dev/stdout");
+    std::os::unix::fs::symlink("/proc/self/fd/2", "/dev/stderr")
+        .expect("failed to link to /dev/stderr");
+
+    // set permissions on /run
+    let mut perms = std::fs::metadata("/run")
+        .expect("failed to get metadata on /run")
+        .permissions();
+    perms.set_mode(0o777);
+    std::fs::set_permissions("/run", perms).expect("failed to set permissions on /run");
+
+    // create tboot user's home directory
+    std::fs::create_dir_all("/home/tboot").expect("failed to create tboot homedir");
+    chown(
+        "/home/tboot",
+        Some(Uid::from_raw(tboot::TINYUSER_UID)),
+        Some(Gid::from_raw(tboot::TINYUSER_GID)),
+    )?;
+
+    std::fs::copy("/etc/resolv.conf.static", "/etc/resolv.conf")
+        .expect("failed to copy static resolv.conf to dynamic one");
+
+    // TODO(jared): don't use mdevd
+    let mdev = std::process::Command::new("/bin/mdevd").spawn()?;
+
+    Ok(mdev)
+}
+
 // https://github.com/torvalds/linux/blob/3b517966c5616ac011081153482a5ba0e91b17ff/security/integrity/digsig.c#L193
 fn load_x509_key() -> anyhow::Result<()> {
     let all_keys = std::fs::read_to_string("/proc/keys")?;
@@ -396,31 +491,170 @@ fn load_x509_key() -> anyhow::Result<()> {
         info!("added ima key with id: {:?}", key_id);
     }
 
+    // only install the IMA policy after we have loaded the key
+    std::fs::copy("/etc/ima/policy.conf", "/sys/kernel/security/ima/policy")?;
+
     Ok(())
 }
 
-#[derive(Debug, Parser)]
-struct Config {
-    #[arg(short, long, value_parser, default_value_t = LevelFilter::Info)]
+// Adapted from https://github.com/mirror/busybox/blob/2d4a3d9e6c1493a9520b907e07a41aca90cdfd94/init/init.c#L341
+fn setup_tty(fd: i32) -> anyhow::Result<()> {
+    let mut tty = Termios::from_fd(fd)?;
+
+    tty.c_cc[VINTR] = 3; // C-c
+    tty.c_cc[VQUIT] = 28; // C-\
+    tty.c_cc[VERASE] = 127; // C-?
+    tty.c_cc[VKILL] = 21; // C-u
+    tty.c_cc[VEOF] = 4; // C-d
+    tty.c_cc[VSTART] = 17; // C-q
+    tty.c_cc[VSTOP] = 19; // C-s
+    tty.c_cc[VSUSP] = 26; // C-z
+
+    tty.c_cflag &= CBAUD | CBAUDEX | CSIZE | CSTOPB | PARENB | PARODD | CRTSCTS;
+    tty.c_cflag |= CREAD | HUPCL | CLOCAL;
+
+    // input modes
+    tty.c_iflag = ICRNL | IXON | IXOFF;
+
+    // output modes
+    tty.c_oflag = OPOST | ONLCR;
+
+    // local modes
+    tty.c_lflag = ISIG | ICANON | ECHO | ECHOE | ECHOK | ECHOCTL | ECHOKE | IEXTEN;
+
+    // set baud speed
+    let baud_rate = 115200;
+    if cfgetispeed(&tty) != baud_rate {
+        cfsetispeed(&mut tty, B115200)?;
+    }
+    if cfgetospeed(&tty) != baud_rate {
+        cfsetospeed(&mut tty, B115200)?;
+    }
+
+    // set size if the size is zero
+    let mut size = std::mem::MaybeUninit::<libc::winsize>::uninit();
+    let ret = unsafe { libc::ioctl(fd, libc::TIOCGWINSZ as _, &mut size) };
+    if ret == 0 {
+        let mut size = unsafe { size.assume_init() };
+        if size.ws_row == 0 {
+            size.ws_row = 24;
+        }
+        if size.ws_col == 0 {
+            size.ws_col = 80;
+        }
+
+        unsafe { libc::ioctl(fd, libc::TIOCSWINSZ as _, &size as *const _) };
+    }
+
+    tcsetattr(fd, TCSANOW, &tty)?;
+
+    Ok(())
+}
+
+fn setup_client() -> anyhow::Result<Child> {
+    // inherit stdio of parent
+    let child = std::process::Command::new("/bin/tbootui")
+        .env_clear()
+        .env("USER", "tboot")
+        .env("HOME", "/home/tboot")
+        .env("TERM", "linux")
+        .current_dir("/home/tboot")
+        .uid(tboot::TINYUSER_UID)
+        .gid(tboot::TINYUSER_GID)
+        .spawn()?;
+
+    Ok(child)
+}
+
+#[derive(Debug)]
+struct Config<'a> {
     log_level: LevelFilter,
+    tty: &'a str,
+}
+
+impl Default for Config<'_> {
+    fn default() -> Self {
+        Self {
+            log_level: LevelFilter::Info,
+            tty: "tty1",
+        }
+    }
+}
+
+impl<'a> Config<'a> {
+    pub fn parse_from(args: &'a [String]) -> anyhow::Result<Self> {
+        let mut map = args
+            .iter()
+            .filter_map(|arg| {
+                arg.strip_prefix("tbootd.")
+                    .and_then(|arg| arg.split_once('='))
+            })
+            .fold(
+                HashMap::new(),
+                |mut map: HashMap<&str, Vec<&str>>, (k, v)| {
+                    if let Some(existing) = map.get_mut(k) {
+                        existing.push(v);
+                    } else {
+                        _ = map.insert(k, vec![v]);
+                    }
+
+                    map
+                },
+            );
+
+        let mut cfg = Config::default();
+        if let Some(log_level) = map.remove("loglevel").and_then(|level| {
+            level
+                .into_iter()
+                .next()
+                .and_then(|level| LevelFilter::from_str(level).ok())
+        }) {
+            cfg.log_level = log_level;
+        }
+
+        if let Some(tty) = map.remove("tty") {
+            if let Some(tty) = tty.first() {
+                cfg.tty = tty;
+            }
+        }
+
+        Ok(cfg)
+    }
 }
 
 const VERSION: Option<&'static str> = option_env!("version");
 
 pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
-    let cfg = Config::try_parse_from(args)?;
+    let cfg = Config::parse_from(&args)?;
+
+    if (unsafe { libc::getuid() }) != 0 {
+        panic!("tinyboot not running as root")
+    }
+
+    if let Err(e) = setup_system() {
+        panic!("failed to setup system: {:?}", e);
+    }
 
     tboot::log::setup_logging(cfg.log_level, Some(Path::new(tboot::log::TBOOTD_LOG_FILE)))?;
 
     info!("running version {}", VERSION.unwrap_or("devel"));
     debug!("config: {:?}", cfg);
 
-    if (unsafe { libc::getuid() }) != 0 {
-        error!("tinyboot not running as root");
-        process::exit(1);
-    }
+    let tty = std::fs::OpenOptions::new()
+        .write(true)
+        .read(true)
+        .open("/dev/tty1")
+        .expect("could not open /dev/tty1");
+    let fd = tty.as_raw_fd();
+    unsafe { libc::dup2(fd, libc::STDIN_FILENO) };
+    unsafe { libc::dup2(fd, libc::STDOUT_FILENO) };
+    unsafe { libc::dup2(fd, libc::STDERR_FILENO) };
+    setup_tty(fd).expect("could not setup /dev/tty1");
+    println!("TEST");
 
-    load_x509_key()?;
+    if let Err(e) = load_x509_key() {
+        error!("failed to load x509 keys for IMA: {:?}", e);
+    }
 
     loop {
         let (internal_tx, internal_rx) = mpsc::channel::<InternalMsg>(100);

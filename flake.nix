@@ -46,12 +46,7 @@
           ima_tpm_early_init = { name = "ima_tpm_early_init"; patch = ./patches/linux-tpm-probe.patch; };
         };
       };
-      devShells = forAllSystems ({ pkgs, ... }: {
-        default = pkgs.tinyboot.overrideAttrs (old: {
-          nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ pkgs.stdenv.cc ];
-          env.CARGO_BUILD_TARGET = pkgs.pkgsStatic.stdenv.hostPlatform.config;
-        });
-      });
+      devShells = forAllSystems ({ pkgs, ... }: { default = pkgs.tinyboot; });
       legacyPackages = forAllSystems ({ pkgs, ... }: pkgs);
       apps = forAllSystems ({ pkgs, system, ... }: (pkgs.lib.concatMapAttrs
         (testName: nixosSystem:

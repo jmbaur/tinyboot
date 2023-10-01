@@ -18,4 +18,10 @@ stdenv.mkDerivation {
   '';
   buildFlags = [ "DTC_FLAGS=-@" "KBUILD_BUILD_VERSION=1-TinyBoot" ];
   installFlags = [ "INSTALL_PATH=$(out)" ] ++ lib.optionals stdenv.hostPlatform.isAarch [ "dtbs_install" "INSTALL_DTBS_PATH=$(out)/dtbs" ];
+  outputs = [ "out" "dev" ];
+  postInstall = ''
+    mkdir -p $dev
+    cp .config $dev/config
+    cp vmlinux $dev/vmlinux
+  '';
 }

@@ -9,6 +9,6 @@
     };
     coreboot.configFile = lib.mkDefault ./coreboot.config;
     debug = lib.mkDefault true;
-    tinyboot.ttys = lib.mkDefault [ "ttyAMA0" ];
+    tinyboot.tty = lib.mkDefault "ttyAMA0";
   };
 }
