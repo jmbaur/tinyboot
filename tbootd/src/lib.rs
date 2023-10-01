@@ -640,17 +640,17 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
     info!("running version {}", VERSION.unwrap_or("devel"));
     debug!("config: {:?}", cfg);
 
-    let tty = std::fs::OpenOptions::new()
+    if let Ok(tty) = std::fs::OpenOptions::new()
         .write(true)
         .read(true)
-        .open("/dev/tty1")
-        .expect("could not open /dev/tty1");
-    let fd = tty.as_raw_fd();
-    unsafe { libc::dup2(fd, libc::STDIN_FILENO) };
-    unsafe { libc::dup2(fd, libc::STDOUT_FILENO) };
-    unsafe { libc::dup2(fd, libc::STDERR_FILENO) };
-    setup_tty(fd).expect("could not setup /dev/tty1");
-    println!("TEST");
+        .open(cfg.tty)
+    {
+        let fd = tty.as_raw_fd();
+        unsafe { libc::dup2(fd, libc::STDIN_FILENO) };
+        unsafe { libc::dup2(fd, libc::STDOUT_FILENO) };
+        unsafe { libc::dup2(fd, libc::STDERR_FILENO) };
+        _ = setup_tty(fd);
+    }
 
     if let Err(e) = load_x509_key() {
         error!("failed to load x509 keys for IMA: {:?}", e);
