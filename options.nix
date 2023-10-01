@@ -106,8 +106,6 @@ in
       CONFIG_CMDLINE="${toString config.linux.commandLine}"
       CONFIG_SYSTEM_TRUSTED_KEYS="tinyboot/ca.pem"
     '';
-    # CONFIG_IMA_LOAD_X509=y
-    # CONFIG_IMA_X509_PATH="/etc/keys/x509_ima.der"
 
     coreboot.extraConfig = ''
       CONFIG_VBOOT_ROOT_KEY="${config.verifiedBoot.vbootRootKey}"
