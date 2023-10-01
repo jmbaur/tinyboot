@@ -561,16 +561,16 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
 
     tboot::log::setup_logging(cfg.log_level, Some(tboot::log::TBOOTUI_LOG_FILE))?;
 
-    // drop permissions
-    unsafe { libc::setregid(tboot::TINYUSER_GID, tboot::TINYUSER_GID) };
-    unsafe { libc::setreuid(tboot::TINYUSER_UID, tboot::TINYUSER_UID) };
-
     set_baud_rate(cfg.baud_rate)?;
     fix_zero_size_terminal()?;
 
-    // set correct env vars
-    std::env::set_var("USER", "tboot");
-    std::env::set_var("HOME", "/home/tboot");
+    // // drop permissions
+    // unsafe { libc::setregid(tboot::TINYUSER_GID, tboot::TINYUSER_GID) };
+    // unsafe { libc::setreuid(tboot::TINYUSER_UID, tboot::TINYUSER_UID) };
+
+    // // set correct env vars
+    // std::env::set_var("USER", "tboot");
+    // std::env::set_var("HOME", "/home/tboot");
 
     let stream = UnixStream::connect(tboot::TINYBOOT_SOCKET).await?;
     let codec: ClientCodec = Codec::new();

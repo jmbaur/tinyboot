@@ -5,7 +5,6 @@ edition = "2021"
 
 [dependencies]
 anyhow.workspace = true
-tbootctl = { path = "../tbootctl" }
 tbootd = { path = "../tbootd" }
 tbootui = { path = "../tbootui" }
 tokio.workspace = true

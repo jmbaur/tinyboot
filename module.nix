@@ -46,11 +46,5 @@ in
       find /boot/EFI/nixos -type f -name "*.efi" \
         -exec ${cfg.settings.build.linux}/bin/sign-file sha256 ${cfg.settings.verifiedBoot.signingPrivateKey} ${cfg.settings.verifiedBoot.signingPublicKey} {} \;
     '';
-    boot.loader.grub.device = "nodev"; # just install grub config file
-    boot.loader.grub.extraInstallCommands = ''
-      echo "signing boot files"
-      find /boot/kernels -type f \
-        -exec ${cfg.settings.build.linux}/bin/sign-file sha256 ${cfg.settings.verifiedBoot.signingPrivateKey} ${cfg.settings.verifiedBoot.signingPublicKey} {} \;
-    '';
   };
 }

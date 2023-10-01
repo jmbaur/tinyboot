@@ -28,7 +28,7 @@ out/tinyboot.cpio: out/bin
 out/bin:
 	cargo build
 	mkdir -p out/bin
-	cp tinyboot/target/debug/{tbootd,tbootui,tbootctl} out/bin/
+	cp tinyboot/target/debug/{tbootd,tbootui} out/bin/
 
 out/coreboot.rom:
 	dd if=$(shell nix build --no-link --print-out-paths -L .\#coreboot.qemu-x86_64)/coreboot.rom of=out/coreboot.rom

@@ -1,15 +1,19 @@
-{ linux, basePackage ? linux, configFile, extraConfig, lib, stdenv }:
+{ linux, fetchpatch, configFile, extraConfig, lib, stdenv }:
 stdenv.mkDerivation {
-  inherit (basePackage) pname version src buildInputs nativeBuildInputs depsBuildBuild makeFlags preInstall enableParallelBuilding;
+  inherit (linux) pname version src buildInputs nativeBuildInputs depsBuildBuild makeFlags preInstall enableParallelBuilding;
   inherit extraConfig;
   passAsFile = [ "extraConfig" ];
-  patches = [ ./patches/linux-tpm-probe.patch ];
+  patches = [
+    (fetchpatch {
+      url = "https://lore.kernel.org/lkml/20230921064506.3420402-1-ovt@google.com/raw";
+      hash = "sha256-YM4AOV4BdfWQ2GGGeVV1yJg6BoucoiK7l7ozrVmrtMM=";
+    })
+    ./patches/linux-tpm-probe.patch
+  ];
   configurePhase = ''
     runHook preConfigure
-    make ARCH=${stdenv.hostPlatform.linuxArch} tinyconfig
-    cat ${configFile} >> .config
-    cat $extraConfigPath >> .config
-    make ARCH=${stdenv.hostPlatform.linuxArch} olddefconfig
+    cat ${configFile} $extraConfigPath > all.config
+    make ARCH=${stdenv.hostPlatform.linuxArch} KCONFIG_ALLCONFIG=1 allnoconfig
     runHook postConfigure
   '';
   buildFlags = [ "DTC_FLAGS=-@" "KBUILD_BUILD_VERSION=1-TinyBoot" ];

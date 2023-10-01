@@ -2,15 +2,11 @@ use crate::linux::LinuxBootEntry;
 use std::time::Duration;
 
 pub mod bls;
-pub mod grub;
-pub mod syslinux;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("boot config not found")]
     BootConfigNotFound,
-    #[error("evaluation error")]
-    Eval(::grub::EvalError),
     #[error("invalid entry")]
     InvalidEntry,
     #[error("invalid mount")]

@@ -34,7 +34,7 @@
               modules = [ baseConfig ./test/${extension}.nix ];
             }));
         in
-        nixpkgs.lib.foldAttrs (curr: acc: acc // curr) { } (map (b: extend b baseConfig) [ "bls" "grub" "extlinux" ]);
+        nixpkgs.lib.foldAttrs (curr: acc: acc // curr) { } (map (b: extend b baseConfig) [ "bls" ]);
       overlays.default = final: prev: {
         tinyboot = prev.pkgsStatic.callPackage ./. { };
         tinybootKernelPatches = prev.lib.mapAttrs (config: _: ./kernel-configs/${config}) (builtins.readDir ./kernel-configs);
@@ -47,11 +47,10 @@
         };
       };
       devShells = forAllSystems ({ pkgs, ... }: {
-        default = with pkgs; mkShell {
-          env.CARGO_BUILD_TARGET = pkgsStatic.stdenv.hostPlatform.config;
-          inputsFrom = [ tinyboot ];
-          nativeBuildInputs = [ bashInteractive grub2 cargo-insta rustfmt cargo-watch cargo-edit clippy ];
-        };
+        default = pkgs.tinyboot.overrideAttrs (old: {
+          nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ pkgs.stdenv.cc ];
+          env.CARGO_BUILD_TARGET = pkgs.pkgsStatic.stdenv.hostPlatform.config;
+        });
       });
       legacyPackages = forAllSystems ({ pkgs, ... }: pkgs);
       apps = forAllSystems ({ pkgs, system, ... }: (pkgs.lib.concatMapAttrs

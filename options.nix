@@ -53,7 +53,7 @@ in
       extraArgs = mkOption { type = types.listOf types.str; default = [ ]; };
     };
     linux = {
-      basePackage = mkOption { type = types.package; default = pkgs.linux; };
+      package = mkOption { type = types.package; default = pkgs.linux_testing; };
       configFile = mkOption { type = types.path; };
       extraConfig = mkOption { type = types.lines; default = ""; };
       commandLine = mkOption { type = types.listOf types.str; default = [ ]; };
@@ -102,18 +102,12 @@ in
       ::respawn:/sbin/tbootd --log-level=${if config.debug then "debug" else "info"}
     '' + (lib.concatLines (map (tty: "${tty}::respawn:/sbin/tbootui") config.tinyboot.ttys));
 
-    linux.commandLine = lib.optional config.debug "debug" ++ [ "lsm=integrity" "ima_appraise=enforce" ];
     linux.extraConfig = ''
       CONFIG_CMDLINE="${toString config.linux.commandLine}"
       CONFIG_SYSTEM_TRUSTED_KEYS="tinyboot/ca.pem"
-      CONFIG_IMA_LOAD_X509=y
-      CONFIG_IMA_X509_PATH="/etc/keys/x509_ima.der"
-    '' + (lib.optionalString config.debug ''
-      CONFIG_DEBUG_DRIVER=y
-      CONFIG_DEBUG_INFO_DWARF5=y
-      CONFIG_DEBUG_KERNEL=y
-      CONFIG_DYNAMIC_DEBUG=y
-    '');
+    '';
+    # CONFIG_IMA_LOAD_X509=y
+    # CONFIG_IMA_X509_PATH="/etc/keys/x509_ima.der"
 
     coreboot.extraConfig = ''
       CONFIG_VBOOT_ROOT_KEY="${config.verifiedBoot.vbootRootKey}"
@@ -150,15 +144,12 @@ in
             { object = config.verifiedBoot.signingPublicKey; symlink = "/etc/keys/x509_ima.der"; }
           ] ++ (lib.optional (config.linux.firmware != null) { object = config.linux.firmware; symlink = "/lib/firmware"; });
       };
-      linux = (pkgs.callPackage ./linux.nix { inherit (config.linux) basePackage configFile extraConfig; }).overrideAttrs (_: {
+      linux = (pkgs.callPackage ./linux.nix { linux = config.linux.package; inherit (config.linux) configFile extraConfig; }).overrideAttrs (_: {
         preConfigure = ''
           mkdir tinyboot; cp ${config.verifiedBoot.caCertificate} tinyboot/ca.pem
         '';
         postInstall = ''
           install -Dm755 -t "$out/bin" scripts/sign-file
-        '' + lib.optionalString config.debug ''
-          cp .config $out/config
-          cp vmlinux $out/vmlinux
         '';
       });
       fitImage = buildFitImage {

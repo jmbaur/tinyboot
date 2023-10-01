@@ -2,10 +2,9 @@
 let
   qemuFlags = toString ((builtins.getAttr stdenv.hostPlatform.qemuArch {
     x86_64 = [ "-M q35" ];
-    aarch64 = [ "-M virt" "-cpu cortex-a53" ];
+    aarch64 = [ "-M virt" "-cpu cortex-a57" ];
   }) ++ lib.optional (stdenv.hostPlatform == stdenv.buildPlatform) "-enable-kvm");
   bios = coreboot."qemu-${stdenv.hostPlatform.qemuArch}".config.build.firmware;
-  inherit (bios) linux initrd;
 in
 substituteAll {
   name = "tinyboot-test-run.bash";
@@ -15,5 +14,5 @@ substituteAll {
   qemu = "qemu-system-${stdenv.hostPlatform.qemuArch}";
   kernelFile = stdenv.hostPlatform.linux-kernel.target;
   inherit (stdenv.hostPlatform) system;
-  inherit bios linux initrd qemuFlags testName;
+  inherit bios qemuFlags testName;
 }

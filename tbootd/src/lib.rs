@@ -17,7 +17,9 @@ use nix::{
 };
 use std::{
     collections::VecDeque,
+    ffi::CString,
     io::ErrorKind,
+    os::raw::{c_char, c_void},
     path::Path,
     process,
     sync::{
@@ -315,6 +317,88 @@ async fn prepare_boot(
     Ok(())
 }
 
+// columns:
+// keyring_id . . . . . . . keyring_name .
+fn parse_proc_keys(contents: &str) -> Vec<(i32, &str, &str)> {
+    contents
+        .lines()
+        .filter_map(|key| {
+            let mut iter = key.split_ascii_whitespace();
+            let Some(key_id) = iter.next() else {
+                return None;
+            };
+
+            let Ok(key_id) = i32::from_str_radix(key_id, 16) else {
+                return None;
+            };
+
+            // skip the next 7 columns
+            for _ in 0..6 {
+                _ = iter.next();
+            }
+
+            let Some(key_type) = iter.next() else {
+                return None;
+            };
+
+            let Some(keyring) = iter.next().and_then(|keyring| keyring.strip_suffix(":")) else {
+                return None;
+            };
+
+            Some((key_id, key_type, keyring))
+        })
+        .collect()
+}
+
+// https://github.com/torvalds/linux/blob/3b517966c5616ac011081153482a5ba0e91b17ff/security/integrity/digsig.c#L193
+fn load_x509_key() -> anyhow::Result<()> {
+    let all_keys = std::fs::read_to_string("/proc/keys")?;
+    let all_keys = parse_proc_keys(&all_keys);
+    let ima_keyring_id = all_keys
+        .into_iter()
+        .find_map(|(key_id, key_type, keyring)| {
+            if key_type != "keyring" {
+                return None;
+            }
+
+            if keyring != ".ima" {
+                return None;
+            }
+
+            Some(key_id)
+        });
+
+    let Some(ima_keyring_id) = ima_keyring_id else {
+        anyhow::bail!(".ima keyring not found");
+    };
+
+    let pub_key = std::fs::read("/etc/keys/x509_ima.der")?;
+
+    let key_type = CString::new("asymmetric")?;
+    let key_desc: *const c_char = std::ptr::null();
+
+    // id = add_key(imaevm_params.x509 ? "asymmetric" : "user",
+    //   imaevm_params.x509 ? NULL : name, pub, len, id);
+    let ret = unsafe {
+        keyutils_raw::add_key(
+            key_type.as_ptr(),
+            key_desc,
+            pub_key.as_ptr() as *const c_void,
+            pub_key.len(),
+            ima_keyring_id,
+        )
+    };
+
+    if ret < 0 {
+        error!("adding ima key failed: {:?}", ret);
+    } else {
+        let key_id = ret;
+        info!("added ima key with id: {:?}", key_id);
+    }
+
+    Ok(())
+}
+
 #[derive(Debug, Parser)]
 struct Config {
     #[arg(short, long, value_parser, default_value_t = LevelFilter::Info)]
@@ -335,6 +419,8 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
         error!("tinyboot not running as root");
         process::exit(1);
     }
+
+    load_x509_key()?;
 
     loop {
         let (internal_tx, internal_rx) = mpsc::channel::<InternalMsg>(100);
@@ -375,5 +461,20 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
             }
             Err(e) => error!("failed to prepare boot: {e}"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    #[test]
+    fn parse_proc_keys() {
+        let proc_keys = r#"
+3b7511b0 I--Q---     1 perm 0b0b0000     0     0 user      invocation_id: 16
+"#;
+        assert_eq!(
+            super::parse_proc_keys(proc_keys),
+            vec![(997527984, "user", "invocation_id")]
+        );
     }
 }

@@ -1,14 +1,8 @@
 use crate::{
-    boot_loader::{
-        bls::BlsBootLoader,
-        grub::{GrubBootLoader, TinybootGrubEnvironment},
-        syslinux::SyslinuxBootLoader,
-        BootLoader, Error,
-    },
+    boot_loader::{bls::BlsBootLoader, BootLoader, Error},
     linux::LinuxBootEntry,
 };
 use crc::{Crc, CRC_32_ISCSI};
-use grub::GrubEvaluator;
 use kobject_uevent::UEvent;
 use log::{debug, error};
 use serde::{Deserialize, Serialize};
@@ -109,8 +103,12 @@ impl TryFrom<UEvent> for BlockDevice {
         // TODO(jared): Use fs::read_dir based on mdev.conf that will put all partitions under
         // /dev/disk/vda/N, where N is the partition number.
         let dev_partitions = find_disk_partitions(|p| {
-            let Some(filename) = p.file_name() else { return false; };
-            let Some(filename) = filename.to_str() else { return false; };
+            let Some(filename) = p.file_name() else {
+                return false;
+            };
+            let Some(filename) = filename.to_str() else {
+                return false;
+            };
             filename.starts_with(devname)
         })?;
 
@@ -143,10 +141,6 @@ impl TryFrom<UEvent> for BlockDevice {
                     if let Some((Ok(entries), new_timeout)) =
                         if let Ok(bls) = find_bls(&mut seen_config_files, mount) {
                             Some((bls.boot_entries(), bls.timeout()))
-                        } else if let Ok(grub) = find_grub(&mut seen_config_files, mount) {
-                            Some((grub.boot_entries(), grub.timeout()))
-                        } else if let Ok(syslinux) = find_syslinux(&mut seen_config_files, mount) {
-                            Some((syslinux.boot_entries(), syslinux.timeout()))
                         } else {
                             None
                         }
@@ -281,169 +275,4 @@ pub fn find_bls(
     seen_config_files.insert(checksum, Some(()));
 
     BlsBootLoader::parse_loader_conf(mount, source)
-}
-
-pub fn find_grub(
-    seen_config_files: &mut HashMap<u32, Option<()>>,
-    mount: &Path,
-) -> Result<impl BootLoader, Error> {
-    let config_file = 'config: {
-        for path in ["boot/grub/grub.cfg", "grub/grub.cfg", "EFI/boot/grub.cfg"] {
-            let search_path = mount.join(path);
-
-            debug!(
-                "searching for grub configuration at {}",
-                search_path.display()
-            );
-
-            if search_path.exists() {
-                break 'config Some(search_path);
-            }
-        }
-
-        None
-    };
-
-    let Some(config_file) = config_file else {
-        return Err(Error::BootConfigNotFound);
-    };
-
-    let source = std::fs::read_to_string(&config_file)?;
-
-    let checksum = CASTAGNOLI.checksum(source.as_bytes());
-    if seen_config_files.get(&checksum).is_some() {
-        return Err(Error::DuplicateConfig);
-    }
-
-    seen_config_files.insert(checksum, Some(()));
-
-    let mut evaluator = GrubEvaluator::new_from_source(
-        source,
-        TinybootGrubEnvironment::new(
-            mount.to_str().ok_or(Error::InvalidMountpoint)?,
-            PathBuf::from(&config_file)
-                .parent()
-                .ok_or(Error::BootConfigNotFound)?
-                .to_str()
-                .ok_or(Error::InvalidMountpoint)?,
-        ),
-    )
-    .map_err(Error::Eval)?;
-
-    let entries: Vec<LinuxBootEntry> = evaluator
-        .menu
-        .clone()
-        .into_iter()
-        .flat_map(|grub_entry| {
-            if let Some(entries) = grub_entry.menuentries {
-                // is submenu entry
-                entries
-            } else {
-                // is boot entry
-                vec![grub_entry]
-            }
-        })
-        .enumerate()
-        .filter_map(|(idx, grub_entry)| {
-            // use mountpoint as implicit value for $root
-            let root = evaluator
-                .get_env("root")
-                .map(Path::new)
-                .unwrap_or(mount)
-                .to_path_buf();
-
-            let (kernel, initrd, cmdline) = evaluator.eval_grub_entry(&grub_entry).ok()?;
-
-            let linux = if kernel.starts_with("/mnt") {
-                kernel
-            } else {
-                let mut linux = root.clone();
-                linux.push(kernel.strip_prefix("/").unwrap_or(&kernel));
-                linux
-            };
-
-            let initrd = initrd.map(|initrd| {
-                if initrd.starts_with("/mnt") {
-                    initrd
-                } else {
-                    let mut final_initrd = root;
-                    final_initrd.push(initrd.strip_prefix("/").unwrap_or(&initrd));
-                    final_initrd
-                }
-            });
-
-            let is_default = evaluator
-                .get_env("default")
-                .and_then(|default_idx| {
-                    default_idx
-                        .parse::<usize>()
-                        .map(|default_idx| default_idx == idx)
-                        .ok()
-                })
-                .unwrap_or_default();
-
-            Some(LinuxBootEntry {
-                default: is_default,
-                display: grub_entry.title,
-                linux,
-                initrd,
-                cmdline,
-            })
-        })
-        .collect();
-
-    Ok(GrubBootLoader {
-        entries,
-        timeout: evaluator.timeout(),
-    })
-}
-
-pub fn find_syslinux(
-    seen_config_files: &mut HashMap<u32, Option<()>>,
-    mount: &Path,
-) -> Result<impl BootLoader, Error> {
-    let config_file = 'config: {
-        for path in [
-            "boot/extlinux/extlinux.conf",
-            "extlinux/extlinux.conf",
-            "extlinux.conf",
-            "boot/syslinux/extlinux.conf",
-            "boot/syslinux/syslinux.cfg",
-            "syslinux/extlinux.conf",
-            "syslinux/syslinux.cfg",
-            "syslinux.cfg",
-        ] {
-            let search_path = mount.join(path);
-
-            debug!(
-                "searching for syslinux configuration at {}",
-                search_path.display()
-            );
-
-            if search_path.exists() {
-                break 'config Some(search_path);
-            }
-        }
-
-        None
-    };
-
-    let Some(config_file) = config_file else {
-        return Err(Error::BootConfigNotFound);
-    };
-
-    let source = std::fs::read_to_string(&config_file)?;
-
-    let checksum = CASTAGNOLI.checksum(source.as_bytes());
-    if seen_config_files.get(&checksum).is_some() {
-        return Err(Error::DuplicateConfig);
-    }
-
-    seen_config_files.insert(checksum, Some(()));
-
-    let Some(parent) = config_file.parent() else {
-        return Err(Error::BootConfigNotFound);
-    };
-
-    SyslinuxBootLoader::parse_syslinux(parent, source)
 }
