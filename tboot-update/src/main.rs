@@ -1,5 +1,5 @@
 use nix::libc;
-use std::{os::fd::AsRawFd, process::Stdio, thread::sleep, time::Duration};
+use std::{os::fd::AsRawFd, thread::sleep, time::Duration};
 
 fn update() -> anyhow::Result<()> {
     _ = tboot::system::setup_system();
@@ -19,8 +19,6 @@ fn update() -> anyhow::Result<()> {
     println!("using flashrom programmer {}", cfg.programmer);
 
     let output = flashrom
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
         .args(&[
             "-p",
             cfg.programmer,
@@ -30,8 +28,7 @@ fn update() -> anyhow::Result<()> {
             "-i",
             "RW_SECTION_A",
         ])
-        .spawn()?
-        .wait_with_output()?;
+        .output()?;
 
     if output.status.success() {
         println!("flashrom succeeded");
