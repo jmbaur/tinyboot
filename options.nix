@@ -105,7 +105,6 @@ in
             { object = "${pkgs.tinyboot}/bin/tbootd"; symlink = "/init"; }
             { object = "${pkgs.tinyboot}/bin/tbootui"; symlink = "/bin/tbootui"; }
             { object = ./etc/group; symlink = "/etc/group"; }
-            { object = ./etc/mdev.conf; symlink = "/etc/mdev.conf"; }
             { object = ./etc/passwd; symlink = "/etc/passwd"; }
             { object = staticResolvConf; symlink = "/etc/resolv.conf.static"; }
             { object = imaPolicy; symlink = "/etc/ima/policy.conf"; }
