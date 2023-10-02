@@ -547,9 +547,7 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
         panic!("tinyboot not running as root")
     }
 
-    if let Err(e) = tboot::system::setup_system() {
-        panic!("failed to setup system: {:?}", e);
-    }
+    _ = tboot::system::setup_system();
 
     // create tboot user's home directory
     std::fs::create_dir_all("/home/tboot").expect("failed to create tboot homedir");

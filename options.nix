@@ -29,9 +29,8 @@ in
       };
     };
     flashrom = {
-      package = mkPackageOptionMD pkgs "flashrom" { };
+      package = mkPackageOptionMD pkgs "flashrom-cros" { };
       programmer = mkOption { type = types.str; default = "internal"; };
-      layout = mkOption { type = types.nullOr types.lines; default = null; };
     };
     linux = {
       package = mkOption { type = types.package; default = pkgs.linux_testing; };

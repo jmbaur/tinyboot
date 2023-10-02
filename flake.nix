@@ -65,7 +65,7 @@
             makeTestDiskScript = {
               type = "app";
               program = toString (pkgs.writeShellScript "make-disk-image" ''
-                dd if=${nixosSystem.config.system.build.qcow2}/nixos.qcow2 of=nixos-${testName}.qcow2
+                dd status=progress if=${nixosSystem.config.system.build.qcow2}/nixos.qcow2 of=nixos-${testName}.qcow2
               '');
             };
           in

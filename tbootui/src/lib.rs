@@ -17,7 +17,7 @@ use tboot::{
     linux::LinuxBootEntry,
     message::{ClientCodec, ClientMessage, ServerError, ServerMessage},
 };
-use termion::{event::Key, input::TermRead, raw::IntoRawMode, screen::IntoAlternateScreen};
+use termion::{event::Key, input::TermRead, raw::IntoRawMode};
 use tokio::{net::UnixStream, sync::mpsc};
 use tokio_serde_cbor::Codec;
 use tokio_util::codec::{Decoder, Framed};
@@ -260,11 +260,8 @@ async fn run_client(
     }
 
     'outer: loop {
-        let backend =
-            TermionBackend::new(std::io::stdout().into_raw_mode()?.into_alternate_screen()?);
+        let backend = TermionBackend::new(std::io::stdout().into_raw_mode()?);
         let mut terminal = Terminal::new(TermionBackend::new(backend))?;
-
-        terminal.clear()?;
 
         let mut popup = None::<&str>;
         let mut time_left = None::<Duration>;
@@ -390,7 +387,6 @@ async fn run_client(
 
                         }
                         ServerMessage::ServerDone => {
-                            terminal.clear()?;
                             terminal.set_cursor(0, 0)?;
                             break 'outer
                         },

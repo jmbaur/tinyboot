@@ -2,7 +2,7 @@ use std::{os::unix::prelude::PermissionsExt, process::Child};
 
 use nix::mount::MsFlags;
 
-pub fn setup_system() -> anyhow::Result<Child> {
+pub fn setup_system() -> Child {
     std::fs::create_dir_all("/proc").expect("faield to create /proc");
     std::fs::create_dir_all("/sys").expect("faield to create /sys");
     std::fs::create_dir_all("/dev").expect("faield to create /dev");
@@ -69,7 +69,9 @@ pub fn setup_system() -> anyhow::Result<Child> {
     std::fs::set_permissions("/run", perms).expect("failed to set permissions on /run");
 
     // TODO(jared): don't use mdevd
-    let mdev = std::process::Command::new("/bin/mdevd").spawn()?;
+    let mdev = std::process::Command::new("/bin/mdevd")
+        .spawn()
+        .expect("failed to start mdevd");
 
-    Ok(mdev)
+    mdev
 }

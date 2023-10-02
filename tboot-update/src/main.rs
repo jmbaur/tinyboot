@@ -2,12 +2,9 @@ use nix::libc;
 use std::{os::fd::AsRawFd, process::Stdio, thread::sleep, time::Duration};
 
 fn update() -> anyhow::Result<()> {
-    tboot::system::setup_system()?;
+    _ = tboot::system::setup_system();
 
-    let stdout = std::fs::OpenOptions::new()
-        .read(true)
-        .create(true)
-        .open("/dev/kmsg")?;
+    let stdout = std::fs::OpenOptions::new().append(true).open("/dev/kmsg")?;
 
     unsafe { libc::dup2(stdout.as_raw_fd(), libc::STDOUT_FILENO) };
     unsafe { libc::dup2(stdout.as_raw_fd(), libc::STDERR_FILENO) };
@@ -17,25 +14,35 @@ fn update() -> anyhow::Result<()> {
 
     if let Some(programmer_arg) = args.find(|arg| arg.starts_with("flashrom.programmer=")) {
         let programmer = programmer_arg.strip_prefix("flashrom.programmer=").unwrap();
-        let exit = flashrom
+
+        println!("using flashrom programmer {}", programmer);
+
+        let output = flashrom
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .args(&[
-                "--programmer",
+                "-p",
                 programmer,
-                "--write",
+                "-w",
                 "/update.rom",
                 "--fmap",
                 "-i",
                 "RW_SECTION_A",
             ])
             .spawn()?
-            .wait()?;
+            .wait_with_output()?;
 
-        if exit.success() {
+        if output.status.success() {
             println!("flashrom succeeded");
         } else {
-            eprintln!("flashrom failed with status {}", exit.code().unwrap());
+            eprintln!(
+                "flashrom failed with status {}",
+                output.status.code().unwrap()
+            );
+            eprintln!(
+                "flashrom error output:\n{}",
+                String::from_utf8(output.stderr).expect("stderr not utf8")
+            );
         }
     } else {
         eprintln!("missing flashrom.programmer arg!");
