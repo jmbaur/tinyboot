@@ -52,8 +52,8 @@ fn main() {
         eprintln!("failed to update: {}", e);
     }
 
-    for i in 0..6 {
-        println!("rebooting in {} seconds", 5 - i);
+    for i in 0..16 {
+        println!("rebooting in {} seconds", 15 - i);
         sleep(Duration::from_secs(1));
     }
 
