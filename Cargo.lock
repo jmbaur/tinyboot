@@ -730,6 +730,7 @@ dependencies = [
 name = "tboot-update"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "nix",
  "tboot",
 ]

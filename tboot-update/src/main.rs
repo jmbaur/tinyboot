@@ -1,14 +1,13 @@
 use nix::libc;
 use std::{os::fd::AsRawFd, process::Stdio, thread::sleep, time::Duration};
 
-fn main() {
-    tboot::system::setup_system().expect("failed to setup system");
+fn update() -> anyhow::Result<()> {
+    tboot::system::setup_system()?;
 
     let stdout = std::fs::OpenOptions::new()
         .read(true)
         .create(true)
-        .open("/dev/kmsg")
-        .expect("failed to open /dev/kmsg");
+        .open("/dev/kmsg")?;
 
     unsafe { libc::dup2(stdout.as_raw_fd(), libc::STDOUT_FILENO) };
     unsafe { libc::dup2(stdout.as_raw_fd(), libc::STDERR_FILENO) };
@@ -30,10 +29,8 @@ fn main() {
                 "-i",
                 "RW_SECTION_A",
             ])
-            .spawn()
-            .expect("starting flashrom failed")
-            .wait()
-            .expect("failed to wait for flashrom to finish");
+            .spawn()?
+            .wait()?;
 
         if exit.success() {
             println!("flashrom succeeded");
@@ -42,6 +39,14 @@ fn main() {
         }
     } else {
         eprintln!("missing flashrom.programmer arg!");
+    }
+
+    Ok(())
+}
+
+fn main() {
+    if let Err(e) = update() {
+        eprintln!("failed to update: {}", e);
     }
 
     println!("rebooting in 5 seconds");
