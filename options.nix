@@ -13,13 +13,10 @@ let
         { object = "${tbootUpdate}/bin/tboot-update"; symlink = "/init"; }
       ];
     };
-  testInitrd =
-    let
-      tbootTest = pkgs.tinyboot.override { package = "tboot-test"; };
-    in
-    pkgs.callPackage ./initramfs.nix {
-      extraContents = [{ object = "${tbootTest}/bin/tboot-test"; symlink = "/init"; }];
-    };
+  testInitrd = pkgs.makeInitrdNG {
+    compressor = "xz";
+    contents = [{ object = "${pkgs.busybox}/bin/busybox"; symlink = "/init"; } { object = "${pkgs.busybox}/bin"; symlink = "/bin"; }];
+  };
 in
 {
   imports = lib.mapAttrsToList (board: _: ./boards/${board}/config.nix) boards;
