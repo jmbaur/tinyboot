@@ -76,6 +76,19 @@ pub fn setup_system() -> Child {
     perms.set_mode(0o777);
     std::fs::set_permissions("/run", perms).expect("failed to set permissions on /run");
 
+    // some programs like to create locks in this directory
+    std::fs::create_dir_all("/run/lock").expect("failed to create /run/lock");
+
+    std::fs::create_dir_all("/dev/pts").expect("failed to create /dev/pts");
+    nix::mount::mount(
+        None::<&str>,
+        "/dev/pts",
+        Some("devpts"),
+        MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_RELATIME,
+        None::<&str>,
+    )
+    .expect("failed to mount to /dev/pts");
+
     // TODO(jared): don't use mdevd
     let mdev = std::process::Command::new("/bin/mdevd")
         .spawn()
