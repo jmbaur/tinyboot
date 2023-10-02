@@ -10,42 +10,47 @@ fn update() -> anyhow::Result<()> {
     unsafe { libc::dup2(stdout.as_raw_fd(), libc::STDERR_FILENO) };
 
     let mut flashrom = std::process::Command::new("/bin/flashrom");
-    let mut args = std::env::args();
+    let args: Vec<String> = std::env::args().collect();
 
-    if let Some(programmer_arg) = args.find(|arg| arg.starts_with("flashrom.programmer=")) {
-        let programmer = programmer_arg.strip_prefix("flashrom.programmer=").unwrap();
+    let Some(programmer_arg) = args
+        .into_iter()
+        .find(|arg| arg.starts_with("flashrom.programmer="))
+    else {
+        anyhow::bail!("missing flashrom.programmer parameter");
+    };
 
-        println!("using flashrom programmer {}", programmer);
+    let programmer = programmer_arg
+        .strip_prefix("flashrom.programmer=")
+        .expect("flashrom.programmer parameter should exist");
 
-        let output = flashrom
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .args(&[
-                "-p",
-                programmer,
-                "-w",
-                "/update.rom",
-                "--fmap",
-                "-i",
-                "RW_SECTION_A",
-            ])
-            .spawn()?
-            .wait_with_output()?;
+    println!("using flashrom programmer {}", programmer);
 
-        if output.status.success() {
-            println!("flashrom succeeded");
-        } else {
-            eprintln!(
-                "flashrom failed with status {}",
-                output.status.code().unwrap()
-            );
-            eprintln!(
-                "flashrom error output:\n{}",
-                String::from_utf8(output.stderr).expect("stderr not utf8")
-            );
-        }
+    let output = flashrom
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .args(&[
+            "-p",
+            programmer,
+            "-w",
+            "/update.rom",
+            "--fmap",
+            "-i",
+            "RW_SECTION_A",
+        ])
+        .spawn()?
+        .wait_with_output()?;
+
+    if output.status.success() {
+        println!("flashrom succeeded");
     } else {
-        eprintln!("missing flashrom.programmer arg!");
+        eprintln!(
+            "flashrom failed with status {}",
+            output.status.code().unwrap()
+        );
+        eprintln!(
+            "flashrom error output:\n{}",
+            String::from_utf8(output.stderr).expect("stderr not utf8")
+        );
     }
 
     Ok(())
