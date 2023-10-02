@@ -8,18 +8,14 @@ use crate::{
     boot_loader::{kexec_execute, kexec_load},
 };
 use futures::prelude::*;
-use log::{debug, error, info, LevelFilter};
+use log::{debug, error, info};
 use message::InternalMsg;
 use nix::{
-    libc::{
-        self, B115200, CBAUD, CBAUDEX, CLOCAL, CREAD, CRTSCTS, CSIZE, CSTOPB, ECHO, ECHOCTL, ECHOE,
-        ECHOK, ECHOKE, HUPCL, ICANON, ICRNL, IEXTEN, ISIG, IXOFF, IXON, ONLCR, OPOST, PARENB,
-        PARODD, TCSANOW, VEOF, VERASE, VINTR, VKILL, VQUIT, VSTART, VSTOP, VSUSP,
-    },
+    libc::{self},
     unistd::{chown, Gid, Uid},
 };
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::VecDeque,
     ffi::CString,
     io::ErrorKind,
     os::{
@@ -29,7 +25,6 @@ use std::{
     },
     path::Path,
     process::Child,
-    str::FromStr,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -41,7 +36,6 @@ use tboot::{
     linux::LinuxBootEntry,
     message::{ClientMessage, ServerCodec, ServerError, ServerMessage},
 };
-use termios::{cfgetispeed, cfgetospeed, cfsetispeed, cfsetospeed, tcsetattr, Termios};
 use tokio::{
     net::{UnixListener, UnixStream},
     sync::broadcast,
@@ -413,60 +407,6 @@ fn load_x509_key() -> anyhow::Result<()> {
     Ok(())
 }
 
-// Adapted from https://github.com/mirror/busybox/blob/2d4a3d9e6c1493a9520b907e07a41aca90cdfd94/init/init.c#L341
-fn setup_tty(fd: i32) -> anyhow::Result<()> {
-    let mut tty = Termios::from_fd(fd)?;
-
-    tty.c_cc[VINTR] = 3; // C-c
-    tty.c_cc[VQUIT] = 28; // C-\
-    tty.c_cc[VERASE] = 127; // C-?
-    tty.c_cc[VKILL] = 21; // C-u
-    tty.c_cc[VEOF] = 4; // C-d
-    tty.c_cc[VSTART] = 17; // C-q
-    tty.c_cc[VSTOP] = 19; // C-s
-    tty.c_cc[VSUSP] = 26; // C-z
-
-    tty.c_cflag &= CBAUD | CBAUDEX | CSIZE | CSTOPB | PARENB | PARODD | CRTSCTS;
-    tty.c_cflag |= CREAD | HUPCL | CLOCAL;
-
-    // input modes
-    tty.c_iflag = ICRNL | IXON | IXOFF;
-
-    // output modes
-    tty.c_oflag = OPOST | ONLCR;
-
-    // local modes
-    tty.c_lflag = ISIG | ICANON | ECHO | ECHOE | ECHOK | ECHOCTL | ECHOKE | IEXTEN;
-
-    // set baud speed
-    let baud_rate = 115200;
-    if cfgetispeed(&tty) != baud_rate {
-        cfsetispeed(&mut tty, B115200)?;
-    }
-    if cfgetospeed(&tty) != baud_rate {
-        cfsetospeed(&mut tty, B115200)?;
-    }
-
-    // set size if the size is zero
-    let mut size = std::mem::MaybeUninit::<libc::winsize>::uninit();
-    let ret = unsafe { libc::ioctl(fd, libc::TIOCGWINSZ as _, &mut size) };
-    if ret == 0 {
-        let mut size = unsafe { size.assume_init() };
-        if size.ws_row == 0 {
-            size.ws_row = 24;
-        }
-        if size.ws_col == 0 {
-            size.ws_col = 80;
-        }
-
-        unsafe { libc::ioctl(fd, libc::TIOCSWINSZ as _, &size as *const _) };
-    }
-
-    tcsetattr(fd, TCSANOW, &tty)?;
-
-    Ok(())
-}
-
 fn setup_client() -> anyhow::Result<Child> {
     // inherit stdio of parent
     let child = std::process::Command::new("/bin/tbootui")
@@ -482,66 +422,10 @@ fn setup_client() -> anyhow::Result<Child> {
     Ok(child)
 }
 
-#[derive(Debug)]
-struct Config<'a> {
-    log_level: LevelFilter,
-    tty: &'a str,
-}
-
-impl Default for Config<'_> {
-    fn default() -> Self {
-        Self {
-            log_level: LevelFilter::Info,
-            tty: "tty1",
-        }
-    }
-}
-
-impl<'a> Config<'a> {
-    pub fn parse_from(args: &'a [String]) -> anyhow::Result<Self> {
-        let mut map = args
-            .iter()
-            .filter_map(|arg| {
-                arg.strip_prefix("tbootd.")
-                    .and_then(|arg| arg.split_once('='))
-            })
-            .fold(
-                HashMap::new(),
-                |mut map: HashMap<&str, Vec<&str>>, (k, v)| {
-                    if let Some(existing) = map.get_mut(k) {
-                        existing.push(v);
-                    } else {
-                        _ = map.insert(k, vec![v]);
-                    }
-
-                    map
-                },
-            );
-
-        let mut cfg = Config::default();
-        if let Some(log_level) = map.remove("loglevel").and_then(|level| {
-            level
-                .into_iter()
-                .next()
-                .and_then(|level| LevelFilter::from_str(level).ok())
-        }) {
-            cfg.log_level = log_level;
-        }
-
-        if let Some(tty) = map.remove("tty") {
-            if let Some(tty) = tty.first() {
-                cfg.tty = tty;
-            }
-        }
-
-        Ok(cfg)
-    }
-}
-
 const VERSION: Option<&'static str> = option_env!("version");
 
 pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
-    let cfg = Config::parse_from(&args)?;
+    let cfg = tboot::config::Config::parse_from(&args)?;
 
     if (unsafe { libc::getuid() }) != 0 {
         panic!("tinyboot not running as root")
@@ -574,7 +458,7 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
         unsafe { libc::dup2(fd, libc::STDIN_FILENO) };
         unsafe { libc::dup2(fd, libc::STDOUT_FILENO) };
         unsafe { libc::dup2(fd, libc::STDERR_FILENO) };
-        _ = setup_tty(fd);
+        _ = tboot::system::setup_tty(fd);
     }
 
     if let Err(e) = load_x509_key() {

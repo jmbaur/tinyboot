@@ -4,33 +4,26 @@ use std::{os::fd::AsRawFd, process::Stdio, thread::sleep, time::Duration};
 fn update() -> anyhow::Result<()> {
     _ = tboot::system::setup_system();
 
-    let stdout = std::fs::OpenOptions::new().append(true).open("/dev/kmsg")?;
+    let args: Vec<String> = std::env::args().collect();
+    let cfg = tboot::config::Config::parse_from(&args)?;
 
-    unsafe { libc::dup2(stdout.as_raw_fd(), libc::STDOUT_FILENO) };
-    unsafe { libc::dup2(stdout.as_raw_fd(), libc::STDERR_FILENO) };
+    if let Ok(tty) = std::fs::OpenOptions::new().write(true).open(cfg.tty) {
+        let fd = tty.as_raw_fd();
+        unsafe { libc::dup2(fd, libc::STDOUT_FILENO) };
+        unsafe { libc::dup2(fd, libc::STDERR_FILENO) };
+        _ = tboot::system::setup_tty(fd);
+    }
 
     let mut flashrom = std::process::Command::new("/bin/flashrom");
-    let args: Vec<String> = std::env::args().collect();
 
-    let Some(programmer_arg) = args
-        .into_iter()
-        .find(|arg| arg.starts_with("flashrom.programmer="))
-    else {
-        anyhow::bail!("missing flashrom.programmer parameter");
-    };
-
-    let programmer = programmer_arg
-        .strip_prefix("flashrom.programmer=")
-        .expect("flashrom.programmer parameter should exist");
-
-    println!("using flashrom programmer {}", programmer);
+    println!("using flashrom programmer {}", cfg.programmer);
 
     let output = flashrom
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .args(&[
             "-p",
-            programmer,
+            cfg.programmer,
             "-w",
             "/update.rom",
             "--fmap",

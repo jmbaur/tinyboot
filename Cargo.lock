@@ -719,6 +719,7 @@ dependencies = [
  "nix",
  "serde",
  "serde_cbor",
+ "termios",
  "thiserror",
  "tokio",
  "tokio-serde-cbor",

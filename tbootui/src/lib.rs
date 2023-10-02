@@ -263,6 +263,8 @@ async fn run_client(
         let backend = TermionBackend::new(std::io::stdout().into_raw_mode()?);
         let mut terminal = Terminal::new(TermionBackend::new(backend))?;
 
+        terminal.clear()?;
+
         let mut popup = None::<&str>;
         let mut time_left = None::<Duration>;
 
@@ -387,6 +389,7 @@ async fn run_client(
 
                         }
                         ServerMessage::ServerDone => {
+                            terminal.clear()?;
                             terminal.set_cursor(0, 0)?;
                             break 'outer
                         },

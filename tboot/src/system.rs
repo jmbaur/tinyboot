@@ -1,6 +1,14 @@
 use std::{os::unix::prelude::PermissionsExt, process::Child};
 
-use nix::mount::MsFlags;
+use nix::{
+    libc::{
+        self, B115200, CBAUD, CBAUDEX, CLOCAL, CREAD, CRTSCTS, CSIZE, CSTOPB, ECHO, ECHOCTL, ECHOE,
+        ECHOK, ECHOKE, HUPCL, ICANON, ICRNL, IEXTEN, ISIG, IXOFF, IXON, ONLCR, OPOST, PARENB,
+        PARODD, TCSANOW, VEOF, VERASE, VINTR, VKILL, VQUIT, VSTART, VSTOP, VSUSP,
+    },
+    mount::MsFlags,
+};
+use termios::{cfgetispeed, cfgetospeed, cfsetispeed, cfsetospeed, tcsetattr, Termios};
 
 pub fn setup_system() -> Child {
     std::fs::create_dir_all("/proc").expect("faield to create /proc");
@@ -74,4 +82,58 @@ pub fn setup_system() -> Child {
         .expect("failed to start mdevd");
 
     mdev
+}
+
+// Adapted from https://github.com/mirror/busybox/blob/2d4a3d9e6c1493a9520b907e07a41aca90cdfd94/init/init.c#L341
+pub fn setup_tty(fd: i32) -> anyhow::Result<()> {
+    let mut tty = Termios::from_fd(fd)?;
+
+    tty.c_cc[VINTR] = 3; // C-c
+    tty.c_cc[VQUIT] = 28; // C-\
+    tty.c_cc[VERASE] = 127; // C-?
+    tty.c_cc[VKILL] = 21; // C-u
+    tty.c_cc[VEOF] = 4; // C-d
+    tty.c_cc[VSTART] = 17; // C-q
+    tty.c_cc[VSTOP] = 19; // C-s
+    tty.c_cc[VSUSP] = 26; // C-z
+
+    tty.c_cflag &= CBAUD | CBAUDEX | CSIZE | CSTOPB | PARENB | PARODD | CRTSCTS;
+    tty.c_cflag |= CREAD | HUPCL | CLOCAL;
+
+    // input modes
+    tty.c_iflag = ICRNL | IXON | IXOFF;
+
+    // output modes
+    tty.c_oflag = OPOST | ONLCR;
+
+    // local modes
+    tty.c_lflag = ISIG | ICANON | ECHO | ECHOE | ECHOK | ECHOCTL | ECHOKE | IEXTEN;
+
+    // set baud speed
+    let baud_rate = 115200;
+    if cfgetispeed(&tty) != baud_rate {
+        cfsetispeed(&mut tty, B115200)?;
+    }
+    if cfgetospeed(&tty) != baud_rate {
+        cfsetospeed(&mut tty, B115200)?;
+    }
+
+    // set size if the size is zero
+    let mut size = std::mem::MaybeUninit::<libc::winsize>::uninit();
+    let ret = unsafe { libc::ioctl(fd, libc::TIOCGWINSZ as _, &mut size) };
+    if ret == 0 {
+        let mut size = unsafe { size.assume_init() };
+        if size.ws_row == 0 {
+            size.ws_row = 24;
+        }
+        if size.ws_col == 0 {
+            size.ws_col = 80;
+        }
+
+        unsafe { libc::ioctl(fd, libc::TIOCSWINSZ as _, &size as *const _) };
+    }
+
+    tcsetattr(fd, TCSANOW, &tty)?;
+
+    Ok(())
 }

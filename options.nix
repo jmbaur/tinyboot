@@ -76,7 +76,7 @@ in
     };
   };
   config = {
-    linux.commandLine = [ "tbootd.loglevel=${if config.debug then "debug" else "info"}" "tbootd.tty=${config.tinyboot.tty}" ];
+    linux.commandLine = [ "quiet" "tboot.loglevel=${if config.debug then "debug" else "info"}" "tboot.tty=${config.tinyboot.tty}" "tboot.programmer=${config.flashrom.programmer}" ];
 
     coreboot.extraConfig = ''
       CONFIG_VBOOT_ROOT_KEY="${config.verifiedBoot.vbootRootKey}"
@@ -111,7 +111,7 @@ in
           ] ++ (lib.optional (config.linux.firmware != null) { object = config.linux.firmware; symlink = "/lib/firmware"; });
       };
       linux = (pkgs.callPackage ./linux.nix {
-        builtinCmdline = [ "quiet" ];
+        builtinCmdline = config.linux.commandLine;
         linux = config.linux.package;
         inherit (config.linux) configFile;
       }).overrideAttrs (old: {
@@ -171,24 +171,15 @@ in
             --flags ${config.verifiedBoot.vbootKeyblockPreambleFlags} \
             $out
         '';
-      updateScript =
-        let
-          serialPortMatch = builtins.match "tty[A-Z]+[0-9]+";
-          applyBaud = baud: tty: "${tty}${lib.optionalString (serialPortMatch tty != null) ",${toString baud}"}";
-          applyStandardBaud = applyBaud 115200;
-          linux = config.build.linux.override { builtinCmdline = [ ]; };
-        in
-        pkgs.writeShellScriptBin "update-firmware" ''
-          kexec -l ${linux}/${pkgs.stdenv.hostPlatform.linux-kernel.target} \
-            --initrd=${updateInitrd}/initrd \
-            --command-line="console=${applyStandardBaud config.tinyboot.tty} flashrom.programmer=${config.flashrom.programmer}"
-          systemctl kexec
-        '';
+      updateScript = pkgs.writeShellScriptBin "update-firmware" ''
+        kexec -l ${config.build.linux}/${pkgs.stdenv.hostPlatform.linux-kernel.target} --initrd=${updateInitrd}/initrd
+        systemctl kexec
+      '';
       # useful for testing kernel configurations
       testScript =
         let
           commonConsoles = map (console: "console=${console}")
-            ((map (serial: "${serial},115200") [ "ttyS0" "ttyAMA0" "ttyMSM0" "ttymxc0" "ttyO0" "ttySAC2" ]) ++ [ "tty0" ]);
+            ((map (serial: "${serial},115200") [ "ttyS0" "ttyAMA0" "ttyMSM0" "ttymxc0" "ttyO0" "ttySAC2" ]) ++ [ "tty1" ]);
           linux = config.build.linux.override { builtinCmdline = [ ]; };
         in
         pkgs.writeShellScriptBin "tboot-test" ''

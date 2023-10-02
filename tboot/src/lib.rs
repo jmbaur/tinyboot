@@ -1,11 +1,11 @@
 pub mod block_device;
 pub mod boot_loader;
+pub mod config;
 pub mod fs;
 pub mod linux;
 pub mod log;
 pub mod message;
 pub mod system;
-pub mod verified_boot;
 
 pub const TINYBOOT_SOCKET: &str = "/run/tboot.sock";
 pub const TINYUSER_UID: u32 = 1000;
