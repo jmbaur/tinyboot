@@ -73,7 +73,7 @@ in
     };
   };
   config = {
-    linux.commandLine = [ "quiet" "tboot.loglevel=${if config.debug then "debug" else "info"}" "tboot.tty=${config.tinyboot.tty}" "tboot.programmer=${config.flashrom.programmer}" ];
+    linux.commandLine = [ "console=null" "tboot.loglevel=${if config.debug then "debug" else "info"}" "tboot.tty=${config.tinyboot.tty}" "tboot.programmer=${config.flashrom.programmer}" ];
 
     coreboot.extraConfig = ''
       CONFIG_VBOOT_ROOT_KEY="${config.verifiedBoot.vbootRootKey}"
