@@ -3,7 +3,6 @@
     platforms = [ "aarch64-linux" ];
     linux = {
       configFile = with pkgs.tinybootKernelPatches; lib.mkDefault (pkgs.concatText "asurada-spherion-kernel.config" [ generic aarch64 chromebook mediatek ]);
-      commandLine = [ "quiet" ];
       dtbPattern = "mt8192-asurada-spherion*";
     };
     coreboot.configFile = lib.mkDefault ./coreboot.config;

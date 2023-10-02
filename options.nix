@@ -13,6 +13,13 @@ let
         { object = "${tbootUpdate}/bin/tboot-update"; symlink = "/init"; }
       ];
     };
+  testInitrd =
+    let
+      tbootTest = pkgs.tinyboot.override { package = "tboot-test"; };
+    in
+    pkgs.callPackage ./initramfs.nix {
+      extraContents = [{ object = "${tbootTest}/bin/tboot-test"; symlink = "/init"; }];
+    };
 in
 {
   imports = lib.mapAttrsToList (board: _: ./boards/${board}/config.nix) boards;
@@ -35,7 +42,6 @@ in
     linux = {
       package = mkOption { type = types.package; default = pkgs.linux_testing; };
       configFile = mkOption { type = types.path; };
-      extraConfig = mkOption { type = types.lines; default = ""; };
       commandLine = mkOption { type = types.listOf types.str; default = [ ]; };
       dtb = mkOption { type = types.nullOr types.path; default = null; };
       dtbPattern = mkOption { type = types.nullOr types.str; default = null; };
@@ -71,10 +77,6 @@ in
   };
   config = {
     linux.commandLine = [ "tbootd.loglevel=${if config.debug then "debug" else "info"}" "tbootd.tty=${config.tinyboot.tty}" ];
-    linux.extraConfig = ''
-      CONFIG_CMDLINE="${toString config.linux.commandLine}"
-      CONFIG_SYSTEM_TRUSTED_KEYS="tinyboot/ca.pem"
-    '';
 
     coreboot.extraConfig = ''
       CONFIG_VBOOT_ROOT_KEY="${config.verifiedBoot.vbootRootKey}"
@@ -108,7 +110,11 @@ in
             { object = config.verifiedBoot.signingPublicKey; symlink = "/etc/keys/x509_ima.der"; }
           ] ++ (lib.optional (config.linux.firmware != null) { object = config.linux.firmware; symlink = "/lib/firmware"; });
       };
-      linux = (pkgs.callPackage ./linux.nix { linux = config.linux.package; inherit (config.linux) configFile extraConfig; }).overrideAttrs (old: {
+      linux = (pkgs.callPackage ./linux.nix {
+        builtinCmdline = [ "quiet" ];
+        linux = config.linux.package;
+        inherit (config.linux) configFile;
+      }).overrideAttrs (old: {
         preConfigure = (old.preConfigure or "") + ''
           mkdir tinyboot; cp ${config.verifiedBoot.caCertificate} tinyboot/ca.pem
         '';
@@ -175,6 +181,19 @@ in
           kexec -l ${config.build.linux}/${pkgs.stdenv.hostPlatform.linux-kernel.target} \
             --initrd=${updateInitrd}/initrd \
             --command-line="console=${applyStandardBaud config.tinyboot.tty} flashrom.programmer=${config.flashrom.programmer}"
+          systemctl kexec
+        '';
+      # useful for testing kernel configurations
+      testScript =
+        let
+          commonConsoles = map (console: "console=${console}")
+            ((map (serial: "${serial},115200") [ "ttyS0" "ttyAMA0" "ttyMSM0" "ttymxc0" "ttyO0" "ttySAC2" ]) ++ [ "tty0" ]);
+          linux = config.build.linux.override { builtinCmdline = [ ]; };
+        in
+        pkgs.writeShellScriptBin "tboot-test" ''
+          kexec -l ${linux}/${pkgs.stdenv.hostPlatform.linux-kernel.target} \
+            --initrd=${testInitrd}/initrd \
+            --command-line="${toString commonConsoles}"
           systemctl kexec
         '';
     };

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["tbootbb", "tbootd", "tbootui", "tboot", "keyutils-raw", "tboot-update"]
+members = ["tbootbb", "tbootd", "tbootui", "tboot", "keyutils-raw", "tboot-update", "tboot-test"]
 
 # optimize release builds for size (see https://github.com/johnthagen/min-sized-rust)
 [profile.release]

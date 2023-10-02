@@ -1,8 +1,11 @@
-{ linux, fetchpatch, configFile, extraConfig, lib, stdenv }:
+{ builtinCmdline ? [ ], linux, fetchpatch, configFile, lib, stdenv }:
+let
+  extraConfig = lib.optionalString (builtinCmdline != [ ]) ''
+    CONFIG_CMDLINE=${toString builtinCmdline}
+  '';
+in
 stdenv.mkDerivation {
   inherit (linux) pname version src buildInputs nativeBuildInputs depsBuildBuild makeFlags preInstall enableParallelBuilding;
-  inherit extraConfig;
-  passAsFile = [ "extraConfig" ];
   patches = [
     (fetchpatch {
       url = "https://lore.kernel.org/lkml/20230921064506.3420402-1-ovt@google.com/raw";
@@ -10,6 +13,8 @@ stdenv.mkDerivation {
     })
     ./patches/linux-tpm-probe.patch
   ];
+  inherit extraConfig;
+  passAsFile = [ "extraConfig" ];
   configurePhase = ''
     runHook preConfigure
     cat ${configFile} $extraConfigPath > all.config

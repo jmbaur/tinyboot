@@ -56,8 +56,10 @@ fn main() {
         eprintln!("failed to update: {}", e);
     }
 
-    println!("rebooting in 5 seconds");
-    sleep(Duration::from_secs(5));
+    for i in 0..6 {
+        println!("rebooting in {} seconds", 5 - i);
+        sleep(Duration::from_secs(1));
+    }
 
     unsafe {
         libc::reboot(libc::LINUX_REBOOT_CMD_RESTART);
