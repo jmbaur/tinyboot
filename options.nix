@@ -176,9 +176,10 @@ in
           serialPortMatch = builtins.match "tty[A-Z]+[0-9]+";
           applyBaud = baud: tty: "${tty}${lib.optionalString (serialPortMatch tty != null) ",${toString baud}"}";
           applyStandardBaud = applyBaud 115200;
+          linux = config.build.linux.override { builtinCmdline = [ ]; };
         in
         pkgs.writeShellScriptBin "update-firmware" ''
-          kexec -l ${config.build.linux}/${pkgs.stdenv.hostPlatform.linux-kernel.target} \
+          kexec -l ${linux}/${pkgs.stdenv.hostPlatform.linux-kernel.target} \
             --initrd=${updateInitrd}/initrd \
             --command-line="console=${applyStandardBaud config.tinyboot.tty} flashrom.programmer=${config.flashrom.programmer}"
           systemctl kexec
