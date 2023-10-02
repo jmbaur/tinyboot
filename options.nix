@@ -4,28 +4,13 @@ let
   buildFitImage = pkgs.callPackage ./fitimage { };
   updateInitrd =
     let
-      flashScript = pkgs.writeScript "flash-script" ''
-        #!/bin/sh
-        logger -s "started flashing new firmware"
-        if flashrom \
-          --programmer ${config.flashrom.programmer} \
-          --write /update.rom \
-          --fmap -i RW_SECTION_A \
-          ${lib.escapeShellArgs config.flashrom.extraArgs}; then
-          logger -s "flashing succeeded"
-          sleep 2
-        else
-          logger -s "flashing failed"
-          sleep 10
-        fi
-        reboot
-      '';
+      tbootUpdate = pkgs.tinyboot.override { package = "tboot-update"; };
     in
     pkgs.callPackage ./initramfs.nix {
       extraContents = [
         { object = config.build.firmware; symlink = "/update.rom"; }
         { object = "${config.flashrom.package}/bin/flashrom"; symlink = "/bin/flashrom"; }
-        { object = flashScript; symlink = "/init"; }
+        { object = "${tbootUpdate}/bin/tboot-update"; symlink = "/init"; }
       ];
     };
 in
@@ -47,7 +32,6 @@ in
       package = mkPackageOptionMD pkgs "flashrom" { };
       programmer = mkOption { type = types.str; default = "internal"; };
       layout = mkOption { type = types.nullOr types.lines; default = null; };
-      extraArgs = mkOption { type = types.listOf types.str; default = [ ]; };
     };
     linux = {
       package = mkOption { type = types.package; default = pkgs.linux_testing; };
@@ -194,7 +178,7 @@ in
         pkgs.writeShellScriptBin "update-firmware" ''
           kexec -l ${config.build.linux}/${pkgs.stdenv.hostPlatform.linux-kernel.target} \
             --initrd=${updateInitrd}/initrd \
-            --command-line="console=${applyStandardBaud config.tinyboot.tty}"
+            --command-line="console=${applyStandardBaud config.tinyboot.tty} flashrom.programmer=${config.flashrom.programmer}"
           systemctl kexec
         '';
     };

@@ -727,6 +727,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "tboot-update"
+version = "0.1.0"
+dependencies = [
+ "nix",
+ "tboot",
+]
+
+[[package]]
 name = "tbootbb"
 version = "0.1.0"
 dependencies = [
