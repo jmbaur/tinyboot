@@ -41,7 +41,8 @@ fn update() -> anyhow::Result<()> {
             output.status.code().unwrap()
         );
         eprintln!(
-            "flashrom error output:\n{}",
+            "flashrom error output:\n{}\n{}",
+            String::from_utf8(output.stdout).expect("stdout not utf8"),
             String::from_utf8(output.stderr).expect("stderr not utf8")
         );
     }
