@@ -58,6 +58,8 @@ fn select_entry(
     state: &mut ServerState,
     internal_rx: &mut mpsc::Receiver<InternalMsg>,
 ) -> Result<LinuxBootEntry, SelectEntryError> {
+    let mut selected_entry: Option<LinuxBootEntry> = None;
+
     loop {
         match internal_rx.recv() {
             Ok(InternalMsg::UserIsPresent) => {
@@ -68,9 +70,43 @@ fn select_entry(
                 let (tx_evt, _) = unsafe { Event::from_existing(shmem.as_ptr().add(256)) }.unwrap();
 
                 match cmd {
-                    cmd::Command::List => { /* TODO */ }
-                    cmd::Command::Select => { /* TODO */ }
-                    cmd::Command::Boot => { /* TODO */ }
+                    cmd::Command::List => {
+                        state
+                            .block_devices
+                            .iter()
+                            .enumerate()
+                            .for_each(|(dev_idx, dev)| {
+                                println!("{}: {}", dev_idx + 1, dev.name);
+                                dev.boot_entries.iter().enumerate().for_each(
+                                    |(entry_idx, entry)| {
+                                        println!("\t{}: {}", entry_idx + 1, entry.display);
+                                        println!("\t\tlinux {:?}", entry.linux);
+                                        println!("\t\tinitrd {:?}", entry.initrd);
+                                        println!("\t\tcmdline {:?}", entry.cmdline);
+                                    },
+                                );
+                            })
+                    }
+                    cmd::Command::Select((dev, entry)) => {
+                        if let Some(dev) = state.block_devices.get(dev - 1) {
+                            if let Some(entry) = dev.boot_entries.get(entry - 1) {
+                                selected_entry = Some(entry.clone());
+                            } else {
+                                println!("entry {} not found", entry);
+                            }
+                        } else {
+                            println!("device {} not found", dev);
+                        }
+                    }
+                    cmd::Command::Boot => {
+                        if let Some(selected_entry) = selected_entry {
+                            return Ok(selected_entry);
+                        } else if let Some(default_entry) = &state.default_entry {
+                            return Ok(default_entry.clone());
+                        } else {
+                            println!("no entry selected and no default entry to boot from");
+                        }
+                    }
                     cmd::Command::Reboot => return Err(SelectEntryError::Reboot),
                     cmd::Command::Poweroff => return Err(SelectEntryError::Poweroff),
                 };

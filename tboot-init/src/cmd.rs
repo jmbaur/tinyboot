@@ -1,7 +1,9 @@
+use std::str::SplitWhitespace;
+
 #[derive(Debug, Clone)]
 pub enum Command {
     List,
-    Select,
+    Select((usize, usize)),
     Boot,
     Reboot,
     Poweroff,
@@ -21,12 +23,26 @@ pub fn parse_input(input: String) -> anyhow::Result<Option<Command>> {
 
     Ok(Some(match cmd {
         "list" => Command::List,
-        "select" => Command::Select,
+        "select" => parse_select(iter)?,
         "boot" => Command::Boot,
         "reboot" => Command::Reboot,
         "poweroff" => Command::Poweroff,
         _ => anyhow::bail!("unknown command '{input}'"),
     }))
+}
+
+fn parse_select(mut iter: SplitWhitespace<'_>) -> anyhow::Result<Command> {
+    let dev = iter
+        .next()
+        .map(|dev| usize::from_str_radix(dev, 10))
+        .ok_or(anyhow::anyhow!("no device number specified"))??;
+
+    let entry = iter
+        .next()
+        .map(|entry| usize::from_str_radix(entry, 10))
+        .ok_or(anyhow::anyhow!("no entry number specified"))??;
+
+    Ok(Command::Select((dev, entry)))
 }
 
 fn print_help(cmd_to_help: Option<&str>) {
