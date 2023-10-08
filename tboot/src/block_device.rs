@@ -5,7 +5,6 @@ use crate::{
 use crc::{Crc, CRC_32_ISCSI};
 use kobject_uevent::UEvent;
 use log::{debug, error};
-use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
@@ -14,7 +13,7 @@ use std::{
 
 pub const CASTAGNOLI: Crc<u32> = Crc::<u32>::new(&CRC_32_ISCSI);
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub struct BlockDevice {
     pub timeout: Duration,
     pub name: String,

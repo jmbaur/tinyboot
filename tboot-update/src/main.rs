@@ -5,7 +5,7 @@ fn update() -> anyhow::Result<()> {
     _ = tboot::system::setup_system();
 
     let args: Vec<String> = std::env::args().collect();
-    let cfg = tboot::config::Config::parse_from(&args)?;
+    let cfg = tboot::config::Config::from_args(&args)?;
 
     if let Ok(tty) = std::fs::OpenOptions::new().write(true).open(cfg.tty) {
         let fd = tty.as_raw_fd();

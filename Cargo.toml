@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["tbootbb", "tbootd", "tbootui", "tboot", "keyutils-raw", "tboot-update"]
+members = ["tboot", "tboot-init", "tboot-update"]
 
 # optimize release builds for size (see https://github.com/johnthagen/min-sized-rust)
 [profile.release]
@@ -11,13 +11,10 @@ codegen-units = 1
 
 [workspace.dependencies]
 anyhow = { default-features = false, version = "1.0.75" }
-futures = { features = [ "std" ], default-features = false, version = "0.3.28" }
-linux-raw-sys = { version = "0.5.3", features = [ "ioctl" ]}
 log = "0.4.20"
 nix = { default-features = false, version = "0.27.1", features = [ "mount", "fs", "user" ] }
+raw_sync = "0.1.5"
+rustyline = "12.0.0"
+shared_memory = "0.12.4"
 tboot = { path = "./tboot" }
 termios = "0.3.3"
-thiserror = "1.0.49"
-tokio = { version = "1.32.0", default-features = false, features = [ "rt-multi-thread", "macros", "time", "fs", "net" ] }
-tokio-serde-cbor = "0.7.0"
-tokio-util = "0.7.9"

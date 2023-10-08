@@ -2,15 +2,14 @@ use log::debug;
 use nix::libc;
 use std::{ffi, io, os::fd::AsRawFd, path::Path};
 use syscalls::{syscall, Sysno};
-use tokio::{fs, time};
 
-pub async fn kexec_load(
+pub fn kexec_load(
     kernel: impl AsRef<Path>,
     initrd: Option<impl AsRef<Path>>,
     cmdline: &str,
 ) -> io::Result<()> {
     debug!("loading kernel from {:?}", kernel.as_ref());
-    let kernel = fs::File::open(kernel).await?;
+    let kernel = std::fs::File::open(kernel)?;
     let kernel_fd = kernel.as_raw_fd() as libc::c_int;
     debug!("kernel loaded as fd {}", kernel_fd);
 
@@ -20,7 +19,7 @@ pub async fn kexec_load(
 
     let retval = if let Some(initrd) = initrd {
         debug!("loading initrd from {:?}", initrd.as_ref());
-        let initrd = fs::File::open(initrd).await?;
+        let initrd = std::fs::File::open(initrd)?;
         let initrd_fd = initrd.as_raw_fd() as libc::c_int;
         debug!("initrd loaded as fd {}", initrd_fd);
 
@@ -54,7 +53,7 @@ pub async fn kexec_load(
 
     while std::fs::read("/sys/kernel/kexec_loaded")? != [b'1', b'\n'] {
         debug!("waiting for kexec_loaded");
-        time::sleep(time::Duration::from_millis(100)).await;
+        std::thread::sleep(std::time::Duration::from_millis(100));
     }
 
     unsafe { libc::sync() };

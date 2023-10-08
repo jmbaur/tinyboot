@@ -2,17 +2,13 @@
 let
   boards = builtins.readDir ./boards;
   buildFitImage = pkgs.callPackage ./fitimage { };
-  updateInitrd =
-    let
-      tbootUpdate = pkgs.tinyboot.override { package = "tboot-update"; };
-    in
-    pkgs.callPackage ./initramfs.nix {
-      extraContents = [
-        { object = config.build.firmware; symlink = "/update.rom"; }
-        { object = "${config.flashrom.package}/bin/flashrom"; symlink = "/bin/flashrom"; }
-        { object = "${tbootUpdate}/bin/tboot-update"; symlink = "/init"; }
-      ];
-    };
+  updateInitrd = pkgs.callPackage ./initramfs.nix {
+    extraContents = [
+      { object = config.build.firmware; symlink = "/update.rom"; }
+      { object = "${config.flashrom.package}/bin/flashrom"; symlink = "/bin/flashrom"; }
+      { object = "${pkgs.tinyboot}/bin/tboot-update"; symlink = "/init"; }
+    ];
+  };
   testInitrd = pkgs.makeInitrdNG {
     compressor = "xz";
     contents = [{ object = "${pkgs.busybox}/bin/busybox"; symlink = "/init"; } { object = "${pkgs.busybox}/bin"; symlink = "/bin"; }];
@@ -63,7 +59,10 @@ in
       vbootKeyblockVersion = mkOption { type = types.str; default = "1"; };
       vbootKeyblockPreambleFlags = mkOption { type = types.str; default = "0x0"; };
     };
-    debug = mkEnableOption "debug mode";
+    loglevel = mkOption {
+      type = types.enum [ "off" "error" "warn" "info" "debug" "trace" ];
+      default = "warn";
+    };
     tinyboot = {
       tty = mkOption { type = types.str; default = "tty1"; };
       nameservers = mkOption {
@@ -73,7 +72,8 @@ in
     };
   };
   config = {
-    linux.commandLine = [ "console=null" "tboot.loglevel=${if config.debug then "debug" else "info"}" "tboot.tty=${config.tinyboot.tty}" "tboot.programmer=${config.flashrom.programmer}" ];
+    # The "--" makes linux pass remaining parameters as args to PID1
+    linux.commandLine = [ "console=ttynull" "--" "tboot.loglevel=${config.loglevel}" "tboot.tty=${config.tinyboot.tty}" "tboot.programmer=${config.flashrom.programmer}" ];
 
     coreboot.extraConfig = ''
       CONFIG_VBOOT_ROOT_KEY="${config.verifiedBoot.vbootRootKey}"
@@ -86,7 +86,7 @@ in
     '';
 
     build = {
-      initrd = pkgs.callPackage ./initramfs.nix {
+      baseInitrd = pkgs.callPackage ./initramfs.nix {
         extraContents =
           let
             staticResolvConf = pkgs.writeText "resolv.conf.static" (lib.concatLines (map (n: "nameserver ${n}") config.tinyboot.nameservers));
@@ -100,12 +100,20 @@ in
             };
           in
           [
-            { object = "${pkgs.tinyboot}/bin/tbootd"; symlink = "/init"; }
-            { object = "${pkgs.tinyboot}/bin/tbootui"; symlink = "/bin/tbootui"; }
             { object = staticResolvConf; symlink = "/etc/resolv.conf.static"; }
             { object = imaPolicy; symlink = "/etc/ima/policy.conf"; }
             { object = config.verifiedBoot.signingPublicKey; symlink = "/etc/keys/x509_ima.der"; }
           ] ++ (lib.optional (config.linux.firmware != null) { object = config.linux.firmware; symlink = "/lib/firmware"; });
+      };
+      initrd = config.build.baseInitrd.override {
+        prepend =
+          let
+            initrd = (pkgs.makeInitrdNG {
+              compressor = "cat";
+              contents = [{ object = "${pkgs.tinyboot}/bin/tboot-init"; symlink = "/init"; }];
+            });
+          in
+          [ "${initrd}/initrd" ];
       };
       linux = (pkgs.callPackage ./linux.nix {
         builtinCmdline = config.linux.commandLine;
@@ -188,3 +196,4 @@ in
     };
   };
 }
+

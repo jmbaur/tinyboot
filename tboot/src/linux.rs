@@ -1,7 +1,6 @@
-use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct LinuxBootEntry {
     pub default: bool,
     pub display: String,

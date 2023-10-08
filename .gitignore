@@ -1,6 +1,6 @@
 *.iso
 *.qcow2
 .direnv
-out
+build
 result*
 target

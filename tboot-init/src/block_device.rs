@@ -3,6 +3,8 @@ use kobject_uevent::UEvent;
 use log::{debug, error};
 use netlink_sys::{protocols::NETLINK_KOBJECT_UEVENT, Socket, SocketAddr};
 use nix::{libc::MSG_DONTWAIT, mount};
+use std::sync::mpsc;
+use std::thread::JoinHandle;
 use std::{
     fs,
     path::PathBuf,
@@ -13,7 +15,6 @@ use std::{
     time::Duration,
 };
 use tboot::block_device::BlockDevice;
-use tokio::{sync::mpsc, task::JoinHandle};
 
 pub fn find_disks() -> anyhow::Result<Vec<BlockDevice>> {
     Ok(fs::read_dir("/sys/class/block")?
@@ -43,12 +44,12 @@ pub enum MountMsg {
     NewMount(PathBuf),
 }
 
-pub fn handle_unmounting(mut rx: mpsc::Receiver<MountMsg>) -> JoinHandle<()> {
-    tokio::spawn(async move {
+pub fn handle_unmounting(rx: mpsc::Receiver<MountMsg>) -> JoinHandle<()> {
+    std::thread::spawn(move || {
         let mut mountpoints = Vec::new();
 
         loop {
-            if let Some(msg) = rx.recv().await {
+            if let Ok(msg) = rx.recv() {
                 match msg {
                     MountMsg::NewMount(mount) => mountpoints.push(mount),
                     MountMsg::UnmountAll => {
@@ -77,18 +78,16 @@ pub fn mount_all_devs(
     mount_tx: mpsc::Sender<MountMsg>,
     done: Arc<AtomicBool>,
 ) -> JoinHandle<()> {
-    tokio::spawn(async move {
+    std::thread::spawn(move || {
         match find_disks() {
             Err(e) => error!("failed to get initial block devices: {e}"),
             Ok(initial_devs) => {
                 for bd in initial_devs {
                     for mountpoint in bd.partition_mounts.values() {
-                        _ = mount_tx
-                            .send(MountMsg::NewMount(mountpoint.to_path_buf()))
-                            .await;
+                        _ = mount_tx.send(MountMsg::NewMount(mountpoint.to_path_buf()));
                     }
 
-                    if internal_tx.send(InternalMsg::Device(bd)).await.is_err() {
+                    if internal_tx.send(InternalMsg::Device(bd)).is_err() {
                         break;
                     }
                 }
@@ -106,7 +105,7 @@ pub fn mount_all_devs(
             }
 
             // sleep since we are setting MSG_DONTWAIT on our recv_from call
-            tokio::time::sleep(Duration::from_millis(100)).await;
+            std::thread::sleep(Duration::from_millis(100));
 
             buf.clear();
             let Ok(_) = socket.recv_from(&mut buf, MSG_DONTWAIT) else {
@@ -124,7 +123,7 @@ pub fn mount_all_devs(
                 devpath.push(devname);
                 let mut tries = 0;
                 while !devpath.exists() {
-                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    std::thread::sleep(Duration::from_millis(100));
                     tries += 1;
                     if tries >= 5 {
                         continue 'outer;
@@ -137,12 +136,10 @@ pub fn mount_all_devs(
             };
 
             for mountpoint in bd.partition_mounts.values() {
-                _ = mount_tx
-                    .send(MountMsg::NewMount(mountpoint.to_path_buf()))
-                    .await;
+                _ = mount_tx.send(MountMsg::NewMount(mountpoint.to_path_buf()));
             }
 
-            if internal_tx.send(InternalMsg::Device(bd)).await.is_err() {
+            if internal_tx.send(InternalMsg::Device(bd)).is_err() {
                 break;
             }
         }

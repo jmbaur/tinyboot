@@ -46,7 +46,12 @@
           ima_tpm_early_init = { name = "ima_tpm_early_init"; patch = ./patches/linux-tpm-probe.patch; };
         };
       };
-      devShells = forAllSystems ({ pkgs, ... }: { default = pkgs.tinyboot; });
+      devShells = forAllSystems ({ pkgs, ... }: {
+        default = pkgs.tinyboot.overrideAttrs
+          (old: {
+            nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ (with pkgs; [ qemu cpio makeInitrdNGTool swtpm xz ]);
+          });
+      });
       legacyPackages = forAllSystems ({ pkgs, ... }: pkgs);
       apps = forAllSystems ({ pkgs, system, ... }: (pkgs.lib.concatMapAttrs
         (testName: nixosSystem:
@@ -79,3 +84,4 @@
       });
     };
 }
+

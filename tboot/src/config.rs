@@ -9,6 +9,16 @@ pub struct Config<'a> {
     pub programmer: &'a str,
 }
 
+impl std::fmt::Display for Config<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "log level: {}, tty: {}, programmer: {}",
+            self.log_level, self.tty, self.programmer
+        )
+    }
+}
+
 impl Default for Config<'_> {
     fn default() -> Self {
         Self {
@@ -20,7 +30,7 @@ impl Default for Config<'_> {
 }
 
 impl<'a> Config<'a> {
-    pub fn parse_from(args: &'a [String]) -> anyhow::Result<Self> {
+    pub fn from_args(args: &'a [String]) -> anyhow::Result<Self> {
         let mut map = args
             .iter()
             .filter_map(|arg| {

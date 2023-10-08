@@ -8,7 +8,7 @@
       '');
     };
     coreboot.configFile = lib.mkDefault ./coreboot.config;
-    debug = lib.mkDefault true;
+    loglevel = lib.mkDefault "info";
     tinyboot.tty = lib.mkDefault "ttyAMA0";
   };
 }

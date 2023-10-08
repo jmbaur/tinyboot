@@ -1,4 +1,4 @@
-use std::{os::unix::prelude::PermissionsExt, process::Child};
+use std::{fs::Permissions, os::unix::prelude::PermissionsExt, process::Child};
 
 use nix::{
     libc::{
@@ -11,11 +11,11 @@ use nix::{
 use termios::{cfgetispeed, cfgetospeed, cfsetispeed, cfsetospeed, tcsetattr, Termios};
 
 pub fn setup_system() -> Child {
-    std::fs::create_dir_all("/proc").expect("faield to create /proc");
-    std::fs::create_dir_all("/sys").expect("faield to create /sys");
-    std::fs::create_dir_all("/dev").expect("faield to create /dev");
-    std::fs::create_dir_all("/run").expect("faield to create /run");
-    std::fs::create_dir_all("/mnt").expect("faield to create /mnt");
+    std::fs::create_dir_all("/proc").expect("failed to create /proc");
+    std::fs::create_dir_all("/sys").expect("failed to create /sys");
+    std::fs::create_dir_all("/dev").expect("failed to create /dev");
+    std::fs::create_dir_all("/run").expect("failed to create /run");
+    std::fs::create_dir_all("/mnt").expect("failed to create /mnt");
 
     nix::mount::mount(
         None::<&str>,
@@ -70,11 +70,8 @@ pub fn setup_system() -> Child {
         .expect("failed to link to /dev/stderr");
 
     // set permissions on /run
-    let mut perms = std::fs::metadata("/run")
-        .expect("failed to get metadata on /run")
-        .permissions();
-    perms.set_mode(0o777);
-    std::fs::set_permissions("/run", perms).expect("failed to set permissions on /run");
+    std::fs::set_permissions("/run", Permissions::from_mode(0o777))
+        .expect("failed to set permissions on /run");
 
     // some programs like to create locks in this directory
     std::fs::create_dir_all("/run/lock").expect("failed to create /run/lock");
@@ -88,6 +85,20 @@ pub fn setup_system() -> Child {
         None::<&str>,
     )
     .expect("failed to mount to /dev/pts");
+
+    std::fs::create_dir_all("/dev/shm").expect("failed to create /dev/shm");
+    nix::mount::mount(
+        None::<&str>,
+        "/dev/shm",
+        Some("tmpfs"),
+        MsFlags::MS_NOSUID | MsFlags::MS_NODEV,
+        None::<&str>,
+    )
+    .expect("failed to mount to /dev/shm");
+
+    // set permissions on /dev/shm
+    std::fs::set_permissions("/dev/shm", Permissions::from_mode(0o777))
+        .expect("failed to set permissions on /dev/shm");
 
     // TODO(jared): don't use mdevd
     let mdev = std::process::Command::new("/bin/mdevd")

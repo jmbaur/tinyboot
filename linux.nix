@@ -9,7 +9,7 @@ stdenv.mkDerivation {
     ./patches/linux-tpm-probe.patch
   ];
   extraConfig = lib.optionalString (builtinCmdline != [ ]) ''
-    CONFIG_CMDLINE=${toString builtinCmdline}
+    CONFIG_CMDLINE="${toString builtinCmdline}"
   '';
   passAsFile = [ "extraConfig" ];
   configurePhase = ''
@@ -22,9 +22,8 @@ stdenv.mkDerivation {
   installFlags = [ "INSTALL_PATH=$(out)" ] ++ lib.optionals stdenv.hostPlatform.isAarch [ "dtbs_install" "INSTALL_DTBS_PATH=$(out)/dtbs" ];
   outputs = [ "out" "dev" ];
   postInstall = ''
-    mkdir -p $dev
-    cp .config $dev/config
-    cp vmlinux $dev/vmlinux
+    ln -s $out/${stdenv.hostPlatform.linux-kernel.target} $out/kernel
+    install -D --target-directory=$dev .config vmlinux
   '';
   passthru = { inherit builtinCmdline; };
 }

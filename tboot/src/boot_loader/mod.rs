@@ -3,17 +3,12 @@ use std::time::Duration;
 
 pub mod bls;
 
-#[derive(thiserror::Error, Debug)]
+#[derive(Debug)]
 pub enum Error {
-    #[error("boot config not found")]
     BootConfigNotFound,
-    #[error("invalid entry")]
     InvalidEntry,
-    #[error("invalid mount")]
     InvalidMountpoint,
-    #[error("IO error")]
     Io(std::io::Error),
-    #[error("duplicate config")]
     DuplicateConfig,
 }
 
