@@ -1,5 +1,5 @@
 use nix::libc;
-use std::{os::fd::AsRawFd, thread::sleep, time::Duration};
+use std::{os::fd::AsRawFd, path::PathBuf, thread::sleep, time::Duration};
 
 fn update() -> anyhow::Result<()> {
     _ = tboot::system::setup_system();
@@ -7,8 +7,15 @@ fn update() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().collect();
     let cfg = tboot::config::Config::from_args(&args)?;
 
-    if let Ok(tty) = std::fs::OpenOptions::new().write(true).open(cfg.tty) {
+    let mut tty = PathBuf::from("/dev");
+    tty.push(cfg.tty);
+    if let Ok(tty) = std::fs::OpenOptions::new()
+        .write(true)
+        .read(true)
+        .open(&tty)
+    {
         let fd = tty.as_raw_fd();
+        unsafe { libc::dup2(fd, libc::STDIN_FILENO) };
         unsafe { libc::dup2(fd, libc::STDOUT_FILENO) };
         unsafe { libc::dup2(fd, libc::STDERR_FILENO) };
         _ = tboot::system::setup_tty(fd);
