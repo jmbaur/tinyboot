@@ -46,15 +46,6 @@ pub fn setup_system() -> Child {
 
     nix::mount::mount(
         None::<&str>,
-        "/run",
-        Some("tmpfs"),
-        MsFlags::MS_NOSUID | MsFlags::MS_NODEV,
-        None::<&str>,
-    )
-    .expect("failed to mount to /run");
-
-    nix::mount::mount(
-        None::<&str>,
         "/sys/kernel/security",
         Some("securityfs"),
         MsFlags::MS_NOSUID | MsFlags::MS_NODEV | MsFlags::MS_NOEXEC | MsFlags::MS_RELATIME,
@@ -68,6 +59,15 @@ pub fn setup_system() -> Child {
         .expect("failed to link to /dev/stdout");
     std::os::unix::fs::symlink("/proc/self/fd/2", "/dev/stderr")
         .expect("failed to link to /dev/stderr");
+
+    nix::mount::mount(
+        None::<&str>,
+        "/run",
+        Some("tmpfs"),
+        MsFlags::MS_NOSUID | MsFlags::MS_NODEV,
+        None::<&str>,
+    )
+    .expect("failed to mount to /run");
 
     // set permissions on /run
     std::fs::set_permissions("/run", Permissions::from_mode(0o777))

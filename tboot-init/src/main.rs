@@ -451,7 +451,13 @@ pub fn main() -> anyhow::Result<()> {
     _ = tboot::system::setup_system();
 
     let args: Vec<String> = std::env::args().collect();
-    let cfg = tboot::config::Config::from_args(&args)?;
+    let cfg = match tboot::config::Config::from_args(&args) {
+        Ok(cfg) => cfg,
+        Err(e) => {
+            error!("failed to parse config: {}", e);
+            tboot::config::Config::default()
+        }
+    };
 
     tboot::log::Logger::new(cfg.log_level)
         .setup()
