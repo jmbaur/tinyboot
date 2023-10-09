@@ -29,6 +29,7 @@ in
             TCG_TIS_SPI = yes;
             IMA_DEFAULT_HASH_SHA256 = yes;
           } // lib.optionalAttrs pkgs.stdenv.hostPlatform.isx86_64 {
+            SPI_INTEL_PCI = yes;
             MFD_INTEL_LPSS_ACPI = yes;
             MFD_INTEL_LPSS_PCI = yes;
           };
