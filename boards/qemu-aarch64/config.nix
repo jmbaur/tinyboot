@@ -2,7 +2,7 @@
   imports = [ ../../qemu.nix ];
   config = lib.mkIf (config.board == "qemu-aarch64") {
     platforms = [ "aarch64-linux" ];
-    qemu.flags = [ "-M" "virt,secure=on,virtualization=on" "-cpu" "cortex-a53" ];
+    qemu.flags = [ "-M" "virt,secure=on,virtualization=on" "-cpu" "cortex-a53" "-device" "tpm-tis-device,tpmdev=tpm0" ];
     linux = {
       configFile = with pkgs.tinybootKernelPatches; lib.mkDefault (pkgs.concatText "qemu-aarch64-kernel.config" [ generic aarch64 qemu ./kernel.config ]);
       dtb = lib.mkDefault (pkgs.buildPackages.runCommand "qemu-aarch64.dtb" { depsBuildBuild = [ pkgs.pkgsBuildBuild.qemu ]; } ''
