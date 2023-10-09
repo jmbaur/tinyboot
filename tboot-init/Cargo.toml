@@ -15,5 +15,4 @@ rustyline.workspace = true
 shared_memory.workspace = true
 syscalls = { features = ["std"], default-features = false, version = "0.6.14" }
 tboot.workspace = true
-termios.workspace = true
 textwrap.workspace = true
