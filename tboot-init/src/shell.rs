@@ -1,7 +1,7 @@
 use std::{io::Read, time::Duration};
 
 use crate::cmd;
-use log::{debug, info};
+use log::debug;
 use raw_sync::{
     events::{Event, EventInit, EventState},
     Timeout,
@@ -68,7 +68,7 @@ pub fn run_shell() -> anyhow::Result<()> {
             Err(_) => {}
         }
 
-        info!("waiting for daemon to be ready to accept new commands");
+        debug!("waiting for daemon to be ready to accept new commands");
         rx_evt
             .wait(Timeout::Infinite)
             .map_err(|e| anyhow::anyhow!("rx wait error {e}"))?;

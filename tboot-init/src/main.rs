@@ -9,7 +9,7 @@ use crate::{
     block_device::{handle_unmounting, mount_all_devs, MountMsg},
     boot_loader::{kexec_execute, kexec_load},
 };
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use message::InternalMsg;
 use nix::{
     libc::{self},
@@ -79,10 +79,14 @@ fn select_entry(
                                 println!("{}: {}", dev_idx + 1, dev.name);
                                 dev.boot_entries.iter().enumerate().for_each(
                                     |(entry_idx, entry)| {
-                                        println!("\t{}: {}", entry_idx + 1, entry.display);
-                                        println!("\t\tlinux {:?}", entry.linux);
-                                        println!("\t\tinitrd {:?}", entry.initrd);
-                                        println!("\t\tcmdline {:?}", entry.cmdline);
+                                        println!("  {}: {}", entry_idx + 1, entry.display);
+                                        println!("    linux {}", entry.linux.display());
+                                        if let Some(initrd) = &entry.initrd {
+                                            println!("    initrd {}", initrd.display());
+                                        }
+                                        if let Some(cmdline) = &entry.cmdline {
+                                            println!("    cmdline {}", cmdline);
+                                        }
                                     },
                                 );
                             })
@@ -449,19 +453,17 @@ pub fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().collect();
     let cfg = tboot::config::Config::from_args(&args)?;
 
+    tboot::log::Logger::new(cfg.log_level)
+        .setup()
+        .expect("failed to setup logger");
+
     if (unsafe { libc::getuid() }) != 0 {
-        panic!("tinyboot not running as root")
+        warn!("tinyboot not running as root");
     }
 
-    std::fs::copy("/etc/resolv.conf.static", "/etc/resolv.conf")
-        .expect("failed to copy static resolv.conf to dynamic one");
-
-    fern::Dispatch::new()
-        .format(|out, message, record| out.finish(format_args!("[{}] {}", record.level(), message)))
-        .level(cfg.log_level)
-        .chain(std::io::stderr())
-        .apply()
-        .expect("failed to setup logging");
+    if let Err(e) = std::fs::copy("/etc/resolv.conf.static", "/etc/resolv.conf") {
+        error!("failed to copy static resolv.conf to /etc/resolv.conf: {e}");
+    }
 
     let mut tty = PathBuf::from("/dev");
     tty.push(cfg.tty);

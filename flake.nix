@@ -49,7 +49,7 @@
       devShells = forAllSystems ({ pkgs, ... }: {
         default = pkgs.tinyboot.overrideAttrs
           (old: {
-            nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ (with pkgs; [ qemu cpio makeInitrdNGTool swtpm xz ]);
+            nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ (with pkgs; [ cpio makeInitrdNGTool xz ]);
           });
       });
       legacyPackages = forAllSystems ({ pkgs, ... }: pkgs);

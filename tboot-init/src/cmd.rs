@@ -56,41 +56,72 @@ fn print_help(cmd_to_help: Option<&str>) {
     }
 }
 
+// use line wrap of 80 characters by wrapping at 78, then indenting by 2 spaces
+macro_rules! print_usage {
+    ($x:expr) => {
+        textwrap::wrap(($x).trim_matches(char::is_whitespace), 78)
+            .iter()
+            .for_each(|line| {
+                println!("{}", textwrap::indent(line, "  "));
+            });
+    };
+}
+
+const POWEROFF_USAGE: &str = r#"
+Immediately poweroff the machine.
+"#;
+
 fn print_poweroff_usage() {
     println!();
     println!("poweroff");
-    println!("\timmediately poweroff the machine");
+    print_usage!(POWEROFF_USAGE);
 }
+
+const REBOOT_USAGE: &str = r#"
+Immediately reboot the machine.
+"#;
 
 fn print_reboot_usage() {
     println!();
     println!("reboot");
-    println!("\timmediately reboot the machine");
+    print_usage!(REBOOT_USAGE);
 }
 
 fn print_all_usage() {
     println!();
-    println!("list\t\t\tlist all boot entries");
-    println!("select\t\t\tselect a boot entry");
-    println!("boot\t\t\tboot from selection");
-    println!("reboot\t\t\treboot the machine");
-    println!("poweroff\t\tpoweroff the machine");
+    println!("list\t\tlist all boot entries");
+    println!("select\t\tselect a boot entry");
+    println!("boot\t\tboot from selection");
+    println!("reboot\t\treboot the machine");
+    println!("poweroff\tpoweroff the machine");
 }
+
+const BOOT_USAGE: &str = r#"
+Boot from the selected entry. If no entry is selected, boot from the default entry.
+"#;
 
 fn print_boot_usage() {
     println!();
     println!("boot");
-    println!("\tTODO");
+    print_usage!(BOOT_USAGE);
 }
+
+const SELECT_USAGE: &str = r#"
+Select an entry to boot from.
+"#;
 
 fn print_select_usage() {
     println!();
     println!("select");
-    println!("\tTODO");
+    print_usage!(SELECT_USAGE);
 }
+
+const LIST_USAGE: &str = r#"
+List all detected boot entries.
+"#;
 
 fn print_list_usage() {
     println!();
     println!("list");
-    println!("\tTODO");
+    print_usage!(LIST_USAGE);
 }

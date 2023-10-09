@@ -1,5 +1,5 @@
-build_dir := justfile_directory() + "/build"
-cargo_debug_target_dir := justfile_directory() + "/target/" + env_var("CARGO_BUILD_TARGET") + "/debug"
+build_dir := justfile_directory() / "build"
+cargo_debug_target_dir := justfile_directory() / "target" / env_var("CARGO_BUILD_TARGET") / "debug"
 
 help:
 	just --list
