@@ -8,7 +8,7 @@
       lib.optional (pkgs.stdenv.hostPlatform.system == pkgs.stdenv.buildPlatform.system) "-enable-kvm";
     build.qemuScript = pkgs.writeShellApplication {
       name = "tinyboot-qemu";
-      runtimeInputs = with pkgs.buildPackages; [ swtpm qemu ];
+      runtimeInputs = with pkgs.pkgsBuildBuild; [ swtpm qemu ];
       text = ''
         stop() { pkill swtpm; }
         trap stop EXIT SIGINT
