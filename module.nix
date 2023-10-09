@@ -24,7 +24,14 @@ in
         {
           name = "enable-ima";
           patch = null;
-          extraStructuredConfig = { IMA = yes; IMA_DEFAULT_HASH_SHA256 = yes; };
+          extraStructuredConfig = {
+            IMA = yes;
+            TCG_TIS_SPI = yes;
+            IMA_DEFAULT_HASH_SHA256 = yes;
+          } // lib.optionalAttrs pkgs.stdenv.hostPlatform.isx86_64 {
+            MFD_INTEL_LPSS_ACPI = yes;
+            MFD_INTEL_LPSS_PCI = yes;
+          };
         }
         {
           name = "enable-coreboot";
