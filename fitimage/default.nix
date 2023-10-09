@@ -14,7 +14,6 @@ buildPackages.runCommand "fitimage-${if (board != null) then board else "unknown
   ''
     mkdir -p dtbs $out
     lzma --threads 0 <${linux}/Image >Image.lzma
-    xz --test <${initrd}/initrd
     cp ${initrd}/initrd initramfs.cpio.xz
     ${copyDtbs}
     bash ${./make-image-its.bash} > image.its
