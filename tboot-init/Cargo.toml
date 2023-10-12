@@ -13,6 +13,6 @@ nix.workspace = true
 raw_sync.workspace = true
 rustyline.workspace = true
 shared_memory.workspace = true
-syscalls = { features = ["std"], default-features = false, version = "0.6.14" }
+syscalls = { features = ["std"], default-features = false, version = "0.6.15" }
 tboot.workspace = true
 textwrap.workspace = true
