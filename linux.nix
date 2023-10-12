@@ -1,13 +1,7 @@
-{ builtinCmdline ? [ ], configFile, lib, stdenv, linux, fetchpatch }:
+{ builtinCmdline ? [ ], configFile, lib, stdenv, linux }:
 stdenv.mkDerivation {
   inherit (linux) pname version src buildInputs nativeBuildInputs depsBuildBuild makeFlags preInstall enableParallelBuilding;
-  patches = [
-    (fetchpatch {
-      url = "https://lore.kernel.org/lkml/20230921064506.3420402-1-ovt@google.com/raw";
-      hash = "sha256-YM4AOV4BdfWQ2GGGeVV1yJg6BoucoiK7l7ozrVmrtMM=";
-    })
-    ./patches/linux-tpm-probe.patch
-  ];
+  patches = [ ./patches/linux-tpm-probe.patch ];
   extraConfig = lib.optionalString (builtinCmdline != [ ]) ''
     CONFIG_CMDLINE="${toString builtinCmdline}"
   '';
