@@ -1,11 +1,11 @@
 { useMeson ? true, lib, stdenv, fetchgit, cmocka, meson, ninja, libftdi1, libjaylink, libusb1, pciutils, pkg-config, sphinx, bash-completion, ... }:
 stdenv.mkDerivation rec {
   pname = "flashrom-cros";
-  version = builtins.substring 0 7 src.rev;
+  version = "unstable-${builtins.substring 0 7 src.rev}";
   src = fetchgit {
     url = "https://chromium.googlesource.com/chromiumos/third_party/flashrom";
     branchName = "master";
-    rev = "0542969a51a834ed1dedd5a86857881c9a4aa299";
+    rev = "4d0acdf62796eed1df2df061f73c05b2f81c19b0";
     hash = "sha256-6lqNR8HQuTIO3sSwW/B4pWEZoJcqGVUa89tnUIvX7wU=";
   };
   patches = [ ./patches/flashrom-power-management.patch ];
