@@ -23,7 +23,11 @@ stdenvNoCC.mkDerivation (rec {
     make oldconfig
     runHook postConfigure
   '';
-  makeFlags = [ "XGCCPATH=${toolchain}/bin/" "KERNELVERSION=4.21-${version}" "UPDATED_SUBMODULES=1" ];
+  makeFlags = [
+    "XGCCPATH=${toolchain}/bin/"
+    "KERNELVERSION=4.21-tinyboot-${version}"
+    "UPDATED_SUBMODULES=1"
+  ];
   installPhase = ''
     runHook preInstall
     mkdir -p  $out
