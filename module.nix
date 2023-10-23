@@ -9,6 +9,7 @@ in
       ./options.nix
       { options.enable = mkEnableOption "tinyboot bootloader"; }
     ];
+    default = { };
   };
   config = lib.mkIf cfg.enable (lib.mkMerge [
     {
