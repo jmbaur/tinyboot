@@ -20,26 +20,13 @@
         imports = [ ./module.nix ];
         nixpkgs.overlays = [ self.overlays.default ];
       };
-      nixosConfigurations =
-        let
-          baseConfig = forAllSystems ({ system, ... }: {
-            imports = [
-              ({ nixpkgs.hostPlatform = system; })
-              self.nixosModules.default
-              ./test/module.nix
-            ];
-          });
-          extend = extension: nixpkgs.lib.mapAttrs'
-            (system: baseConfig: nixpkgs.lib.nameValuePair "${extension}-${system}" (nixpkgs.lib.nixosSystem {
-              modules = [ baseConfig ./test/${extension}.nix ];
-            }));
-        in
-        nixpkgs.lib.foldAttrs (curr: acc: acc // curr) { } (map (b: extend b baseConfig) [ "bls" ]);
+      nixosConfigurations.default = nixpkgs.lib.nixosSystem {
+        modules = [ self.nixosModules.default ./test/module.nix ];
+      };
       overlays.default = final: prev: {
         tinyboot = prev.pkgsStatic.callPackage ./. { };
-        tinybootKernelPatches = prev.lib.mapAttrs (config: _: ./kernel-configs/${config}) (builtins.readDir ./kernel-configs);
+        tinybootKernelConfigs = prev.lib.mapAttrs (config: _: ./kernel-configs/${config}) (builtins.readDir ./kernel-configs);
         flashrom-cros = prev.callPackage ./flashrom-cros.nix { };
-        libpayload = prev.callPackage ./libpayload.nix { src = inputs.coreboot; flashrom = final.flashrom-cros; };
         buildCoreboot = prev.callPackage ./coreboot.nix { src = inputs.coreboot; flashrom = final.flashrom-cros; };
         coreboot = import ./boards.nix final;
         kernelPatches = prev.kernelPatches // {
@@ -47,40 +34,27 @@
         };
       };
       devShells = forAllSystems ({ pkgs, ... }: {
-        default = pkgs.tinyboot.overrideAttrs
-          (old: {
-            nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ (with pkgs; [ just cpio makeInitrdNGTool xz ]);
-          });
+        default = pkgs.tinyboot.overrideAttrs (old: {
+          nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ (with pkgs; [ just cpio makeInitrdNGTool xz ]);
+        });
       });
       legacyPackages = forAllSystems ({ pkgs, ... }: pkgs);
-      apps = forAllSystems ({ pkgs, system, ... }: (pkgs.lib.concatMapAttrs
-        (testName: nixosSystem:
-          let
-            testScript = {
-              type = "app";
-              program =
-                let
-                  myPkgs = if nixosSystem.config.nixpkgs.hostPlatform.system == system then pkgs else {
-                    x86_64-linux = pkgs.pkgsCross.gnu64;
-                    aarch64-linux = pkgs.pkgsCross.aarch64-multiplatform;
-                  }.${nixosSystem.config.nixpkgs.hostPlatform.system};
-                in
-                toString (myPkgs.callPackage ./test { inherit testName; });
-            };
-            makeTestDiskScript = {
-              type = "app";
-              program = toString (pkgs.writeShellScript "make-disk-image" ''
-                dd status=progress if=${nixosSystem.config.system.build.qcow2}/nixos.qcow2 of=nixos-${testName}.qcow2
-              '');
-            };
-          in
-          {
-            "${testName}-run" = testScript;
-            "${testName}-disk" = makeTestDiskScript;
-          })
-        self.nixosConfigurations) // {
-        disk = self.apps.${system}."bls-${system}-disk";
-        default = self.apps.${system}."bls-${system}-run";
+      apps = forAllSystems ({ pkgs, system, ... }: (
+        let
+          nixosSystem = self.nixosConfigurations.default.extendModules {
+            modules = [ ({ ... }: { nixpkgs.hostPlatform = system; }) ];
+          };
+        in
+        {
+          "${system}-disk" = {
+            type = "app";
+            program = toString (pkgs.writeShellScript "make-disk-image" ''
+              dd status=progress if=${nixosSystem.config.system.build.qcow2}/nixos.qcow2 of=nixos-${system}.qcow2
+            '');
+          };
+        }
+      ) // {
+        default = self.apps.${system}."${system}-disk";
       });
     };
 }

@@ -1,18 +1,16 @@
-use std::{io::Read, time::Duration};
-
-use crate::cmd;
-use log::debug;
-use raw_sync::{
-    events::{Event, EventInit, EventState},
-    Timeout,
+use std::{
+    io::Read,
+    sync::mpsc::{Receiver, Sender},
 };
-use shared_memory::ShmemConf;
+
+use crate::{cmd, ClientToServer, ServerToClient};
+use log::{debug, error};
 
 const PROMPT: &str = ">> ";
 
-pub fn run_shell() -> anyhow::Result<()> {
-    let mut rl = rustyline::DefaultEditor::new()?;
-    rl.save_history("/run/history")?;
+pub fn run_shell(tx: Sender<ClientToServer>, rx: Receiver<ServerToClient>) {
+    let mut rl = rustyline::DefaultEditor::new().unwrap();
+    rl.save_history("/run/history").unwrap();
 
     let mut stdin = std::io::stdin().lock();
 
@@ -20,27 +18,15 @@ pub fn run_shell() -> anyhow::Result<()> {
     // contents. Once we detect user input, we can print a prompt and start receiving real
     // commands from the user.
     let mut buf = [0; 1];
-    stdin.read_exact(&mut buf)?;
-
-    let shmem = loop {
-        if std::fs::metadata("/run/tboot.ready").is_ok() {
-            break ShmemConf::new().flink("/run/tboot.shmem").open()?;
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    };
-
-    let (tx_evt, _tx_used_bytes) = (unsafe { Event::from_existing(shmem.as_ptr()) })
-        .map_err(|e| anyhow::anyhow!("get shell tx event error {e}"))?;
-
-    let (rx_evt, _rx_used_bytes) = (unsafe { Event::from_existing(shmem.as_ptr().add(256)) })
-        .map_err(|e| anyhow::anyhow!("get shell rx event error {e}"))?;
-
-    let cmd_loc = unsafe { shmem.as_ptr().add(2 * 256) };
+    stdin.read_exact(&mut buf).unwrap();
 
     // Send initial signal that a user is present.
-    tx_evt
-        .set(EventState::Signaled)
-        .map_err(|e| anyhow::anyhow!("tx signal error {e}"))?;
+    tx.send(ClientToServer::UserIsPresent).unwrap();
+
+    match rx.recv().unwrap() {
+        ServerToClient::Stop => return,
+        ServerToClient::ServerIsReady => {}
+    }
 
     loop {
         let readline = rl.readline(PROMPT);
@@ -53,27 +39,21 @@ pub fn run_shell() -> anyhow::Result<()> {
 
                 match cmd::parse_input(line) {
                     Err(e) => {
-                        println!("{e}");
+                        error!("failed to parse input: {e}");
                         continue;
                     }
                     Ok(None) => continue,
                     Ok(Some(cmd)) => {
-                        unsafe { std::ptr::write(cmd_loc as *mut cmd::Command, cmd) };
-                        tx_evt
-                            .set(EventState::Signaled)
-                            .map_err(|e| anyhow::anyhow!("tx signal error {e}"))?;
+                        tx.send(ClientToServer::Command(cmd)).unwrap();
                     }
                 };
             }
-            Err(_) => {}
+            Err(e) => error!("readline error: {e}"),
         }
 
-        debug!("waiting for daemon to be ready to accept new commands");
-        rx_evt
-            .wait(Timeout::Infinite)
-            .map_err(|e| anyhow::anyhow!("rx wait error {e}"))?;
-        rx_evt
-            .set(EventState::Clear)
-            .map_err(|e| anyhow::anyhow!("rx clear error {e}"))?;
+        match rx.recv().unwrap() {
+            ServerToClient::Stop => break,
+            ServerToClient::ServerIsReady => {}
+        };
     }
 }

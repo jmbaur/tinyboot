@@ -14,6 +14,16 @@ pub enum FsType {
     Iso9660,
 }
 
+impl FsType {
+    pub fn as_str(&self) -> &str {
+        match self {
+            FsType::Iso9660 => "iso9660",
+            FsType::Ext4(..) => "ext4",
+            FsType::Vfat(..) => "vfat",
+        }
+    }
+}
+
 /// formatted as (start, length)
 /// FAT documentation: https://www.win.tue.nl/~aeb/linux/fs/fat/fat-1.html
 /// EXT4 documentation: https://ext4.wiki.kernel.org/index.php/Ext4_Disk_Layout

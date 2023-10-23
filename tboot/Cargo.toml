@@ -4,10 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-anyhow.workspace = true
-crc = "3.0.1"
-kobject-uevent = "0.1.0"
 log.workspace = true
 nix.workspace = true
-termios.workspace = true
-uuid = { default-features = false, version = "1.4.1" }
+termios = "0.3.3"

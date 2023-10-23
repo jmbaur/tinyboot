@@ -21,7 +21,11 @@ impl log::Log for Logger {
 
     fn log(&self, record: &log::Record) {
         if self.enabled(record.metadata()) {
-            eprintln!("{}", record.args())
+            if let Some(module) = record.module_path() {
+                if module.starts_with("tboot") {
+                    eprintln!("[{}][{}] {}", record.level(), module, record.args());
+                }
+            }
         }
     }
 

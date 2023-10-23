@@ -41,7 +41,7 @@ in
       firmware = mkOption { type = types.nullOr types.path; default = null; };
     };
     coreboot = {
-      extraArgs = mkOption { type = types.attrsOf types.anything; default = { }; };
+      enable = mkEnableOption "coreboot integration";
       configFile = mkOption { type = types.path; };
       extraConfig = mkOption { type = types.lines; default = ""; };
     };
@@ -134,15 +134,15 @@ in
       };
       coreboot = pkgs.buildCoreboot {
         inherit (config) board;
-        inherit (config.coreboot) configFile extraConfig extraArgs;
+        inherit (config.coreboot) configFile extraConfig;
       };
       firmware = pkgs.runCommand "tinyboot-${config.build.coreboot.name}"
         {
           inherit (config.verifiedBoot) requiredSystemFeatures;
-          nativeBuildInputs = with pkgs.buildPackages; [ coreboot-utils vboot_reference ];
+          nativeBuildInputs = with pkgs.buildPackages; [ cbfstool vboot_reference ];
           passthru = { inherit (config.build) linux initrd coreboot; };
           meta.platforms = config.platforms;
-          env.CBFSTOOL = "${pkgs.buildPackages.coreboot-utils}/bin/cbfstool"; # needed by futility
+          env.CBFSTOOL = "${pkgs.buildPackages.cbfstool}/bin/cbfstool"; # needed by futility
         }
         ''
           dd if=${config.build.coreboot}/coreboot.rom of=$out
@@ -162,11 +162,6 @@ in
             -f ${config.build.fitImage}/uImage
           '' else throw "Unsupported architecture"}
           cbfstool $out truncate -r FW_MAIN_A
-
-          cbfstool $out add-payload \
-            -r COREBOOT \
-            -n fallback/payload \
-            -f ${pkgs.libpayload}/libexec/hello.elf
 
           futility sign \
             --signprivate "${config.verifiedBoot.vbootFirmwarePrivkey}" \

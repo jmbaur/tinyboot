@@ -30,7 +30,7 @@ impl Default for Config<'_> {
 }
 
 impl<'a> Config<'a> {
-    pub fn from_args(args: &'a [String]) -> anyhow::Result<Self> {
+    pub fn from_args(args: &'a [String]) -> Self {
         let mut map = args
             .iter()
             .filter_map(|arg| {
@@ -72,6 +72,6 @@ impl<'a> Config<'a> {
             }
         }
 
-        Ok(cfg)
+        cfg
     }
 }

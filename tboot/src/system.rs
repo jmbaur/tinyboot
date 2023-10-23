@@ -1,5 +1,6 @@
-use std::{fs::Permissions, os::unix::prelude::PermissionsExt, process::Child};
+use std::{fs::Permissions, os::unix::prelude::PermissionsExt};
 
+use log::error;
 use nix::{
     libc::{
         self, B115200, CBAUD, CBAUDEX, CLOCAL, CREAD, CRTSCTS, CSIZE, CSTOPB, ECHO, ECHOCTL, ECHOE,
@@ -10,7 +11,7 @@ use nix::{
 };
 use termios::{cfgetispeed, cfgetospeed, cfsetispeed, cfsetospeed, tcsetattr, Termios};
 
-pub fn setup_system() -> Child {
+pub fn setup_system() {
     std::fs::create_dir_all("/proc").expect("failed to create /proc");
     std::fs::create_dir_all("/sys").expect("failed to create /sys");
     std::fs::create_dir_all("/dev").expect("failed to create /dev");
@@ -101,15 +102,24 @@ pub fn setup_system() -> Child {
         .expect("failed to set permissions on /dev/shm");
 
     // TODO(jared): don't use mdevd
-    let mdev = std::process::Command::new("/bin/mdevd")
-        .spawn()
-        .expect("failed to start mdevd");
-
-    mdev
+    _ = std::thread::spawn(move || loop {
+        match std::process::Command::new("/bin/mdevd")
+            .spawn()
+            .expect("failed to start mdevd")
+            .wait()
+        {
+            Ok(status) => {
+                error!("mdev exited with status {status}");
+            }
+            Err(e) => {
+                error!("mdev failed to run: {e}")
+            }
+        }
+    });
 }
 
 // Adapted from https://github.com/mirror/busybox/blob/2d4a3d9e6c1493a9520b907e07a41aca90cdfd94/init/init.c#L341
-pub fn setup_tty(fd: i32) -> anyhow::Result<()> {
+pub fn setup_tty(fd: i32) -> std::io::Result<()> {
     let mut tty = Termios::from_fd(fd)?;
 
     tty.c_cc[VINTR] = 3; // C-c

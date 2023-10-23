@@ -1,10 +1,13 @@
 { src, lib, stdenvNoCC, pkgsBuildBuild, python3, pkg-config, openssl, ... }:
-lib.makeOverridable ({ board ? null, configFile, extraConfig ? "", extraArgs ? { } }:
+{ board ? null, configFile, extraConfig ? "" }:
 let
-  toolchain = pkgsBuildBuild.coreboot-toolchain.${{ i386 = "i386"; x86_64 = "i386"; arm64 = "aarch64"; arm = "arm"; riscv = "riscv"; powerpc = "ppc64"; }.${stdenvNoCC.hostPlatform.linuxArch}};
+  architectures = { i386 = "i386"; x86_64 = "i386"; arm64 = "aarch64"; arm = "arm"; riscv = "riscv"; powerpc = "ppc64"; };
+  toolchain = pkgsBuildBuild.coreboot-toolchain.${architectures.${stdenvNoCC.hostPlatform.linuxArch}}.override {
+    withAda = stdenvNoCC.hostPlatform.isx86_64;
+  };
   version = src.shortRev or src.dirtyShortRev; # allow for --override-input
 in
-stdenvNoCC.mkDerivation (rec {
+stdenvNoCC.mkDerivation (finalAttrs: {
   pname = "coreboot-${if (board) != null then board else "unknown"}";
   inherit src version;
   patches = [ ./patches/coreboot-fitimage-memlayout.patch ];
@@ -23,15 +26,10 @@ stdenvNoCC.mkDerivation (rec {
     make oldconfig
     runHook postConfigure
   '';
-  makeFlags = [
-    "XGCCPATH=${toolchain}/bin/"
-    "KERNELVERSION=4.21-tinyboot-${version}"
-    "UPDATED_SUBMODULES=1"
-  ];
+  makeFlags = [ "XGCCPATH=${toolchain}/bin/" "KERNELVERSION=4.21-tinyboot-${version}" "UPDATED_SUBMODULES=1" ];
   installPhase = ''
     runHook preInstall
-    mkdir -p  $out
-    cp build/coreboot.rom $out/coreboot.rom
+    install -D --target-directory=$out build/coreboot.rom
     runHook postInstall
   '';
-} // extraArgs))
+})

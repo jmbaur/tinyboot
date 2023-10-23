@@ -11,7 +11,7 @@ clean:
 	rm -rf {{build_dir}}
 
 disk:
-	nix run -L {{justfile_directory()}}\#disk
+	nix run -L {{justfile_directory()}}
 
 qemu-script: init
 	nix build -L {{justfile_directory()}}\#coreboot.qemu-{{arch()}}.config.build.qemuScript \
@@ -34,9 +34,9 @@ initrd: initrd-contents
 	(cd {{build_dir}}/root && find . -print0 | sort -z | cpio -o -H newc -R +0:+0 --reproducible --null >> {{build_dir}}/initrd)
 
 qemu: initrd
-	test -f {{justfile_directory()}}/nixos-bls-{{arch()}}-linux.qcow2 || just disk
+	test -f {{justfile_directory()}}/nixos-{{arch()}}-linux.qcow2 || just disk
 	test -f {{build_dir}}/result-qemu-script/bin/tinyboot-qemu || just qemu-script
 	env BUILD_DIR={{build_dir}} \
 		{{build_dir}}/result-qemu-script/bin/tinyboot-qemu \
-		-drive if=virtio,file=nixos-bls-{{arch()}}-linux.qcow2,format=qcow2,media=disk \
+		-drive if=virtio,file=nixos-{{arch()}}-linux.qcow2,format=qcow2,media=disk \
 		-initrd {{build_dir}}/initrd

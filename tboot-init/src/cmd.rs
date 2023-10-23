@@ -1,7 +1,13 @@
-use std::str::SplitWhitespace;
+use std::str::{FromStr, SplitWhitespace};
+
+use log::error;
+
+use crate::boot_loader::LoaderType;
 
 #[derive(Debug, Clone)]
 pub enum Command {
+    Loader(Option<LoaderType>),
+    Help(Option<String>),
     List,
     Select((usize, usize)),
     Boot,
@@ -16,19 +22,26 @@ pub fn parse_input(input: String) -> anyhow::Result<Option<Command>> {
         return Ok(None);
     };
 
-    if cmd == "help" {
-        print_help(iter.next());
+    if cmd.is_empty() {
         return Ok(None);
     }
 
     Ok(Some(match cmd {
-        "list" => Command::List,
-        "select" => parse_select(iter)?,
         "boot" => Command::Boot,
-        "reboot" => Command::Reboot,
+        "help" => Command::Help(iter.next().map(|s| s.to_string())),
+        "list" => Command::List,
+        "loader" => parse_loader(iter)?,
         "poweroff" => Command::Poweroff,
+        "reboot" => Command::Reboot,
+        "select" => parse_select(iter)?,
         _ => anyhow::bail!("unknown command '{input}'"),
     }))
+}
+
+fn parse_loader(mut iter: SplitWhitespace<'_>) -> anyhow::Result<Command> {
+    Ok(Command::Loader(
+        iter.next().map(LoaderType::from_str).transpose()?,
+    ))
 }
 
 fn parse_select(mut iter: SplitWhitespace<'_>) -> anyhow::Result<Command> {
@@ -45,14 +58,16 @@ fn parse_select(mut iter: SplitWhitespace<'_>) -> anyhow::Result<Command> {
     Ok(Command::Select((dev, entry)))
 }
 
-fn print_help(cmd_to_help: Option<&str>) {
-    match cmd_to_help {
+pub fn print_help(cmd_to_help: Option<&str>) {
+    match cmd_to_help.as_deref() {
         Some("list") => print_list_usage(),
         Some("select") => print_select_usage(),
         Some("boot") => print_boot_usage(),
         Some("reboot") => print_reboot_usage(),
         Some("poweroff") => print_poweroff_usage(),
-        Some(_) | None => print_all_usage(),
+        Some("loader") => print_loader_usage(),
+        Some(_) => error!(""),
+        None => print_all_usage(),
     }
 }
 
@@ -124,4 +139,14 @@ fn print_list_usage() {
     println!();
     println!("list");
     print_usage!(LIST_USAGE);
+}
+
+const LOADER_USAGE: &str = r#"
+Select or print current boot loader.
+"#;
+
+fn print_loader_usage() {
+    println!();
+    println!("loader");
+    print_usage!(LOADER_USAGE);
 }
