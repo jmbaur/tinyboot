@@ -16,7 +16,7 @@ use boot_loader::{disk::BlsBootLoader, LinuxBootEntry, LinuxBootLoader, Loader, 
 use cmd::print_help;
 use log::{debug, error, info, warn, LevelFilter};
 use nix::libc::{self};
-use shell::run_shell;
+use shell::{run_shell, wait_for_user_presence};
 use std::{io::Write, time::Duration};
 use std::{os::fd::AsRawFd, path::PathBuf, sync::mpsc};
 
@@ -42,7 +42,8 @@ fn prepare_boot() -> anyhow::Result<Outcome> {
     let (client_tx, server_rx) = mpsc::channel::<ClientToServer>();
     let (server_tx, client_rx) = mpsc::channel::<ServerToClient>();
 
-    let client_thread = std::thread::spawn(move || run_shell(client_tx, client_rx));
+    let user_presence_tx = client_tx.clone();
+    let user_presence_thread = std::thread::spawn(move || wait_for_user_presence(user_presence_tx));
 
     let mut outcome: Option<Outcome> = None;
 
@@ -74,9 +75,7 @@ fn prepare_boot() -> anyhow::Result<Outcome> {
                         stdout.flush().expect("flush failed");
 
                         match server_rx.recv_timeout(TICK_DURATION) {
-                            Ok(ClientToServer::UserIsPresent) => {
-                                break 'autoboot;
-                            }
+                            Ok(ClientToServer::UserIsPresent) => break 'autoboot,
                             _ => {}
                         }
 
@@ -98,11 +97,12 @@ fn prepare_boot() -> anyhow::Result<Outcome> {
                         match kexec_load(default_entry) {
                             Ok(()) => {
                                 outcome = Some(Outcome::Kexec);
-                                break;
+                                break 'autoboot;
                             }
                             Err(e) => {
                                 error!("failed to kexec load: {e}");
-                                continue;
+                                outcome = None;
+                                break 'autoboot;
                             }
                         }
                     }
@@ -114,7 +114,11 @@ fn prepare_boot() -> anyhow::Result<Outcome> {
     if let Some(outcome) = outcome {
         Ok(outcome)
     } else {
+        let client_thread = std::thread::spawn(move || run_shell(client_tx, client_rx));
         let outcome = handle_commands(server_tx, server_rx);
+        user_presence_thread
+            .join()
+            .expect("failed to join user presence thread");
         client_thread.join().expect("failed to join client thread");
         Ok(outcome)
     }
@@ -128,6 +132,9 @@ fn handle_commands(
     let mut selected: Option<LinuxBootEntry> = None;
 
     loop {
+        // ensure that stdout is flushed to before indicating that the server is ready to receive
+        // new commands
+        std::io::stdout().flush().unwrap();
         server_tx.send(ServerToClient::ServerIsReady).unwrap();
 
         match server_rx.recv().unwrap() {
@@ -174,15 +181,25 @@ fn handle_commands(
                 None => println!("no loader selected"),
                 Some(ref mut loader) => {
                     match loader.boot_devices().map(|devs| {
-                        devs.get(dev_idx - 1)
-                            .map(|dev| dev.entries.get(entry_idx - 1))
+                        let Some(dev_idx) = dev_idx.checked_sub(1) else {
+                            return None;
+                        };
+
+                        devs.get(dev_idx)
+                            .map(|dev| {
+                                let Some(entry_idx) = entry_idx.checked_sub(1) else {
+                                    return None;
+                                };
+
+                                dev.entries.get(entry_idx)
+                            })
                             .flatten()
                     }) {
                         Ok(Some(entry)) => {
                             selected = Some(entry.clone());
                             println!("selected entry '{}'", entry.display);
                         }
-                        Ok(None) => println!("cannot select non-existant entry"),
+                        Ok(None) => println!("cannot select non-existent entry"),
                         Err(e) => println!("failed to get entries: {e}"),
                     }
                 }

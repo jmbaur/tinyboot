@@ -8,10 +8,7 @@ use log::{debug, error};
 
 const PROMPT: &str = ">> ";
 
-pub fn run_shell(tx: Sender<ClientToServer>, rx: Receiver<ServerToClient>) {
-    let mut rl = rustyline::DefaultEditor::new().unwrap();
-    rl.save_history("/run/history").unwrap();
-
+pub fn wait_for_user_presence(tx: Sender<ClientToServer>) {
     let mut stdin = std::io::stdin().lock();
 
     // This is a trash buffer just for detecting user input, we don't actually care about the
@@ -19,14 +16,20 @@ pub fn run_shell(tx: Sender<ClientToServer>, rx: Receiver<ServerToClient>) {
     // commands from the user.
     let mut buf = [0; 1];
     stdin.read_exact(&mut buf).unwrap();
+    debug!("user presence detected");
 
     // Send initial signal that a user is present.
     tx.send(ClientToServer::UserIsPresent).unwrap();
+}
 
+pub fn run_shell(tx: Sender<ClientToServer>, rx: Receiver<ServerToClient>) {
     match rx.recv().unwrap() {
         ServerToClient::Stop => return,
         ServerToClient::ServerIsReady => {}
     }
+
+    let mut rl = rustyline::DefaultEditor::new().unwrap();
+    rl.save_history("/run/history").unwrap();
 
     loop {
         let readline = rl.readline(PROMPT);
