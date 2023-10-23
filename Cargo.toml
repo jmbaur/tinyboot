@@ -10,12 +10,6 @@ opt-level = "z"
 codegen-units = 1
 
 [workspace.dependencies]
-anyhow = { default-features = false, version = "1.0.75" }
 log = "0.4.20"
 nix = { default-features = false, version = "0.27.1", features = [ "mount", "fs", "user" ] }
-raw_sync = "0.1.5"
-rustyline = { default-features = false, version = "12.0.0", features = [ "with-file-history" ] }
-shared_memory = "0.12.4"
 tboot = { path = "./tboot" }
-termios = "0.3.3"
-textwrap = { default-features = false, version = "0.16.0" }

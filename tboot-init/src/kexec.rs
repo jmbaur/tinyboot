@@ -1,27 +1,33 @@
-use log::debug;
+use log::{debug, trace};
 use nix::libc;
-use std::{ffi, io, os::fd::AsRawFd, path::Path};
+use std::{ffi, os::fd::AsRawFd};
 use syscalls::{syscall, Sysno};
 
-pub fn kexec_load(
-    kernel: impl AsRef<Path>,
-    initrd: Option<impl AsRef<Path>>,
-    cmdline: &str,
-) -> io::Result<()> {
-    debug!("loading kernel from {:?}", kernel.as_ref());
+use crate::boot_loader::LinuxBootEntry;
+
+pub fn kexec_load(boot_entry: &LinuxBootEntry) -> std::io::Result<()> {
+    let kernel = &boot_entry.linux;
+    let initrd = &boot_entry.initrd;
+    let cmdline = boot_entry
+        .cmdline
+        .as_ref()
+        .map(|s| s.as_str())
+        .unwrap_or_default();
+
+    debug!("loading kernel from {}", kernel.display());
     let kernel = std::fs::File::open(kernel)?;
     let kernel_fd = kernel.as_raw_fd() as libc::c_int;
-    debug!("kernel loaded as fd {}", kernel_fd);
+    trace!("kernel loaded as fd {}", kernel_fd);
 
-    debug!("loading cmdline as {:?}", cmdline);
+    debug!("loading cmdline as {}", cmdline);
     let cmdline = ffi::CString::new(cmdline)?;
     let cmdline = cmdline.to_bytes_with_nul();
 
     let retval = if let Some(initrd) = initrd {
-        debug!("loading initrd from {:?}", initrd.as_ref());
+        debug!("loading initrd from {}", initrd.display());
         let initrd = std::fs::File::open(initrd)?;
         let initrd_fd = initrd.as_raw_fd() as libc::c_int;
-        debug!("initrd loaded as fd {}", initrd_fd);
+        trace!("initrd loaded as fd {}", initrd_fd);
 
         unsafe {
             syscall!(
@@ -48,7 +54,7 @@ pub fn kexec_load(
 
     if retval > -4096isize as usize {
         let code = -(retval as isize) as i32;
-        return Err(io::Error::from_raw_os_error(code));
+        return Err(std::io::Error::from_raw_os_error(code));
     }
 
     while std::fs::read("/sys/kernel/kexec_loaded")? != [b'1', b'\n'] {
@@ -56,15 +62,13 @@ pub fn kexec_load(
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
 
-    unsafe { libc::sync() };
-
     Ok(())
 }
 
-pub fn kexec_execute() -> io::Result<()> {
+pub fn kexec_execute() -> std::io::Result<()> {
     let ret = unsafe { libc::reboot(libc::LINUX_REBOOT_CMD_KEXEC) };
     if ret < 0 {
-        Err(io::Error::last_os_error())
+        Err(std::io::Error::last_os_error())
     } else {
         Ok(())
     }

@@ -1,11 +1,11 @@
 use nix::libc;
 use std::{os::fd::AsRawFd, path::PathBuf, thread::sleep, time::Duration};
 
-fn update() -> anyhow::Result<()> {
-    _ = tboot::system::setup_system();
+fn update() -> std::io::Result<()> {
+    tboot::system::setup_system();
 
     let args: Vec<String> = std::env::args().collect();
-    let cfg = tboot::config::Config::from_args(&args)?;
+    let cfg = tboot::config::Config::from_args(&args);
 
     let mut tty = PathBuf::from("/dev");
     tty.push(cfg.tty);
