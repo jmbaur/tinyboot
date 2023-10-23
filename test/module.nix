@@ -7,8 +7,6 @@
   environment.etc."keys/x509_ima.der".source = ./keys/x509_ima.der;
   specialisation.alternate.configuration.boot.kernelParams = [ "console=tty1" ]; # to provide more menu options
   boot.growPartition = true;
-  boot.loader.efi.canTouchEfiVariables = false;
-  boot.loader.systemd-boot.enable = true;
   users.users.root.password = "";
   fileSystems."/boot" = {
     device = "/dev/disk/by-label/ESP";

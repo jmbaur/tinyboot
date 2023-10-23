@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["tboot", "tboot-init", "tboot-update"]
+members = ["tboot", "tboot-init", "tboot-update", "tboot-nixos-install"]
 
 # optimize release builds for size (see https://github.com/johnthagen/min-sized-rust)
 [profile.release]

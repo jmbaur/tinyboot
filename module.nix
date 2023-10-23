@@ -30,11 +30,9 @@ in
       ];
       boot.loader.supportsInitrdSecrets = lib.mkForce false;
       boot.loader.efi.canTouchEfiVariables = lib.mkForce false;
-      boot.loader.systemd-boot.extraInstallCommands = ''
-        echo "signing boot files"
-        find /boot/EFI/nixos -type f -name "*.efi" \
-          -exec ${cfg.build.linux}/bin/sign-file sha256 ${cfg.verifiedBoot.signingPrivateKey} ${cfg.verifiedBoot.signingPublicKey} {} \;
-      '';
+      boot.bootspec.enable = true;
+      boot.loader.external.enable = true;
+      boot.loader.external.installHook = "${pkgs.tinyboot}/bin/tboot-nixos-install --efi-sys-mount-point ${config.boot.loader.efi.efiSysMountPoint} --sign-file ${cfg.build.linux}/bin/sign-file --private-key ${cfg.verifiedBoot.signingPrivateKey} --public-key ${cfg.verifiedBoot.signingPublicKey}";
     }
     (lib.mkIf cfg.coreboot.enable {
       environment.systemPackages = with pkgs; [ cbmem cbfstool nvramtool cfg.build.updateScript ];

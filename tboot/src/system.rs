@@ -101,19 +101,14 @@ pub fn setup_system() {
     std::fs::set_permissions("/dev/shm", Permissions::from_mode(0o777))
         .expect("failed to set permissions on /dev/shm");
 
-    // TODO(jared): don't use mdevd
-    _ = std::thread::spawn(move || loop {
+    std::thread::spawn(move || loop {
         match std::process::Command::new("/bin/mdevd")
             .spawn()
             .expect("failed to start mdevd")
             .wait()
         {
-            Ok(status) => {
-                error!("mdev exited with status {status}");
-            }
-            Err(e) => {
-                error!("mdev failed to run: {e}")
-            }
+            Ok(status) => error!("mdev exited with status {status}"),
+            Err(e) => error!("mdev failed to run: {e}"),
         }
     });
 }
