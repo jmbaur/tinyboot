@@ -162,15 +162,15 @@ fn handle_commands(
                                 .iter()
                                 .enumerate()
                                 .for_each(|(entry_idx, entry)| {
-                                    println!("  {}: {}", entry_idx + 1, entry.display);
-                                    println!("    linux {}", entry.linux.display());
+                                    println!("   {}: {}", entry_idx + 1, entry.display);
+                                    println!("      linux {}", entry.linux.display());
 
                                     if let Some(initrd) = &entry.initrd {
-                                        println!("    initrd {}", initrd.display());
+                                        println!("      initrd {}", initrd.display());
                                     }
 
                                     if let Some(cmdline) = &entry.cmdline {
-                                        println!("    cmdline {}", cmdline);
+                                        println!("      cmdline {}", cmdline);
                                     }
                                 });
                         });
