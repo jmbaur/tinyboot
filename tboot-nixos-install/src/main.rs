@@ -264,9 +264,11 @@ fn main() {
     let efi_nixos_dir =
         std::fs::read_dir(state.args.efi_sys_mount_point.join("EFI/nixos")).unwrap();
     for file in efi_nixos_dir {
-        let file_path = file.unwrap().path();
+        let file_path = file.as_ref().unwrap().path();
 
-        if state.known_efi_files.get(&file_path).is_none() {
+        if state.known_efi_files.get(&file_path).is_none()
+            && file.as_ref().unwrap().metadata().unwrap().is_file()
+        {
             std::fs::remove_file(&file_path).unwrap();
         }
     }
@@ -274,9 +276,11 @@ fn main() {
     let entry_dir =
         std::fs::read_dir(state.args.efi_sys_mount_point.join("loader/entries")).unwrap();
     for file in entry_dir {
-        let file_path = file.unwrap().path();
+        let file_path = file.as_ref().unwrap().path();
 
-        if state.known_entry_files.get(&file_path).is_none() {
+        if state.known_entry_files.get(&file_path).is_none()
+            && file.as_ref().unwrap().metadata().unwrap().is_file()
+        {
             std::fs::remove_file(&file_path).unwrap();
         }
     }
