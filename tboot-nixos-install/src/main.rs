@@ -88,7 +88,7 @@ fn install_generation(
         .known_efi_files
         .insert(state.args.efi_sys_mount_point.join(&linux), ());
 
-    std::process::Command::new(&state.args.sign_file)
+    assert!(std::process::Command::new(&state.args.sign_file)
         .args([
             "sha256",
             state.args.private_key.to_str().unwrap(),
@@ -103,7 +103,8 @@ fn install_generation(
         .spawn()
         .unwrap()
         .wait()
-        .unwrap();
+        .unwrap()
+        .success());
 
     entry_contents.push('\n');
 
@@ -131,7 +132,7 @@ fn install_generation(
             .known_efi_files
             .insert(state.args.efi_sys_mount_point.join(&initrd), ());
 
-        std::process::Command::new(&state.args.sign_file)
+        assert!(std::process::Command::new(&state.args.sign_file)
             .args([
                 "sha256",
                 state.args.private_key.to_str().unwrap(),
@@ -146,7 +147,9 @@ fn install_generation(
             .spawn()
             .unwrap()
             .wait()
-            .unwrap();
+            .unwrap()
+            .success());
+
         entry_contents.push_str(&format!(
             "initrd {}",
             Path::new("/").join(&initrd).display()
