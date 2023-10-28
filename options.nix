@@ -12,6 +12,7 @@ let
       { object = config.build.firmware; symlink = "/update.rom"; }
       { object = "${config.flashrom.package}/bin/flashrom"; symlink = "/bin/flashrom"; }
       { object = "${pkgs.tinyboot}/bin/tboot-update"; symlink = "/init"; }
+      { object = "${pkgs.tinyboot}/bin/tboot-update"; symlink = "/bin/nologin"; }
     ];
   };
   testInitrd = pkgs.makeInitrdNG {
@@ -95,7 +96,10 @@ in
           let
             initrd = (pkgs.makeInitrdNG {
               compressor = "cat"; # prepend cannot be used with a compressed initrd
-              contents = [{ object = "${pkgs.tinyboot}/bin/tboot-loader"; symlink = "/init"; }];
+              contents = [
+                { object = "${pkgs.tinyboot}/bin/tboot-loader"; symlink = "/init"; }
+                { object = "${pkgs.tinyboot}/bin/tboot-loader"; symlink = "/bin/nologin"; }
+              ];
             });
           in
           [ "${initrd}/initrd" ];

@@ -55,6 +55,8 @@ fn update() -> std::io::Result<()> {
 }
 
 fn main() {
+    tboot::nologin::detect_nologin();
+
     if let Err(e) = update() {
         eprintln!("failed to update: {}", e);
     }

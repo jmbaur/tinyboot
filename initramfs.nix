@@ -16,7 +16,6 @@ makeInitrdNG {
     { object = "${ncurses}/share/terminfo/l/linux"; symlink = "/etc/terminfo/l/linux"; }
     { object = etcPasswd; symlink = "/etc/passwd"; }
     { object = etcGroup; symlink = "/etc/group"; }
-    { object = "${tinyboot}/bin/nologin"; symlink = "/bin/nologin"; }
   ] ++ extraContents;
 }
 
