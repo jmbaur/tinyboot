@@ -1,10 +1,26 @@
 use std::ffi::{c_char, c_void, CString};
 
-use log::info;
+use log::{info, warn};
 use syscalls::{syscall, Sysno};
 
 // https://github.com/torvalds/linux/blob/3b517966c5616ac011081153482a5ba0e91b17ff/security/integrity/digsig.c#L193
 pub fn load_x509_key() -> anyhow::Result<()> {
+    let Some(pubkey) = ('pubkey: {
+        if cfg!(fw_cfg) {
+            // https://qemu-project.gitlab.io/qemu/specs/fw_cfg.html
+            match std::fs::read("/sys/firmware/qemu_fw_cfg/by_name/opt/org.tboot/pubkey/raw") {
+                Ok(raw) => break 'pubkey Some(raw),
+                Err(e) => {
+                    warn!("failed to get key from fw_cfg: {}", e);
+                }
+            }
+        }
+
+        std::fs::read("/etc/keys/x509_ima.der").ok()
+    }) else {
+        anyhow::bail!("no public key found");
+    };
+
     let all_keys = std::fs::read_to_string("/proc/keys")?;
     let all_keys = parse_proc_keys(&all_keys);
     let ima_keyring_id = all_keys
@@ -25,8 +41,6 @@ pub fn load_x509_key() -> anyhow::Result<()> {
         anyhow::bail!(".ima keyring not found");
     };
 
-    let pub_key = std::fs::read("/etc/keys/x509_ima.der")?;
-
     let key_type = CString::new("asymmetric")?;
     let key_desc: *const c_char = std::ptr::null();
 
@@ -36,8 +50,8 @@ pub fn load_x509_key() -> anyhow::Result<()> {
             Sysno::add_key,
             key_type.as_ptr(),
             key_desc,
-            pub_key.as_ptr() as *const c_void,
-            pub_key.len(),
+            pubkey.as_ptr() as *const c_void,
+            pubkey.len(),
             ima_keyring_id
         )?
     };

@@ -303,6 +303,7 @@ pub fn main() -> ! {
 
     if let Err(e) = keys::load_x509_key() {
         error!("failed to load x509 keys for IMA: {:?}", e);
+        info!("boot verification is off");
     }
 
     match prepare_boot() {
