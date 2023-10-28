@@ -9,12 +9,11 @@ configs are welcome!
 ## Usage
 
 ```
-nix run github:jmbaur/tinyboot#coreboot.<your_board>.config.build.updateScript
+nix run github:jmbaur/tinyboot#coreboot.<your_board>.config.build.installScript
 ```
 
 ## Hacking
 
 ```
-nix run .#disk
-nix run .#default
+just qemu
 ```

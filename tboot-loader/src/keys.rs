@@ -1,47 +1,50 @@
 use std::ffi::{c_char, c_void, CString};
 
-use log::{info, warn};
+use log::{debug, warn};
+use nix::libc;
 use syscalls::{syscall, Sysno};
 
-// https://github.com/torvalds/linux/blob/3b517966c5616ac011081153482a5ba0e91b17ff/security/integrity/digsig.c#L193
-pub fn load_x509_key() -> anyhow::Result<()> {
-    let Some(pubkey) = ('pubkey: {
-        if cfg!(fw_cfg) {
-            // https://qemu-project.gitlab.io/qemu/specs/fw_cfg.html
-            match std::fs::read("/sys/firmware/qemu_fw_cfg/by_name/opt/org.tboot/pubkey/raw") {
-                Ok(raw) => break 'pubkey Some(raw),
-                Err(e) => {
-                    warn!("failed to get key from fw_cfg: {}", e);
-                }
-            }
+// We are using the "_ima" keyring and not the ".ima" keyring since we do not use
+// CONFIG_INTEGRITY_TRUSTED_KEYRING=y in our kernel config.
+const IMA_KEYRING_NAME: &str = "_ima";
+
+enum KeySerial {
+    UserKeyring,
+}
+
+impl Into<i32> for KeySerial {
+    fn into(self) -> i32 {
+        match self {
+            KeySerial::UserKeyring => libc::KEY_SPEC_USER_KEYRING,
         }
+    }
+}
 
-        std::fs::read("/etc/keys/x509_ima.der").ok()
-    }) else {
-        anyhow::bail!("no public key found");
+// https://git.kernel.org/pub/scm/linux/kernel/git/dhowells/keyutils.git/tree/keyctl.c#n705
+fn add_keyring(name: &str, key_serial: KeySerial) -> anyhow::Result<i32> {
+    let key_type = CString::new("keyring")?;
+
+    let key_desc = CString::new(name)?;
+
+    let key_serial: i32 = key_serial.into();
+
+    let keyring_id = unsafe {
+        syscall!(
+            Sysno::add_key,
+            key_type.as_ptr(),
+            key_desc.as_ptr(),
+            std::ptr::null() as *const c_void,
+            0,
+            key_serial
+        )?
     };
 
-    let all_keys = std::fs::read_to_string("/proc/keys")?;
-    let all_keys = parse_proc_keys(&all_keys);
-    let ima_keyring_id = all_keys
-        .into_iter()
-        .find_map(|(key_id, key_type, keyring)| {
-            if key_type != "keyring" {
-                return None;
-            }
+    Ok(keyring_id.try_into()?)
+}
 
-            if keyring != ".ima" {
-                return None;
-            }
-
-            Some(key_id)
-        });
-
-    let Some(ima_keyring_id) = ima_keyring_id else {
-        anyhow::bail!(".ima keyring not found");
-    };
-
+fn add_key(keyring_id: i32, key_content: &[u8]) -> anyhow::Result<i32> {
     let key_type = CString::new("asymmetric")?;
+
     let key_desc: *const c_char = std::ptr::null();
 
     // see https://github.com/torvalds/linux/blob/59f3fd30af355dc893e6df9ccb43ace0b9033faa/security/keys/keyctl.c#L74
@@ -50,64 +53,51 @@ pub fn load_x509_key() -> anyhow::Result<()> {
             Sysno::add_key,
             key_type.as_ptr(),
             key_desc,
-            pubkey.as_ptr() as *const c_void,
-            pubkey.len(),
-            ima_keyring_id
+            key_content.as_ptr() as *const c_void,
+            key_content.len(),
+            keyring_id
         )?
     };
 
-    info!("added ima key with id: {:?}", key_id);
+    Ok(key_id.try_into()?)
+}
+
+// https://github.com/torvalds/linux/blob/3b517966c5616ac011081153482a5ba0e91b17ff/security/integrity/digsig.c#L193
+pub fn load_verification_key() -> anyhow::Result<()> {
+    let Some(pubkey) = ('pubkey: {
+        if cfg!(feature = "fw_cfg") {
+            debug!("searching for keys from qemu fw_cfg");
+
+            // https://qemu-project.gitlab.io/qemu/specs/fw_cfg.html
+            match std::fs::read("/sys/firmware/qemu_fw_cfg/by_name/opt/org.tboot/pubkey/raw") {
+                Ok(raw) => break 'pubkey Some(raw),
+                Err(e) => warn!("failed to get key from fw_cfg: {}", e),
+            }
+        }
+
+        if cfg!(feature = "coreboot") {
+            debug!("searching for keys from coreboot vpd");
+
+            // https://github.com/torvalds/linux/blob/master/drivers/firmware/google/vpd.c#L193
+            match std::fs::read("/sys/firmware/vpd/ro/pubkey_raw") {
+                Ok(raw) => break 'pubkey Some(raw),
+                Err(e) => warn!("failed to get key from RO_VPD: {}", e),
+            }
+        }
+
+        None
+    }) else {
+        anyhow::bail!("no public key found");
+    };
+
+    let ima_keyring_id = add_keyring(IMA_KEYRING_NAME, KeySerial::UserKeyring)?;
+
+    let key_id = add_key(ima_keyring_id, &pubkey)?;
+
+    debug!("added ima key with id: {:?}", key_id);
 
     // only install the IMA policy after we have loaded the key
     std::fs::copy("/etc/ima/policy.conf", "/sys/kernel/security/ima/policy")?;
 
     Ok(())
-}
-
-// columns:
-// keyring_id . . . . . . . keyring_name .
-fn parse_proc_keys(contents: &str) -> Vec<(i32, &str, &str)> {
-    contents
-        .lines()
-        .filter_map(|key| {
-            let mut iter = key.split_ascii_whitespace();
-            let Some(key_id) = iter.next() else {
-                return None;
-            };
-
-            let Ok(key_id) = i32::from_str_radix(key_id, 16) else {
-                return None;
-            };
-
-            // skip the next 7 columns
-            for _ in 0..6 {
-                _ = iter.next();
-            }
-
-            let Some(key_type) = iter.next() else {
-                return None;
-            };
-
-            let Some(keyring) = iter.next().and_then(|keyring| keyring.strip_suffix(":")) else {
-                return None;
-            };
-
-            Some((key_id, key_type, keyring))
-        })
-        .collect()
-}
-
-#[cfg(test)]
-mod tests {
-
-    #[test]
-    fn parse_proc_keys() {
-        let proc_keys = r#"
-3b7511b0 I--Q---     1 perm 0b0b0000     0     0 user      invocation_id: 16
-"#;
-        assert_eq!(
-            super::parse_proc_keys(proc_keys),
-            vec![(997527984, "user", "invocation_id")]
-        );
-    }
 }

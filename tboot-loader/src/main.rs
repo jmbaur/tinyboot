@@ -301,9 +301,11 @@ pub fn main() -> ! {
     info!("version {}", VERSION.unwrap_or("devel"));
     info!("{}", cfg);
 
-    if let Err(e) = keys::load_x509_key() {
-        error!("failed to load x509 keys for IMA: {:?}", e);
-        info!("boot verification is off");
+    if let Err(e) = keys::load_verification_key() {
+        error!("failed to load verification keys: {:?}", e);
+        warn!("boot verification is OFF");
+    } else {
+        info!("boot verification is ON");
     }
 
     match prepare_boot() {

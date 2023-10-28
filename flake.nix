@@ -1,7 +1,7 @@
 {
   description = "A small linuxboot payload for coreboot";
   inputs = {
-    nixpkgs.url = "nixpkgs/nixos-unstable";
+    nixpkgs.url = "github:jmbaur/nixpkgs/nixos-unstable"; # we use this for so we can get vpd
     coreboot = {
       url = "git+https://github.com/jmbaur/coreboot?ref=tinyboot&submodules=1";
       flake = false;

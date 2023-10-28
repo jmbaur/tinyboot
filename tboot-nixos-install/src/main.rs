@@ -234,7 +234,13 @@ fn main() {
         .unwrap();
 
         let nixos_system_closure = std::fs::canonicalize(entry.path()).unwrap();
-        let boot_json = bootspec::BootJson::synthesize_latest(&nixos_system_closure).unwrap();
+
+        let boot_json: bootspec::BootJson = serde_json::from_str(
+            std::fs::read_to_string(nixos_system_closure.join(bootspec::JSON_FILENAME))
+                .unwrap()
+                .as_str(),
+        )
+        .unwrap();
 
         if nixos_system_closure == state.args.default_nixos_system_closure {
             std::fs::write(

@@ -2,6 +2,11 @@
 let
   boards = builtins.readDir ./boards;
   buildFitImage = pkgs.callPackage ./fitimage { };
+  installInitrd = pkgs.callPackage ./initramfs.nix {
+    extraContents = [
+      { object = "${config.flashrom.package}/bin/flashrom"; symlink = "/bin/flashrom"; }
+    ];
+  };
   updateInitrd = pkgs.callPackage ./initramfs.nix {
     extraContents = [
       { object = config.build.firmware; symlink = "/update.rom"; }
@@ -63,13 +68,7 @@ in
       type = types.enum [ "off" "error" "warn" "info" "debug" "trace" ];
       default = "warn";
     };
-    tinyboot = {
-      tty = mkOption { type = types.str; default = "tty1"; };
-      nameservers = mkOption {
-        type = types.listOf types.str;
-        default = [ "8.8.8.8" "8.8.4.4" "2001:4860:4860::8888" "2001:4860:4860::8844" ];
-      };
-    };
+    tinyboot.tty = mkOption { type = types.str; default = "tty1"; };
   };
   config = {
     # The "--" makes linux pass remaining parameters as args to PID1
@@ -87,29 +86,15 @@ in
 
     build = {
       baseInitrd = pkgs.callPackage ./initramfs.nix {
-        extraContents =
-          let
-            staticResolvConf = pkgs.writeText "resolv.conf.static" (lib.concatLines (map (n: "nameserver ${n}") config.tinyboot.nameservers));
-            imaPolicy = pkgs.substituteAll {
-              name = "ima_policy.conf";
-              src = ./etc/ima_policy.conf.in;
-              extraPolicy = ''
-                appraise func=KEXEC_KERNEL_CHECK appraise_type=imasig|modsig
-                appraise func=KEXEC_INITRAMFS_CHECK appraise_type=imasig|modsig
-              '';
-            };
-          in
-          [
-            { object = staticResolvConf; symlink = "/etc/resolv.conf.static"; }
-            { object = imaPolicy; symlink = "/etc/ima/policy.conf"; }
-            { object = config.verifiedBoot.signingPublicKey; symlink = "/etc/keys/x509_ima.der"; }
-          ] ++ (lib.optional (config.linux.firmware != null) { object = config.linux.firmware; symlink = "/lib/firmware"; });
+        extraContents = [
+          { object = ./etc/ima_policy.conf; symlink = "/etc/ima/policy.conf"; }
+        ] ++ (lib.optional (config.linux.firmware != null) { object = config.linux.firmware; symlink = "/lib/firmware"; });
       };
       initrd = config.build.baseInitrd.override {
         prepend =
           let
             initrd = (pkgs.makeInitrdNG {
-              compressor = "cat";
+              compressor = "cat"; # prepend cannot be used with a compressed initrd
               contents = [{ object = "${pkgs.tinyboot}/bin/tboot-loader"; symlink = "/init"; }];
             });
           in
@@ -119,13 +104,6 @@ in
         builtinCmdline = config.linux.commandLine;
         linux = config.linux.package;
         inherit (config.linux) configFile;
-      }).overrideAttrs (old: {
-        preConfigure = (old.preConfigure or "") + ''
-          mkdir tinyboot; cp ${config.verifiedBoot.caCertificate} tinyboot/ca.pem
-        '';
-        postInstall = (old.postInstall or "") + ''
-          install -Dm755 -t "$out/bin" scripts/sign-file
-        '';
       });
       fitImage = buildFitImage {
         inherit (config) board;
@@ -171,7 +149,11 @@ in
             --flags ${config.verifiedBoot.vbootKeyblockPreambleFlags} \
             $out
         '';
-      updateScript = pkgs.writeShellScriptBin "update-firmware" ''
+      installScript = pkgs.writeShellScriptBin "install-tinyboot" ''
+        kexec -l ${config.build.linux}/${pkgs.stdenv.hostPlatform.linux-kernel.target} --initrd=${installInitrd}/initrd
+        systemctl kexec
+      '';
+      updateScript = pkgs.writeShellScriptBin "update-tinyboot" ''
         kexec -l ${config.build.linux}/${pkgs.stdenv.hostPlatform.linux-kernel.target} --initrd=${updateInitrd}/initrd
         systemctl kexec
       '';
