@@ -1,10 +1,11 @@
 [package]
-name = "tboot-init"
+name = "tboot-loader"
 version = "0.1.0"
 edition = "2021"
 
 [features]
 coreboot = []
+fw_cfg = []
 
 [dependencies]
 anyhow = "1.0.75"

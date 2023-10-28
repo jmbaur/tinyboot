@@ -328,7 +328,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "tboot-init"
+name = "tboot-loader"
 version = "0.1.0"
 dependencies = [
  "anyhow",

@@ -110,7 +110,7 @@ in
           let
             initrd = (pkgs.makeInitrdNG {
               compressor = "cat";
-              contents = [{ object = "${pkgs.tinyboot}/bin/tboot-init"; symlink = "/init"; }];
+              contents = [{ object = "${pkgs.tinyboot}/bin/tboot-loader"; symlink = "/init"; }];
             });
           in
           [ "${initrd}/initrd" ];

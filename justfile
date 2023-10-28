@@ -23,12 +23,12 @@ base-initrd: init
 	xz -d < {{build_dir}}/result-base-initrd/initrd > {{build_dir}}/base-initrd
 
 initrd-contents: init
-	echo -e "{{cargo_debug_target_dir}}/tboot-init\n/init" >{{build_dir}}/contents
+	echo -e "{{cargo_debug_target_dir}}/tboot-loader\n/init" >{{build_dir}}/contents
 
 initrd: initrd-contents
 	test -f {{build_dir}}/base-initrd || just base-initrd
 	cat {{build_dir}}/base-initrd > {{build_dir}}/initrd
-	cargo build --package tboot-init
+	cargo build --package tboot-loader --features fw_cfg
 	rm -rf {{build_dir}}/root
 	make-initrd-ng {{build_dir}}/contents {{build_dir}}/root
 	(cd {{build_dir}}/root && find . -print0 | sort -z | cpio -o -H newc -R +0:+0 --reproducible --null >> {{build_dir}}/initrd)
