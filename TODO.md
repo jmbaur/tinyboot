@@ -1,3 +1,4 @@
+- fix FMAPs for boards where RO size is less than 4M
 - use non-volatile storage for configuration of boot order, etc.
 - integrate IMA keys with vboot keys
 - document options
