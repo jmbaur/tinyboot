@@ -1,5 +1,8 @@
 { config, pkgs, lib, ... }:
 let
+  tinyboot = pkgs.tinyboot.override {
+    corebootSupport = config.coreboot.enable;
+  };
   boards = builtins.readDir ./boards;
   buildFitImage = pkgs.callPackage ./fitimage { };
   installInitrd = pkgs.callPackage ./initramfs.nix {
@@ -11,8 +14,8 @@ let
     extraContents = [
       { object = config.build.firmware; symlink = "/update.rom"; }
       { object = "${config.flashrom.package}/bin/flashrom"; symlink = "/bin/flashrom"; }
-      { object = "${pkgs.tinyboot}/bin/tboot-update"; symlink = "/init"; }
-      { object = "${pkgs.tinyboot}/bin/tboot-update"; symlink = "/bin/nologin"; }
+      { object = "${tinyboot}/bin/tboot-update"; symlink = "/init"; }
+      { object = "${tinyboot}/bin/tboot-update"; symlink = "/bin/nologin"; }
     ];
   };
   testInitrd = pkgs.makeInitrdNG {
@@ -112,8 +115,8 @@ in
             initrd = (pkgs.makeInitrdNG {
               compressor = "cat"; # prepend cannot be used with a compressed initrd
               contents = [
-                { object = "${pkgs.tinyboot}/bin/tboot-loader"; symlink = "/init"; }
-                { object = "${pkgs.tinyboot}/bin/tboot-loader"; symlink = "/bin/nologin"; }
+                { object = "${tinyboot}/bin/tboot-loader"; symlink = "/init"; }
+                { object = "${tinyboot}/bin/tboot-loader"; symlink = "/bin/nologin"; }
               ];
             });
           in
