@@ -23,6 +23,7 @@ in
             TCG_TIS_SPI = yes;
             IMA_DEFAULT_HASH_SHA256 = yes;
           } // lib.optionalAttrs pkgs.stdenv.hostPlatform.isx86_64 {
+            # helpful for early TPM initialization on x86_64 chromebooks
             SPI_INTEL_PCI = yes;
             MFD_INTEL_LPSS_ACPI = yes;
             MFD_INTEL_LPSS_PCI = yes;
@@ -45,7 +46,7 @@ in
 
       system.build = { inherit (cfg.build) firmware; };
 
-      boot.kernelPackages = with lib.kernel; with (whenHelpers config.boot.kernelPackages.kernel.version); [{
+      boot.kernelPatches = with lib.kernel; with (whenHelpers config.boot.kernelPackages.kernel.version); [{
         name = "enable-coreboot";
         patch = null;
         extraStructuredConfig = {

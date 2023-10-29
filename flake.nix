@@ -33,12 +33,12 @@
           ima_tpm_early_init = { name = "ima_tpm_early_init"; patch = ./patches/linux-tpm-probe.patch; };
         };
       };
+      legacyPackages = forAllSystems ({ pkgs, ... }: pkgs);
       devShells = forAllSystems ({ pkgs, ... }: {
         default = pkgs.tinyboot.overrideAttrs (old: {
           nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ (with pkgs; [ just cpio makeInitrdNGTool xz ]);
         });
       });
-      legacyPackages = forAllSystems ({ pkgs, ... }: pkgs);
       apps = forAllSystems ({ pkgs, system, ... }: (
         let
           nixosSystem = self.nixosConfigurations.default.extendModules {

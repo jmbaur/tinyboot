@@ -59,7 +59,7 @@ in
       firmware = mkOption { type = types.nullOr types.path; default = null; };
     };
     coreboot = {
-      enable = mkEnableOption "coreboot integration";
+      enable = mkEnableOption "coreboot integration" // { default = true; };
       configFile = mkOption { type = types.path; };
       vpd.ro = vpdOption;
       vpd.rw = vpdOption;
@@ -142,35 +142,37 @@ in
           env.CBFSTOOL = "${pkgs.buildPackages.cbfstool}/bin/cbfstool"; # needed by futility
         }
         ''
-            dd if=${config.build.coreboot}/coreboot.rom of=$out
+          dd if=${config.build.coreboot}/coreboot.rom of=$out
 
-            cbfstool $out expand -r FW_MAIN_A
-            ${if pkgs.stdenv.hostPlatform.linuxArch == "x86_64" then ''
-            cbfstool $out add-payload \
-              -r FW_MAIN_A \
-              -n fallback/payload \
-              -f ${config.build.linux}/${pkgs.stdenv.hostPlatform.linux-kernel.target} \
-              -I ${config.build.initrd}/initrd
-            '' else if pkgs.stdenv.hostPlatform.linuxArch == "arm64" then ''
-            cbfstool $out add \
-              -r FW_MAIN_A \
-              -n fallback/payload \
-              -t fit_payload \
-              -f ${config.build.fitImage}/uImage
-          '' else throw "Unsupported architecture"}
-            cbfstool $out truncate -r FW_MAIN_A
+          vpd -f $out -O
+          ${lib.concatLines (lib.mapAttrsToList (applyVpd "RO_VPD") config.coreboot.vpd.ro)}
+          ${lib.concatLines (lib.mapAttrsToList (applyVpd "RW_VPD") config.coreboot.vpd.rw)}
 
-            vpd -f $out -O
-            ${lib.concatLines (lib.mapAttrsToList (applyVpd "RO_VPD") config.coreboot.vpd.ro)}
-            ${lib.concatLines (lib.mapAttrsToList (applyVpd "RW_VPD") config.coreboot.vpd.rw)}
+          for section in "FW_MAIN_A" "COREBOOT"; do
+          cbfstool $out expand -r $section
+          ${if pkgs.stdenv.hostPlatform.isx86_64 then ''
+          cbfstool $out add-payload \
+            -r $section \
+            -n fallback/payload \
+            -f ${config.build.linux}/${pkgs.stdenv.hostPlatform.linux-kernel.target} \
+            -I ${config.build.initrd}/initrd
+          '' else if pkgs.stdenv.hostPlatform.isAarch64 then ''
+          cbfstool $out add \
+            -r $section \
+            -n fallback/payload \
+            -t fit_payload \
+            -f ${config.build.fitImage}/uImage
+          '' else throw "unsupported architecture"}
+          cbfstool $out truncate -r $section
+          done
 
-            futility sign \
-              --signprivate "${config.verifiedBoot.vbootFirmwarePrivkey}" \
-              --keyblock "${config.verifiedBoot.vbootKeyblock}" \
-              --kernelkey "${config.verifiedBoot.vbootKernelKey}" \
-              --version ${config.verifiedBoot.vbootKeyblockVersion} \
-              --flags ${config.verifiedBoot.vbootKeyblockPreambleFlags} \
-              $out
+          futility sign \
+            --signprivate "${config.verifiedBoot.vbootFirmwarePrivkey}" \
+            --keyblock "${config.verifiedBoot.vbootKeyblock}" \
+            --kernelkey "${config.verifiedBoot.vbootKernelKey}" \
+            --version ${config.verifiedBoot.vbootKeyblockVersion} \
+            --flags ${config.verifiedBoot.vbootKeyblockPreambleFlags} \
+            $out
         '';
       installScript = pkgs.writeShellScriptBin "install-tinyboot" ''
         kexec -l ${config.build.linux}/${pkgs.stdenv.hostPlatform.linux-kernel.target} --initrd=${installInitrd}/initrd
