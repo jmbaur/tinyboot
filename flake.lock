@@ -3,11 +3,11 @@
     "coreboot": {
       "flake": false,
       "locked": {
-        "lastModified": 1692861410,
-        "narHash": "sha256-4OUxeIXvu0vzr9eVjgV9VmGexrWEi02HyQNkxMTwNhw=",
+        "lastModified": 1698601112,
+        "narHash": "sha256-uGp5QWDP7jG+TPJlfvhR/SAy3zXFVSnHzaXVE/ImqeI=",
         "ref": "tinyboot",
-        "rev": "e308340f2208d02acc394d28ae063141dd7df221",
-        "revCount": 54033,
+        "rev": "832bb68d0c3650fa61ad477aadd61bd09d4f2df7",
+        "revCount": 54034,
         "submodules": true,
         "type": "git",
         "url": "https://github.com/jmbaur/coreboot"
@@ -21,11 +21,11 @@
     },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1698516940,
-        "narHash": "sha256-oaWT11uJFmysigi9xzbmwoCqWlCxLaoaWXawkdC4eQs=",
+        "lastModified": 1698551568,
+        "narHash": "sha256-McxHobezIetz2gbjHp517IZIjTtRT6vE9hQhEoDl1ws=",
         "owner": "jmbaur",
         "repo": "nixpkgs",
-        "rev": "a29786e56ad28ff5b584ef78bfa5d425b8fad45a",
+        "rev": "9aa43a269597dbdc21bd39f848bfdab081057650",
         "type": "github"
       },
       "original": {
