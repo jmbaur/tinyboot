@@ -3,11 +3,11 @@
     "coreboot": {
       "flake": false,
       "locked": {
-        "lastModified": 1698601112,
-        "narHash": "sha256-uGp5QWDP7jG+TPJlfvhR/SAy3zXFVSnHzaXVE/ImqeI=",
+        "lastModified": 1698642359,
+        "narHash": "sha256-yy6HxkpiYUIe2G88Ik0V+BhouROswG1GgPVfHrbM78g=",
         "ref": "tinyboot",
-        "rev": "832bb68d0c3650fa61ad477aadd61bd09d4f2df7",
-        "revCount": 54034,
+        "rev": "d68482c5425ef6996a4b3a5cd9812fedc4d02750",
+        "revCount": 54039,
         "submodules": true,
         "type": "git",
         "url": "https://github.com/jmbaur/coreboot"

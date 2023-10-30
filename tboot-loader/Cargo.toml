@@ -9,6 +9,7 @@ fw_cfg = []
 
 [dependencies]
 anyhow = "1.0.75"
+base64 = "0.21.5"
 gpt = "3.1.0"
 log.workspace = true
 nix.workspace = true

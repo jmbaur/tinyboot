@@ -1,4 +1,4 @@
-{ config, pkgs, lib, ... }:
+{ config, pkgs, lib, kconfig, ... }:
 let
   tinyboot = pkgs.tinyboot.override {
     corebootSupport = config.coreboot.enable;
@@ -21,6 +21,21 @@ let
   testInitrd = pkgs.makeInitrdNG {
     compressor = "xz";
     contents = [{ object = "${pkgs.busybox}/bin/busybox"; symlink = "/init"; } { object = "${pkgs.busybox}/bin"; symlink = "/bin"; }];
+  };
+  kconfigOption = lib.mkOption {
+    type = lib.types.attrsOf lib.types.anything;
+    default = { };
+    apply = attrs: {
+      inherit attrs;
+      __resolved = lib.concatLines (lib.mapAttrsToList
+        (option: response: {
+          "bool" =
+            if response.value then "CONFIG_${option}=y" else "# CONFIG_${option} is not set";
+          "freeform" =
+            if lib.isInt response.value then "CONFIG_${option}=${toString response.value}" else ''CONFIG_${option}="${response.value}"'';
+        }.${response._type})
+        attrs);
+    };
   };
   vpdOption = lib.mkOption {
     type = lib.types.attrsOf (lib.types.either lib.types.str lib.types.path);
@@ -63,10 +78,9 @@ in
     };
     coreboot = {
       enable = mkEnableOption "coreboot integration" // { default = true; };
-      configFile = mkOption { type = types.path; };
+      kconfig = kconfigOption;
       vpd.ro = vpdOption;
       vpd.rw = vpdOption;
-      extraConfig = mkOption { type = types.lines; default = ""; };
     };
     verifiedBoot = {
       requiredSystemFeatures = mkOption { type = types.listOf types.str; default = [ ]; };
@@ -79,8 +93,6 @@ in
       vbootFirmwarePrivkey = mkOption { type = types.path; default = "${pkgs.vboot_reference}/share/vboot/devkeys/firmware_data_key.vbprivk"; };
       vbootKeyblock = mkOption { type = types.path; default = "${pkgs.vboot_reference}/share/vboot/devkeys/firmware.keyblock"; };
       vbootKernelKey = mkOption { type = types.path; default = "${pkgs.vboot_reference}/share/vboot/devkeys/kernel_subkey.vbpubk"; };
-      vbootKeyblockVersion = mkOption { type = types.str; default = "1"; };
-      vbootKeyblockPreambleFlags = mkOption { type = types.str; default = "0x0"; };
     };
     loglevel = mkOption {
       type = types.enum [ "off" "error" "warn" "info" "debug" "trace" ];
@@ -89,19 +101,33 @@ in
     tinyboot.tty = mkOption { type = types.str; default = "tty1"; };
   };
   config = {
+    _module.args.kconfig = {
+      yes = { _type = "bool"; value = true; };
+      no = { _type = "bool"; value = false; };
+      freeform = value: { _type = "freeform"; inherit value; };
+    };
+
     # The "--" makes linux pass remaining parameters as args to PID1
     linux.commandLine = [ "console=ttynull" "--" "tboot.loglevel=${config.loglevel}" "tboot.tty=${config.tinyboot.tty}" "tboot.programmer=${config.flashrom.programmer}" ];
 
     coreboot.vpd.ro.pubkey = config.verifiedBoot.signingPublicKey;
-    coreboot.extraConfig = ''
-      CONFIG_VBOOT_ROOT_KEY="${config.verifiedBoot.vbootRootKey}"
-      CONFIG_VBOOT_RECOVERY_KEY="${config.verifiedBoot.vbootRecoveryKey}"
-      CONFIG_VBOOT_FIRMWARE_PRIVKEY="${config.verifiedBoot.vbootFirmwarePrivkey}"
-      CONFIG_VBOOT_KERNEL_KEY="${config.verifiedBoot.vbootKernelKey}"
-      CONFIG_VBOOT_KEYBLOCK="${config.verifiedBoot.vbootKeyblock}"
-      CONFIG_VBOOT_KEYBLOCK_VERSION=${config.verifiedBoot.vbootKeyblockVersion}
-      CONFIG_VBOOT_KEYBLOCK_PREAMBLE_FLAGS=${config.verifiedBoot.vbootKeyblockPreambleFlags}
-    '';
+    coreboot.kconfig = with kconfig; {
+      PAYLOAD_FILE = freeform "";
+      PAYLOAD_FIT = if pkgs.hostPlatform.isAarch64 then yes else no;
+      PAYLOAD_FIT_SUPPORT = if pkgs.hostPlatform.isAarch64 then yes else no;
+      PAYLOAD_NONE = if pkgs.hostPlatform.isx86_64 then yes else no;
+      VBOOT = yes;
+      VBOOT_ARMV8_CE_SHA256_ACCELERATION = if pkgs.hostPlatform.isAarch64 then yes else no;
+      VBOOT_FIRMWARE_PRIVKEY = freeform config.verifiedBoot.vbootFirmwarePrivkey;
+      VBOOT_KERNEL_KEY = freeform config.verifiedBoot.vbootKernelKey;
+      VBOOT_KEYBLOCK = freeform config.verifiedBoot.vbootKeyblock;
+      VBOOT_RECOVERY_KEY = freeform config.verifiedBoot.vbootRecoveryKey;
+      VBOOT_ROOT_KEY = freeform config.verifiedBoot.vbootRootKey;
+      VBOOT_SIGN = no; # don't sign during build
+      VBOOT_SLOTS_RW_A = yes;
+      VBOOT_X86_SHA256_ACCELERATION=if pkgs.hostPlatform.isx86_64 then yes else no;
+      VPD = yes;
+    };
 
     build = {
       baseInitrd = pkgs.callPackage ./initramfs.nix {
@@ -134,7 +160,7 @@ in
       };
       coreboot = pkgs.buildCoreboot {
         inherit (config) board;
-        inherit (config.coreboot) configFile extraConfig;
+        configFile = config.coreboot.kconfig.__resolved;
       };
       firmware = pkgs.runCommand "tinyboot-${config.build.coreboot.name}"
         {
@@ -145,36 +171,35 @@ in
           env.CBFSTOOL = "${pkgs.buildPackages.cbfstool}/bin/cbfstool"; # needed by futility
         }
         ''
-          dd if=${config.build.coreboot}/coreboot.rom of=$out
+          dd status=none if=${config.build.coreboot}/coreboot.rom of=$out
 
-          vpd -f $out -O
+          vpd -f $out -i RO_VPD -O
           ${lib.concatLines (lib.mapAttrsToList (applyVpd "RO_VPD") config.coreboot.vpd.ro)}
+          vpd -f $out -i RW_VPD -O
           ${lib.concatLines (lib.mapAttrsToList (applyVpd "RW_VPD") config.coreboot.vpd.rw)}
 
           for section in "FW_MAIN_A" "COREBOOT"; do
-          cbfstool $out expand -r $section
-          ${if pkgs.stdenv.hostPlatform.isx86_64 then ''
-          cbfstool $out add-payload \
-            -r $section \
-            -n fallback/payload \
-            -f ${config.build.linux}/${pkgs.stdenv.hostPlatform.linux-kernel.target} \
-            -I ${config.build.initrd}/initrd
-          '' else if pkgs.stdenv.hostPlatform.isAarch64 then ''
-          cbfstool $out add \
-            -r $section \
-            -n fallback/payload \
-            -t fit_payload \
-            -f ${config.build.fitImage}/uImage
-          '' else throw "unsupported architecture"}
-          cbfstool $out truncate -r $section
+            cbfstool $out expand -r $section
+            ${if pkgs.stdenv.hostPlatform.isx86_64 then ''
+            cbfstool $out add-payload \
+              -r $section \
+              -n fallback/payload \
+              -f ${config.build.linux}/${pkgs.stdenv.hostPlatform.linux-kernel.target} \
+              -I ${config.build.initrd}/initrd
+            '' else if pkgs.stdenv.hostPlatform.isAarch64 then ''
+            cbfstool $out add \
+              -r $section \
+              -n fallback/payload \
+              -t fit_payload \
+              -f ${config.build.fitImage}/uImage
+            '' else throw "unsupported architecture"}
+            cbfstool $out truncate -r $section
           done
 
           futility sign \
             --signprivate "${config.verifiedBoot.vbootFirmwarePrivkey}" \
             --keyblock "${config.verifiedBoot.vbootKeyblock}" \
             --kernelkey "${config.verifiedBoot.vbootKernelKey}" \
-            --version ${config.verifiedBoot.vbootKeyblockVersion} \
-            --flags ${config.verifiedBoot.vbootKeyblockPreambleFlags} \
             $out
         '';
       installScript = pkgs.writeShellScriptBin "install-tinyboot" ''
@@ -201,4 +226,3 @@ in
     };
   };
 }
-

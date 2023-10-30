@@ -1,4 +1,4 @@
-{ config, pkgs, lib, ... }: {
+{ config, pkgs, lib, kconfig, ... }: {
   config = lib.mkIf (config.board == "fizz-fizz") {
     platforms = [ "x86_64-linux" ];
     tinyboot.tty = lib.mkDefault "ttyS0";
@@ -8,6 +8,10 @@
         mkdir -p $out; cp -r ${pkgs.linux-firmware}/lib/firmware/rtl_nic $out/rtl_nic
       '';
     };
-    coreboot.configFile = lib.mkDefault ./coreboot.config;
+    coreboot.kconfig = with kconfig; {
+      VENDOR_GOOGLE = yes;
+      BOARD_GOOGLE_FIZZ = yes;
+      FMDFILE = freeform ./layout.fmd;
+    };
   };
 }

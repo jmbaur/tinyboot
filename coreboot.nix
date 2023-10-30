@@ -1,5 +1,5 @@
 { src, lib, stdenvNoCC, pkgsBuildBuild, python3, pkg-config, openssl, ... }:
-{ board ? null, configFile, extraConfig ? "" }:
+{ board ? null, configFile }:
 let
   architectures = { i386 = "i386"; x86_64 = "i386"; arm64 = "aarch64"; arm = "arm"; riscv = "riscv"; powerpc = "ppc64"; };
   toolchain = pkgsBuildBuild.coreboot-toolchain.${architectures.${stdenvNoCC.hostPlatform.linuxArch}}.override {
@@ -17,19 +17,20 @@ stdenvNoCC.mkDerivation (finalAttrs: {
   postPatch = ''
     patchShebangs util 3rdparty/vboot/scripts
   '';
-  inherit extraConfig;
-  passAsFile = [ "extraConfig" ];
+  inherit configFile;
+  passAsFile = [ "configFile" ];
   configurePhase = ''
     runHook preConfigure
-    cat ${configFile} > .config
-    cat $extraConfigPath >> .config
-    make oldconfig
+    cat $configFilePath > .config
+    make olddefconfig
     runHook postConfigure
   '';
   makeFlags = [ "XGCCPATH=${toolchain}/bin/" "KERNELVERSION=4.21-tinyboot-${version}" "UPDATED_SUBMODULES=1" ];
+  outputs = [ "out" "dev" ];
   installPhase = ''
     runHook preInstall
     install -D --target-directory=$out build/coreboot.rom
+    install -D --target-directory=$dev .config
     runHook postInstall
   '';
 })

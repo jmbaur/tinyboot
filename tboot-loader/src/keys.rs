@@ -1,5 +1,6 @@
 use std::ffi::{c_char, c_void, CString};
 
+use base64::{engine::general_purpose, Engine as _};
 use log::{debug, warn};
 use nix::libc;
 use syscalls::{syscall, Sysno};
@@ -78,9 +79,13 @@ pub fn load_verification_key() -> anyhow::Result<()> {
         if cfg!(feature = "coreboot") {
             debug!("searching for keys from coreboot vpd");
 
+            // The public key is held in VPD as a base64 encoded string.
             // https://github.com/torvalds/linux/blob/master/drivers/firmware/google/vpd.c#L193
-            match std::fs::read("/sys/firmware/vpd/ro/pubkey_raw") {
-                Ok(raw) => break 'pubkey Some(raw),
+            match std::fs::read("/sys/firmware/vpd/ro/pubkey")
+                .map(|bytes| general_purpose::STANDARD.decode(bytes))
+            {
+                Ok(Ok(raw)) => break 'pubkey Some(raw),
+                Ok(Err(e)) => warn!("failed to decode public key: {}", e),
                 Err(e) => warn!("failed to get key from RO_VPD: {}", e),
             }
         }

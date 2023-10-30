@@ -1,4 +1,4 @@
-{ config, pkgs, lib, ... }: {
+{ config, pkgs, lib, kconfig, ... }: {
   imports = [ ../../qemu.nix ];
   config = lib.mkIf (config.board == "qemu-aarch64") {
     platforms = [ "aarch64-linux" ];
@@ -9,8 +9,12 @@
         qemu-system-aarch64 -M virt,secure=on,virtualization=on,dumpdtb=$out -cpu cortex-a53 -m 2G -smp 2 -nographic
       '');
     };
-    coreboot.configFile = lib.mkDefault ./coreboot.config;
     loglevel = lib.mkDefault "debug";
     tinyboot.tty = lib.mkDefault "ttyAMA0";
+    coreboot.kconfig = with kconfig; {
+      BOARD_EMULATION = yes;
+      BOARD_EMULATION_QEMU_AARCH64 = yes;
+      FMDFILE = freeform ./layout.fmd;
+    };
   };
 }

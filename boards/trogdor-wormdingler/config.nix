@@ -1,4 +1,4 @@
-{ config, pkgs, lib, ... }: {
+{ config, pkgs, lib, kconfig, ... }: {
   config = lib.mkIf (config.board == "trogdor-wormdingler") {
     platforms = [ "aarch64-linux" ];
     linux = {
@@ -7,7 +7,12 @@
       commandLine = [ "pd_ignore_unused" "clk_ignore_unused" ];
       dtbPattern = "sc7180-trogdor-wormdingler*";
     };
-    coreboot.configFile = lib.mkDefault ./coreboot.config;
     tinyboot.tty = "ttyMSM0";
+    coreboot.kconfig = with kconfig; {
+      USE_QC_BLOBS = yes;
+      VENDOR_GOOGLE = yes;
+      BOARD_GOOGLE_WORMDINGLER = yes;
+      FMDFILE = freeform ./layout.fmd;
+    };
   };
 }
