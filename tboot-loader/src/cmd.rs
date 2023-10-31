@@ -4,7 +4,7 @@ use log::error;
 
 use crate::boot_loader::LoaderType;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
     Loader(Option<LoaderType>),
     Help(Option<String>),

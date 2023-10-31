@@ -54,11 +54,14 @@ pub fn run_shell(tx: Sender<ClientToServer>, rx: Receiver<ServerToClient>) {
                     }
                 };
             }
-            Err(e) => error!("readline error: {e}"),
+            Err(e) => error!("read line error: {e}"),
         }
 
         match rx.recv().unwrap() {
-            ServerToClient::Stop => break,
+            ServerToClient::Stop => {
+                debug!("exiting shell");
+                break;
+            },
             ServerToClient::ServerIsReady => {}
         };
     }

@@ -20,7 +20,7 @@ use shell::{run_shell, wait_for_user_presence};
 use std::{io::Write, time::Duration};
 use std::{os::fd::AsRawFd, path::PathBuf, sync::mpsc};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ClientToServer {
     Command(Command),
     UserIsPresent,
@@ -45,12 +45,12 @@ fn prepare_boot() -> anyhow::Result<Outcome> {
     let user_presence_tx = client_tx.clone();
     let user_presence_thread = std::thread::spawn(move || wait_for_user_presence(user_presence_tx));
 
+    let mut user_is_present = false;
     let mut outcome: Option<Outcome> = None;
+    let mut stdout = std::io::stdout();
 
     // TODO(jared): fetch boot order from some nonvolatile storage
     let boot_loaders: Vec<Box<dyn LinuxBootLoader>> = vec![Box::new(BlsBootLoader::new())];
-
-    let mut stdout = std::io::stdout();
 
     'autoboot: for loader in boot_loaders {
         let mut loader = Loader::from(loader);
@@ -64,7 +64,7 @@ fn prepare_boot() -> anyhow::Result<Outcome> {
                 for boot_dev in boot_devices {
                     info!("using boot device {}", boot_dev.name);
 
-                    println!("press ENTER to stop boot");
+                    println!("press <ENTER> to stop boot");
 
                     print!("booting in ");
                     stdout.flush().expect("flush failed");
@@ -75,7 +75,10 @@ fn prepare_boot() -> anyhow::Result<Outcome> {
                         stdout.flush().expect("flush failed");
 
                         match server_rx.recv_timeout(TICK_DURATION) {
-                            Ok(ClientToServer::UserIsPresent) => break 'autoboot,
+                            Ok(ClientToServer::UserIsPresent) => {
+                                user_is_present = true;
+                                break 'autoboot;
+                            }
                             _ => {}
                         }
 
@@ -114,12 +117,22 @@ fn prepare_boot() -> anyhow::Result<Outcome> {
     if let Some(outcome) = outcome {
         Ok(outcome)
     } else {
-        let client_thread = std::thread::spawn(move || run_shell(client_tx, client_rx));
-        let outcome = handle_commands(server_tx, server_rx);
+        if !user_is_present {
+            println!("failed to boot");
+            println!("press <ENTER> to enter interactive mode");
+
+            assert_eq!(server_rx.recv().unwrap(), ClientToServer::UserIsPresent);
+        }
+
         user_presence_thread
             .join()
             .expect("failed to join user presence thread");
-        client_thread.join().expect("failed to join client thread");
+
+        let shell_thread = std::thread::spawn(move || run_shell(client_tx, client_rx));
+        let outcome = handle_commands(server_tx, server_rx);
+
+        shell_thread.join().expect("failed to join shell thread");
+
         Ok(outcome)
     }
 }
@@ -132,8 +145,8 @@ fn handle_commands(
     let mut selected: Option<LinuxBootEntry> = None;
 
     loop {
-        // ensure that stdout is flushed to before indicating that the server is ready to receive
-        // new commands
+        // ensure that stdout buffer is flushed before indicating that the server is ready to
+        // receive new commands
         std::io::stdout().flush().unwrap();
         server_tx.send(ServerToClient::ServerIsReady).unwrap();
 

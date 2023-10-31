@@ -2,7 +2,7 @@ use std::{fmt::Display, path::PathBuf, str::FromStr, time::Duration};
 
 pub mod disk;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LoaderType {
     Disk,
 }
