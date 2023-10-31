@@ -1,5 +1,5 @@
 use std::{
-    io::Read,
+    io::{Read, Write},
     sync::mpsc::{Receiver, Sender},
 };
 
@@ -28,19 +28,22 @@ pub fn run_shell(tx: Sender<ClientToServer>, rx: Receiver<ServerToClient>) {
         ServerToClient::ServerIsReady => {}
     }
 
-    let mut rl = rustyline::DefaultEditor::new().unwrap();
-    rl.save_history("/run/history").unwrap();
+    let mut stdout = std::io::stdout();
 
     loop {
-        let readline = rl.readline(PROMPT);
+        print!("{PROMPT}");
+        stdout.flush().unwrap();
 
-        match readline {
-            Ok(line) => {
-                if let Err(e) = rl.add_history_entry(line.clone()) {
-                    debug!("failed to add input to history: {e}");
+        let mut input = String::new();
+
+        match std::io::stdin().read_line(&mut input) {
+            Ok(bytes_read) => {
+                // remove newline
+                if bytes_read > 0 {
+                    input.truncate(bytes_read - 1);
                 }
 
-                match cmd::parse_input(line) {
+                match cmd::parse_input(input) {
                     Err(e) => {
                         error!("failed to parse input: {e}");
                         continue;
