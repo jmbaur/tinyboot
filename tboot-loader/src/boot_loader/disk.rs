@@ -315,7 +315,11 @@ impl Disk {
         mount::mount(
             Some(&partition_chardev_path),
             &mountpoint,
-            Some(crate::fs::detect_fs_type(&partition_chardev_path)?.as_str()),
+            Some(
+                crate::fs::detect_fs_type(std::fs::File::open(&partition_chardev_path)?)
+                    .ok_or(anyhow::anyhow!("could not detect fstype"))?
+                    .as_str(),
+            ),
             MsFlags::MS_NOEXEC | MsFlags::MS_NOSUID | MsFlags::MS_NODEV,
             None::<&[u8]>,
         )?;
