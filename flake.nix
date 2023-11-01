@@ -20,9 +20,6 @@
         imports = [ ./module.nix ];
         nixpkgs.overlays = [ self.overlays.default ];
       };
-      nixosConfigurations.default = nixpkgs.lib.nixosSystem {
-        modules = [ self.nixosModules.default ./test/module.nix ];
-      };
       overlays.default = final: prev: {
         tinyboot = prev.pkgsStatic.callPackage ./. { };
         tinybootKernelConfigs = prev.lib.mapAttrs (config: _: ./kernel-configs/${config}) (builtins.readDir ./kernel-configs);
@@ -41,8 +38,8 @@
       });
       apps = forAllSystems ({ pkgs, system, ... }: (
         let
-          nixosSystem = self.nixosConfigurations.default.extendModules {
-            modules = [ ({ ... }: { nixpkgs.hostPlatform = system; }) ];
+          nixosSystem = nixpkgs.lib.nixosSystem {
+            modules = [ self.nixosModules.default ./test/module.nix ({ nixpkgs.hostPlatform = system; }) ];
           };
         in
         {
