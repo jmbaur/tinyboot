@@ -1,22 +1,20 @@
 { config, pkgs, lib, kconfig, ... }:
 let
-  tinyboot = pkgs.tinyboot.override {
-    corebootSupport = config.coreboot.enable;
-  };
   boards = builtins.readDir ./boards;
+  tinyboot = pkgs.tinyboot.override { corebootSupport = config.coreboot.enable; };
   buildFitImage = pkgs.callPackage ./fitimage { };
-  installInitrd = pkgs.callPackage ./initramfs.nix {
-    extraContents = [
+  installInitrd = pkgs.makeInitrdNG {
+    compressor = "xz";
+    contents = [
       { object = "${config.flashrom.package}/bin/flashrom"; symlink = "/bin/flashrom"; }
-    ];
+    ] ++ map (symlink: { inherit symlink; object = "${tinyboot}/bin/tboot-install"; }) [ "/init" "/bin/nologin" ];
   };
-  updateInitrd = pkgs.callPackage ./initramfs.nix {
-    extraContents = [
+  updateInitrd = pkgs.makeInitrdNG {
+    compressor = "xz";
+    contents = [
       { object = config.build.firmware; symlink = "/update.rom"; }
       { object = "${config.flashrom.package}/bin/flashrom"; symlink = "/bin/flashrom"; }
-      { object = "${tinyboot}/bin/tboot-update"; symlink = "/init"; }
-      { object = "${tinyboot}/bin/tboot-update"; symlink = "/bin/nologin"; }
-    ];
+    ] ++ map (symlink: { inherit symlink; object = "${tinyboot}/bin/tboot-update"; }) [ "/init" "/bin/nologin" ];
   };
   testInitrd = pkgs.makeInitrdNG {
     compressor = "xz";
@@ -74,10 +72,18 @@ in
       commandLine = mkOption { type = types.listOf types.str; default = [ ]; };
       dtb = mkOption { type = types.nullOr types.path; default = null; };
       dtbPattern = mkOption { type = types.nullOr types.str; default = null; };
-      firmware = mkOption { type = types.nullOr types.path; default = null; };
+      firmware = mkOption {
+        type = types.listOf (types.submodule {
+          options.dir = mkOption { type = types.str; };
+          options.pattern = mkOption { type = types.str; };
+        });
+        default = [ ];
+      };
     };
     coreboot = {
       enable = mkEnableOption "coreboot integration" // { default = true; };
+      wpRange.start = mkOption { readOnly = true; type = types.str; };
+      wpRange.length = mkOption { readOnly = true; type = types.str; };
       kconfig = kconfigOption;
       vpd.ro = vpdOption;
       vpd.rw = vpdOption;
@@ -96,7 +102,7 @@ in
     };
     loglevel = mkOption {
       type = types.enum [ "off" "error" "warn" "info" "debug" "trace" ];
-      default = "warn";
+      default = "info";
     };
     tinyboot.tty = mkOption { type = types.str; default = "tty1"; };
   };
@@ -112,41 +118,49 @@ in
 
     coreboot.vpd.ro.pubkey = config.verifiedBoot.signingPublicKey;
     coreboot.kconfig = with kconfig; {
-      PAYLOAD_FILE = freeform "";
-      PAYLOAD_FIT = if pkgs.hostPlatform.isAarch64 then yes else no;
-      PAYLOAD_FIT_SUPPORT = if pkgs.hostPlatform.isAarch64 then yes else no;
-      PAYLOAD_NONE = if pkgs.hostPlatform.isx86_64 then yes else no;
+      "CONFIG_DEFAULT_CONSOLE_LOGLEVEL_${toString { "off" = 2; "error" = 3; "warn" = 4; "info" = 6; "debug" = 7; "trace" = 8; }.${config.loglevel}}" = yes;
       VBOOT = yes;
-      VBOOT_ARMV8_CE_SHA256_ACCELERATION = if pkgs.hostPlatform.isAarch64 then yes else no;
       VBOOT_FIRMWARE_PRIVKEY = freeform config.verifiedBoot.vbootFirmwarePrivkey;
       VBOOT_KERNEL_KEY = freeform config.verifiedBoot.vbootKernelKey;
       VBOOT_KEYBLOCK = freeform config.verifiedBoot.vbootKeyblock;
       VBOOT_RECOVERY_KEY = freeform config.verifiedBoot.vbootRecoveryKey;
       VBOOT_ROOT_KEY = freeform config.verifiedBoot.vbootRootKey;
       VBOOT_SIGN = no; # don't sign during build
-      VBOOT_SLOTS_RW_A = yes;
-      VBOOT_X86_SHA256_ACCELERATION=if pkgs.hostPlatform.isx86_64 then yes else no;
       VPD = yes;
+    } // lib.optionalAttrs pkgs.hostPlatform.isx86_64 {
+      LINUX_INITRD = freeform "${config.build.initrd}/initrd";
+      PAYLOAD_FILE = freeform "${config.build.linux}/${pkgs.stdenv.hostPlatform.linux-kernel.target}";
+      PAYLOAD_LINUX = yes;
+      VBOOT_SLOTS_RW_AB = lib.mkDefault yes; # x86_64 spi flash is usually large enough for 3 vboot slots
+      VBOOT_X86_SHA256_ACCELERATION = yes;
+    } // lib.optionalAttrs pkgs.hostPlatform.isAarch64 {
+      PAYLOAD_FILE = freeform "${config.build.fitImage}/uImage";
+      PAYLOAD_FIT = yes;
+      PAYLOAD_FIT_SUPPORT = yes;
+      PAYLOAD_NONE = no;
+      VBOOT_ARMV8_CE_SHA256_ACCELERATION = yes;
+      VBOOT_SLOTS_RW_A = lib.mkDefault yes; # aarch64 spi flash is usually not large enough for 3 vboot slots
     };
 
     build = {
-      baseInitrd = pkgs.callPackage ./initramfs.nix {
-        extraContents = [
-          { object = ./etc/ima_policy.conf; symlink = "/etc/ima/policy.conf"; }
-        ] ++ (lib.optional (config.linux.firmware != null) { object = config.linux.firmware; symlink = "/lib/firmware"; });
+      baseInitrd = pkgs.makeInitrdNG {
+        compressor = "xz";
+        contents = [{ object = ./etc/ima_policy.conf; symlink = "/etc/ima/policy.conf"; }] ++ [{
+          symlink = "/lib/firmware";
+          object = pkgs.buildPackages.runCommand "linux-firmware" { } ("mkdir -p $out;" + lib.concatLines (map
+            ({ dir, pattern }: ''
+              pushd ${pkgs.linux-firmware}/lib/firmware
+              find ${dir} -type f -name "${pattern}" -exec install -D --target-directory=$out/${dir} {} \;
+              popd
+            '')
+            config.linux.firmware));
+        }];
       };
       initrd = config.build.baseInitrd.override {
-        prepend =
-          let
-            initrd = (pkgs.makeInitrdNG {
-              compressor = "cat"; # prepend cannot be used with a compressed initrd
-              contents = [
-                { object = "${tinyboot}/bin/tboot-loader"; symlink = "/init"; }
-                { object = "${tinyboot}/bin/tboot-loader"; symlink = "/bin/nologin"; }
-              ];
-            });
-          in
-          [ "${initrd}/initrd" ];
+        prepend = (pkgs.makeInitrdNG {
+          compressor = "cat"; # prepend cannot be used with a compressed initrd
+          contents = map (symlink: { inherit symlink; object = "${tinyboot}/bin/tboot-loader"; }) [ "/init" "/bin/nologin" ];
+        }) + "/initrd";
       };
       linux = (pkgs.callPackage ./linux.nix {
         builtinCmdline = config.linux.commandLine;
@@ -177,24 +191,6 @@ in
           ${lib.concatLines (lib.mapAttrsToList (applyVpd "RO_VPD") config.coreboot.vpd.ro)}
           vpd -f $out -i RW_VPD -O
           ${lib.concatLines (lib.mapAttrsToList (applyVpd "RW_VPD") config.coreboot.vpd.rw)}
-
-          for section in "FW_MAIN_A" "COREBOOT"; do
-            cbfstool $out expand -r $section
-            ${if pkgs.stdenv.hostPlatform.isx86_64 then ''
-            cbfstool $out add-payload \
-              -r $section \
-              -n fallback/payload \
-              -f ${config.build.linux}/${pkgs.stdenv.hostPlatform.linux-kernel.target} \
-              -I ${config.build.initrd}/initrd
-            '' else if pkgs.stdenv.hostPlatform.isAarch64 then ''
-            cbfstool $out add \
-              -r $section \
-              -n fallback/payload \
-              -t fit_payload \
-              -f ${config.build.fitImage}/uImage
-            '' else throw "unsupported architecture"}
-            cbfstool $out truncate -r $section
-          done
 
           futility sign \
             --signprivate "${config.verifiedBoot.vbootFirmwarePrivkey}" \

@@ -1,6 +1,5 @@
 use std::{fs::Permissions, os::unix::prelude::PermissionsExt};
 
-use log::error;
 use nix::{
     libc::{
         self, B115200, CBAUD, CBAUDEX, CLOCAL, CREAD, CRTSCTS, CSIZE, CSTOPB, ECHO, ECHOCTL, ECHOE,
@@ -87,28 +86,9 @@ pub fn setup_system() {
     )
     .expect("failed to mount to /dev/pts");
 
-    std::fs::create_dir_all("/dev/shm").expect("failed to create /dev/shm");
-    nix::mount::mount(
-        None::<&str>,
-        "/dev/shm",
-        Some("tmpfs"),
-        MsFlags::MS_NOSUID | MsFlags::MS_NODEV,
-        None::<&str>,
-    )
-    .expect("failed to mount to /dev/shm");
-
-    // set permissions on /dev/shm
-    std::fs::set_permissions("/dev/shm", Permissions::from_mode(0o777))
-        .expect("failed to set permissions on /dev/shm");
-
-    std::thread::spawn(move || loop {
-        match std::process::Command::new("/bin/mdevd")
-            .spawn()
-            .expect("failed to start mdevd")
-            .wait()
-        {
-            Ok(status) => error!("mdev exited with status {status}"),
-            Err(e) => error!("mdev failed to run: {e}"),
+    std::thread::spawn(move || {
+        if let Err(e) = crate::dev::listen_and_create_devices() {
+            panic!("listen_and_create_devices failed: {e}");
         }
     });
 }

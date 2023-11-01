@@ -1,12 +1,17 @@
 { config, pkgs, lib, kconfig, ... }: {
   config = lib.mkIf (config.board == "brya-banshee") {
     platforms = [ "x86_64-linux" ];
-    linux.configFile = with pkgs.tinybootKernelConfigs; lib.mkDefault (pkgs.concatText "brya-banshee-kernel.config" [ generic x86_64 chromebook ./kernel.config ]);
-    coreboot.kconfig = with kconfig; {
-      BOARD_GOOGLE_BANSHEE = yes;
-      FMDFILE = freeform ./layout.fmd;
-      VBOOT_NO_BOARD_SUPPORT = yes; # TODO(jared): figure out why this is needed
-      VENDOR_GOOGLE = yes;
+    linux.configFile = with pkgs.tinybootKernelConfigs; lib.mkDefault (pkgs.concatText "brya-banshee-kernel.config" [ generic video x86_64 chromebook ./kernel.config ]);
+    coreboot = {
+      # start=0x01800000 length=0x00800000 (upper 1/4)
+      wpRange.start = "0x01800000";
+      wpRange.length = "0x00800000";
+      kconfig = with kconfig; {
+        BOARD_GOOGLE_BANSHEE = yes;
+        FMDFILE = freeform ./layout.fmd;
+        VBOOT_NO_BOARD_SUPPORT = yes; # TODO(jared): figure out why this is needed
+        VENDOR_GOOGLE = yes;
+      };
     };
   };
 }

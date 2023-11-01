@@ -1,7 +1,7 @@
 { config, pkgs, lib, kconfig, ... }: {
   config = lib.mkIf (config.board == "volteer-elemi") {
     platforms = [ "x86_64-linux" ];
-    linux.configFile = with pkgs.tinybootKernelConfigs; lib.mkDefault (pkgs.concatText "volteer-elemi-kernel.config" [ generic x86_64 chromebook ./kernel.config ]);
+    linux.configFile = with pkgs.tinybootKernelConfigs; lib.mkDefault (pkgs.concatText "volteer-elemi-kernel.config" [ generic video x86_64 chromebook ./kernel.config ]);
     coreboot.kconfig = with kconfig; {
       BOARD_GOOGLE_ELEMI = yes;
       FMDFILE = freeform ./layout.fmd;

@@ -7,12 +7,10 @@ fn update() -> std::io::Result<()> {
     let args: Vec<String> = std::env::args().collect();
     let cfg = tboot::config::Config::from_args(&args);
 
-    let mut tty = PathBuf::from("/dev");
-    tty.push(cfg.tty);
     if let Ok(tty) = std::fs::OpenOptions::new()
         .write(true)
         .read(true)
-        .open(&tty)
+        .open(PathBuf::from("/dev").join(cfg.tty))
     {
         let fd = tty.as_raw_fd();
         unsafe { libc::dup2(fd, libc::STDIN_FILENO) };

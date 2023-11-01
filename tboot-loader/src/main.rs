@@ -292,8 +292,7 @@ pub fn main() -> ! {
         error!("failed to copy static resolv.conf to /etc/resolv.conf: {e}");
     }
 
-    let mut tty = PathBuf::from("/dev");
-    tty.push(cfg.tty);
+    let tty = PathBuf::from("/dev").join(cfg.tty);
     if let Ok(tty) = std::fs::OpenOptions::new()
         .write(true)
         .read(true)

@@ -1,3 +1,4 @@
+# TODO(jared): vboot not tested on this platform
 { config, pkgs, lib, kconfig, ... }: {
   imports = [ ../../qemu.nix ];
   config = lib.mkIf (config.board == "qemu-aarch64") {
@@ -9,7 +10,6 @@
         qemu-system-aarch64 -M virt,secure=on,virtualization=on,dumpdtb=$out -cpu cortex-a53 -m 2G -smp 2 -nographic
       '');
     };
-    loglevel = lib.mkDefault "debug";
     tinyboot.tty = lib.mkDefault "ttyAMA0";
     coreboot.kconfig = with kconfig; {
       BOARD_EMULATION = yes;

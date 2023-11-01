@@ -1,10 +1,8 @@
 { lib, pkgs, config, ... }: {
-  options.qemu.flags = with lib; mkOption {
-    type = types.listOf types.str;
-    default = [ ];
-  };
+  options.qemu.flags = with lib; mkOption { type = types.listOf types.str; default = [ ]; };
   config = {
     qemu.flags = [ "-kernel" "${config.build.linux}/kernel" ];
+    loglevel = lib.mkDefault "debug";
     build.qemuScript = pkgs.writeShellApplication {
       name = "tinyboot-qemu";
       runtimeInputs = with pkgs.pkgsBuildBuild; [ swtpm qemu ];
