@@ -1,8 +1,0 @@
-[package]
-name = "tboot-update"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-nix.workspace = true
-tboot.workspace = true

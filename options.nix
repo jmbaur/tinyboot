@@ -3,19 +3,6 @@ let
   boards = builtins.readDir ./boards;
   tinyboot = pkgs.tinyboot.override { corebootSupport = config.coreboot.enable; };
   buildFitImage = pkgs.callPackage ./fitimage { };
-  installInitrd = pkgs.makeInitrdNG {
-    compressor = "xz";
-    contents = [
-      { object = "${config.flashrom.package}/bin/flashrom"; symlink = "/bin/flashrom"; }
-    ] ++ map (symlink: { inherit symlink; object = "${tinyboot}/bin/tboot-install"; }) [ "/init" "/bin/nologin" ];
-  };
-  updateInitrd = pkgs.makeInitrdNG {
-    compressor = "xz";
-    contents = [
-      { object = config.build.firmware; symlink = "/update.rom"; }
-      { object = "${config.flashrom.package}/bin/flashrom"; symlink = "/bin/flashrom"; }
-    ] ++ map (symlink: { inherit symlink; object = "${tinyboot}/bin/tboot-update"; }) [ "/init" "/bin/nologin" ];
-  };
   testInitrd = pkgs.makeInitrdNG {
     compressor = "xz";
     contents = [{ object = "${pkgs.busybox}/bin/busybox"; symlink = "/init"; } { object = "${pkgs.busybox}/bin"; symlink = "/bin"; }];
@@ -119,6 +106,7 @@ in
     coreboot.vpd.ro.pubkey = config.verifiedBoot.signingPublicKey;
     coreboot.kconfig = with kconfig; {
       "CONFIG_DEFAULT_CONSOLE_LOGLEVEL_${toString { "off" = 2; "error" = 3; "warn" = 4; "info" = 6; "debug" = 7; "trace" = 8; }.${config.loglevel}}" = yes;
+      PAYLOAD_NONE = no;
       VBOOT = yes;
       VBOOT_FIRMWARE_PRIVKEY = freeform config.verifiedBoot.vbootFirmwarePrivkey;
       VBOOT_KERNEL_KEY = freeform config.verifiedBoot.vbootKernelKey;
@@ -137,7 +125,6 @@ in
       PAYLOAD_FILE = freeform "${config.build.fitImage}/uImage";
       PAYLOAD_FIT = yes;
       PAYLOAD_FIT_SUPPORT = yes;
-      PAYLOAD_NONE = no;
       VBOOT_ARMV8_CE_SHA256_ACCELERATION = yes;
       VBOOT_SLOTS_RW_A = lib.mkDefault yes; # aarch64 spi flash is usually not large enough for 3 vboot slots
     };
@@ -198,14 +185,6 @@ in
             --kernelkey "${config.verifiedBoot.vbootKernelKey}" \
             $out
         '';
-      installScript = pkgs.writeShellScriptBin "install-tinyboot" ''
-        kexec -l ${config.build.linux}/${pkgs.stdenv.hostPlatform.linux-kernel.target} --initrd=${installInitrd}/initrd
-        systemctl kexec
-      '';
-      updateScript = pkgs.writeShellScriptBin "update-tinyboot" ''
-        kexec -l ${config.build.linux}/${pkgs.stdenv.hostPlatform.linux-kernel.target} --initrd=${updateInitrd}/initrd
-        systemctl kexec
-      '';
       # useful for testing kernel configurations
       testScript =
         let

@@ -235,13 +235,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tboot-install"
-version = "0.1.0"
-dependencies = [
- "tboot",
-]
-
-[[package]]
 name = "tboot-loader"
 version = "0.1.0"
 dependencies = [
@@ -261,14 +254,6 @@ dependencies = [
  "argh",
  "bootspec",
  "serde_json",
-]
-
-[[package]]
-name = "tboot-update"
-version = "0.1.0"
-dependencies = [
- "nix",
- "tboot",
 ]
 
 [[package]]

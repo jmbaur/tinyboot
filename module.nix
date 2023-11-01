@@ -29,6 +29,11 @@ in
             MFD_INTEL_LPSS_PCI = yes;
           };
         }
+        {
+          name = "allow-flashrom";
+          patch = null;
+          extraStructuredConfig.IO_STRICT_DEVMEM = lib.kernel.no;
+        }
       ];
       boot.loader.supportsInitrdSecrets = lib.mkForce false;
       boot.loader.efi.canTouchEfiVariables = lib.mkForce false;
@@ -37,7 +42,7 @@ in
       boot.loader.external.installHook = "${pkgs.tinyboot}/bin/tboot-nixos-install --efi-sys-mount-point ${config.boot.loader.efi.efiSysMountPoint} --sign-file ${cfg.build.linux}/bin/sign-file --private-key ${cfg.verifiedBoot.signingPrivateKey} --public-key ${cfg.verifiedBoot.signingPublicKey}";
     }
     (lib.mkIf cfg.coreboot.enable {
-      environment.systemPackages = with pkgs; [ cbmem cbfstool nvramtool cfg.build.updateScript ];
+      environment.systemPackages = with pkgs; [ cbmem cbfstool nvramtool ];
 
       programs.flashrom = {
         enable = true;
@@ -46,6 +51,7 @@ in
 
       system.build = { inherit (cfg.build) firmware; };
 
+      boot.kernelPackages = lib.mkDefault pkgs.linuxPackages_testing;
       boot.kernelPatches = with lib.kernel; with (whenHelpers config.boot.kernelPackages.kernel.version); [{
         name = "enable-coreboot";
         patch = null;
