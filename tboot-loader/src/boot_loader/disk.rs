@@ -66,9 +66,11 @@ impl BlsEntry {
         let Some(file_name) = conf_path.as_ref().file_stem() else {
             anyhow::bail!("no file name");
         };
+
         let Some(file_name) = file_name.to_str() else {
             anyhow::bail!("invalid path");
         };
+
         entry.name = file_name.to_string();
 
         for line in entry_conf.lines() {
@@ -336,6 +338,13 @@ impl Disk {
             error!("disk not mounted");
             return;
         };
+
+        if let Ok(entries_srel) = std::fs::read_to_string(mountpoint.join("loader/entries.srel")) {
+            if entries_srel != "type1\n" {
+                debug!("/loader/entries.srel not type1, skipping disk");
+                return;
+            }
+        }
 
         let entry_dir = mountpoint.join("loader/entries");
         let entries = match std::fs::read_dir(&entry_dir) {

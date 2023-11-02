@@ -195,8 +195,13 @@ fn install_generation(
 fn main() {
     let args: Args = argh::from_env();
 
-    std::fs::create_dir_all(args.efi_sys_mount_point.join("loader/entries")).unwrap();
     std::fs::create_dir_all(args.efi_sys_mount_point.join("EFI/nixos")).unwrap();
+    std::fs::create_dir_all(args.efi_sys_mount_point.join("loader/entries")).unwrap();
+    std::fs::write(
+        args.efi_sys_mount_point.join("loader/entries.srel"),
+        "type1\n",
+    )
+    .unwrap();
 
     let mut state = State::default();
     state.args = args;
