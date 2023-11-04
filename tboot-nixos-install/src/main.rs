@@ -5,7 +5,7 @@ use std::{
 
 use argh::FromArgs;
 
-#[derive(FromArgs, Debug, Default)]
+#[derive(FromArgs, Debug)]
 /// Install nixos boot loader files
 struct Args {
     /// the sign-file executable to use (built with the linux kernel)
@@ -24,16 +24,30 @@ struct Args {
     #[argh(option)]
     efi_sys_mount_point: PathBuf,
 
+    /// maximum number of tries a boot entry has before the bootloader will consider the entry
+    /// "bad"
+    #[argh(option)]
+    max_tries: u32,
+
     /// the nixos system closure of the current activation
     #[argh(positional)]
     default_nixos_system_closure: PathBuf,
 }
 
-#[derive(Default)]
-struct State {
-    args: Args,
+struct State<'a> {
+    args: &'a Args,
     known_efi_files: HashMap<PathBuf, ()>,
     known_entry_files: HashMap<PathBuf, ()>,
+}
+
+impl<'a> State<'a> {
+    fn new(args: &'a Args) -> Self {
+        Self {
+            args,
+            known_efi_files: HashMap::default(),
+            known_entry_files: HashMap::default(),
+        }
+    }
 }
 
 fn install_generation(
@@ -41,6 +55,7 @@ fn install_generation(
     entry_number: u32,
     generation: &bootspec::v1::GenerationV1,
     specialisation: Option<&bootspec::SpecialisationName>,
+    max_tries: u32,
 ) {
     let mut entry_contents = format!(
         "title NixOS{}",
@@ -181,11 +196,12 @@ fn install_generation(
         .join("loader")
         .join("entries")
         .join(format!(
-            "nixos-generation-{}{}.conf",
+            "nixos-generation-{}{}+{}.conf",
             entry_number,
             specialisation
                 .map(|specialisation| format!("-specialisation-{specialisation}"))
-                .unwrap_or_default()
+                .unwrap_or_default(),
+            max_tries,
         ));
     std::fs::write(&entry_path, entry_contents).unwrap();
 
@@ -195,6 +211,8 @@ fn install_generation(
 fn main() {
     let args: Args = argh::from_env();
 
+    let mut state = State::new(&args);
+
     std::fs::create_dir_all(args.efi_sys_mount_point.join("EFI/nixos")).unwrap();
     std::fs::create_dir_all(args.efi_sys_mount_point.join("loader/entries")).unwrap();
     std::fs::write(
@@ -202,9 +220,6 @@ fn main() {
         "type1\n",
     )
     .unwrap();
-
-    let mut state = State::default();
-    state.args = args;
 
     let profiles_dir = std::fs::read_dir("/nix/var/nix/profiles").unwrap();
     for entry in profiles_dir {
@@ -266,10 +281,11 @@ fn main() {
                             entry_number,
                             generation,
                             Some(specialisation),
+                            args.max_tries,
                         )
                     });
 
-                install_generation(&mut state, entry_number, &generation, None);
+                install_generation(&mut state, entry_number, &generation, None, args.max_tries);
             }
             _ => {}
         }

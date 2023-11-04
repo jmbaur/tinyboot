@@ -9,10 +9,10 @@ pub enum Command {
     Loader(Option<LoaderType>),
     Help(Option<String>),
     List,
-    Select((usize, usize)),
-    Boot,
+    Boot((Option<usize>, Option<usize>)),
     Reboot,
     Poweroff,
+    Dmesg,
 }
 
 pub fn parse_input(input: String) -> anyhow::Result<Option<Command>> {
@@ -27,13 +27,13 @@ pub fn parse_input(input: String) -> anyhow::Result<Option<Command>> {
     }
 
     Ok(Some(match cmd {
-        "boot" => Command::Boot,
+        "boot" => parse_boot(iter)?,
         "help" => Command::Help(iter.next().map(|s| s.to_string())),
         "list" => Command::List,
         "loader" => parse_loader(iter)?,
         "poweroff" => Command::Poweroff,
         "reboot" => Command::Reboot,
-        "select" => parse_select(iter)?,
+        "dmesg" => Command::Dmesg,
         _ => anyhow::bail!("unknown command '{input}'"),
     }))
 }
@@ -44,28 +44,28 @@ fn parse_loader(mut iter: SplitWhitespace<'_>) -> anyhow::Result<Command> {
     ))
 }
 
-fn parse_select(mut iter: SplitWhitespace<'_>) -> anyhow::Result<Command> {
+fn parse_boot(mut iter: SplitWhitespace<'_>) -> anyhow::Result<Command> {
     let dev = iter
         .next()
         .map(|dev| usize::from_str_radix(dev, 10))
-        .ok_or(anyhow::anyhow!("no device number specified"))??;
+        .transpose()?;
 
     let entry = iter
         .next()
         .map(|entry| usize::from_str_radix(entry, 10))
-        .ok_or(anyhow::anyhow!("no entry number specified"))??;
+        .transpose()?;
 
-    Ok(Command::Select((dev, entry)))
+    Ok(Command::Boot((dev, entry)))
 }
 
 pub fn print_help(cmd_to_help: Option<&str>) {
     match cmd_to_help.as_deref() {
         Some("list") => print_list_usage(),
-        Some("select") => print_select_usage(),
         Some("boot") => print_boot_usage(),
         Some("reboot") => print_reboot_usage(),
         Some("poweroff") => print_poweroff_usage(),
         Some("loader") => print_loader_usage(),
+        Some("dmesg") => print_dmesg_usage(),
         Some(_) => error!(""),
         None => print_all_usage(),
     }
@@ -94,8 +94,8 @@ fn print_reboot_usage() {
 fn print_all_usage() {
     println!();
     println!("list\t\tlist all boot entries");
-    println!("select\t\tselect a boot entry");
     println!("boot\t\tboot from selection");
+    println!("dmesg\t\tprint kernel logs");
     println!("reboot\t\treboot the machine");
     println!("poweroff\tpoweroff the machine");
 }
@@ -108,16 +108,6 @@ fn print_boot_usage() {
     println!();
     println!("boot");
     println!("{BOOT_USAGE}");
-}
-
-const SELECT_USAGE: &str = r#"
-Select an entry to boot from.
-"#;
-
-fn print_select_usage() {
-    println!();
-    println!("select");
-    println!("{SELECT_USAGE}");
 }
 
 const LIST_USAGE: &str = r#"
@@ -138,4 +128,14 @@ fn print_loader_usage() {
     println!();
     println!("loader");
     println!("{LOADER_USAGE}");
+}
+
+const DMESG_USAGE: &str = r#"
+Print kernel logs.
+"#;
+
+fn print_dmesg_usage() {
+    println!();
+    println!("dmesg");
+    println!("{DMESG_USAGE}");
 }

@@ -7,7 +7,10 @@ in
     type = types.submodule [
       { _module.args = { inherit pkgs; }; }
       ./options.nix
-      { options.enable = mkEnableOption "tinyboot bootloader"; }
+      {
+        options.enable = mkEnableOption "tinyboot bootloader";
+        options.maxFailedBootAttempts = mkOption { type = types.int; default = 3; };
+      }
     ];
     default = { };
   };
@@ -39,7 +42,7 @@ in
       boot.loader.efi.canTouchEfiVariables = lib.mkForce false;
       boot.bootspec.enable = true;
       boot.loader.external.enable = true;
-      boot.loader.external.installHook = "${pkgs.tinyboot}/bin/tboot-nixos-install --efi-sys-mount-point ${config.boot.loader.efi.efiSysMountPoint} --sign-file ${cfg.build.linux}/bin/sign-file --private-key ${cfg.verifiedBoot.signingPrivateKey} --public-key ${cfg.verifiedBoot.signingPublicKey}";
+      boot.loader.external.installHook = "${pkgs.tinyboot}/bin/tboot-nixos-install --efi-sys-mount-point ${config.boot.loader.efi.efiSysMountPoint} --sign-file ${cfg.build.linux}/bin/sign-file --private-key ${cfg.verifiedBoot.signingPrivateKey} --public-key ${cfg.verifiedBoot.signingPublicKey} --max-tries ${toString cfg.maxFailedBootAttempts}";
     }
     (lib.mkIf cfg.coreboot.enable {
       environment.systemPackages = with pkgs; [ cbmem cbfstool nvramtool ];
@@ -51,7 +54,7 @@ in
 
       system.build = { inherit (cfg.build) firmware; };
 
-      boot.kernelPackages = lib.mkDefault pkgs.linuxPackages_testing;
+      boot.kernelPackages = lib.mkDefault pkgs.linuxPackages_latest;
       boot.kernelPatches = with lib.kernel; with (whenHelpers config.boot.kernelPackages.kernel.version); [{
         name = "enable-coreboot";
         patch = null;

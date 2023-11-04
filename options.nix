@@ -54,7 +54,7 @@ in
       programmer = mkOption { type = types.str; default = "internal"; };
     };
     linux = {
-      package = mkOption { type = types.package; default = pkgs.linux_testing; };
+      package = mkOption { type = types.package; default = pkgs.linux_latest; };
       configFile = mkOption { type = types.path; };
       commandLine = mkOption { type = types.listOf types.str; default = [ ]; };
       dtb = mkOption { type = types.nullOr types.path; default = null; };

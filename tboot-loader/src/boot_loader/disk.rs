@@ -1,19 +1,20 @@
-use crate::boot_loader::LinuxBootLoader;
+use crate::boot_loader::BootLoader;
 use log::{debug, error, info, trace};
 use nix::mount::{self, MntFlags, MsFlags};
 use std::{
     cmp::Ordering,
     collections::HashMap,
+    fmt::Display,
     path::{Path, PathBuf},
     str::FromStr,
     time::Duration,
 };
 
-use super::{BootDevice, LinuxBootEntry, LoaderType};
+use super::{BootDevice, BootEntry, LinuxBootParts, LoaderType};
 
 const DISK_MNT_PATH: &str = "/mnt/disk";
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum EfiArch {
     Ia32,
     X64,
@@ -38,8 +39,11 @@ impl FromStr for EfiArch {
 }
 
 // Documentation: https://uapi-group.org/specifications/specs/boot_loader_specification/#type-1-boot-loader-specification-entries
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct BlsEntry {
+    entry_path: PathBuf,
+    tries_left: Option<u32>,
+    tries_done: Option<u32>,
     name: String,
     pretty_name: String,
     title: Option<String>,
@@ -53,27 +57,122 @@ struct BlsEntry {
     linux: Option<PathBuf>,
     initrd: Option<Vec<PathBuf>>,
     options: Option<String>,
+    is_default: bool,
+}
+
+impl Display for BlsEntry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.pretty_name)
+    }
+}
+
+impl BootEntry for BlsEntry {
+    fn is_default(&self) -> bool {
+        self.is_default
+    }
+
+    fn select(&self) -> LinuxBootParts {
+        // this should be checked by "impl TryInto<Box<dyn BootEntry>> for BlsEntry"
+        let linux = self
+            .linux
+            .clone()
+            .expect("path to linux kernel is not present");
+
+        let initrd = if let Some(initrds) = self.initrd.clone() {
+            if initrds.len() > 1 {
+                info!("cannot use multiple initrds with KEXEC_FILE_LOAD and modsig appraisal");
+                info!("using first initrd");
+            }
+            initrds.into_iter().next()
+        } else {
+            None
+        };
+
+        let cmdline = self.options.clone();
+
+        self.boot_count();
+
+        LinuxBootParts {
+            linux,
+            initrd,
+            cmdline,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
+enum BlsEntryError {
+    MissingConfSuffix,
+    // only occurs when a TriesDone is specified
+    MissingTriesLeft,
+    InvalidTriesSyntax,
+    MissingFileName,
+}
+
+/// Parses an entry filename and returns a tuple of the form (entry name, tries done, tries left).
+/// It follows the convention layed out the boot counter section of the BootLoaderSpec.
+/// https://uapi-group.org/specifications/specs/boot_loader_specification/#boot-counting
+fn parse_entry_filename(filename: &str) -> Result<(&str, Option<u32>, Option<u32>), BlsEntryError> {
+    let filename = filename
+        .strip_suffix(".conf")
+        .ok_or(BlsEntryError::MissingConfSuffix)?;
+
+    match filename.split_once('+') {
+        None => {
+            let mut reverse_chars = filename.chars().rev();
+            let last_char_is_numeric = reverse_chars
+                .next()
+                .map(char::is_numeric)
+                .unwrap_or_default();
+
+            if last_char_is_numeric {
+                while let Some(c) = reverse_chars.next() {
+                    if c == '-' {
+                        return Err(BlsEntryError::MissingTriesLeft);
+                    }
+                }
+            }
+
+            return Ok((filename, None, None));
+        }
+        Some((name, counter_info)) => match counter_info.split_once('-') {
+            None => {
+                let tries_done = u32::from_str_radix(counter_info, 10)
+                    .map_err(|_| BlsEntryError::InvalidTriesSyntax)?;
+                return Ok((name, Some(tries_done), None));
+            }
+            Some((tries_done, tries_left)) => {
+                let tries_done = u32::from_str_radix(tries_done, 10)
+                    .map_err(|_| BlsEntryError::InvalidTriesSyntax)?;
+                let tries_left = u32::from_str_radix(tries_left, 10)
+                    .map_err(|_| BlsEntryError::InvalidTriesSyntax)?;
+                return Ok((name, Some(tries_done), Some(tries_left)));
+            }
+        },
+    }
 }
 
 impl BlsEntry {
     fn parse_entry_conf(
         mountpoint: impl AsRef<Path>,
         conf_path: impl AsRef<Path>,
-        entry_conf: &str,
-    ) -> anyhow::Result<BlsEntry> {
+        entry_contents: &str,
+    ) -> Result<BlsEntry, BlsEntryError> {
         let mut entry = BlsEntry::default();
 
-        let Some(file_name) = conf_path.as_ref().file_stem() else {
-            anyhow::bail!("no file name");
-        };
+        entry.entry_path = conf_path.as_ref().to_path_buf();
+        let filename = conf_path
+            .as_ref()
+            .file_name()
+            .ok_or(BlsEntryError::MissingFileName)?
+            .to_str()
+            .unwrap();
+        let (entry_name, tries_left, tries_done) = parse_entry_filename(filename)?;
+        entry.name = entry_name.to_string();
+        entry.tries_left = tries_left;
+        entry.tries_done = tries_done;
 
-        let Some(file_name) = file_name.to_str() else {
-            anyhow::bail!("invalid path");
-        };
-
-        entry.name = file_name.to_string();
-
-        for line in entry_conf.lines() {
+        for line in entry_contents.lines() {
             let Some((key, val)) = line.split_once(char::is_whitespace) else {
                 continue;
             };
@@ -169,74 +268,83 @@ impl BlsEntry {
 
         Ok(entry)
     }
+
+    fn boot_count(&self) {
+        let Some(tries_left) = self.tries_left else {
+            return;
+        };
+
+        let Some(entry_dir) = self.entry_path.parent() else {
+            return;
+        };
+
+        let new_tries_left = tries_left.checked_sub(1).unwrap_or(tries_left);
+
+        let new_entry_path = entry_dir.join(if let Some(tries_done) = self.tries_done {
+            format!(
+                "{}+{}-{}.conf",
+                self.name,
+                new_tries_left,
+                tries_done.checked_add(1).unwrap_or(tries_done),
+            )
+        } else {
+            format!("{}+{}.conf", self.name, new_tries_left)
+        });
+
+        info!(
+            "counting boot from {} tries left to {} tries left",
+            tries_left, new_tries_left
+        );
+
+        if let Err(e) = std::fs::rename(self.entry_path.as_path(), new_entry_path.as_path()) {
+            error!(
+                "failed to move entry file from {} to {}: {e}",
+                self.entry_path.display(),
+                new_entry_path.display()
+            );
+        }
+    }
 }
 
-impl TryInto<LinuxBootEntry> for &BlsEntry {
+impl TryInto<Box<dyn BootEntry>> for BlsEntry {
     type Error = anyhow::Error;
 
-    fn try_into(self) -> Result<LinuxBootEntry, Self::Error> {
+    fn try_into(self) -> Result<Box<dyn BootEntry>, Self::Error> {
         if self.efi.is_some() {
             anyhow::bail!("cannot boot efi");
         }
 
-        let Some(linux) = self.linux.clone() else {
+        if self.linux.is_none() {
             anyhow::bail!("cannot boot without linux");
-        };
+        }
 
-        let initrd = if let Some(initrds) = self.initrd.clone() {
-            if initrds.len() > 1 {
-                info!("cannot use multiple initrds with KEXEC_FILE_LOAD and modsig appraisal");
-                info!("using first initrd");
-            }
-            initrds.first().cloned()
-        } else {
-            None
-        };
+        if self
+            .tries_left
+            .map(|tries_left| tries_left == 0)
+            .unwrap_or_default()
+        {
+            anyhow::bail!("entry is bad");
+        }
 
-        let cmdline = self.options.clone();
-
-        let display = self.pretty_name.clone();
-
-        Ok(LinuxBootEntry {
-            display,
-            linux,
-            initrd,
-            cmdline,
-        })
+        Ok(Box::new(self) as _)
     }
 }
 
+#[derive(Clone)]
 struct Disk {
     diskseq: u64,
     device_path: PathBuf,
     entries: Vec<BlsEntry>,
     mountpoint: Option<PathBuf>,
-    loader_conf: Option<LoaderConf>,
+    timeout: Duration,
     removable: bool,
     vendor: Option<String>,
     model: Option<String>,
 }
 
-impl Into<BootDevice> for &mut Disk {
+impl Into<BootDevice> for Disk {
     fn into(self) -> BootDevice {
-        let (timeout, default_entry) = if let Some(conf) = &self.loader_conf {
-            (
-                conf.timeout,
-                self.entries
-                    .iter()
-                    .enumerate()
-                    .find_map(|(idx, entry)| {
-                        if Some(entry.name.as_str()) == conf.default_entry.as_deref() {
-                            Some(idx)
-                        } else {
-                            None
-                        }
-                    })
-                    .unwrap_or_default(),
-            )
-        } else {
-            (Duration::from_secs(10), 0)
-        };
+        let timeout = self.timeout;
 
         BootDevice {
             name: format!(
@@ -253,14 +361,13 @@ impl Into<BootDevice> for &mut Disk {
                 },
             ),
             timeout,
-            default_entry,
             entries: self
                 .entries
-                .iter()
+                .into_iter()
                 .filter_map(|entry| match entry.try_into() {
                     Ok(entry) => Some(entry),
                     Err(e) => {
-                        info!("could not convert entry {}: {e}", entry.name);
+                        info!("could not convert entry: {e}");
                         None
                     }
                 })
@@ -279,7 +386,7 @@ impl Disk {
             vendor: None,
             model: None,
             mountpoint: None,
-            loader_conf: None,
+            timeout: Duration::from_secs(10),
         };
 
         disk.removable = Self::get_attribute_bool(&disk.device_path, "removable");
@@ -331,7 +438,7 @@ impl Disk {
         Ok(())
     }
 
-    fn discover_entries(&mut self) {
+    fn discover_entries(&mut self, default_entry_name: Option<String>) {
         trace!("searching for BLS entries");
 
         let Some(mountpoint) = self.mountpoint.as_ref() else {
@@ -374,12 +481,15 @@ impl Disk {
                 }
             };
 
-            let Ok(parsed_entry) =
+            let Ok(mut parsed_entry) =
                 BlsEntry::parse_entry_conf(mountpoint.as_path(), &entry_path, &entry_conf_contents)
             else {
                 error!("failed to parse entry at {:?}", entry_path);
                 continue;
             };
+
+            parsed_entry.is_default =
+                Some(parsed_entry.name.as_str()) == default_entry_name.as_deref();
 
             debug!("new entry added {}", entry_path.display());
             self.entries.push(parsed_entry);
@@ -413,9 +523,19 @@ impl Disk {
     }
 }
 
+#[derive(Clone)]
 struct LoaderConf {
     default_entry: Option<String>,
     timeout: Duration,
+}
+
+impl Default for LoaderConf {
+    fn default() -> Self {
+        Self {
+            timeout: Duration::from_secs(10),
+            default_entry: None,
+        }
+    }
 }
 
 impl LoaderConf {
@@ -462,9 +582,9 @@ impl BlsBootLoader {
     }
 }
 
-impl LinuxBootLoader for BlsBootLoader {
-    fn startup(&mut self) -> anyhow::Result<()> {
-        debug!("startup");
+impl BootLoader for BlsBootLoader {
+    fn prepare(&mut self) -> anyhow::Result<()> {
+        debug!("prepare");
 
         std::fs::create_dir_all(DISK_MNT_PATH).unwrap();
 
@@ -552,34 +672,41 @@ impl LinuxBootLoader for BlsBootLoader {
         Ok(())
     }
 
-    fn probe(&mut self) -> anyhow::Result<Vec<super::BootDevice>> {
+    fn probe(&mut self) -> Vec<BootDevice> {
         debug!("probe");
 
         let mut devs = Vec::new();
 
         for disk in self.disks.iter_mut() {
             if let Some(mountpoint) = &disk.mountpoint {
-                let loader_conf = mountpoint.join("loader/loader.conf");
+                let loader_conf_path = mountpoint.join("loader/loader.conf");
 
-                let loader_conf_contents = match std::fs::read_to_string(&loader_conf) {
+                let loader_conf_contents = match std::fs::read_to_string(&loader_conf_path) {
                     Ok(l) => l,
                     Err(e) => {
-                        debug!("failed to read loader.conf {}, {e}", loader_conf.display());
+                        debug!(
+                            "failed to read loader.conf {}, {e}",
+                            loader_conf_path.display()
+                        );
                         continue;
                     }
                 };
 
-                disk.loader_conf = Some(LoaderConf::parse_loader_conf(&loader_conf_contents));
-                disk.discover_entries();
-                devs.push(disk.into());
+                let loader_conf = LoaderConf::parse_loader_conf(&loader_conf_contents);
+
+                disk.timeout = loader_conf.timeout;
+
+                disk.discover_entries(loader_conf.default_entry);
+
+                devs.push(disk.to_owned().into());
             }
         }
 
-        Ok(devs)
+        devs
     }
 
-    fn shutdown(&mut self) {
-        debug!("shutdown");
+    fn teardown(&mut self) {
+        debug!("teardown");
 
         for disk in &self.disks {
             disk.unmount();
@@ -621,7 +748,7 @@ mod tests {
 
     #[test]
     fn test_parse_entry_conf() {
-        let entry = super::BlsEntry::parse_entry_conf(Path::new("/foo/bar"), Path::new("foo.conf"), r#"title NixOS
+        let entry = super::BlsEntry::parse_entry_conf(Path::new("/foo/bar"), Path::new("/foo/loader/entries/foo.conf"), r#"title NixOS
 version Generation 118 NixOS 23.05.20230506.0000000, Linux Kernel 6.1.27, Built on 2023-05-07
 linux /efi/nixos/00000000000000000000000000000000-linux-6.1.27-bzImage.efi
 initrd /efi/nixos/00000000000000000000000000000000-initrd-linux-6.1.27-initrd.efi
@@ -654,6 +781,57 @@ machine-id 00000000000000000000000000000000
         assert_eq!(
             entry.options,
             Some(String::from("init=/nix/store/00000000000000000000000000000000-nixos-system-beetroot-23.05.20230506.0000000/init systemd.show_status=auto loglevel=4"))
+        );
+    }
+
+    #[test]
+    fn test_parse_entry_filename() {
+        // error cases
+        assert_eq!(
+            super::parse_entry_filename("my-entry"),
+            Err(super::BlsEntryError::MissingConfSuffix)
+        );
+        assert_eq!(
+            super::parse_entry_filename("my-entry-0.conf"),
+            Err(super::BlsEntryError::MissingTriesLeft)
+        );
+        assert_eq!(
+            super::parse_entry_filename("my-entry+foo.conf"),
+            Err(super::BlsEntryError::InvalidTriesSyntax)
+        );
+        assert_eq!(
+            super::parse_entry_filename("my-entry+foo-bar.conf"),
+            Err(super::BlsEntryError::InvalidTriesSyntax)
+        );
+
+        // happy path
+        assert_eq!(
+            super::parse_entry_filename("my-entry.conf"),
+            Ok(("my-entry", None, None))
+        );
+        assert_eq!(
+            super::parse_entry_filename("my-entry+1.conf"),
+            Ok(("my-entry", Some(1), None))
+        );
+        assert_eq!(
+            super::parse_entry_filename("my-entry+0.conf"),
+            Ok(("my-entry", Some(0), None))
+        );
+        assert_eq!(
+            super::parse_entry_filename("my-entry+0-3.conf"),
+            Ok(("my-entry", Some(0), Some(3)))
+        );
+        assert_eq!(
+            super::parse_entry_filename("my-entry-1+5-0.conf"),
+            Ok(("my-entry-1", Some(5), Some(0)))
+        );
+        assert_eq!(
+            super::parse_entry_filename("my-entry-2+3-1.conf"),
+            Ok(("my-entry-2", Some(3), Some(1)))
+        );
+        assert_eq!(
+            super::parse_entry_filename("my-entry-3+2.conf"),
+            Ok(("my-entry-3", Some(2), None))
         );
     }
 }

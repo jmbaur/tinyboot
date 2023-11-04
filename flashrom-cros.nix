@@ -5,8 +5,8 @@ stdenv.mkDerivation (finalAttrs: {
   src = fetchgit {
     url = "https://chromium.googlesource.com/chromiumos/third_party/flashrom";
     branchName = "master";
-    rev = "d811062a2e351dcc78eaa901033d6119a8d2ddec";
-    hash = "sha256-RxYh47SlHbUzyblIP4RKEi51Lt8Ntxe6wHpRHUNyxOw=";
+    rev = "58b496dad509417369634af6c95aa43e9daa7e40";
+    hash = "sha256-EIpDSR536AyFixfKA3s61RpfMK69fyTdQnPhABnXaZQ=";
   };
   patches = [ ./patches/flashrom-power-management.patch ];
   outputs = [ "out" ] ++ lib.optionals useMeson [ "lib" "dev" ];
