@@ -61,7 +61,7 @@ pub fn run_shell(tx: Sender<ClientToServer>, rx: Receiver<ServerToClient>) {
             ServerToClient::Stop => {
                 debug!("exiting shell");
                 break;
-            },
+            }
             ServerToClient::ServerIsReady => {}
         };
     }

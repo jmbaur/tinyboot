@@ -12,7 +12,7 @@ use crate::{
     cmd::Command,
     kexec::{kexec_execute, kexec_load},
 };
-use boot_loader::{disk::BlsBootLoader, LinuxBootEntry, LinuxBootLoader, Loader, LoaderType};
+use boot_loader::{disk::BlsBootLoader, Loader, LoaderType};
 use cmd::print_help;
 use log::{debug, error, info, warn, LevelFilter};
 use nix::libc::{self};
@@ -50,7 +50,7 @@ fn prepare_boot() -> anyhow::Result<Outcome> {
     let mut stdout = std::io::stdout();
 
     // TODO(jared): fetch boot order from some nonvolatile storage
-    let boot_loaders: Vec<Box<dyn LinuxBootLoader>> = vec![Box::new(BlsBootLoader::new())];
+    let boot_loaders: Vec<Loader> = vec![Loader::new(Box::new(BlsBootLoader::new()))];
 
     'autoboot: for loader in boot_loaders {
         let mut loader = Loader::from(loader);
@@ -90,14 +90,21 @@ fn prepare_boot() -> anyhow::Result<Outcome> {
                         info!("boot device {} contains no entries", boot_dev.name);
                         continue;
                     } else {
-                        let default_entry = boot_dev
-                            .entries
-                            .get(boot_dev.default_entry)
-                            .unwrap_or_else(|| {
-                                boot_dev.entries.first().expect("entries is non-empty")
-                            });
+                        let mut entries = boot_dev.entries.iter();
+                        let first_entry = entries.next().expect("boot device has no entries");
 
-                        match kexec_load(default_entry) {
+                        let default_entry = 'default: {
+                            while let Some(entry) = entries.next() {
+                                if entry.is_default() {
+                                    break 'default entry;
+                                }
+                            }
+                            first_entry
+                        };
+
+                        let boot_parts = default_entry.select();
+
+                        match kexec_load(boot_parts) {
                             Ok(()) => {
                                 outcome = Some(Outcome::Kexec);
                                 break 'autoboot;
@@ -142,7 +149,6 @@ fn handle_commands(
     server_rx: mpsc::Receiver<ClientToServer>,
 ) -> Outcome {
     let mut loader: Option<Loader> = None;
-    let mut selected: Option<LinuxBootEntry> = None;
 
     loop {
         // ensure that stdout buffer is flushed before indicating that the server is ready to
@@ -152,6 +158,10 @@ fn handle_commands(
 
         match server_rx.recv().unwrap() {
             ClientToServer::UserIsPresent => {}
+            ClientToServer::Command(Command::Dmesg) => match tboot::system::kernel_logs() {
+                Ok(logs) => println!("{logs}"),
+                Err(e) => error!("failed to get kernel logs: {e}"),
+            },
             ClientToServer::Command(Command::Help(help)) => {
                 print_help(help.as_deref());
             }
@@ -175,76 +185,50 @@ fn handle_commands(
                                 .iter()
                                 .enumerate()
                                 .for_each(|(entry_idx, entry)| {
-                                    println!("   {}: {}", entry_idx + 1, entry.display);
-                                    println!("      linux {}", entry.linux.display());
-
-                                    if let Some(initrd) = &entry.initrd {
-                                        println!("      initrd {}", initrd.display());
-                                    }
-
-                                    if let Some(cmdline) = &entry.cmdline {
-                                        println!("      cmdline {}", cmdline);
-                                    }
+                                    println!("   {}: {}", entry_idx + 1, entry);
                                 });
                         });
                     }
                 },
             },
-            ClientToServer::Command(Command::Select((dev_idx, entry_idx))) => match loader {
+            ClientToServer::Command(Command::Boot((dev_idx, entry_idx))) => match loader {
                 None => println!("no loader selected"),
                 Some(ref mut loader) => {
                     match loader.boot_devices().map(|devs| {
-                        let Some(dev_idx) = dev_idx.checked_sub(1) else {
+                        let Some(boot_dev) = dev_idx
+                            .map(|dev_idx| dev_idx.checked_sub(1).map(|idx| devs.get(idx)))
+                            .flatten()
+                            .unwrap_or_else(|| devs.first())
+                        else {
                             return None;
                         };
 
-                        devs.get(dev_idx)
-                            .map(|dev| {
-                                let Some(entry_idx) = entry_idx.checked_sub(1) else {
-                                    return None;
-                                };
-
-                                dev.entries.get(entry_idx)
+                        entry_idx
+                            .map(|entry_idx| {
+                                entry_idx
+                                    .checked_sub(1)
+                                    .map(|idx| boot_dev.entries.get(idx))
                             })
                             .flatten()
+                            .unwrap_or_else(|| {
+                                boot_dev.entries.iter().find(|entry| entry.is_default())
+                            })
                     }) {
                         Ok(Some(entry)) => {
-                            selected = Some(entry.clone());
-                            println!("selected entry '{}'", entry.display);
+                            println!("selected entry '{}'", entry);
+
+                            if let Err(e) = kexec_load(entry.select()) {
+                                println!("failed to load entry: {e}");
+                            } else {
+                                server_tx.send(ServerToClient::Stop).unwrap();
+                                return Outcome::Kexec;
+                            }
                         }
                         Ok(None) => println!("cannot select non-existent entry"),
                         Err(e) => println!("failed to get entries: {e}"),
                     }
                 }
             },
-            ClientToServer::Command(Command::Boot) => {
-                let entry = {
-                    if let Some(entry) = selected.as_ref() {
-                        Some(entry)
-                    } else if let Some(Ok(Some(Some(default_entry)))) =
-                        loader.as_mut().map(|loader| {
-                            loader.boot_devices().map(|devs| {
-                                devs.first()
-                                    .map(|dev| dev.entries.first().map(|entry| entry))
-                            })
-                        })
-                    {
-                        Some(default_entry)
-                    } else {
-                        println!("no entry selected");
-                        None
-                    }
-                };
-
-                match entry.map(|entry| kexec_load(entry)) {
-                    Some(Err(e)) => println!("failed to load entry: {e}"),
-                    Some(Ok(_)) => {
-                        server_tx.send(ServerToClient::Stop).unwrap();
-                        return Outcome::Kexec;
-                    }
-                    None => {}
-                }
-            }
             ClientToServer::Command(Command::Loader(desired_loader)) => {
                 if let Some(desired_loader) = desired_loader {
                     // shutdown the current loader

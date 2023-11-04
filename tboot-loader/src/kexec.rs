@@ -3,9 +3,9 @@ use nix::libc;
 use std::{ffi, os::fd::AsRawFd};
 use syscalls::{syscall, Sysno};
 
-use crate::boot_loader::LinuxBootEntry;
+use crate::boot_loader::LinuxBootParts;
 
-pub fn kexec_load(boot_entry: &LinuxBootEntry) -> std::io::Result<()> {
+pub fn kexec_load(boot_entry: LinuxBootParts) -> std::io::Result<()> {
     let kernel = &boot_entry.linux;
     let initrd = &boot_entry.initrd;
     let cmdline = boot_entry

@@ -146,3 +146,28 @@ pub fn setup_tty(fd: i32) -> std::io::Result<()> {
 
     Ok(())
 }
+
+// not in libc crate??
+const SYSLOG_ACTION_READ_ALL: i32 = 3;
+extern "C" {
+    fn klogctl(syslog_type: libc::c_int, buf: *mut libc::c_char, len: libc::c_int) -> libc::c_int;
+}
+
+pub fn kernel_logs() -> std::io::Result<String> {
+    let bufp = &mut [0u8; 1 << 16];
+    let bytes_read = unsafe {
+        klogctl(
+            SYSLOG_ACTION_READ_ALL,
+            bufp.as_mut_ptr() as _,
+            bufp.len() as _,
+        )
+    };
+    if bytes_read < 0 {
+        return Err(std::io::Error::last_os_error());
+    } else {
+        Ok(String::from_utf8(
+            bufp[..bytes_read as usize - 1].to_vec(), // remove trailing newline
+        )
+        .expect("kernel logs not valid UTF-8"))
+    }
+}

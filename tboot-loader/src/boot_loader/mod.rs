@@ -31,28 +31,32 @@ impl FromStr for LoaderType {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct LinuxBootEntry {
-    pub display: String,
+pub struct LinuxBootParts {
     pub linux: PathBuf,
     pub initrd: Option<PathBuf>,
     pub cmdline: Option<String>,
 }
 
+pub trait BootEntry: Display {
+    fn is_default(&self) -> bool;
+
+    fn select(&self) -> LinuxBootParts;
+}
+
 pub struct BootDevice {
     pub name: String,
-    pub default_entry: usize,
-    pub entries: Vec<LinuxBootEntry>,
+    pub entries: Vec<Box<dyn BootEntry>>,
     pub timeout: Duration,
 }
 
-pub trait LinuxBootLoader {
+pub trait BootLoader {
     fn loader_type(&mut self) -> LoaderType;
 
-    fn startup(&mut self) -> anyhow::Result<()>;
+    fn prepare(&mut self) -> anyhow::Result<()>;
 
-    fn probe(&mut self) -> anyhow::Result<Vec<BootDevice>>;
+    fn probe(&mut self) -> Vec<BootDevice>;
 
-    fn shutdown(&mut self);
+    fn teardown(&mut self);
 }
 
 pub enum LoaderState {
@@ -63,19 +67,15 @@ pub enum LoaderState {
 }
 
 pub struct Loader {
+    /// boot_devices is expected to be ordered based on priority of usage of that device. Hence the
+    /// first device in the vec will be used as the default device to boot from.
     boot_devices: Vec<BootDevice>,
     state: LoaderState,
-    inner: Box<dyn LinuxBootLoader>,
-}
-
-impl From<Box<dyn LinuxBootLoader>> for Loader {
-    fn from(value: Box<dyn LinuxBootLoader>) -> Self {
-        Loader::new(value)
-    }
+    inner: Box<dyn BootLoader>,
 }
 
 impl Loader {
-    pub fn new(loader: Box<dyn LinuxBootLoader>) -> Self {
+    pub fn new(loader: Box<dyn BootLoader>) -> Self {
         Self {
             state: LoaderState::Unstarted,
             boot_devices: Vec::new(),
@@ -85,7 +85,7 @@ impl Loader {
 
     pub fn startup(&mut self) -> anyhow::Result<()> {
         match self.state {
-            LoaderState::Unstarted | LoaderState::Shutdown => self.inner.startup()?,
+            LoaderState::Unstarted | LoaderState::Shutdown => self.inner.prepare()?,
             LoaderState::Started | LoaderState::Probed => {}
         }
 
@@ -101,7 +101,7 @@ impl Loader {
             LoaderState::Unstarted | LoaderState::Shutdown => self.startup()?,
         }
 
-        self.boot_devices = self.inner.probe()?;
+        self.boot_devices = self.inner.probe();
 
         self.state = LoaderState::Probed;
 
@@ -110,10 +110,10 @@ impl Loader {
 
     pub fn shutdown(&mut self) {
         match self.state {
-            LoaderState::Started | LoaderState::Probed => self.inner.shutdown(),
+            LoaderState::Started | LoaderState::Probed => self.inner.teardown(),
             LoaderState::Unstarted | LoaderState::Shutdown => {}
         };
-        self.boot_devices = Vec::new();
+        self.boot_devices.clear();
         self.state = LoaderState::Shutdown;
     }
 
