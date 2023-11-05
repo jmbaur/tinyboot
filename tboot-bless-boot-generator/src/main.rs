@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{path::PathBuf, str::FromStr};
 
 use log::debug;
 
@@ -18,6 +18,16 @@ impl From<std::io::Error> for Error {
 // TODO(jared): systemd's bless-boot-generator exits early if it detects it is running in a
 // container
 fn main() -> Result<(), Error> {
+    let log_level =
+        match std::env::var("RUST_LOG").map(|rust_log| log::LevelFilter::from_str(&rust_log)) {
+            Ok(Ok(l)) => l,
+            _ => log::LevelFilter::Info,
+        };
+
+    tboot::log::Logger::new(log_level)
+        .setup()
+        .expect("failed to setup logging");
+
     let mut args = std::env::args().into_iter();
 
     let _normal_dir = args.next().ok_or(Error::InvalidArgs)?;

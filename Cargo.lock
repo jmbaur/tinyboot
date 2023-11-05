@@ -253,6 +253,7 @@ name = "tboot-bless-boot-generator"
 version = "0.1.0"
 dependencies = [
  "log",
+ "tboot",
 ]
 
 [[package]]
