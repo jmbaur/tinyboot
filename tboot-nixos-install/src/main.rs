@@ -4,6 +4,7 @@ use std::{
 };
 
 use argh::FromArgs;
+use glob::glob;
 
 #[derive(FromArgs, Debug)]
 /// Install nixos boot loader files
@@ -190,22 +191,53 @@ fn install_generation(
 
     entry_contents.push('\n');
 
-    let entry_path = state
+    let parent = state
         .args
         .efi_sys_mount_point
         .join("loader")
-        .join("entries")
-        .join(format!(
-            "nixos-generation-{}{}+{}.conf",
-            entry_number,
-            specialisation
-                .map(|specialisation| format!("-specialisation-{specialisation}"))
-                .unwrap_or_default(),
-            max_tries,
-        ));
-    std::fs::write(&entry_path, entry_contents).unwrap();
+        .join("entries");
 
-    state.known_entry_files.insert(entry_path, ());
+    let entry_path = parent.join(format!(
+        "nixos-generation-{}{}+{}.conf",
+        entry_number,
+        specialisation
+            .map(|specialisation| format!("-specialisation-{specialisation}"))
+            .unwrap_or_default(),
+        max_tries,
+    ));
+
+    let glob_pattern = format!(
+        "{}/nixos-generation-{}*.conf",
+        parent.display(),
+        entry_number
+    );
+
+    // only write the new entry if an existing one does not exist
+    if !({
+        let mut has_matches = false;
+
+        for entry in glob(&glob_pattern).unwrap() {
+            if let Ok(entry) = entry {
+                if entry
+                    .file_name()
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+                    .contains("specialisation")
+                {
+                    continue;
+                }
+
+                has_matches = true;
+                state.known_efi_files.insert(entry, ());
+            }
+        }
+
+        has_matches
+    }) {
+        std::fs::write(&entry_path, entry_contents).unwrap();
+        state.known_entry_files.insert(entry_path, ());
+    }
 }
 
 fn main() {

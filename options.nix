@@ -101,7 +101,7 @@ in
     };
 
     # The "--" makes linux pass remaining parameters as args to PID1
-    linux.commandLine = [ "console=ttynull" "--" "tboot.loglevel=${config.loglevel}" "tboot.tty=${config.tinyboot.tty}" "tboot.programmer=${config.flashrom.programmer}" ];
+    linux.commandLine = [ "console=ttynull" "--" "tboot.loglevel=${config.loglevel}" "tboot.tty=${config.tinyboot.tty}" ];
 
     coreboot.vpd.ro.pubkey = config.verifiedBoot.signingPublicKey;
     coreboot.kconfig = with kconfig; {

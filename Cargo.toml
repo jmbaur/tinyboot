@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["tboot", "tboot-loader", "tboot-nixos-install"]
+members = ["tboot", "tboot-loader", "tboot-nixos-install", "tboot-bless-boot-generator", "tboot-bless-boot"]
 
 # optimize release builds for size (see https://github.com/johnthagen/min-sized-rust)
 [profile.release]

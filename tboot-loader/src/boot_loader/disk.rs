@@ -56,7 +56,7 @@ struct BlsEntry {
     efi: Option<PathBuf>,
     linux: Option<PathBuf>,
     initrd: Option<Vec<PathBuf>>,
-    options: Option<String>,
+    options: Vec<String>,
     is_default: bool,
 }
 
@@ -88,7 +88,9 @@ impl BootEntry for BlsEntry {
             None
         };
 
-        let cmdline = self.options.clone();
+        let mut options = self.options.clone();
+        options.push(format!("tboot.bls-entry={}", self.name));
+        let cmdline = Some(options.join(" "));
 
         self.boot_count();
 
@@ -100,74 +102,25 @@ impl BootEntry for BlsEntry {
     }
 }
 
-#[derive(Debug, PartialEq)]
-enum BlsEntryError {
-    MissingConfSuffix,
-    // only occurs when a TriesDone is specified
-    MissingTriesLeft,
-    InvalidTriesSyntax,
-    MissingFileName,
-}
-
-/// Parses an entry filename and returns a tuple of the form (entry name, tries done, tries left).
-/// It follows the convention layed out the boot counter section of the BootLoaderSpec.
-/// https://uapi-group.org/specifications/specs/boot_loader_specification/#boot-counting
-fn parse_entry_filename(filename: &str) -> Result<(&str, Option<u32>, Option<u32>), BlsEntryError> {
-    let filename = filename
-        .strip_suffix(".conf")
-        .ok_or(BlsEntryError::MissingConfSuffix)?;
-
-    match filename.split_once('+') {
-        None => {
-            let mut reverse_chars = filename.chars().rev();
-            let last_char_is_numeric = reverse_chars
-                .next()
-                .map(char::is_numeric)
-                .unwrap_or_default();
-
-            if last_char_is_numeric {
-                while let Some(c) = reverse_chars.next() {
-                    if c == '-' {
-                        return Err(BlsEntryError::MissingTriesLeft);
-                    }
-                }
-            }
-
-            return Ok((filename, None, None));
-        }
-        Some((name, counter_info)) => match counter_info.split_once('-') {
-            None => {
-                let tries_done = u32::from_str_radix(counter_info, 10)
-                    .map_err(|_| BlsEntryError::InvalidTriesSyntax)?;
-                return Ok((name, Some(tries_done), None));
-            }
-            Some((tries_done, tries_left)) => {
-                let tries_done = u32::from_str_radix(tries_done, 10)
-                    .map_err(|_| BlsEntryError::InvalidTriesSyntax)?;
-                let tries_left = u32::from_str_radix(tries_left, 10)
-                    .map_err(|_| BlsEntryError::InvalidTriesSyntax)?;
-                return Ok((name, Some(tries_done), Some(tries_left)));
-            }
-        },
-    }
-}
 
 impl BlsEntry {
     fn parse_entry_conf(
         mountpoint: impl AsRef<Path>,
         conf_path: impl AsRef<Path>,
         entry_contents: &str,
-    ) -> Result<BlsEntry, BlsEntryError> {
+    ) -> Result<BlsEntry, tboot::bls::BlsEntryError> {
         let mut entry = BlsEntry::default();
 
         entry.entry_path = conf_path.as_ref().to_path_buf();
         let filename = conf_path
             .as_ref()
             .file_name()
-            .ok_or(BlsEntryError::MissingFileName)?
+            .ok_or(tboot::bls::BlsEntryError::MissingFileName)?
             .to_str()
             .unwrap();
-        let (entry_name, tries_left, tries_done) = parse_entry_filename(filename)?;
+
+        let (entry_name, tries_left, tries_done) = tboot::bls::parse_entry_filename(filename)?;
+
         entry.name = entry_name.to_string();
         entry.tries_left = tries_left;
         entry.tries_done = tries_done;
@@ -222,13 +175,11 @@ impl BlsEntry {
                         None => entry.initrd = Some(new_initrds),
                     }
                 }
-                "options" => match entry.options.iter_mut().next() {
-                    Some(opts) => {
-                        opts.push(' ');
-                        opts.push_str(val.trim());
-                    }
-                    None => entry.options = Some(val.trim().to_string()),
-                },
+                "options" => {
+                    entry
+                        .options
+                        .extend(val.trim().split_whitespace().into_iter().map(String::from));
+                }
                 "devicetree" => {
                     entry.devicetree = Some(
                         mountpoint
@@ -780,58 +731,7 @@ machine-id 00000000000000000000000000000000
         );
         assert_eq!(
             entry.options,
-            Some(String::from("init=/nix/store/00000000000000000000000000000000-nixos-system-beetroot-23.05.20230506.0000000/init systemd.show_status=auto loglevel=4"))
-        );
-    }
-
-    #[test]
-    fn test_parse_entry_filename() {
-        // error cases
-        assert_eq!(
-            super::parse_entry_filename("my-entry"),
-            Err(super::BlsEntryError::MissingConfSuffix)
-        );
-        assert_eq!(
-            super::parse_entry_filename("my-entry-0.conf"),
-            Err(super::BlsEntryError::MissingTriesLeft)
-        );
-        assert_eq!(
-            super::parse_entry_filename("my-entry+foo.conf"),
-            Err(super::BlsEntryError::InvalidTriesSyntax)
-        );
-        assert_eq!(
-            super::parse_entry_filename("my-entry+foo-bar.conf"),
-            Err(super::BlsEntryError::InvalidTriesSyntax)
-        );
-
-        // happy path
-        assert_eq!(
-            super::parse_entry_filename("my-entry.conf"),
-            Ok(("my-entry", None, None))
-        );
-        assert_eq!(
-            super::parse_entry_filename("my-entry+1.conf"),
-            Ok(("my-entry", Some(1), None))
-        );
-        assert_eq!(
-            super::parse_entry_filename("my-entry+0.conf"),
-            Ok(("my-entry", Some(0), None))
-        );
-        assert_eq!(
-            super::parse_entry_filename("my-entry+0-3.conf"),
-            Ok(("my-entry", Some(0), Some(3)))
-        );
-        assert_eq!(
-            super::parse_entry_filename("my-entry-1+5-0.conf"),
-            Ok(("my-entry-1", Some(5), Some(0)))
-        );
-        assert_eq!(
-            super::parse_entry_filename("my-entry-2+3-1.conf"),
-            Ok(("my-entry-2", Some(3), Some(1)))
-        );
-        assert_eq!(
-            super::parse_entry_filename("my-entry-3+2.conf"),
-            Ok(("my-entry-3", Some(2), None))
+            vec!["init=/nix/store/00000000000000000000000000000000-nixos-system-beetroot-23.05.20230506.0000000/init".to_string(), "systemd.show_status=auto".to_string(), "loglevel=4".to_string()]
         );
     }
 }
