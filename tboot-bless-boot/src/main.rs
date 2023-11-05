@@ -108,14 +108,16 @@ fn find_entry(esp: impl AsRef<Path>, entry_name: &str) -> Option<(PathBuf, BlsEn
 }
 
 fn mark_as_good(
-    (entry_path, (name, _tries_left, _tries_done)): (PathBuf, BlsEntryMetadata),
+    (entry_path, (name, tries_left, _tries_done)): (PathBuf, BlsEntryMetadata),
 ) -> Result<(), Error> {
     let Some(parent) = entry_path.parent() else {
         return Ok(());
     };
 
     let new_entry_path = parent.join(format!("{}.conf", name));
-    std::fs::rename(entry_path, new_entry_path)?;
+    if tries_left.is_some() {
+        std::fs::rename(entry_path, new_entry_path)?;
+    }
 
     Ok(())
 }
