@@ -1,10 +1,16 @@
+use std::fmt::Display;
+
 #[derive(Debug, PartialEq)]
 pub enum BlsEntryError {
     MissingConfSuffix,
-    // only occurs when a TriesDone is specified
-    MissingTriesLeft,
     InvalidTriesSyntax,
     MissingFileName,
+}
+
+impl Display for BlsEntryError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
 }
 
 pub type BlsEntryMetadata = (String, Option<u32>, Option<u32>);
@@ -18,23 +24,7 @@ pub fn parse_entry_filename(filename: &str) -> Result<BlsEntryMetadata, BlsEntry
         .ok_or(BlsEntryError::MissingConfSuffix)?;
 
     match filename.split_once('+') {
-        None => {
-            let mut reverse_chars = filename.chars().rev();
-            let last_char_is_numeric = reverse_chars
-                .next()
-                .map(char::is_numeric)
-                .unwrap_or_default();
-
-            if last_char_is_numeric {
-                while let Some(c) = reverse_chars.next() {
-                    if c == '-' {
-                        return Err(BlsEntryError::MissingTriesLeft);
-                    }
-                }
-            }
-
-            return Ok((filename.to_string(), None, None));
-        }
+        None => Ok((filename.to_string(), None, None)),
         Some((name, counter_info)) => match counter_info.split_once('-') {
             None => {
                 let tries_done = u32::from_str_radix(counter_info, 10)
@@ -63,10 +53,6 @@ mod tests {
             Err(super::BlsEntryError::MissingConfSuffix)
         );
         assert_eq!(
-            super::parse_entry_filename("my-entry-0.conf"),
-            Err(super::BlsEntryError::MissingTriesLeft)
-        );
-        assert_eq!(
             super::parse_entry_filename("my-entry+foo.conf"),
             Err(super::BlsEntryError::InvalidTriesSyntax)
         );
@@ -87,6 +73,10 @@ mod tests {
         assert_eq!(
             super::parse_entry_filename("my-entry+0.conf"),
             Ok(("my-entry".to_string(), Some(0), None))
+        );
+        assert_eq!(
+            super::parse_entry_filename("my-entry-1.conf"),
+            Ok(("my-entry-1".to_string(), None, None))
         );
         assert_eq!(
             super::parse_entry_filename("my-entry+0-3.conf"),

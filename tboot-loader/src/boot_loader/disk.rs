@@ -102,7 +102,6 @@ impl BootEntry for BlsEntry {
     }
 }
 
-
 impl BlsEntry {
     fn parse_entry_conf(
         mountpoint: impl AsRef<Path>,
@@ -432,11 +431,16 @@ impl Disk {
                 }
             };
 
-            let Ok(mut parsed_entry) =
-                BlsEntry::parse_entry_conf(mountpoint.as_path(), &entry_path, &entry_conf_contents)
-            else {
-                error!("failed to parse entry at {:?}", entry_path);
-                continue;
+            let mut parsed_entry = match BlsEntry::parse_entry_conf(
+                mountpoint.as_path(),
+                &entry_path,
+                &entry_conf_contents,
+            ) {
+                Ok(entry) => entry,
+                Err(e) => {
+                    error!("failed to parse entry at {:?}: {e}", entry_path);
+                    continue;
+                }
             };
 
             parsed_entry.is_default =
