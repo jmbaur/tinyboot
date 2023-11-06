@@ -42,7 +42,7 @@ in
       boot.loader.efi.canTouchEfiVariables = lib.mkForce false;
       boot.bootspec.enable = true;
       boot.loader.external.enable = true;
-      boot.loader.external.installHook = "${pkgs.tinyboot}/bin/tboot-nixos-install --efi-sys-mount-point ${config.boot.loader.efi.efiSysMountPoint} --sign-file ${cfg.build.linux}/bin/sign-file --private-key ${cfg.verifiedBoot.signingPrivateKey} --public-key ${cfg.verifiedBoot.signingPublicKey} --max-tries ${toString cfg.maxFailedBootAttempts}";
+      boot.loader.external.installHook = "${pkgs.tinyboot}/bin/tboot-nixos-install --efi-sys-mount-point ${config.boot.loader.efi.efiSysMountPoint} --sign-file ${cfg.build.linux}/bin/sign-file --private-key ${cfg.verifiedBoot.tbootPrivateKey} --public-key ${cfg.verifiedBoot.tbootPublicCertificate} --max-tries ${toString cfg.maxFailedBootAttempts}";
       systemd.additionalUpstreamSystemUnits = [ "boot-complete.target" ];
       systemd.generators.tboot-bless-boot-generator = "${pkgs.tinyboot}/bin/tboot-bless-boot-generator";
       systemd.services.tboot-bless-boot = {

@@ -29,7 +29,7 @@
         qemu-system-${pkgs.hostPlatform.qemuArch} \
           -nographic \
           -smp 2 -m 2G \
-          -fw_cfg name=opt/org.tboot/pubkey,file=${config.verifiedBoot.signingPublicKey} \
+          -fw_cfg name=opt/org.tboot/pubkey,file=${config.verifiedBoot.tbootPublicCertificate} \
           -netdev user,id=n1 -device virtio-net-pci,netdev=n1 \
           -chardev socket,id=chrtpm,path="''${tpm_dir}/swtpm-sock" -tpmdev emulator,id=tpm0,chardev=chrtpm \
           ${toString config.qemu.flags} \

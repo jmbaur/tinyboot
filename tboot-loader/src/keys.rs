@@ -95,6 +95,10 @@ pub fn load_verification_key() -> anyhow::Result<()> {
         anyhow::bail!("no public key found");
     };
 
+    if pubkey == include_bytes!("../../test/keys/tboot/key.der") {
+        warn!("test keys are in use");
+    }
+
     let ima_keyring_id = add_keyring(IMA_KEYRING_NAME, KeySerial::UserKeyring)?;
 
     let key_id = add_key(ima_keyring_id, &pubkey)?;

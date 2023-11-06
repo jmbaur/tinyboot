@@ -77,15 +77,12 @@ in
     };
     verifiedBoot = {
       requiredSystemFeatures = mkOption { type = types.listOf types.str; default = [ ]; };
-      # TODO(jared): integrate IMA and vboot keys (they can come from the same RSA key?)
-      caCertificate = mkOption { type = types.path; default = ./test/keys/x509_ima.pem; };
-      signingPublicKey = mkOption { type = types.path; default = ./test/keys/x509_ima.der; };
-      signingPrivateKey = mkOption { type = types.path; default = ./test/keys/privkey_ima.pem; };
-      vbootRootKey = mkOption { type = types.path; default = "${pkgs.vboot_reference}/share/vboot/devkeys/root_key.vbpubk"; };
-      vbootRecoveryKey = mkOption { type = types.path; default = "${pkgs.vboot_reference}/share/vboot/devkeys/recovery_key.vbpubk"; };
-      vbootFirmwarePrivkey = mkOption { type = types.path; default = "${pkgs.vboot_reference}/share/vboot/devkeys/firmware_data_key.vbprivk"; };
-      vbootKeyblock = mkOption { type = types.path; default = "${pkgs.vboot_reference}/share/vboot/devkeys/firmware.keyblock"; };
-      vbootKernelKey = mkOption { type = types.path; default = "${pkgs.vboot_reference}/share/vboot/devkeys/kernel_subkey.vbpubk"; };
+      tbootPublicCertificate = mkOption { type = types.path; default = ./test/keys/tboot/key.der; };
+      tbootPrivateKey = mkOption { type = types.path; default = ./test/keys/tboot/key.pem; };
+      vbootRootKey = mkOption { type = types.path; default = ./test/keys/root/key.vbpubk; };
+      vbootFirmwarePrivkey = mkOption { type = types.path; default = ./test/keys/firmware/key.vbprivk; };
+      vbootFirmwareKey = mkOption { type = types.path; default = ./test/keys/firmware/key.vbpubk; };
+      vbootKeyblock = mkOption { type = types.path; default = ./test/keys/firmware/key.keyblock; };
     };
     loglevel = mkOption {
       type = types.enum [ "off" "error" "warn" "info" "debug" "trace" ];
@@ -103,15 +100,15 @@ in
     # The "--" makes linux pass remaining parameters as args to PID1
     linux.commandLine = [ "console=ttynull" "--" "tboot.loglevel=${config.loglevel}" "tboot.tty=${config.tinyboot.tty}" ];
 
-    coreboot.vpd.ro.pubkey = config.verifiedBoot.signingPublicKey;
+    coreboot.vpd.ro.pubkey = config.verifiedBoot.tbootPublicCertificate;
     coreboot.kconfig = with kconfig; {
       "CONFIG_DEFAULT_CONSOLE_LOGLEVEL_${toString { "off" = 2; "error" = 3; "warn" = 4; "info" = 6; "debug" = 7; "trace" = 8; }.${config.loglevel}}" = yes;
       PAYLOAD_NONE = no;
       VBOOT = yes;
       VBOOT_FIRMWARE_PRIVKEY = freeform config.verifiedBoot.vbootFirmwarePrivkey;
-      VBOOT_KERNEL_KEY = freeform config.verifiedBoot.vbootKernelKey;
+      VBOOT_KERNEL_KEY = freeform config.verifiedBoot.vbootFirmwareKey;
       VBOOT_KEYBLOCK = freeform config.verifiedBoot.vbootKeyblock;
-      VBOOT_RECOVERY_KEY = freeform config.verifiedBoot.vbootRecoveryKey;
+      VBOOT_RECOVERY_KEY = freeform config.verifiedBoot.vbootFirmwareKey;
       VBOOT_ROOT_KEY = freeform config.verifiedBoot.vbootRootKey;
       VBOOT_SIGN = no; # don't sign during build
       VPD = yes;

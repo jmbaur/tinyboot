@@ -126,7 +126,8 @@ fn prepare_boot() -> anyhow::Result<Outcome> {
     } else {
         if !user_is_present {
             println!("failed to boot");
-            println!("press <ENTER> to enter interactive mode");
+            print!("press <ENTER> to enter interactive mode");
+            stdout.flush().expect("flush failed");
 
             assert_eq!(server_rx.recv().unwrap(), ClientToServer::UserIsPresent);
         }

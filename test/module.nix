@@ -3,8 +3,7 @@
   tinyboot.enable = true;
   tinyboot.board = "qemu-${pkgs.stdenv.hostPlatform.qemuArch}";
   boot.kernelParams = [ "console=${{ x86_64 = "ttyS0"; arm64 = "ttyAMA0"; }.${config.nixpkgs.hostPlatform.linuxArch}},115200" ];
-  system.stateVersion = "23.05";
-  environment.etc."keys/x509_ima.der".source = ./keys/x509_ima.der;
+  system.stateVersion = "23.11";
   specialisation.alternate.configuration.boot.kernelParams = [ "console=tty1" ]; # to provide more menu options
   boot.growPartition = true;
   users.users.root.password = "";
