@@ -160,7 +160,7 @@ in
         inherit (config) board;
         configFile = config.coreboot.kconfig.__resolved;
       };
-      firmware = pkgs.runCommand "${config.build.coreboot.name}-signed"
+      firmware = pkgs.runCommand "tinyboot-${config.board}"
         {
           inherit (config.verifiedBoot) requiredSystemFeatures;
           nativeBuildInputs = with pkgs.buildPackages; [ cbfstool vboot_reference vpd ];

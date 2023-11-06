@@ -1,5 +1,5 @@
 { src, lib, stdenvNoCC, pkgsBuildBuild, python3, pkg-config, openssl, ... }:
-{ board ? null, configFile }:
+{ board, configFile }:
 let
   architectures = { i386 = "i386"; x86_64 = "i386"; arm64 = "aarch64"; arm = "arm"; riscv = "riscv"; powerpc = "ppc64"; };
   toolchain = pkgsBuildBuild.coreboot-toolchain.${architectures.${stdenvNoCC.hostPlatform.linuxArch}}.override {
@@ -8,7 +8,7 @@ let
   version = src.shortRev or src.dirtyShortRev; # allow for --override-input
 in
 stdenvNoCC.mkDerivation (finalAttrs: {
-  pname = "coreboot-${if (board) != null then board else "unknown"}";
+  pname = "coreboot-${board}";
   inherit src version;
   patches = [ ./patches/coreboot-fitimage-memlayout.patch ];
   depsBuildBuild = [ pkgsBuildBuild.stdenv.cc pkg-config openssl ];

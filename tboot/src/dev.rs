@@ -107,15 +107,15 @@ impl<'a> Uevent<'a> {
 
         let mut split = uevent_str.split('\0');
 
-        let Some(event_type) = dbg!(split.next()) else {
+        let Some(event_type) = split.next() else {
             return Err(());
         };
 
-        let Some((event_type, _)) = dbg!(event_type.split_once('@')) else {
+        let Some((event_type, _)) = event_type.split_once('@') else {
             return Err(());
         };
 
-        let event_type = dbg!(EventType::from_str(event_type)?);
+        let event_type = EventType::from_str(event_type)?;
 
         let mut major = None;
         let mut minor = None;
@@ -123,7 +123,7 @@ impl<'a> Uevent<'a> {
         let mut devtype = None;
 
         loop {
-            match dbg!(split.next().map(|s| s.split_once('=')).flatten()) {
+            match split.next().map(|s| s.split_once('=')).flatten() {
                 Some(("DEVNAME", name)) => devname = Some(name),
                 Some(("DEVTYPE", "disk")) => devtype = Some(DevType::Disk),
                 Some(("MAJOR", maj)) => {
