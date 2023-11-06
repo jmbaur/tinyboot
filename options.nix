@@ -160,7 +160,7 @@ in
         inherit (config) board;
         configFile = config.coreboot.kconfig.__resolved;
       };
-      firmware = pkgs.runCommand "tinyboot-${config.build.coreboot.name}"
+      firmware = pkgs.runCommand "${config.build.coreboot.name}-signed"
         {
           inherit (config.verifiedBoot) requiredSystemFeatures;
           nativeBuildInputs = with pkgs.buildPackages; [ cbfstool vboot_reference vpd ];
@@ -179,7 +179,7 @@ in
           futility sign \
             --signprivate "${config.verifiedBoot.vbootFirmwarePrivkey}" \
             --keyblock "${config.verifiedBoot.vbootKeyblock}" \
-            --kernelkey "${config.verifiedBoot.vbootKernelKey}" \
+            --kernelkey "${config.verifiedBoot.vbootFirmwareKey}" \
             $out
         '';
       # useful for testing kernel configurations
