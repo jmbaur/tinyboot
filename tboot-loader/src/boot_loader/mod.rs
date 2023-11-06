@@ -52,13 +52,14 @@ pub struct BootDevice {
 pub trait BootLoader {
     fn loader_type(&mut self) -> LoaderType;
 
-    fn prepare(&mut self) -> anyhow::Result<()>;
+    fn setup(&mut self) -> anyhow::Result<()>;
 
     fn probe(&mut self) -> Vec<BootDevice>;
 
     fn teardown(&mut self);
 }
 
+#[derive(Debug, PartialEq, Eq)]
 pub enum LoaderState {
     Unstarted,
     Started,
@@ -83,10 +84,9 @@ impl Loader {
         }
     }
 
-    pub fn startup(&mut self) -> anyhow::Result<()> {
-        match self.state {
-            LoaderState::Unstarted | LoaderState::Shutdown => self.inner.prepare()?,
-            LoaderState::Started | LoaderState::Probed => {}
+    pub fn setup(&mut self, force: bool) -> anyhow::Result<()> {
+        if force || matches!(self.state, LoaderState::Unstarted | LoaderState::Shutdown) {
+            self.inner.setup()?;
         }
 
         self.state = LoaderState::Started;
@@ -94,11 +94,11 @@ impl Loader {
         Ok(())
     }
 
-    pub fn probe(&mut self) -> anyhow::Result<()> {
-        match self.state {
-            LoaderState::Probed => return Ok(()),
-            LoaderState::Started => {}
-            LoaderState::Unstarted | LoaderState::Shutdown => self.startup()?,
+    pub fn probe(&mut self, force: bool) -> anyhow::Result<()> {
+        if force || matches!(self.state, LoaderState::Unstarted | LoaderState::Shutdown) {
+            self.setup(force)?;
+        } else if self.state == LoaderState::Probed {
+            return Ok(());
         }
 
         self.boot_devices = self.inner.probe();
@@ -118,7 +118,7 @@ impl Loader {
     }
 
     pub fn boot_devices(&mut self) -> anyhow::Result<&[BootDevice]> {
-        self.probe()?;
+        self.probe(false)?;
         Ok(&self.boot_devices)
     }
 

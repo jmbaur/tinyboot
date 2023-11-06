@@ -13,6 +13,7 @@ pub enum Command {
     Reboot,
     Poweroff,
     Dmesg,
+    Rescan,
 }
 
 pub fn parse_input(input: String) -> anyhow::Result<Option<Command>> {
@@ -29,8 +30,9 @@ pub fn parse_input(input: String) -> anyhow::Result<Option<Command>> {
     Ok(Some(match cmd {
         "boot" => parse_boot(iter)?,
         "help" => Command::Help(iter.next().map(|s| s.to_string())),
-        "list" => Command::List,
         "loader" => parse_loader(iter)?,
+        "list" => Command::List,
+        "rescan" => Command::Rescan,
         "poweroff" => Command::Poweroff,
         "reboot" => Command::Reboot,
         "dmesg" => Command::Dmesg,
@@ -66,6 +68,7 @@ pub fn print_help(cmd_to_help: Option<&str>) {
         Some("poweroff") => print_poweroff_usage(),
         Some("loader") => print_loader_usage(),
         Some("dmesg") => print_dmesg_usage(),
+        Some("rescan") => print_rescan_usage(),
         Some(_) => error!(""),
         None => print_all_usage(),
     }
@@ -138,4 +141,14 @@ fn print_dmesg_usage() {
     println!();
     println!("dmesg");
     println!("{DMESG_USAGE}");
+}
+
+const RESCAN_USAGE: &str = r#"
+Rescan loader for devices and boot entries.
+"#;
+
+fn print_rescan_usage() {
+    println!();
+    println!("rescan");
+    println!("{RESCAN_USAGE}");
 }

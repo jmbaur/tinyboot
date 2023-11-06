@@ -446,8 +446,15 @@ impl Disk {
             parsed_entry.is_default =
                 Some(parsed_entry.name.as_str()) == default_entry_name.as_deref();
 
-            debug!("new entry added {}", entry_path.display());
-            self.entries.push(parsed_entry);
+            if self
+                .entries
+                .iter()
+                .find(|entry| entry.name == parsed_entry.name)
+                .is_none()
+            {
+                debug!("new entry added {}", entry_path.display());
+                self.entries.push(parsed_entry);
+            }
         }
 
         // TODO(jared): this could be a lot better, it depends on sequential entries having the
@@ -538,8 +545,8 @@ impl BlsBootLoader {
 }
 
 impl BootLoader for BlsBootLoader {
-    fn prepare(&mut self) -> anyhow::Result<()> {
-        debug!("prepare");
+    fn setup(&mut self) -> anyhow::Result<()> {
+        debug!("setup");
 
         std::fs::create_dir_all(DISK_MNT_PATH).unwrap();
 
@@ -606,7 +613,15 @@ impl BootLoader for BlsBootLoader {
                     continue;
                 }
 
-                self.disks.push(disk);
+                // add the disk if it does not already exist
+                if self
+                    .disks
+                    .iter()
+                    .find(|disk| disk.diskseq == diskseq)
+                    .is_none()
+                {
+                    self.disks.push(disk);
+                }
 
                 // Assuming one ESP per disk.
                 continue;

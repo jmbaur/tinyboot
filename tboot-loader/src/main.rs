@@ -174,6 +174,14 @@ fn handle_commands(
                 server_tx.send(ServerToClient::Stop).unwrap();
                 return Outcome::Poweroff;
             }
+            ClientToServer::Command(Command::Rescan) => match loader {
+                None => println!("no loader selected"),
+                Some(ref mut loader) => {
+                    if let Err(e) = loader.probe(true) {
+                        error!("failed to rescan: {e}");
+                    }
+                }
+            },
             ClientToServer::Command(Command::List) => match loader {
                 None => println!("no loader selected"),
                 Some(ref mut loader) => match loader.boot_devices() {
