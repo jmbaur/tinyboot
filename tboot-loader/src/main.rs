@@ -125,7 +125,7 @@ fn prepare_boot() -> anyhow::Result<Outcome> {
         Ok(outcome)
     } else {
         if !user_is_present {
-            println!("failed to boot");
+            error!("failed to boot");
             print!("press <ENTER> to enter interactive mode");
             stdout.flush().expect("flush failed");
 
@@ -159,10 +159,21 @@ fn handle_commands(
 
         match server_rx.recv().unwrap() {
             ClientToServer::UserIsPresent => {}
-            ClientToServer::Command(Command::Dmesg) => match tboot::system::kernel_logs() {
-                Ok(logs) => println!("{logs}"),
-                Err(e) => error!("failed to get kernel logs: {e}"),
-            },
+            ClientToServer::Command(Command::Shell) => {
+                 if std::process::Command::new("/bin/busybox")
+                    .arg("sh")
+                    .env("TERM", "linux")
+                    .status().is_err()
+                {
+                    error!("failed to run shell");
+                }
+            }
+            ClientToServer::Command(Command::Dmesg(level)) => {
+                match tboot::system::kernel_logs(level) {
+                    Ok(logs) => println!("{logs}"),
+                    Err(e) => error!("failed to get kernel logs: {e}"),
+                }
+            }
             ClientToServer::Command(Command::Help(help)) => {
                 print_help(help.as_deref());
             }
@@ -281,10 +292,6 @@ pub fn main() -> ! {
         warn!("tinyboot not running as root");
     }
 
-    if let Err(e) = std::fs::copy("/etc/resolv.conf.static", "/etc/resolv.conf") {
-        error!("failed to copy static resolv.conf to /etc/resolv.conf: {e}");
-    }
-
     let tty = PathBuf::from("/dev").join(cfg.tty);
     if let Ok(tty) = std::fs::OpenOptions::new()
         .write(true)
@@ -299,6 +306,20 @@ pub fn main() -> ! {
     } else {
         error!("unable to open tty {}", tty.display());
     }
+
+    // listen_and_create_devices prints logs, so make sure it starts after logging and output
+    // console is setup
+    std::thread::spawn(|| {
+        // We must first run scan_and_create_devices since this code will run after some devices
+        // have already been created by the linux kernel, so starting the listener will end up with
+        // us missing a bunch of devices.
+        tboot::dev::scan_and_create_devices();
+
+        if let Err(e) = tboot::dev::listen_and_create_devices() {
+            error!("listen_and_create_devices failed: {e}");
+            panic!()
+        }
+    });
 
     println!(
         "{} tinyboot {}",

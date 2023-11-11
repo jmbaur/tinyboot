@@ -36,7 +36,7 @@ let
     '';
 in
 {
-  imports = lib.mapAttrsToList (board: _: ./boards/${board}/config.nix) boards;
+  imports = [ ./qemu.nix ] ++ lib.mapAttrsToList (board: _: ./boards/${board}/config.nix) boards;
   options = with lib; {
     platforms = mkOption { type = types.listOf types.str; default = [ ]; };
     board = mkOption {
@@ -49,6 +49,8 @@ in
         modules = [{ freeformType = with types; lazyAttrsOf (uniq unspecified); }];
       };
     };
+    qemu.enable = mkEnableOption "qemu";
+    qemu.flags = mkOption { type = types.listOf types.str; default = [ ]; };
     flashrom = {
       package = mkPackageOptionMD pkgs "flashrom-cros" { };
       programmer = mkOption { type = types.str; default = "internal"; };
@@ -89,6 +91,13 @@ in
       default = "info";
     };
     tinyboot.tty = mkOption { type = types.str; default = "tty1"; };
+    extraInitrdContents = mkOption {
+      type = types.listOf (types.submodule {
+        options.object = mkOption { type = types.path; };
+        options.symlink = mkOption { type = types.str; };
+      });
+      default = [ ];
+    };
   };
   config = {
     _module.args.kconfig = {
@@ -138,7 +147,7 @@ in
               popd
             '')
             config.linux.firmware));
-        }];
+        }] ++ config.extraInitrdContents;
       };
       initrd = config.build.baseInitrd.override {
         prepend = (pkgs.makeInitrdNG {

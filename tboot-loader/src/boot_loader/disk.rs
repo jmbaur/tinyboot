@@ -603,10 +603,9 @@ impl BootLoader for BlsBootLoader {
                 .iter()
                 .find(|(_, part)| part.part_type_guid == gpt::partition_types::EFI)
             {
-                let partition_name = format!("{}{}", devname, esp.0);
-                let partition_chardev_path = get_dev_path(&partition_name);
-
                 let mut disk = Disk::new(diskseq, device_path.clone());
+
+                let partition_chardev_path = PathBuf::from("/dev/part").join(disk.diskseq.to_string()).join(esp.0.to_string());
 
                 if let Err(e) = disk.mount(partition_chardev_path) {
                     debug!("failed to mount {}: {e}", disk_chardev_path.display());
@@ -699,16 +698,7 @@ fn get_dev_path(devname: &str) -> PathBuf {
 fn get_uevent(sys_dev: &Path) -> HashMap<String, String> {
     let uevent = sys_dev.join("uevent");
     let contents = std::fs::read_to_string(uevent).unwrap();
-    parse_uevent(contents)
-}
-
-fn parse_uevent(contents: String) -> HashMap<String, String> {
-    contents.lines().fold(HashMap::new(), |mut map, line| {
-        if let Some((key, val)) = line.split_once('=') {
-            map.insert(key.to_string(), val.to_string());
-        }
-        map
-    })
+    tboot::dev::parse_uevent(contents)
 }
 
 #[cfg(test)]

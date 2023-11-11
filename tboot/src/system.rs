@@ -10,6 +10,8 @@ use nix::{
 };
 use termios::{cfgetispeed, cfgetospeed, cfsetispeed, cfsetospeed, tcsetattr, Termios};
 
+const ASCII_INTEGER_START: u8 = 0x30;
+
 pub fn setup_system() {
     std::fs::create_dir_all("/proc").expect("failed to create /proc");
     std::fs::create_dir_all("/sys").expect("failed to create /sys");
@@ -30,7 +32,7 @@ pub fn setup_system() {
         None::<&str>,
         "/dev",
         Some("devtmpfs"),
-        MsFlags::MS_NOSUID,
+        MsFlags::MS_SILENT | MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC,
         None::<&str>,
     )
     .expect("failed to mount to /dev");
@@ -85,12 +87,6 @@ pub fn setup_system() {
         None::<&str>,
     )
     .expect("failed to mount to /dev/pts");
-
-    std::thread::spawn(move || {
-        if let Err(e) = crate::dev::listen_and_create_devices() {
-            panic!("listen_and_create_devices failed: {e}");
-        }
-    });
 }
 
 // Adapted from https://github.com/mirror/busybox/blob/2d4a3d9e6c1493a9520b907e07a41aca90cdfd94/init/init.c#L341
@@ -153,7 +149,13 @@ extern "C" {
     fn klogctl(syslog_type: libc::c_int, buf: *mut libc::c_char, len: libc::c_int) -> libc::c_int;
 }
 
-pub fn kernel_logs() -> std::io::Result<String> {
+pub fn kernel_logs(level: u8) -> std::io::Result<String> {
+    let max_level: u8 = if level > 7 {
+        7
+    } else {
+        level.try_into().unwrap()
+    };
+
     let bufp = &mut [0u8; 1 << 16];
     let bytes_read = unsafe {
         klogctl(
@@ -162,12 +164,36 @@ pub fn kernel_logs() -> std::io::Result<String> {
             bufp.len() as _,
         )
     };
+
     if bytes_read < 0 {
         return Err(std::io::Error::last_os_error());
-    } else {
-        Ok(String::from_utf8(
-            bufp[..bytes_read as usize - 1].to_vec(), // remove trailing newline
-        )
-        .expect("kernel logs not valid UTF-8"))
     }
+
+    let bytes = &bufp[..bytes_read as usize];
+    let split = bytes.split(|byte| byte == &b'\n');
+
+    let mut bytes_filtered = split
+        .filter_map(|line| {
+            // remove log level indicator <N> and filter based on max_level
+            if line.len() > 3 {
+                let line_level = line[1] - ASCII_INTEGER_START;
+                if line_level <= max_level {
+                    Some(&line[3..])
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        })
+        .fold(Vec::new(), |mut acc, line| {
+            acc.extend(line);
+            acc.push(b'\n');
+            acc
+        });
+
+    // remove trailing newline
+    _ = bytes_filtered.remove(bytes_filtered.len() - 1);
+
+    Ok(String::from_utf8(bytes_filtered).unwrap())
 }

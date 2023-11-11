@@ -12,8 +12,9 @@ pub enum Command {
     Boot((Option<usize>, Option<usize>)),
     Reboot,
     Poweroff,
-    Dmesg,
+    Dmesg(u8),
     Rescan,
+    Shell,
 }
 
 pub fn parse_input(input: String) -> anyhow::Result<Option<Command>> {
@@ -35,9 +36,19 @@ pub fn parse_input(input: String) -> anyhow::Result<Option<Command>> {
         "rescan" => Command::Rescan,
         "poweroff" => Command::Poweroff,
         "reboot" => Command::Reboot,
-        "dmesg" => Command::Dmesg,
+        "dmesg" => parse_dmesg(iter)?,
+        "shell" => Command::Shell,
         _ => anyhow::bail!("unknown command '{input}'"),
     }))
+}
+
+fn parse_dmesg(mut iter: SplitWhitespace<'_>) -> anyhow::Result<Command> {
+    Ok(Command::Dmesg(
+        iter.next()
+            .map(|arg| u8::from_str_radix(arg, 10))
+            .transpose()?
+            .unwrap_or(6), // 6 = INFO loglevel
+    ))
 }
 
 fn parse_loader(mut iter: SplitWhitespace<'_>) -> anyhow::Result<Command> {

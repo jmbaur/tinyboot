@@ -16,7 +16,7 @@
     fsType = "ext4";
     autoResize = true;
   };
-  # NOTE: make-disk-image.nix is incapable of cross-compilation
+  # TODO(jared): make-disk-image.nix is incapable of cross-compilation. Use disko instead?
   system.build.qcow2 = import (pkgs.path + "/nixos/lib/make-disk-image.nix") {
     name = "tinyboot-test-image";
     inherit pkgs lib config;

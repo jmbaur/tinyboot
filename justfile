@@ -8,7 +8,7 @@ init:
 	mkdir -p {{BUILD_DIR}}
 
 build:
-	cargo build --features fw_cfg
+	cargo build --package tboot-loader --features fw_cfg
 
 clean:
 	rm -rf {{BUILD_DIR}}
@@ -34,5 +34,6 @@ initrd: build initrd-contents
 qemu: initrd
 	test -f {{justfile_directory()}}/nixos-{{arch()}}-linux.qcow2 || just disk
 	nix run -L {{justfile_directory()}}\#coreboot.qemu-{{arch()}}.config.build.qemuScript -- \
-		-drive if=virtio,file=nixos-{{arch()}}-linux.qcow2,format=qcow2,media=disk \
-		-initrd {{BUILD_DIR}}/initrd
+		-initrd {{BUILD_DIR}}/initrd \
+		-drive file=nixos-{{arch()}}-linux.qcow2,if=none,id=nvm \
+		-device nvme,serial=deadbeef,drive=nvm

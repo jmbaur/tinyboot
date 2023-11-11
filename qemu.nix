@@ -1,8 +1,16 @@
-{ lib, pkgs, config, ... }: {
-  options.qemu.flags = with lib; mkOption { type = types.listOf types.str; default = [ ]; };
-  config = {
+{ lib, pkgs, config, ... }:
+let
+  busybox = pkgs.pkgsStatic.busybox.override {
+    extraConfig = ''
+      CONFIG_FEATURE_SH_STANDALONE y
+    '';
+  };
+in
+{
+  config = lib.mkIf config.qemu.enable {
     qemu.flags = [ "-kernel" "${config.build.linux}/kernel" ];
     loglevel = lib.mkDefault "debug";
+    extraInitrdContents = [{ object = "${busybox}/bin/busybox"; symlink = "/bin/busybox"; }];
     build.qemuScript = pkgs.writeShellApplication {
       name = "tinyboot-qemu";
       runtimeInputs = with pkgs.pkgsBuildBuild; [ swtpm qemu ];
