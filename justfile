@@ -35,5 +35,4 @@ qemu: initrd
 	test -f {{justfile_directory()}}/nixos-{{arch()}}-linux.qcow2 || just disk
 	nix run -L {{justfile_directory()}}\#coreboot.qemu-{{arch()}}.config.build.qemuScript -- \
 		-initrd {{BUILD_DIR}}/initrd \
-		-drive file=nixos-{{arch()}}-linux.qcow2,if=none,id=nvm \
-		-device nvme,serial=deadbeef,drive=nvm
+		-drive if=virtio,file=nixos-{{arch()}}-linux.qcow2,format=qcow2,media=disk
