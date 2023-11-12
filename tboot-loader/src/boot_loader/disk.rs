@@ -19,21 +19,44 @@ const DISK_MNT_PATH: &str = "/mnt/disk";
 pub enum EfiArch {
     Ia32,
     X64,
-    Ia64,
     Arm,
     Aa64,
+    Riscv32,
+    Riscv64,
+    LoongArch32,
+    LoongArch64,
+}
+
+impl EfiArch {
+    /// Indicates whether the variant of EFI architecture matches the current running architecture.
+    fn is_running_arch(&self) -> bool {
+        match (self, std::env::consts::ARCH) {
+            (Self::X64, "x86") => true,
+            (Self::X64, "x86_64") => true,
+            (Self::Arm, "arm") => true,
+            (Self::Aa64, "aarch64") => true,
+            (Self::Riscv32, "riscv32") => true,
+            (Self::Riscv64, "riscv64") => true,
+            (Self::LoongArch32, "loongarch32") => true,
+            (Self::LoongArch64, "LoongArch64") => true,
+            _ => false,
+        }
+    }
 }
 
 impl FromStr for EfiArch {
     type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(match s {
+        Ok(match s.to_lowercase().as_str() {
             "ia32" => EfiArch::Ia32,
             "x64" => EfiArch::X64,
-            "ia64" => EfiArch::Ia64,
             "arm" => EfiArch::Arm,
             "aa64" => EfiArch::Aa64,
+            "riscv32" => EfiArch::Riscv32,
+            "riscv64" => EfiArch::Riscv64,
+            "loongarch32" => Self::LoongArch32,
+            "LoongArch64" => Self::LoongArch64,
             _ => anyhow::bail!("unknown EFI arch"),
         })
     }
@@ -451,11 +474,28 @@ impl Disk {
                 .entries
                 .iter()
                 .find(|entry| entry.name == parsed_entry.name)
-                .is_none()
+                .is_some()
             {
-                debug!("new entry added {}", entry_path.display());
-                self.entries.push(parsed_entry);
+                debug!("entry {} already present, skipping", entry_path.display());
+                continue;
             }
+
+            // assume entry is meant for running architecture if not specified
+            if !parsed_entry
+                .architecture
+                .as_ref()
+                .map(|arch| arch.is_running_arch())
+                .unwrap_or(true)
+            {
+                debug!(
+                    "entry {} is not for current running architecture, skipping",
+                    entry_path.display()
+                );
+                continue;
+            }
+
+            debug!("new entry added {}", entry_path.display());
+            self.entries.push(parsed_entry);
         }
 
         // TODO(jared): this could be a lot better, it depends on sequential entries having the
