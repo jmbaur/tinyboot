@@ -1,2 +1,3 @@
 - use non-volatile storage for configuration of boot order, etc.
+- network booting
 - docs
