@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    io::Write,
     path::{Path, PathBuf},
 };
 
@@ -29,6 +30,11 @@ struct Args {
     /// "bad"
     #[argh(option)]
     max_tries: u32,
+
+    /// time (in seconds) before the bootloader will try to boot from the default entry if no user
+    /// input is detected
+    #[argh(option)]
+    timeout: u32,
 
     /// the nixos system closure of the current activation
     #[argh(positional)]
@@ -294,12 +300,16 @@ fn main() {
         )
         .unwrap();
 
-        if nixos_system_closure == state.args.default_nixos_system_closure {
-            std::fs::write(
-                state.args.efi_sys_mount_point.join("loader/loader.conf"),
-                format!("default nixos-generation-{}\n", entry_number),
-            )
+        let mut loader_conf = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .open(state.args.efi_sys_mount_point.join("loader/loader.conf"))
             .unwrap();
+
+        write!(loader_conf, "timeout {}\n", state.args.timeout).unwrap();
+
+        if nixos_system_closure == state.args.default_nixos_system_closure {
+            write!(loader_conf, "default nixos-generation-{}\n", entry_number,).unwrap();
         }
 
         match boot_json.generation {
