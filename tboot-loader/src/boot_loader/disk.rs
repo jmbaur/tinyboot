@@ -364,7 +364,7 @@ impl Disk {
             .map(|val| val.trim().to_string())
     }
 
-    fn mount(&mut self, partition_chardev_path: PathBuf) -> anyhow::Result<()> {
+    fn mount(&mut self, partition_chardev_path: impl AsRef<Path>) -> anyhow::Result<()> {
         // We can use diskseq as value that is unique across all disks
         // https://github.com/torvalds/linux/blob/9c5d00cb7b6bbc5a7965d9ab7d223b5402d1f02c/block/genhd.c#L53
 
@@ -372,7 +372,7 @@ impl Disk {
         std::fs::create_dir(&mountpoint)?;
 
         mount::mount(
-            Some(&partition_chardev_path),
+            Some(partition_chardev_path.as_ref()),
             &mountpoint,
             Some(
                 crate::fs::detect_fs_type(std::fs::File::open(&partition_chardev_path)?)
@@ -566,7 +566,9 @@ impl BootLoader for BlsBootLoader {
             let device_path = {
                 let device_path = block_dev_path.join("device");
                 if !std::fs::metadata(&device_path).is_ok() {
-                    debug!("no backing device for {}", block_dev_path.display());
+                    // There is no physical backing device for this device. This could happen if
+                    // the device is a logical partition (e.g. `/dev/sda1` where the parent device
+                    // is `/dev/sda`)
                     continue;
                 }
                 std::fs::canonicalize(device_path).unwrap()
@@ -590,25 +592,33 @@ impl BootLoader for BlsBootLoader {
 
             let gpt_cfg = gpt::GptConfig::new().writable(false);
             let disk_chardev_path = get_dev_path(devname);
+
             let gpt_disk = match gpt_cfg.open(&disk_chardev_path) {
                 Ok(disk) => disk,
                 Err(e) => {
-                    debug!("gpt: {}: {e}", disk_chardev_path.display());
+                    debug!(
+                        "GPT detection failed for disk {}: {e}",
+                        disk_chardev_path.display()
+                    );
                     continue;
                 }
             };
 
+            debug!("found gpt-partitioned disk {}", disk_chardev_path.display());
+
             if let Some(esp) = gpt_disk
                 .partitions()
                 .iter()
-                .find(|(_, part)| part.part_type_guid == gpt::partition_types::EFI)
+                .find(|(_, part)| matches!(part.part_type_guid, gpt::partition_types::EFI))
             {
                 let mut disk = Disk::new(diskseq, device_path.clone());
 
-                let partition_chardev_path = PathBuf::from("/dev/part").join(disk.diskseq.to_string()).join(esp.0.to_string());
+                let partition_chardev_path = PathBuf::from("/dev/part")
+                    .join(disk.diskseq.to_string())
+                    .join(esp.0.to_string());
 
-                if let Err(e) = disk.mount(partition_chardev_path) {
-                    debug!("failed to mount {}: {e}", disk_chardev_path.display());
+                if let Err(e) = disk.mount(&partition_chardev_path) {
+                    debug!("failed to mount {}: {e}", partition_chardev_path.display());
                     continue;
                 }
 

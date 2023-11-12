@@ -1,25 +1,31 @@
-use std::{collections::HashMap, ffi::CString, path::PathBuf, str::FromStr};
+use std::{
+    collections::HashMap,
+    ffi::CString,
+    path::PathBuf,
+    str::FromStr,
+    sync::mpsc::{Receiver, RecvTimeoutError, Sender},
+    time::Duration,
+};
 
 use log::{debug, error, warn};
 use netlink_sys::{protocols::NETLINK_KOBJECT_UEVENT, Socket, SocketAddr};
 use nix::libc;
 
-pub fn listen_and_create_devices() -> std::io::Result<()> {
+pub fn listen_and_create_devices(tx: Sender<()>) -> std::io::Result<()> {
     let mut socket = Socket::new(NETLINK_KOBJECT_UEVENT)?;
-    let sa = SocketAddr::new(0, 0);
+    let sa = SocketAddr::new(std::process::id(), 1);
     socket.bind(&sa)?;
 
     loop {
-        let mut buf = vec![0; 1024 * 8];
-        let n = match socket.recv_from(&mut buf, 0) {
-            Ok((n, _)) => n,
+        let bytes = match socket.recv_from_full() {
+            Ok((b, _)) => b,
             Err(e) => {
                 error!("failed to receive kobject uevent: {e}");
                 continue;
             }
         };
 
-        let uevent = match Uevent::parse(&buf[..n]) {
+        let uevent = match Uevent::parse(&bytes) {
             Ok(u) => u,
             Err(e) => {
                 error!("failed to parse uevent: {e:?}");
@@ -27,12 +33,17 @@ pub fn listen_and_create_devices() -> std::io::Result<()> {
             }
         };
 
-        debug!(
-            "{:?};{} {},{}",
-            uevent.event, uevent.devname, uevent.major, uevent.minor
-        );
+        let (Some(devname), Some(major), Some(minor)) =
+            (uevent.devname, uevent.major, uevent.minor)
+        else {
+            continue;
+        };
 
-        let path = PathBuf::from("/dev").join(uevent.devname);
+        debug!("{:?}->{} {},{}", uevent.event, devname, major, minor);
+
+        tx.send(()).unwrap();
+
+        let path = PathBuf::from("/dev").join(devname);
         let parent = path.parent().expect("/dev should always exist");
         std::fs::create_dir_all(&parent).unwrap();
 
@@ -43,11 +54,11 @@ pub fn listen_and_create_devices() -> std::io::Result<()> {
                 let special: Special = uevent.devtype.into();
 
                 let res = unsafe {
-                    libc::mknod(
-                        c_path.as_ptr(),
-                        special.0,
-                        libc::makedev(uevent.major, uevent.minor),
-                    )
+                    if path.exists() {
+                        0
+                    } else {
+                        libc::mknod(c_path.as_ptr(), special.0, libc::makedev(major, minor))
+                    }
                 };
 
                 if res < 0 {
@@ -55,9 +66,9 @@ pub fn listen_and_create_devices() -> std::io::Result<()> {
                 } else {
                     match uevent.devtype {
                         DevType::Character => {}
-                        DevType::Disk(diskseq) => add_disk_symlink(uevent.devname, diskseq),
+                        DevType::Disk(diskseq) => add_disk_symlink(devname, diskseq),
                         DevType::Partition(diskseq, partnum) => {
-                            add_partition_symlink(uevent.devname, diskseq, partnum)
+                            add_partition_symlink(devname, diskseq, partnum)
                         }
                     }
                 }
@@ -137,18 +148,15 @@ impl FromStr for EventType {
 #[derive(PartialEq, Debug)]
 struct Uevent<'a> {
     event: EventType,
-    major: u32,
-    minor: u32,
-    devname: &'a str,
+    major: Option<u32>,
+    minor: Option<u32>,
+    devname: Option<&'a str>,
     devtype: DevType,
 }
 
 #[derive(Debug)]
 enum Error<'a> {
     InvalidUevent,
-    MissingMajor,
-    MissingMinor,
-    MissingDeviceName,
     MissingEventType,
     InvalidEventType(&'a str),
 }
@@ -182,23 +190,19 @@ impl<'a> Uevent<'a> {
             uevent
         };
 
-        let devname = uevent.get("DEVNAME").ok_or(Error::MissingDeviceName)?;
+        let devname = uevent.get("DEVNAME").copied();
 
-        let Ok(major) = uevent
+        let major = uevent
             .get("MAJOR")
             .map(|major| u32::from_str_radix(major, 10))
-            .ok_or(Error::MissingMajor)?
-        else {
-            return Err(Error::InvalidUevent);
-        };
+            .transpose()
+            .map_err(|_| Error::InvalidUevent)?;
 
-        let Ok(minor) = uevent
+        let minor = uevent
             .get("MINOR")
             .map(|minor| u32::from_str_radix(minor, 10))
-            .ok_or(Error::MissingMinor)?
-        else {
-            return Err(Error::InvalidUevent);
-        };
+            .transpose()
+            .map_err(|_| Error::InvalidUevent)?;
 
         let devtype = uevent
             .get("SUBSYSTEM")
@@ -265,9 +269,9 @@ mod tests {
             uevent,
             super::Uevent {
                 event: super::EventType::Add,
-                major: 4,
-                minor: 70,
-                devname: "ttyS6",
+                major: Some(4),
+                minor: Some(70),
+                devname: Some("ttyS6"),
                 devtype: super::DevType::Character,
             }
         );
@@ -291,10 +295,36 @@ mod tests {
             uevent,
             super::Uevent {
                 event: super::EventType::Remove,
-                major: 4,
-                minor: 70,
-                devname: "ttyS6",
+                major: Some(4),
+                minor: Some(70),
+                devname: Some("ttyS6"),
                 devtype: super::DevType::Character,
+            }
+        );
+    }
+
+    #[test]
+    fn parse_add_disk() {
+        const DATA: &[u8] = b"add@/devices/platform/4010000000.pcie/pci0000:00/0000:00:02.0/usb2/2-1/2-1:1.0/host0/target0:0:0/0:0:0:0/block/sda\0\
+                                ACTION=add\0\
+                                DEVPATH=/devices/platform/4010000000.pcie/pci0000:00/0000:00:02.0/usb2/2-1/2-1:1.0/host0/target0:0:0/0:0:0:0/block/sda\0\
+                                SUBSYSTEM=block\0\
+                                MAJOR=8\0\
+                                MINOR=0\0\
+                                DEVNAME=sda\0\
+                                DEVTYPE=disk\0\
+                                DISKSEQ=3\0\
+                                SEQNUM=532\0";
+
+        let uevent = super::Uevent::parse(DATA).unwrap();
+        assert_eq!(
+            uevent,
+            super::Uevent {
+                event: super::EventType::Add,
+                major: Some(8),
+                minor: Some(0),
+                devname: Some("sda"),
+                devtype: super::DevType::Disk(3),
             }
         );
     }
@@ -392,4 +422,14 @@ pub fn parse_uevent(contents: String) -> HashMap<String, String> {
         }
         map
     })
+}
+
+/// Blocks until no new messages have been received in some maximum wait time
+pub fn wait_for_settle(new_dev_rx: Receiver<()>, max_wait: Duration) {
+    loop {
+        match new_dev_rx.recv_timeout(max_wait) {
+            Err(RecvTimeoutError::Timeout) => break,
+            _ => {}
+        }
+    }
 }

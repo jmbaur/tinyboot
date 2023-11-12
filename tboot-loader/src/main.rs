@@ -160,10 +160,11 @@ fn handle_commands(
         match server_rx.recv().unwrap() {
             ClientToServer::UserIsPresent => {}
             ClientToServer::Command(Command::Shell) => {
-                 if std::process::Command::new("/bin/busybox")
+                if std::process::Command::new("/bin/busybox")
                     .arg("sh")
                     .env("TERM", "linux")
-                    .status().is_err()
+                    .status()
+                    .is_err()
                 {
                     error!("failed to run shell");
                 }
@@ -307,6 +308,8 @@ pub fn main() -> ! {
         error!("unable to open tty {}", tty.display());
     }
 
+    let (new_dev_tx, new_dev_rx) = std::sync::mpsc::channel::<()>();
+
     // listen_and_create_devices prints logs, so make sure it starts after logging and output
     // console is setup
     std::thread::spawn(|| {
@@ -315,7 +318,7 @@ pub fn main() -> ! {
         // us missing a bunch of devices.
         tboot::dev::scan_and_create_devices();
 
-        if let Err(e) = tboot::dev::listen_and_create_devices() {
+        if let Err(e) = tboot::dev::listen_and_create_devices(new_dev_tx) {
             error!("listen_and_create_devices failed: {e}");
             panic!()
         }
@@ -335,6 +338,9 @@ pub fn main() -> ! {
     } else {
         info!("boot verification is ON");
     }
+
+    debug!("waiting for new events to settle");
+    tboot::dev::wait_for_settle(new_dev_rx, Duration::from_secs(1));
 
     match prepare_boot() {
         Ok(Outcome::Kexec) => {
