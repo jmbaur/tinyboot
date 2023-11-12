@@ -340,7 +340,7 @@ pub fn main() -> ! {
     }
 
     debug!("waiting for new events to settle");
-    tboot::dev::wait_for_settle(new_dev_rx, Duration::from_secs(1));
+    tboot::dev::wait_for_settle(new_dev_rx, Duration::from_secs(2));
 
     match prepare_boot() {
         Ok(Outcome::Kexec) => {

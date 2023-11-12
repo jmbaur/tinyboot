@@ -1,4 +1,5 @@
 use crate::boot_loader::BootLoader;
+use gpt::mbr;
 use log::{debug, error, info, trace};
 use nix::mount::{self, MntFlags, MsFlags};
 use std::{
@@ -590,50 +591,62 @@ impl BootLoader for BlsBootLoader {
                 continue;
             };
 
-            let gpt_cfg = gpt::GptConfig::new().writable(false);
             let disk_chardev_path = get_dev_path(devname);
 
-            let gpt_disk = match gpt_cfg.open(&disk_chardev_path) {
-                Ok(disk) => disk,
-                Err(e) => {
-                    debug!(
-                        "GPT detection failed for disk {}: {e}",
-                        disk_chardev_path.display()
-                    );
+            let gpt_cfg = gpt::GptConfig::new().writable(false);
+
+            let boot_part_idx = {
+                if let Ok(Some(gpt_idx)) = gpt_cfg.open(&disk_chardev_path).map(|disk| {
+                    disk.partitions().iter().find_map(|(part_idx, part)| {
+                        if part.part_type_guid == gpt::partition_types::EFI {
+                            Some(part_idx.to_owned())
+                        } else {
+                            None
+                        }
+                    })
+                }) {
+                    gpt_idx
+                } else if let Ok(Ok(Some(mbr_idx))) =
+                    std::fs::File::open(&disk_chardev_path).map(|mut disk| {
+                        mbr::ProtectiveMBR::from_disk(&mut disk, gpt::disk::LogicalBlockSize::Lb512)
+                            .map(|mbr_disk| {
+                                for idx in 0u32..=3 {
+                                    let maybe_esp = mbr_disk.partition(idx as usize).unwrap();
+                                    // https://uapi-group.org/specifications/specs/boot_loader_specification/#the-partitions
+                                    if maybe_esp.os_type == 0xEA {
+                                        return Some(idx + 1);
+                                    }
+                                }
+
+                                None
+                            })
+                    })
+                {
+                    mbr_idx
+                } else {
                     continue;
                 }
             };
 
-            debug!("found gpt-partitioned disk {}", disk_chardev_path.display());
+            let mut disk = Disk::new(diskseq, device_path.clone());
 
-            if let Some(esp) = gpt_disk
-                .partitions()
-                .iter()
-                .find(|(_, part)| matches!(part.part_type_guid, gpt::partition_types::EFI))
-            {
-                let mut disk = Disk::new(diskseq, device_path.clone());
+            let partition_chardev_path = PathBuf::from("/dev/part")
+                .join(disk.diskseq.to_string())
+                .join(boot_part_idx.to_string());
 
-                let partition_chardev_path = PathBuf::from("/dev/part")
-                    .join(disk.diskseq.to_string())
-                    .join(esp.0.to_string());
-
-                if let Err(e) = disk.mount(&partition_chardev_path) {
-                    debug!("failed to mount {}: {e}", partition_chardev_path.display());
-                    continue;
-                }
-
-                // add the disk if it does not already exist
-                if self
-                    .disks
-                    .iter()
-                    .find(|disk| disk.diskseq == diskseq)
-                    .is_none()
-                {
-                    self.disks.push(disk);
-                }
-
-                // Assuming one ESP per disk.
+            if let Err(e) = disk.mount(&partition_chardev_path) {
+                debug!("failed to mount {}: {e}", partition_chardev_path.display());
                 continue;
+            }
+
+            // add the disk if it does not already exist
+            if self
+                .disks
+                .iter()
+                .find(|disk| disk.diskseq == diskseq)
+                .is_none()
+            {
+                self.disks.push(disk);
             }
         }
 
@@ -664,7 +677,7 @@ impl BootLoader for BlsBootLoader {
                     Ok(l) => l,
                     Err(e) => {
                         debug!(
-                            "failed to read loader.conf {}, {e}",
+                            "failed to read loader.conf {}: {e}",
                             loader_conf_path.display()
                         );
                         continue;

@@ -41,7 +41,7 @@ pub fn listen_and_create_devices(tx: Sender<()>) -> std::io::Result<()> {
 
         debug!("{:?}->{} {},{}", uevent.event, devname, major, minor);
 
-        tx.send(()).unwrap();
+        _ = tx.send(());
 
         let path = PathBuf::from("/dev").join(devname);
         let parent = path.parent().expect("/dev should always exist");
