@@ -14,6 +14,7 @@ stdenvNoCC.mkDerivation (finalAttrs: {
   depsBuildBuild = [ pkgsBuildBuild.stdenv.cc pkg-config openssl ];
   nativeBuildInputs = [ python3 ];
   buildInputs = [ ];
+  enableParallelBuilding = true;
   postPatch = ''
     patchShebangs util 3rdparty/vboot/scripts
   '';

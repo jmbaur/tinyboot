@@ -1,5 +1,5 @@
 # TODO(jared): vboot not tested on this platform
-{ config, pkgs, lib, kconfig, ... }: {
+{ config, pkgs, lib, ... }: {
   config = lib.mkIf (config.board == "qemu-aarch64") {
     platforms = [ "aarch64-linux" ];
     qemu.enable = true;
@@ -11,7 +11,7 @@
       '');
     };
     tinyboot.tty = lib.mkDefault "ttyAMA0";
-    coreboot.kconfig = with kconfig; {
+    coreboot.kconfig = with lib.kernel; {
       BOARD_EMULATION = yes;
       BOARD_EMULATION_QEMU_AARCH64 = yes;
       FMDFILE = freeform ./layout.fmd;

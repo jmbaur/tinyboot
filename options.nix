@@ -1,4 +1,4 @@
-{ config, pkgs, lib, kconfig, ... }:
+{ config, pkgs, lib, ... }:
 let
   boards = builtins.readDir ./boards;
   tinyboot = pkgs.tinyboot.override { corebootSupport = config.coreboot.enable; };
@@ -13,12 +13,15 @@ let
     apply = attrs: {
       inherit attrs;
       __resolved = lib.concatLines (lib.mapAttrsToList
-        (option: response: {
-          "bool" =
-            if response.value then "CONFIG_${option}=y" else "# CONFIG_${option} is not set";
-          "freeform" =
-            if lib.isInt response.value then "CONFIG_${option}=${toString response.value}" else ''CONFIG_${option}="${response.value}"'';
-        }.${response._type})
+        (option: response:
+          if response ? freeform then
+            let val = if lib.isInt response.freeform then response.freeform else ''"${response.freeform}"''; in
+            "CONFIG_${option}=${val}"
+          else assert response ? tristate;
+          if response.tristate == null then
+            "# CONFIG_${option} is not set"
+          else assert response.tristate != "m"; # coreboot does not have modules
+          "CONFIG_${option}=${response.tristate}")
         attrs);
     };
   };
@@ -71,8 +74,8 @@ in
     };
     coreboot = {
       enable = mkEnableOption "coreboot integration" // { default = true; };
-      wpRange.start = mkOption { readOnly = true; type = types.str; };
-      wpRange.length = mkOption { readOnly = true; type = types.str; };
+      wpRange.start = mkOption { type = types.str; };
+      wpRange.length = mkOption { type = types.str; };
       kconfig = kconfigOption;
       vpd.ro = vpdOption;
       vpd.rw = vpdOption;
@@ -100,26 +103,20 @@ in
     };
   };
   config = {
-    _module.args.kconfig = {
-      yes = { _type = "bool"; value = true; };
-      no = { _type = "bool"; value = false; };
-      freeform = value: { _type = "freeform"; inherit value; };
-    };
-
     # The "--" makes linux pass remaining parameters as args to PID1
     linux.commandLine = [ "console=ttynull" "--" "tboot.loglevel=${config.loglevel}" "tboot.tty=${config.tinyboot.tty}" ];
 
     coreboot.vpd.ro.pubkey = config.verifiedBoot.tbootPublicCertificate;
-    coreboot.kconfig = with kconfig; {
-      "CONFIG_DEFAULT_CONSOLE_LOGLEVEL_${toString { "off" = 2; "error" = 3; "warn" = 4; "info" = 6; "debug" = 7; "trace" = 8; }.${config.loglevel}}" = yes;
-      PAYLOAD_NONE = no;
+    coreboot.kconfig = with lib.kernel; {
+      "DEFAULT_CONSOLE_LOGLEVEL_${toString { "off" = 2; "error" = 3; "warn" = 4; "info" = 6; "debug" = 7; "trace" = 8; }.${config.loglevel}}" = yes;
+      PAYLOAD_NONE = unset;
       VBOOT = yes;
       VBOOT_FIRMWARE_PRIVKEY = freeform config.verifiedBoot.vbootFirmwarePrivkey;
       VBOOT_KERNEL_KEY = freeform config.verifiedBoot.vbootFirmwareKey;
       VBOOT_KEYBLOCK = freeform config.verifiedBoot.vbootKeyblock;
       VBOOT_RECOVERY_KEY = freeform config.verifiedBoot.vbootFirmwareKey;
       VBOOT_ROOT_KEY = freeform config.verifiedBoot.vbootRootKey;
-      VBOOT_SIGN = no; # don't sign during build
+      VBOOT_SIGN = unset; # don't sign during build
       VPD = yes;
     } // lib.optionalAttrs pkgs.hostPlatform.isx86_64 {
       LINUX_INITRD = freeform "${config.build.initrd}/initrd";

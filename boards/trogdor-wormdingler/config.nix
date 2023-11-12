@@ -1,4 +1,4 @@
-{ config, pkgs, lib, kconfig, ... }: {
+{ config, pkgs, lib, ... }: {
   config = lib.mkIf (config.board == "trogdor-wormdingler") {
     platforms = [ "aarch64-linux" ];
     linux = {
@@ -8,7 +8,7 @@
       dtbPattern = "sc7180-trogdor-wormdingler*";
     };
     tinyboot.tty = "ttyMSM0";
-    coreboot.kconfig = with kconfig; {
+    coreboot.kconfig = with lib.kernel; {
       USE_QC_BLOBS = yes;
       VENDOR_GOOGLE = yes;
       BOARD_GOOGLE_WORMDINGLER = yes;
