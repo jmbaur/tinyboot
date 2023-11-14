@@ -111,6 +111,7 @@ in
       "DEFAULT_CONSOLE_LOGLEVEL_${toString { "off" = 2; "error" = 3; "warn" = 4; "info" = 6; "debug" = 7; "trace" = 8; }.${config.loglevel}}" = yes;
       PAYLOAD_NONE = unset;
       VBOOT = yes;
+      VBOOT_ALWAYS_ENABLE_DISPLAY = yes;
       VBOOT_FIRMWARE_PRIVKEY = freeform config.verifiedBoot.vbootFirmwarePrivkey;
       VBOOT_KERNEL_KEY = freeform config.verifiedBoot.vbootFirmwareKey;
       VBOOT_KEYBLOCK = freeform config.verifiedBoot.vbootKeyblock;

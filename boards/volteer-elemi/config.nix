@@ -1,4 +1,4 @@
-{ config, pkgs, lib,  ... }: {
+{ config, pkgs, lib, ... }: {
   config = lib.mkIf (config.board == "volteer-elemi") {
     platforms = [ "x86_64-linux" ];
     linux.configFile = with pkgs.tinybootKernelConfigs; lib.mkDefault (pkgs.concatText "volteer-elemi-kernel.config" [ generic video x86_64 tigerlake chromebook ]);
