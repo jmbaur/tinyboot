@@ -69,7 +69,6 @@ struct BlsEntry {
     tries_left: Option<u32>,
     tries_done: Option<u32>,
     name: String,
-    pretty_name: String,
     title: Option<String>,
     version: Option<String>,
     machine_id: Option<String>,
@@ -86,7 +85,20 @@ struct BlsEntry {
 
 impl Display for BlsEntry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.pretty_name)
+        match self.title.as_ref() {
+            Some(title) => {
+                write!(f, "{}", title)?;
+
+                if let Some(version) = self.version.as_ref() {
+                    write!(f, " {}", version)?;
+                }
+
+                Ok(())
+            }
+            None => {
+                write!(f, "{}", self.name)
+            }
+        }
     }
 }
 
@@ -228,17 +240,6 @@ impl BlsEntry {
                 _ => {}
             }
         }
-
-        entry.pretty_name = 'pretty: {
-            let Some(title) = &entry.title else {
-                break 'pretty entry.name.clone();
-            };
-            let Some(version) = &entry.version else {
-                break 'pretty entry.name.clone();
-            };
-
-            format!("{} {}", title, version)
-        };
 
         Ok(entry)
     }
