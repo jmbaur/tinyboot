@@ -204,7 +204,7 @@ fn install_generation(
         .join("entries");
 
     let entry_path = parent.join(format!(
-        "nixos-generation-{}{}+{}.conf",
+        "nixos-generation-{}{}+{}-0.conf",
         entry_number,
         specialisation
             .map(|specialisation| format!("-specialisation-{specialisation}"))

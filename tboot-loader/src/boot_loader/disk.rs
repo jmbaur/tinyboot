@@ -15,7 +15,7 @@ use super::{BootDevice, BootEntry, LinuxBootParts, LoaderType};
 
 const DISK_MNT_PATH: &str = "/mnt/disk";
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum EfiArch {
     Ia32,
     X64,
@@ -63,7 +63,7 @@ impl FromStr for EfiArch {
 }
 
 // Documentation: https://uapi-group.org/specifications/specs/boot_loader_specification/#type-1-boot-loader-specification-entries
-#[derive(Default, Clone)]
+#[derive(Debug, Default, PartialEq, Eq, Clone)]
 struct BlsEntry {
     entry_path: PathBuf,
     tries_left: Option<u32>,
@@ -135,6 +135,56 @@ impl BootEntry for BlsEntry {
             initrd,
             cmdline,
         }
+    }
+}
+
+// Use systemd's sorting scheme for sorting BLS Type-1 entries.
+// Reference:
+// https://uapi-group.org/specifications/specs/boot_loader_specification/#sorting
+// https://github.com/systemd/systemd/blob/4bf4b439b20748ea2b3d23ce654ea0e646a76326/src/boot/efi/boot.c#L1665
+impl PartialOrd for BlsEntry {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        let mut comps = Vec::new();
+
+        // If either entry has no more boot tries left, sort appropriately.
+        if self
+            .tries_left
+            .is_some_and(|tries_left| tries_left == 0)
+        {
+            return Some(Ordering::Less);
+        }
+        if other.tries_left.is_some_and(|tries_left| tries_left == 0) {
+            return Some(Ordering::Greater);
+        }
+
+        // If the sort-key is set on both entries, use in order of priority the sort-key,
+        // machine-id, and version (decreasing order) keys.
+        if let (Some(self_sort_key), Some(other_sort_key)) =
+            (self.sort_key.as_ref(), other.sort_key.as_ref())
+        {
+            comps.push(self_sort_key.cmp(&other_sort_key));
+            comps.push(self.machine_id.cmp(&other.machine_id));
+            comps.push(self.version.cmp(&other.version));
+        }
+
+        // Sort by name (filename of the entry minus boot counting and file suffix)
+        comps.push(self.name.cmp(&other.name));
+
+        // If both entries are using boot counting, prioritize the entry with more tries left. If
+        // they both have equal tries left, prioritize the entry with less tries done.
+        if let (Some(self_tries_left), Some(other_tries_left)) = (self.tries_left, other.tries_left)
+        {
+            comps.push(self_tries_left.cmp(&other_tries_left));
+            comps.push(self.tries_done.cmp(&other.tries_done));
+        }
+
+        comps.iter().find(|&cmp| cmp != &Ordering::Equal).copied()
+    }
+}
+
+impl Ord for BlsEntry {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.partial_cmp(other).unwrap_or(Ordering::Equal)
     }
 }
 
@@ -499,23 +549,7 @@ impl Disk {
             self.entries.push(parsed_entry);
         }
 
-        // TODO(jared): this could be a lot better, it depends on sequential entries having the
-        // same fields defined, but this isn't always necessarily the case.
-        self.entries.sort_by(|a, b| {
-            if a.version < b.version {
-                Ordering::Greater
-            } else if a.version > b.version {
-                Ordering::Less
-            } else if a.title > b.title {
-                Ordering::Greater
-            } else if a.title < b.title {
-                Ordering::Less
-            } else if a.name > b.name {
-                Ordering::Greater
-            } else {
-                Ordering::Less
-            }
-        });
+        self.entries.sort_by(|a, b| a.cmp(b));
     }
 
     fn unmount(&self) {
@@ -772,7 +806,8 @@ mod tests {
 
     #[test]
     fn test_parse_entry_conf() {
-        let entry = super::BlsEntry::parse_entry_conf(Path::new("/foo/bar"), Path::new("/foo/loader/entries/foo.conf"), r#"title NixOS
+        let entry = super::BlsEntry::parse_entry_conf(Path::new("/foo/bar"), Path::new("/foo/loader/entries/foo.conf"), r#"\
+title NixOS
 version Generation 118 NixOS 23.05.20230506.0000000, Linux Kernel 6.1.27, Built on 2023-05-07
 linux /efi/nixos/00000000000000000000000000000000-linux-6.1.27-bzImage.efi
 initrd /efi/nixos/00000000000000000000000000000000-initrd-linux-6.1.27-initrd.efi
@@ -806,5 +841,76 @@ machine-id 00000000000000000000000000000000
             entry.options,
             vec!["init=/nix/store/00000000000000000000000000000000-nixos-system-beetroot-23.05.20230506.0000000/init".to_string(), "systemd.show_status=auto".to_string(), "loglevel=4".to_string()]
         );
+    }
+
+    #[test]
+    fn test_entry_sorting() {
+        use std::cmp::Ordering::*;
+
+        let entry_a = super::BlsEntry::parse_entry_conf(
+            Path::new("/foo/bar"),
+            Path::new("/foo/loader/entries/entry-a.conf"),
+            ""
+        )
+        .unwrap();
+        let entry_b = super::BlsEntry::parse_entry_conf(
+            Path::new("/foo/bar"),
+            Path::new("/foo/loader/entries/entry-b.conf"),
+            ""
+        )
+        .unwrap();
+        let entry_c_1_2 = super::BlsEntry::parse_entry_conf(
+            Path::new("/foo/bar"),
+            Path::new("/foo/loader/entries/entry-c+1-2.conf"),
+            ""
+        )
+        .unwrap();
+        let entry_c_0 = super::BlsEntry::parse_entry_conf(
+            Path::new("/foo/bar"),
+            Path::new("/foo/loader/entries/entry-c+0.conf"),
+            ""
+        )
+        .unwrap();
+        let entry_c_1 = super::BlsEntry::parse_entry_conf(
+            Path::new("/foo/bar"),
+            Path::new("/foo/loader/entries/entry-c+1.conf"),
+            ""
+        )
+        .unwrap();
+        let entry_d = super::BlsEntry::parse_entry_conf(
+            Path::new("/foo/bar"),
+            Path::new("/foo/loader/entries/entry-d.conf"),
+            ""
+        )
+        .unwrap();
+        let entry_e_1 = super::BlsEntry::parse_entry_conf(
+            Path::new("/foo/bar"),
+            Path::new("/foo/loader/entries/entry-e-1.conf"),
+            r#"\
+sort-key E
+version 2
+machine-id 2
+"#,
+        )
+        .unwrap();
+        let entry_e_2 = super::BlsEntry::parse_entry_conf(
+            Path::new("/foo/bar"),
+            Path::new("/foo/loader/entries/entry-e-2.conf"),
+            r#"\
+sort-key E
+version 1
+machine-id 1
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(entry_a.cmp(&entry_a), Equal);
+        assert_eq!(entry_a.cmp(&entry_b), Less);
+        assert_eq!(entry_c_0.cmp(&entry_b), Less);
+        assert_eq!(entry_c_1.cmp(&entry_c_0), Greater);
+        assert_eq!(entry_c_1.cmp(&entry_c_1_2), Less);
+        assert_eq!(entry_d.cmp(&entry_b), Greater);
+        assert_eq!(entry_e_2.cmp(&entry_e_1), Less);
+        assert_eq!(entry_a.cmp(&entry_e_1), Less);
     }
 }

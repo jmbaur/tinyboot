@@ -85,26 +85,6 @@ pub fn print_help(cmd_to_help: Option<&str>) {
     }
 }
 
-const POWEROFF_USAGE: &str = r#"
-Immediately poweroff the machine.
-"#;
-
-fn print_poweroff_usage() {
-    println!();
-    println!("poweroff");
-    println!("{POWEROFF_USAGE}");
-}
-
-const REBOOT_USAGE: &str = r#"
-Immediately reboot the machine.
-"#;
-
-fn print_reboot_usage() {
-    println!();
-    println!("reboot");
-    println!("{REBOOT_USAGE}");
-}
-
 fn print_all_usage() {
     println!();
     println!("list\t\tlist all boot entries");
@@ -114,7 +94,27 @@ fn print_all_usage() {
     println!("poweroff\tpoweroff the machine");
 }
 
-const BOOT_USAGE: &str = r#"
+const POWEROFF_USAGE: &str = r#"\
+Immediately poweroff the machine.
+"#;
+
+fn print_poweroff_usage() {
+    println!();
+    println!("poweroff");
+    println!("{POWEROFF_USAGE}");
+}
+
+const REBOOT_USAGE: &str = r#"\
+Immediately reboot the machine.
+"#;
+
+fn print_reboot_usage() {
+    println!();
+    println!("reboot");
+    println!("{REBOOT_USAGE}");
+}
+
+const BOOT_USAGE: &str = r#"\
 Boot from the selected entry. If no entry is selected, boot from the default entry.
 "#;
 
@@ -124,7 +124,7 @@ fn print_boot_usage() {
     println!("{BOOT_USAGE}");
 }
 
-const LIST_USAGE: &str = r#"
+const LIST_USAGE: &str = r#"\
 List all detected boot entries.
 "#;
 
@@ -134,7 +134,7 @@ fn print_list_usage() {
     println!("{LIST_USAGE}");
 }
 
-const LOADER_USAGE: &str = r#"
+const LOADER_USAGE: &str = r#"\
 Select or print current boot loader.
 "#;
 
@@ -144,7 +144,7 @@ fn print_loader_usage() {
     println!("{LOADER_USAGE}");
 }
 
-const DMESG_USAGE: &str = r#"
+const DMESG_USAGE: &str = r#"\
 Print kernel logs.
 "#;
 
@@ -154,7 +154,7 @@ fn print_dmesg_usage() {
     println!("{DMESG_USAGE}");
 }
 
-const RESCAN_USAGE: &str = r#"
+const RESCAN_USAGE: &str = r#"\
 Rescan loader for devices and boot entries.
 "#;
 
