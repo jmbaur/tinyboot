@@ -87,7 +87,7 @@ impl Display for BlsEntry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.title.as_ref() {
             Some(title) => {
-                write!(f, "{}", title)?;
+                write!(f, "[{}] {}", self.name, title)?;
 
                 if let Some(version) = self.version.as_ref() {
                     write!(f, " {}", version)?;
@@ -147,10 +147,7 @@ impl PartialOrd for BlsEntry {
         let mut comps = Vec::new();
 
         // If either entry has no more boot tries left, sort appropriately.
-        if self
-            .tries_left
-            .is_some_and(|tries_left| tries_left == 0)
-        {
+        if self.tries_left.is_some_and(|tries_left| tries_left == 0) {
             return Some(Ordering::Less);
         }
         if other.tries_left.is_some_and(|tries_left| tries_left == 0) {
@@ -850,37 +847,37 @@ machine-id 00000000000000000000000000000000
         let entry_a = super::BlsEntry::parse_entry_conf(
             Path::new("/foo/bar"),
             Path::new("/foo/loader/entries/entry-a.conf"),
-            ""
+            "",
         )
         .unwrap();
         let entry_b = super::BlsEntry::parse_entry_conf(
             Path::new("/foo/bar"),
             Path::new("/foo/loader/entries/entry-b.conf"),
-            ""
+            "",
         )
         .unwrap();
         let entry_c_1_2 = super::BlsEntry::parse_entry_conf(
             Path::new("/foo/bar"),
             Path::new("/foo/loader/entries/entry-c+1-2.conf"),
-            ""
+            "",
         )
         .unwrap();
         let entry_c_0 = super::BlsEntry::parse_entry_conf(
             Path::new("/foo/bar"),
             Path::new("/foo/loader/entries/entry-c+0.conf"),
-            ""
+            "",
         )
         .unwrap();
         let entry_c_1 = super::BlsEntry::parse_entry_conf(
             Path::new("/foo/bar"),
             Path::new("/foo/loader/entries/entry-c+1.conf"),
-            ""
+            "",
         )
         .unwrap();
         let entry_d = super::BlsEntry::parse_entry_conf(
             Path::new("/foo/bar"),
             Path::new("/foo/loader/entries/entry-d.conf"),
-            ""
+            "",
         )
         .unwrap();
         let entry_e_1 = super::BlsEntry::parse_entry_conf(
