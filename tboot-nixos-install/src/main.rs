@@ -110,7 +110,7 @@ fn install_generation(
     if !linux.exists() {
         info!("copying kernel {}", linux.display());
         std::fs::copy(&generation.bootspec.kernel, &linux).unwrap();
-        debug!("signing kernel {}", linux.display());
+        info!("signing kernel {}", linux.display());
         assert!(std::process::Command::new(&state.args.sign_file)
             .args([
                 "sha256",
@@ -157,7 +157,7 @@ fn install_generation(
         if !initrd.exists() {
             info!("copying initrd to {}", initrd.display());
             std::fs::copy(generation.bootspec.initrd.as_ref().unwrap(), &initrd).unwrap();
-            debug!("signing initrd {}", initrd.display());
+            info!("signing initrd {}", initrd.display());
             assert!(std::process::Command::new(&state.args.sign_file)
                 .args([
                     "sha256",
