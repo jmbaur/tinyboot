@@ -6,7 +6,6 @@ edition = "2021"
 [dependencies]
 argh = "0.1.12"
 bootspec = "1.0.0"
-glob = "0.3.1"
 serde_json = "1.0.108"
 log.workspace = true
 tboot.workspace = true

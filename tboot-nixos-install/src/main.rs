@@ -6,7 +6,6 @@ use std::{
 };
 
 use argh::FromArgs;
-use glob::glob;
 use log::{debug, info};
 
 #[derive(FromArgs, Debug)]
@@ -107,33 +106,30 @@ fn install_generation(
 
     entry_contents.push_str(&format!("linux {}", Path::new("/").join(&linux).display()));
 
-    std::fs::copy(
-        &generation.bootspec.kernel,
-        state.args.efi_sys_mount_point.join(&linux),
-    )
-    .unwrap();
-    state
-        .known_efi_files
-        .insert(state.args.efi_sys_mount_point.join(&linux), ());
-
-    debug!("signing kernel {}", linux.display());
-    assert!(std::process::Command::new(&state.args.sign_file)
-        .args([
-            "sha256",
-            state.args.private_key.to_str().unwrap(),
-            state.args.public_key.to_str().unwrap(),
-            state
-                .args
-                .efi_sys_mount_point
-                .join(&linux)
-                .to_str()
-                .unwrap(),
-        ])
-        .spawn()
-        .unwrap()
-        .wait()
-        .unwrap()
-        .success());
+    let linux = state.args.efi_sys_mount_point.join(&linux);
+    if !linux.exists() {
+        info!("copying kernel {}", linux.display());
+        std::fs::copy(&generation.bootspec.kernel, &linux).unwrap();
+        debug!("signing kernel {}", linux.display());
+        assert!(std::process::Command::new(&state.args.sign_file)
+            .args([
+                "sha256",
+                state.args.private_key.to_str().unwrap(),
+                state.args.public_key.to_str().unwrap(),
+                state
+                    .args
+                    .efi_sys_mount_point
+                    .join(&linux)
+                    .to_str()
+                    .unwrap(),
+            ])
+            .spawn()
+            .unwrap()
+            .wait()
+            .unwrap()
+            .success());
+    }
+    state.known_efi_files.insert(linux, ());
 
     entry_contents.push('\n');
 
@@ -152,38 +148,30 @@ fn install_generation(
     });
 
     if let Some(initrd) = initrd {
-        std::fs::copy(
-            generation.bootspec.initrd.as_ref().unwrap(),
-            state.args.efi_sys_mount_point.join(&initrd),
-        )
-        .unwrap();
-        state
-            .known_efi_files
-            .insert(state.args.efi_sys_mount_point.join(&initrd), ());
-
-        debug!("signing initrd {}", initrd.display());
-        assert!(std::process::Command::new(&state.args.sign_file)
-            .args([
-                "sha256",
-                state.args.private_key.to_str().unwrap(),
-                state.args.public_key.to_str().unwrap(),
-                state
-                    .args
-                    .efi_sys_mount_point
-                    .join(&initrd)
-                    .to_str()
-                    .unwrap(),
-            ])
-            .spawn()
-            .unwrap()
-            .wait()
-            .unwrap()
-            .success());
-
         entry_contents.push_str(&format!(
             "initrd {}",
             Path::new("/").join(&initrd).display()
         ));
+
+        let initrd = state.args.efi_sys_mount_point.join(&initrd);
+        if !initrd.exists() {
+            info!("copying initrd to {}", initrd.display());
+            std::fs::copy(generation.bootspec.initrd.as_ref().unwrap(), &initrd).unwrap();
+            debug!("signing initrd {}", initrd.display());
+            assert!(std::process::Command::new(&state.args.sign_file)
+                .args([
+                    "sha256",
+                    state.args.private_key.to_str().unwrap(),
+                    state.args.public_key.to_str().unwrap(),
+                    initrd.to_str().unwrap(),
+                ])
+                .spawn()
+                .unwrap()
+                .wait()
+                .unwrap()
+                .success());
+        }
+        state.known_efi_files.insert(initrd, ());
     }
 
     entry_contents.push('\n');
@@ -220,38 +208,35 @@ fn install_generation(
         max_tries,
     ));
 
-    // glob match on any boot counter state
-    let glob_pattern = format!("{}/nixos-generation-*.conf", parent.display());
-
-    // only write the new entry if an existing one does not exist
-    if !({
-        let mut has_matches = false;
-
-        for entry in glob(&glob_pattern).unwrap() {
-            if let Ok(entry) = entry {
-                // the glob can match files that we just wrote (e.g. specialisations), so ignore
-                // those here
-                if state.known_entry_files.get(&entry).is_some() {
-                    debug!("skipping known entry file {}", entry.display());
-                    continue;
-                }
-
-                let Ok((existing_entry_name, _, _)) =
-                    tboot::bls::parse_entry_filename(entry.to_str().unwrap())
-                else {
-                    continue;
-                };
-
-                if existing_entry_name == format!("nixos-generation-{}", entry_number) {
-                    debug!("skipping existing entry file {}", entry.display());
-                    has_matches = true;
-                    state.known_entry_files.insert(entry, ());
-                }
-            }
+    let mut already_installed = false;
+    for entry in std::fs::read_dir(&parent).unwrap() {
+        let Ok(entry) = entry else {
+            continue;
+        };
+        if !entry.metadata().unwrap().is_file() {
+            continue;
         }
 
-        has_matches
-    }) {
+        let path = entry.path();
+
+        let file_name = path.file_name().unwrap().to_str().unwrap();
+
+        let Ok((existing_entry_name, _, _)) = tboot::bls::parse_entry_filename(file_name) else {
+            continue;
+        };
+
+        if existing_entry_name == format!("nixos-generation-{}", entry_number) {
+            already_installed = true;
+            state.known_entry_files.insert(path, ());
+        }
+    }
+
+    if already_installed {
+        debug!(
+            "entry for nixos generation {} already installed",
+            entry_number
+        );
+    } else {
         info!("creating boot entry {}", entry_path.display());
         std::fs::write(&entry_path, entry_contents).unwrap();
         state.known_entry_files.insert(entry_path, ());
