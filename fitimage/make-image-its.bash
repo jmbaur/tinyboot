@@ -28,8 +28,10 @@ EOF
 
 fdt_reference() {
 	local idx=$1
+	local filepath=$2
 	cat <<EOF
         conf-${idx} {
+            description = "boot image for $(basename "$filepath")";
             kernel = "kernel";
             fdt = "fdt-${idx}";
             ramdisk = "ramdisk";
@@ -78,7 +80,7 @@ cat <<EOF
 EOF
 
 for index in "${!dtb_files[@]}"; do
-	fdt_reference "$index"
+	fdt_reference "$index" "${dtb_files[$index]}"
 done
 
 cat <<EOF
