@@ -136,7 +136,7 @@ in
     build = {
       baseInitrd = pkgs.makeInitrdNG {
         compressor = "xz";
-        contents = [{ object = ./etc/ima_policy.conf; symlink = "/etc/ima/policy.conf"; }] ++ [{
+        contents = [{
           symlink = "/lib/firmware";
           object = pkgs.buildPackages.runCommand "linux-firmware" { } ("mkdir -p $out;" + lib.concatLines (map
             ({ dir, pattern }: ''

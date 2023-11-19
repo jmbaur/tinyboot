@@ -105,8 +105,5 @@ pub fn load_verification_key() -> anyhow::Result<()> {
 
     debug!("added ima key with id: {:?}", key_id);
 
-    // only install the IMA policy after we have loaded the key
-    std::fs::copy("/etc/ima/policy.conf", "/sys/kernel/security/ima/policy")?;
-
     Ok(())
 }

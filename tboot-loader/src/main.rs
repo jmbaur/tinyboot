@@ -1,6 +1,7 @@
 pub(crate) mod boot_loader;
 pub(crate) mod cmd;
 pub(crate) mod fs;
+pub(crate) mod ima;
 pub(crate) mod kexec;
 pub(crate) mod keys;
 pub(crate) mod shell;
@@ -332,12 +333,45 @@ pub fn main() -> ! {
     info!("version {}", VERSION.unwrap_or("devel"));
     info!("{}", cfg);
 
+    let mut ima_policy = String::new();
+
+    for policy in &[
+        ima::PROC_SUPER_MAGIC,
+        ima::SYSFS_MAGIC,
+        ima::DEBUGFS_MAGIC,
+        ima::TMPFS_MAGIC,
+        ima::DEVPTS_SUPER_MAGIC,
+        ima::BINFMTFS_MAGIC,
+        ima::SECURITYFS_MAGIC,
+        ima::SELINUX_MAGIC,
+        ima::SMACK_MAGIC,
+        ima::CGROUP_SUPER_MAGIC,
+        ima::CGROUP2_SUPER_MAGIC,
+        ima::NSFS_MAGIC,
+        ima::KEY_CHECK,
+        ima::POLICY_CHECK,
+        ima::KEXEC_KERNEL_CHECK,
+        ima::KEXEC_INITRAMFS_CHECK,
+        ima::KEXEC_CMDLINE,
+    ] {
+        ima_policy.push_str(policy);
+        ima_policy.push('\n');
+    }
+
     if let Err(e) = keys::load_verification_key() {
         error!("failed to load verification keys: {:?}", e);
         warn!("boot verification is OFF");
     } else {
+        ima_policy.push_str(ima::KEXEC_KERNEL_CHECK_APPRAISE);
+        ima_policy.push('\n');
+        ima_policy.push_str(ima::KEXEC_INITRAMFS_CHECK_APPRAISE);
+        ima_policy.push('\n');
         info!("boot verification is ON");
     }
+
+    if let Err(e) = std::fs::write(ima::IMA_POLICY_PATH, ima_policy) {
+        error!("failed to apply boot policy: {e}");
+    };
 
     debug!("waiting for new events to settle");
     tboot::dev::wait_for_settle(new_dev_rx, Duration::from_secs(2));
