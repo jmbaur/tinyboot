@@ -11,5 +11,5 @@ panic = "abort"
 
 [workspace.dependencies]
 log = "0.4.20"
-nix = { default-features = false, version = "0.27.1", features = [ "mount", "fs", "user" ] }
+nix = { default-features = false, version = "0.27.1", features = [ "mount", "fs" ] }
 tboot = { path = "./tboot" }

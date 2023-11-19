@@ -56,6 +56,8 @@ in
         config.boot.loader.timeout
         "--max-tries"
         cfg.maxFailedBootAttempts
+        "--log-level"
+        cfg.loglevel
       ];
       systemd.additionalUpstreamSystemUnits = [ "boot-complete.target" ];
       systemd.generators.tboot-bless-boot-generator = "${pkgs.tinyboot}/bin/tboot-bless-boot-generator";

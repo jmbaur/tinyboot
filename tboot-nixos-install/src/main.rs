@@ -2,10 +2,12 @@ use std::{
     collections::HashMap,
     io::Write,
     path::{Path, PathBuf},
+    str::FromStr,
 };
 
 use argh::FromArgs;
 use glob::glob;
+use log::{debug, info};
 
 #[derive(FromArgs, Debug)]
 /// Install nixos boot loader files
@@ -35,6 +37,10 @@ struct Args {
     /// input is detected
     #[argh(option)]
     timeout: u32,
+
+    /// maximum log level
+    #[argh(option)]
+    log_level: String,
 
     /// the nixos system closure of the current activation
     #[argh(positional)]
@@ -110,6 +116,7 @@ fn install_generation(
         .known_efi_files
         .insert(state.args.efi_sys_mount_point.join(&linux), ());
 
+    debug!("signing kernel {}", linux.display());
     assert!(std::process::Command::new(&state.args.sign_file)
         .args([
             "sha256",
@@ -154,6 +161,7 @@ fn install_generation(
             .known_efi_files
             .insert(state.args.efi_sys_mount_point.join(&initrd), ());
 
+        debug!("signing initrd {}", initrd.display());
         assert!(std::process::Command::new(&state.args.sign_file)
             .args([
                 "sha256",
@@ -212,11 +220,8 @@ fn install_generation(
         max_tries,
     ));
 
-    let glob_pattern = format!(
-        "{}/nixos-generation-{}*.conf",
-        parent.display(),
-        entry_number
-    );
+    // glob match on any boot counter state
+    let glob_pattern = format!("{}/nixos-generation-*.conf", parent.display());
 
     // only write the new entry if an existing one does not exist
     if !({
@@ -224,23 +229,30 @@ fn install_generation(
 
         for entry in glob(&glob_pattern).unwrap() {
             if let Ok(entry) = entry {
-                if entry
-                    .file_name()
-                    .unwrap()
-                    .to_str()
-                    .unwrap()
-                    .contains("specialisation")
-                {
+                // the glob can match files that we just wrote (e.g. specialisations), so ignore
+                // those here
+                if state.known_entry_files.get(&entry).is_some() {
+                    debug!("skipping known entry file {}", entry.display());
                     continue;
                 }
 
-                has_matches = true;
-                state.known_efi_files.insert(entry, ());
+                let Ok((existing_entry_name, _, _)) =
+                    tboot::bls::parse_entry_filename(entry.to_str().unwrap())
+                else {
+                    continue;
+                };
+
+                if existing_entry_name == format!("nixos-generation-{}", entry_number) {
+                    debug!("skipping existing entry file {}", entry.display());
+                    has_matches = true;
+                    state.known_entry_files.insert(entry, ());
+                }
             }
         }
 
         has_matches
     }) {
+        info!("creating boot entry {}", entry_path.display());
         std::fs::write(&entry_path, entry_contents).unwrap();
         state.known_entry_files.insert(entry_path, ());
     }
@@ -249,8 +261,15 @@ fn install_generation(
 fn main() {
     let args: Args = argh::from_env();
 
+    tboot::log::Logger::new(
+        log::LevelFilter::from_str(&args.log_level).unwrap_or(log::LevelFilter::Info),
+    )
+    .setup()
+    .unwrap();
+
     let mut state = State::new(&args);
 
+    debug!("creating ESP directories");
     std::fs::create_dir_all(args.efi_sys_mount_point.join("EFI/nixos")).unwrap();
     std::fs::create_dir_all(args.efi_sys_mount_point.join("loader/entries")).unwrap();
     std::fs::write(
@@ -259,6 +278,7 @@ fn main() {
     )
     .unwrap();
 
+    debug!("finding nixos system generations");
     let profiles_dir = std::fs::read_dir("/nix/var/nix/profiles").unwrap();
     for entry in profiles_dir {
         let entry = entry.unwrap();
@@ -341,6 +361,7 @@ fn main() {
         if state.known_efi_files.get(&file_path).is_none()
             && file.as_ref().unwrap().metadata().unwrap().is_file()
         {
+            info!("cleaning up {}", file_path.display());
             std::fs::remove_file(&file_path).unwrap();
         }
     }
@@ -353,6 +374,7 @@ fn main() {
         if state.known_entry_files.get(&file_path).is_none()
             && file.as_ref().unwrap().metadata().unwrap().is_file()
         {
+            info!("cleaning up {}", file_path.display());
             std::fs::remove_file(&file_path).unwrap();
         }
     }
