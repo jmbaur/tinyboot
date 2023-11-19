@@ -7,12 +7,11 @@
       commandLine = [ "pd_ignore_unused" "clk_ignore_unused" ];
       dtbPattern = "sc7180-trogdor-wormdingler*";
     };
-    tinyboot.tty = "ttyMSM0";
     coreboot.kconfig = with lib.kernel; {
-      USE_QC_BLOBS = yes;
-      VENDOR_GOOGLE = yes;
       BOARD_GOOGLE_WORMDINGLER = yes;
       FMDFILE = freeform ./layout.fmd;
+      USE_QC_BLOBS = yes;
+      VENDOR_GOOGLE = yes;
     };
   };
 }

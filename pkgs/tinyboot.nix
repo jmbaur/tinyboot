@@ -2,8 +2,8 @@
 rustPlatform.buildRustPackage {
   pname = "tinyboot";
   version = "0.1.0";
-  src = ./.;
-  cargoLock.lockFile = ./Cargo.lock;
+  src = ../.;
+  cargoLock.lockFile = ../Cargo.lock;
   strictDeps = true;
   depsBuildBuild = [ pkgsBuildBuild.stdenv.cc ];
   buildFeatures = lib.optional corebootSupport "coreboot";

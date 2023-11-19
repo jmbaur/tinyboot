@@ -1,33 +1,28 @@
 {
   description = "A small linuxboot payload for coreboot";
-  inputs = {
-    nixpkgs.url = "github:jmbaur/nixpkgs/nixos-unstable"; # we use this for so we can get vpd
-    coreboot = {
-      url = "git+https://github.com/jmbaur/coreboot?ref=tinyboot&submodules=1";
-      flake = false;
-    };
-  };
-  outputs = inputs: with inputs;
+  inputs.nixpkgs.url = "github:jmbaur/nixpkgs/nixos-unstable"; # we use this for so we can get vpd
+  outputs = inputs:
     let
       systems = [ "x86_64-linux" "aarch64-linux" ];
-      forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f {
+      forAllSystems = f: inputs.nixpkgs.lib.genAttrs systems (system: f {
         inherit system;
-        pkgs = import nixpkgs { inherit system; overlays = [ self.overlays.default ]; };
+        pkgs = import inputs.nixpkgs { inherit system; overlays = [ inputs.self.overlays.default ]; };
       });
     in
     {
       nixosModules.default = {
         imports = [ ./module.nix ];
-        nixpkgs.overlays = [ self.overlays.default ];
+        nixpkgs.overlays = [ inputs.self.overlays.default ];
       };
       overlays.default = final: prev: {
-        tinyboot = prev.pkgsStatic.callPackage ./. { };
+        tinyboot = prev.pkgsStatic.callPackage ./pkgs/tinyboot.nix { };
         tinybootKernelConfigs = prev.lib.mapAttrs (config: _: ./kernel-configs/${config}) (builtins.readDir ./kernel-configs);
-        flashrom-cros = prev.callPackage ./flashrom-cros.nix { };
-        buildCoreboot = prev.callPackage ./coreboot.nix { src = inputs.coreboot; flashrom = final.flashrom-cros; };
+        armTrustedFirmwareMT8183 = prev.callPackage ./pkgs/arm-trusted-firmware-cros.nix { platform = "mt8183"; };
+        armTrustedFirmwareMT8192 = prev.callPackage ./pkgs/arm-trusted-firmware-cros.nix { platform = "mt8192"; };
+        flashrom-cros = prev.callPackage ./pkgs/flashrom-cros { };
         coreboot = import ./boards.nix final;
         kernelPatches = prev.kernelPatches // {
-          ima_tpm_early_init = { name = "ima_tpm_early_init"; patch = ./patches/linux-tpm-probe.patch; };
+          ima_tpm_early_init = { name = "ima_tpm_early_init"; patch = ./pkgs/linux/tpm-probe.patch; };
         };
       };
       legacyPackages = forAllSystems ({ pkgs, ... }: pkgs);
@@ -38,8 +33,8 @@
       });
       apps = forAllSystems ({ pkgs, system, ... }: (
         let
-          nixosSystem = nixpkgs.lib.nixosSystem {
-            modules = [ self.nixosModules.default ./test/module.nix ({ nixpkgs.hostPlatform = system; }) ];
+          nixosSystem = inputs.nixpkgs.lib.nixosSystem {
+            modules = [ inputs.self.nixosModules.default ./test/module.nix ({ nixpkgs.hostPlatform = system; }) ];
           };
         in
         {
@@ -51,7 +46,7 @@
           };
         }
       ) // {
-        default = self.apps.${system}."${system}-disk";
+        default = inputs.self.apps.${system}."${system}-disk";
       });
     };
 }

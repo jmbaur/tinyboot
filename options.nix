@@ -150,10 +150,10 @@ in
       initrd = config.build.baseInitrd.override {
         prepend = (pkgs.makeInitrdNG {
           compressor = "cat"; # prepend cannot be used with a compressed initrd
-          contents = map (symlink: { inherit symlink; object = "${tinyboot}/bin/tboot-loader"; }) [ "/init" "/bin/nologin" ];
+          contents = [{ symlink = "/init"; object = "${tinyboot}/bin/tboot-loader"; }];
         }) + "/initrd";
       };
-      linux = (pkgs.callPackage ./linux.nix {
+      linux = (pkgs.callPackage ./pkgs/linux {
         builtinCmdline = config.linux.commandLine;
         linux = config.linux.package;
         inherit (config.linux) configFile;
@@ -163,7 +163,7 @@ in
         inherit (config.build) linux initrd;
         inherit (config.linux) dtb dtbPattern;
       };
-      coreboot = pkgs.buildCoreboot {
+      coreboot = pkgs.callPackage ./pkgs/coreboot {
         inherit (config) board;
         configFile = config.coreboot.kconfig.__resolved;
       };

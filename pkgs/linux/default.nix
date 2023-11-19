@@ -1,7 +1,7 @@
 { builtinCmdline ? [ ], configFile, lib, stdenv, linux }:
 stdenv.mkDerivation {
   inherit (linux) pname version src buildInputs nativeBuildInputs depsBuildBuild makeFlags preInstall enableParallelBuilding;
-  patches = [ ./patches/linux-tpm-probe.patch ];
+  patches = [ ./tpm-probe.patch ];
   extraConfig = lib.optionalString (builtinCmdline != [ ]) ''
     CONFIG_CMDLINE="${toString builtinCmdline}"
   '';
