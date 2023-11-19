@@ -9,6 +9,7 @@ buildArmTrustedFirmware {
     hash = "sha256-EF1eCVKihtZ0LDwJbQVHIy/DQn91kGYAlG4QRZMVt2c=";
   };
   filesToInstall = [ "build/${platform}/release/bl31/bl31.elf" ];
+  extraMakeFlags = [ "COREBOOT=1" ];
   dontStrip = false;
   postInstall = ''
     mkdir -p $out/libexec && mv $out/bl31.elf $out/libexec/bl31.elf

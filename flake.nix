@@ -19,6 +19,7 @@
         tinybootKernelConfigs = prev.lib.mapAttrs (config: _: ./kernel-configs/${config}) (builtins.readDir ./kernel-configs);
         armTrustedFirmwareMT8183 = prev.callPackage ./pkgs/arm-trusted-firmware-cros.nix { platform = "mt8183"; };
         armTrustedFirmwareMT8192 = prev.callPackage ./pkgs/arm-trusted-firmware-cros.nix { platform = "mt8192"; };
+        armTrustedFirmwareSC7180 = prev.callPackage ./pkgs/arm-trusted-firmware-cros.nix { platform = "sc7180"; };
         flashrom-cros = prev.callPackage ./pkgs/flashrom-cros { };
         coreboot = import ./boards.nix final;
         kernelPatches = prev.kernelPatches // {
