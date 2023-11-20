@@ -199,14 +199,15 @@ fn install_generation(
         .join("loader")
         .join("entries");
 
-    let entry_path = parent.join(format!(
-        "nixos-generation-{}{}+{}-0.conf",
+    let entry_name = format!(
+        "nixos-generation-{}{}",
         entry_number,
         specialisation
             .map(|specialisation| format!("-specialisation-{specialisation}"))
             .unwrap_or_default(),
-        max_tries,
-    ));
+    );
+
+    let entry_path = parent.join(format!("{}+{}-0.conf", entry_name, max_tries));
 
     let mut already_installed = false;
     for entry in std::fs::read_dir(&parent).unwrap() {
@@ -225,17 +226,14 @@ fn install_generation(
             continue;
         };
 
-        if existing_entry_name == format!("nixos-generation-{}", entry_number) {
+        if existing_entry_name == entry_name {
             already_installed = true;
             state.known_entry_files.insert(path, ());
         }
     }
 
     if already_installed {
-        debug!(
-            "entry for nixos generation {} already installed",
-            entry_number
-        );
+        debug!("entry {} already installed", entry_name);
     } else {
         info!("creating boot entry {}", entry_path.display());
         std::fs::write(&entry_path, entry_contents).unwrap();
