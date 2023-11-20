@@ -7,18 +7,18 @@ let
 in
 stdenvNoCC.mkDerivation (finalAttrs: {
   pname = "coreboot-${board}";
-  version = "4.22";
+  version = "4.21";
   src = fetchFromGitHub {
     owner = "jmbaur";
     repo = "coreboot";
-    rev = "0e69d79ed70548dc698333da323e9f7c061cf440";
-    hash = "sha256-WUsIKQAsTxYE4sC3INKL6jJOP1cNpHqm1Bqm4nrMAeE=";
+    rev = "1047cc51b891b56289423293d350f9f350bcdc7c";
+    hash = "sha256-mzv0xMUCxBeirVunThr1dwjNKwzvSUSU7ZY45ic+EJs=";
     fetchSubmodules = true;
   };
   patches = [
     ./0001-Add-Kconfig-VBOOT_SIGN-option.patch
     ./0002-Fix-build-for-brya.patch
-    ./0003-Allow-for-fitImage-use-on-mt8183-and-mt8192.patch
+    # ./0003-Allow-for-fitImage-use-on-mt8183-and-mt8192.patch
   ];
   depsBuildBuild = [ pkgsBuildBuild.stdenv.cc pkg-config openssl ];
   nativeBuildInputs = [ python3 ];
@@ -35,7 +35,7 @@ stdenvNoCC.mkDerivation (finalAttrs: {
     make olddefconfig
     runHook postConfigure
   '';
-  makeFlags = [ "XGCCPATH=${toolchain}/bin/" "KERNELVERSION=${finalAttrs.version}" "UPDATED_SUBMODULES=1" ];
+  makeFlags = [ "XGCCPATH=${toolchain}/bin/" "KERNELVERSION=${finalAttrs.version}-${builtins.substring 0 7 finalAttrs.src.rev}" "UPDATED_SUBMODULES=1" ];
   outputs = [ "out" "dev" ];
   installPhase = ''
     runHook preInstall

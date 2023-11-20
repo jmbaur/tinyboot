@@ -11,6 +11,9 @@ use log::{debug, error, warn};
 use netlink_sys::{protocols::NETLINK_KOBJECT_UEVENT, Socket, SocketAddr};
 use nix::libc;
 
+/// Listens to Kobject events from the kernel over netlink and creates character and block devices
+/// under `/dev`. For block devices, aliases are created under `/dev/disk/<diskseq>` for disks and
+/// `/dev/part/<diskseq>/<partnum>` for partitions.
 pub fn listen_and_create_devices(tx: Sender<()>) -> std::io::Result<()> {
     let mut socket = Socket::new(NETLINK_KOBJECT_UEVENT)?;
     let sa = SocketAddr::new(std::process::id(), 1);
@@ -330,10 +333,10 @@ mod tests {
     }
 }
 
-/// This function relies on the linux kernel option CONFIG_DEVTMPFS being enabled, since this means
-/// that any devices detected by the kernel before our code runs will be setup for us as soon as
-/// /dev is mounted. This means that this function only needs to setup any symlinks that we use as
-/// a convenience for accessing devices.
+/// This function relies on the linux kernel option `CONFIG_DEVTMPFS` being enabled, since this
+/// means that any devices detected by the kernel before our code runs will be setup for us as soon
+/// as /dev is mounted. This means that this function only needs to setup any symlinks that we use
+/// as a convenience for accessing devices.
 pub fn scan_and_create_devices() {
     if let Ok(dir) = std::fs::read_dir("/sys/class/block") {
         for entry in dir {

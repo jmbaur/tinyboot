@@ -213,44 +213,50 @@ fn handle_commands(
                     }
                 },
             },
-            ClientToServer::Command(Command::Boot((dev_idx, entry_idx))) => match loader {
-                None => println!("no loader selected"),
-                Some(ref mut loader) => {
-                    match loader.boot_devices().map(|devs| {
-                        let Some(boot_dev) = dev_idx
-                            .map(|dev_idx| dev_idx.checked_sub(1).map(|idx| devs.get(idx)))
-                            .flatten()
-                            .unwrap_or_else(|| devs.first())
-                        else {
-                            return None;
-                        };
+            ClientToServer::Command(Command::Boot((dev_idx, entry_idx, kernel_cmdline))) => {
+                match loader {
+                    None => println!("no loader selected"),
+                    Some(ref mut loader) => {
+                        match loader.boot_devices().map(|devs| {
+                            let Some(boot_dev) = dev_idx
+                                .map(|dev_idx| dev_idx.checked_sub(1).map(|idx| devs.get(idx)))
+                                .flatten()
+                                .unwrap_or_else(|| devs.first())
+                            else {
+                                return None;
+                            };
 
-                        entry_idx
-                            .map(|entry_idx| {
-                                entry_idx
-                                    .checked_sub(1)
-                                    .map(|idx| boot_dev.entries.get(idx))
-                            })
-                            .flatten()
-                            .unwrap_or_else(|| {
-                                boot_dev.entries.iter().find(|entry| entry.is_default())
-                            })
-                    }) {
-                        Ok(Some(entry)) => {
-                            println!("selected entry '{}'", entry);
+                            entry_idx
+                                .map(|entry_idx| {
+                                    entry_idx
+                                        .checked_sub(1)
+                                        .map(|idx| boot_dev.entries.get(idx))
+                                })
+                                .flatten()
+                                .unwrap_or_else(|| {
+                                    boot_dev.entries.iter().find(|entry| entry.is_default())
+                                })
+                        }) {
+                            Ok(Some(entry)) => {
+                                println!("selected entry '{}'", entry);
+                                let mut entry = entry.select();
+                                if let Some(overridden_cmdline) = kernel_cmdline {
+                                    entry.cmdline = Some(overridden_cmdline);
+                                }
 
-                            if let Err(e) = kexec_load(entry.select()) {
-                                println!("failed to load entry: {e}");
-                            } else {
-                                server_tx.send(ServerToClient::Stop).unwrap();
-                                return Outcome::Kexec;
+                                if let Err(e) = kexec_load(entry) {
+                                    println!("failed to load entry: {e}");
+                                } else {
+                                    server_tx.send(ServerToClient::Stop).unwrap();
+                                    return Outcome::Kexec;
+                                }
                             }
+                            Ok(None) => println!("cannot select non-existent entry"),
+                            Err(e) => println!("failed to get entries: {e}"),
                         }
-                        Ok(None) => println!("cannot select non-existent entry"),
-                        Err(e) => println!("failed to get entries: {e}"),
                     }
                 }
-            },
+            }
             ClientToServer::Command(Command::Loader(desired_loader)) => {
                 if let Some(desired_loader) = desired_loader {
                     // shutdown the current loader

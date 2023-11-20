@@ -9,7 +9,7 @@ pub enum Command {
     Loader(Option<LoaderType>),
     Help(Option<String>),
     List,
-    Boot((Option<usize>, Option<usize>)),
+    Boot((Option<usize>, Option<usize>, Option<String>)),
     Reboot,
     Poweroff,
     Dmesg(u8),
@@ -68,7 +68,14 @@ fn parse_boot(mut iter: SplitWhitespace<'_>) -> anyhow::Result<Command> {
         .map(|entry| usize::from_str_radix(entry, 10))
         .transpose()?;
 
-    Ok(Command::Boot((dev, entry)))
+    let mut peek = iter.peekable();
+    let kernel_cmdline: Option<String> = if peek.peek().is_some() {
+        Some(peek.collect::<Vec<&str>>().join(" "))
+    } else {
+        None
+    };
+
+    Ok(Command::Boot((dev, entry, kernel_cmdline)))
 }
 
 pub fn print_help(cmd_to_help: Option<&str>) {
