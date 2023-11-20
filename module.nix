@@ -69,6 +69,7 @@ in
         before = [ "shutdown.target" ];
         after = [ "local-fs.target" "boot-complete.target" ];
         unitConfig.DefaultDependencies = false;
+        restartIfChanged = false; # Only run at boot
         serviceConfig = {
           Type = "oneshot";
           RemainAfterExit = true;
