@@ -1,0 +1,49 @@
+FLASH 16M {
+	WP_RO@0x0 0x800000 {
+		SI_DESC@0x0 0x1000
+		IFWI@0x1000 0x1ff000
+		RO_VPD(PRESERVE)@0x200000 16K
+		RO_SECTION {
+			FMAP@0x0 0x800
+			RO_FRID@0x800 0x40
+			RO_FRID_PAD@0x840 0x7c0
+			COREBOOT(CBFS)@0x1000
+			GBB 0x3000
+		}
+	}
+	MISC_RW@0x800000 0x2d000 {
+		RW_PRESERVE(PRESERVE) {
+			UNIFIED_MRC_CACHE@0x0 0x21000 {
+				RECOVERY_MRC_CACHE@0x0 0x10000
+				RW_MRC_CACHE@0x10000 0x10000
+				RW_VAR_MRC_CACHE@0x20000 0x1000
+			}
+		}
+		RW_SHARED@0x21000 0x4000 {
+			SHARED_DATA@0x0 0x2000
+			VBLOCK_DEV@0x2000 0x2000
+		}
+		RW_VPD(PRESERVE)@0x25000 0x2000
+		RW_NVRAM(PRESERVE)@0x27000 0x5000
+		FPF_STATUS@0x2c000 0x1000
+	}
+	RW_SECTION_A@0x82d000 {
+		VBLOCK_A 0x10000
+		FW_MAIN_A(CBFS)
+		RW_FWID_A 0x40
+	}
+	SMMSTORE(PRESERVE)@0xd30000 0x40000
+	BIOS_UNUSABLE@0xf30000 0x4f000
+	DEVICE_EXTENSION@0xf7f000 0x80000
+	# Currently, it is required that the BIOS region be a multiple of 8KiB.
+	# This is required so that the recovery mechanism can find SIGN_CSE
+	# region aligned to 4K at the center of BIOS region. Since the
+	# descriptor at the beginning uses 4K and BIOS starts at an offset of
+	# 4K, a hole of 4K is created towards the end of the flash to compensate
+	# for the size requirement of BIOS region.
+	# FIT tool thus creates descriptor with following regions:
+	# Descriptor --> 0 to 4K
+	# BIOS       --> 4K to 0xf7f000
+	# Device ext --> 0xf7f000 to 0xfff000
+	UNUSED_HOLE@0xfff000 0x1000
+}
