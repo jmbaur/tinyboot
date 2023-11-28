@@ -70,7 +70,8 @@ fn install_generation(
     max_tries: u32,
 ) {
     let mut entry_contents = format!(
-        "title NixOS{}",
+        "title {}{}",
+        &generation.bootspec.label,
         specialisation
             .map(|specialisation| format!(" ({})", specialisation))
             .unwrap_or_default()
