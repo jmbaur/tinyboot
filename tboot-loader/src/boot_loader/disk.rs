@@ -83,22 +83,17 @@ struct BlsEntry {
     is_default: bool,
 }
 
+// TODO(jared): The BLS spec says that the way entries are displayed to the user depends on how
+// each entry relates to one another. For example, if every entry has the same name, then the
+// version needs to also be displayed to the user.
 impl Display for BlsEntry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.title.as_ref() {
-            Some(title) => {
-                write!(f, "[{}] {}", self.name, title)?;
-
-                if let Some(version) = self.version.as_ref() {
-                    write!(f, " {}", version)?;
-                }
-
-                Ok(())
-            }
-            None => {
-                write!(f, "{}", self.name)
-            }
+            Some(title) => write!(f, "[{}] {}", self.name, title)?,
+            None => write!(f, "{}", self.name)?,
         }
+
+        Ok(())
     }
 }
 
