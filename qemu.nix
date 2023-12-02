@@ -35,7 +35,8 @@ in
         set -x
 
         qemu-system-${pkgs.hostPlatform.qemuArch} \
-          -nographic \
+          -device VGA \
+          -serial stdio \
           -smp 2 -m 2G \
           -fw_cfg name=opt/org.tboot/pubkey,file=${config.verifiedBoot.tbootPublicCertificate} \
           -netdev user,id=n1 -device virtio-net-pci,netdev=n1 \

@@ -2,6 +2,9 @@
 stdenv.mkDerivation {
   inherit (linux) pname version src buildInputs nativeBuildInputs depsBuildBuild makeFlags preInstall enableParallelBuilding;
   patches = [ ./tpm-probe.patch ];
+  postPatch = ''
+    cp ${./boots_ascii_16.ppm} drivers/video/logo/logo_linux_vga16.ppm
+  '';
   extraConfig = lib.optionalString (builtinCmdline != [ ]) ''
     CONFIG_CMDLINE="${toString builtinCmdline}"
   '';

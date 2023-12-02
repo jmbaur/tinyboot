@@ -19,7 +19,8 @@ use log::{debug, error, info, warn, LevelFilter};
 use nix::libc::{self};
 use shell::{run_shell, wait_for_user_presence};
 use std::{io::Write, time::Duration};
-use std::{os::fd::AsRawFd, path::PathBuf, sync::mpsc};
+use std::{os::fd::AsRawFd, sync::mpsc};
+use tboot::{config::Config, system::Tty};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ClientToServer {
@@ -39,7 +40,7 @@ enum Outcome {
     Kexec,
 }
 
-fn prepare_boot() -> anyhow::Result<Outcome> {
+fn prepare_boot(cfg: &Config) -> anyhow::Result<Outcome> {
     let (client_tx, server_rx) = mpsc::channel::<ClientToServer>();
     let (server_tx, client_rx) = mpsc::channel::<ServerToClient>();
 
@@ -65,7 +66,9 @@ fn prepare_boot() -> anyhow::Result<Outcome> {
                 for boot_dev in boot_devices {
                     info!("using boot device {}", boot_dev.name);
 
-                    println!("press <ENTER> to stop boot");
+                    if !cfg.tty.is_virtual() {
+                        println!("press <ENTER> to interrupt");
+                    }
 
                     print!("booting in ");
                     stdout.flush().expect("flush failed");
@@ -78,6 +81,17 @@ fn prepare_boot() -> anyhow::Result<Outcome> {
                         match server_rx.recv_timeout(TICK_DURATION) {
                             Ok(ClientToServer::UserIsPresent) => {
                                 user_is_present = true;
+                                if cfg.tty.is_virtual() {
+                                    // Setup our stdin and change to virtual terminal 2
+                                    let tty = std::fs::OpenOptions::new()
+                                        .write(true)
+                                        .read(true)
+                                        .open("/dev/tty2")
+                                        .unwrap();
+                                    let fd = tty.as_raw_fd();
+                                    unsafe { libc::dup2(fd, libc::STDIN_FILENO) };
+                                    tboot::system::chvt(2);
+                                }
                                 break 'autoboot;
                             }
                             _ => {}
@@ -283,7 +297,7 @@ pub fn main() -> ! {
     tboot::system::setup_system();
 
     let args: Vec<String> = std::env::args().collect();
-    let cfg = tboot::config::Config::from_args(&args);
+    let cfg = Config::from_args(&args);
 
     if cfg.log_level >= LevelFilter::Debug {
         debug!("enabling backtrace printing");
@@ -294,24 +308,41 @@ pub fn main() -> ! {
         .setup()
         .expect("failed to setup logger");
 
-    if (unsafe { libc::getuid() }) != 0 {
-        warn!("tinyboot not running as root");
+    if cfg.tty.is_virtual() {
+        let mut tty = std::fs::OpenOptions::new()
+            .write(true)
+            .read(true)
+            .open("/dev/tty1")
+            .unwrap();
+        let fd = tty.as_raw_fd();
+
+        // Setup stdin on tty1 so we can detect user presence.
+        unsafe { libc::dup2(fd, libc::STDIN_FILENO) };
+
+        _ = tboot::system::setup_tty(fd);
+        write!(tty, "Press <ENTER> to interrupt").unwrap();
+        tty.flush().unwrap();
     }
 
-    let tty = PathBuf::from("/dev").join(cfg.tty);
-    if let Ok(tty) = std::fs::OpenOptions::new()
+    let tty = std::fs::OpenOptions::new()
         .write(true)
         .read(true)
-        .open(&tty)
-    {
-        let fd = tty.as_raw_fd();
+        .open(match cfg.tty {
+            Tty::Virtual => "/dev/tty2",
+            Tty::Serial(tty) => tty,
+        })
+        .unwrap();
+    let fd = tty.as_raw_fd();
+
+    // Setup stdin on the serial terminal so we can detect user presence only if we didn't do this
+    // for tty1.
+    if !cfg.tty.is_virtual() {
         unsafe { libc::dup2(fd, libc::STDIN_FILENO) };
-        unsafe { libc::dup2(fd, libc::STDOUT_FILENO) };
-        unsafe { libc::dup2(fd, libc::STDERR_FILENO) };
-        _ = tboot::system::setup_tty(fd);
-    } else {
-        error!("unable to open tty {}", tty.display());
     }
+    unsafe { libc::dup2(fd, libc::STDOUT_FILENO) };
+    unsafe { libc::dup2(fd, libc::STDERR_FILENO) };
+
+    _ = tboot::system::setup_tty(fd);
 
     let (new_dev_tx, new_dev_rx) = std::sync::mpsc::channel::<()>();
 
@@ -380,7 +411,7 @@ pub fn main() -> ! {
     debug!("waiting for new events to settle");
     tboot::dev::wait_for_settle(new_dev_rx, Duration::from_secs(2));
 
-    match prepare_boot() {
+    match prepare_boot(&cfg) {
         Ok(Outcome::Kexec) => {
             debug!("kexec'ing");
             kexec_execute().expect("kexec execute failed")

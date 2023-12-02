@@ -2,10 +2,12 @@ use std::{collections::HashMap, str::FromStr};
 
 use log::LevelFilter;
 
+use crate::system::Tty;
+
 #[derive(Debug)]
 pub struct Config<'a> {
     pub log_level: LevelFilter,
-    pub tty: &'a str,
+    pub tty: Tty<'a>,
     pub programmer: &'a str,
 }
 
@@ -13,7 +15,7 @@ impl std::fmt::Display for Config<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "log level: {}, tty: {}, programmer: {}",
+            "log level: {}, tty: {:?}, programmer: {}",
             self.log_level, self.tty, self.programmer
         )
     }
@@ -23,7 +25,7 @@ impl Default for Config<'_> {
     fn default() -> Self {
         Self {
             log_level: LevelFilter::Info,
-            tty: "tty1",
+            tty: Tty::Virtual,
             programmer: "internal",
         }
     }
@@ -62,7 +64,7 @@ impl<'a> Config<'a> {
 
         if let Some(tty) = map.remove("tty") {
             if let Some(tty) = tty.first() {
-                cfg.tty = tty;
+                cfg.tty = (*tty).into();
             }
         }
 

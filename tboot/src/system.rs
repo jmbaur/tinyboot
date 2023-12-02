@@ -1,4 +1,8 @@
-use std::{fs::Permissions, os::unix::prelude::PermissionsExt};
+use std::{
+    ffi::c_uint,
+    fs::Permissions,
+    os::{fd::AsRawFd, unix::prelude::PermissionsExt},
+};
 
 use nix::{
     libc::{
@@ -87,6 +91,32 @@ pub fn setup_system() {
         None::<&str>,
     )
     .expect("failed to mount to /dev/pts");
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub enum Tty<'a> {
+    Virtual,
+    Serial(&'a str),
+}
+
+impl Tty<'_> {
+    pub fn is_virtual(&self) -> bool {
+        self == &Self::Virtual
+    }
+}
+
+impl<'a> From<&'a str> for Tty<'a> {
+    fn from(value: &'a str) -> Self {
+        if value
+            .strip_prefix("tty")
+            .map(|rest| u8::from_str_radix(rest, 10).is_err())
+            .unwrap_or_default()
+        {
+            Self::Serial(value)
+        } else {
+            Self::Virtual
+        }
+    }
 }
 
 // Adapted from https://github.com/mirror/busybox/blob/2d4a3d9e6c1493a9520b907e07a41aca90cdfd94/init/init.c#L341
@@ -196,4 +226,19 @@ pub fn kernel_logs(level: u8) -> std::io::Result<String> {
     _ = bytes_filtered.remove(bytes_filtered.len() - 1);
 
     Ok(String::from_utf8(bytes_filtered).unwrap())
+}
+
+const VT_ACTIVATE: i32 = 0x5606; // make vt active
+const VT_WAITACTIVE: i32 = 0x5607; // wait for vt active
+
+pub fn chvt(vt: u8) {
+    let tty = std::fs::OpenOptions::new()
+        .write(true)
+        .read(true)
+        .open("/proc/self/fd/0")
+        .unwrap();
+    let fd = tty.as_raw_fd();
+
+    unsafe { libc::ioctl(fd, VT_ACTIVATE, vt as c_uint) };
+    unsafe { libc::ioctl(fd, VT_WAITACTIVE, vt as c_uint) };
 }
