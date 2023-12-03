@@ -236,7 +236,7 @@ pub fn kernel_logs(level: u8) -> std::io::Result<String> {
 const VT_ACTIVATE: i32 = 0x5606; // make vt active
 const VT_WAITACTIVE: i32 = 0x5607; // wait for vt active
 
-pub fn chvt(vt: u8) {
+pub fn chvt(vt: u8) -> std::io::Result<()> {
     let tty = std::fs::OpenOptions::new()
         .write(true)
         .read(true)
@@ -244,6 +244,13 @@ pub fn chvt(vt: u8) {
         .unwrap();
     let fd = tty.as_raw_fd();
 
-    unsafe { libc::ioctl(fd, VT_ACTIVATE, vt as c_uint) };
-    unsafe { libc::ioctl(fd, VT_WAITACTIVE, vt as c_uint) };
+    if unsafe { libc::ioctl(fd, VT_ACTIVATE, vt as c_uint) } < 0 {
+        return Err(std::io::Error::last_os_error());
+    };
+
+    if unsafe { libc::ioctl(fd, VT_WAITACTIVE, vt as c_uint) } < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+
+    Ok(())
 }

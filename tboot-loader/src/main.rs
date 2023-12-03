@@ -90,7 +90,7 @@ fn prepare_boot(cfg: &Config) -> anyhow::Result<Outcome> {
                                         .unwrap();
                                     let fd = tty.as_raw_fd();
                                     unsafe { libc::dup2(fd, libc::STDIN_FILENO) };
-                                    tboot::system::chvt(2);
+                                    tboot::system::chvt(2).unwrap();
                                 }
                                 break 'autoboot;
                             }
