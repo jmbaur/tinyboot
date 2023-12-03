@@ -141,7 +141,7 @@ fn prepare_boot(cfg: &Config) -> anyhow::Result<Outcome> {
     } else {
         if !user_is_present {
             error!("failed to boot");
-            print!("press <ENTER> to enter interactive mode");
+            print!("press <ENTER> to start interactive session");
             stdout.flush().expect("flush failed");
 
             assert_eq!(server_rx.recv().unwrap(), ClientToServer::UserIsPresent);
@@ -319,8 +319,20 @@ pub fn main() -> ! {
         // Setup stdin on tty1 so we can detect user presence.
         unsafe { libc::dup2(fd, libc::STDIN_FILENO) };
 
-        _ = tboot::system::setup_tty(fd);
-        write!(tty, "Press <ENTER> to interrupt").unwrap();
+        let term_size = tboot::system::setup_tty(fd).unwrap();
+
+        let msg = "Press <ENTER> to interrupt";
+
+        // ESC[<L>;<C>H moves the cursor to line L and column C
+        // ESC[?25l makes the cursor invisible
+        write!(
+            tty,
+            "\x1b[{};{}H\x1b[?25l{}",
+            term_size.ws_row - 1,
+            (term_size.ws_col as usize / 2) - (msg.len() / 2),
+            msg
+        )
+        .unwrap();
         tty.flush().unwrap();
     }
 
@@ -342,7 +354,7 @@ pub fn main() -> ! {
     unsafe { libc::dup2(fd, libc::STDOUT_FILENO) };
     unsafe { libc::dup2(fd, libc::STDERR_FILENO) };
 
-    _ = tboot::system::setup_tty(fd);
+    _ = tboot::system::setup_tty(fd).unwrap();
 
     let (new_dev_tx, new_dev_rx) = std::sync::mpsc::channel::<()>();
 

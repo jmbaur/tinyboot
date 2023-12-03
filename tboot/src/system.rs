@@ -120,7 +120,7 @@ impl<'a> From<&'a str> for Tty<'a> {
 }
 
 // Adapted from https://github.com/mirror/busybox/blob/2d4a3d9e6c1493a9520b907e07a41aca90cdfd94/init/init.c#L341
-pub fn setup_tty(fd: i32) -> std::io::Result<()> {
+pub fn setup_tty(fd: i32) -> std::io::Result<libc::winsize> {
     let mut tty = Termios::from_fd(fd)?;
 
     tty.c_cc[VINTR] = 3; // C-c
@@ -155,22 +155,27 @@ pub fn setup_tty(fd: i32) -> std::io::Result<()> {
 
     // set size if the size is zero
     let mut size = std::mem::MaybeUninit::<libc::winsize>::uninit();
+
     let ret = unsafe { libc::ioctl(fd, libc::TIOCGWINSZ as _, &mut size) };
     if ret == 0 {
         let mut size = unsafe { size.assume_init() };
+
         if size.ws_row == 0 {
             size.ws_row = 24;
         }
+
         if size.ws_col == 0 {
             size.ws_col = 80;
         }
 
         unsafe { libc::ioctl(fd, libc::TIOCSWINSZ as _, &size as *const _) };
+
+        tcsetattr(fd, TCSANOW, &tty)?;
+
+        Ok(size)
+    } else {
+        Err(std::io::Error::last_os_error())
     }
-
-    tcsetattr(fd, TCSANOW, &tty)?;
-
-    Ok(())
 }
 
 // not in libc crate??
