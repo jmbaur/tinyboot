@@ -1,5 +1,5 @@
 export BUILD_DIR := justfile_directory() / "build"
-cargo_debug_target_dir := justfile_directory() / "target" / env_var("CARGO_BUILD_TARGET") / "debug"
+zig_bin_dir := justfile_directory() / "zig-out/bin"
 
 help:
 	just --list
@@ -8,10 +8,11 @@ init:
 	mkdir -p {{BUILD_DIR}}
 
 build:
-	cargo build --package tboot-loader --features fw_cfg
+	zig build -Dcpu=baseline -Doptimize=Debug
 
 clean:
 	rm -rf {{BUILD_DIR}}
+	rm -rf {{zig_bin_dir}} {{justfile_directory() / "zig-cache"}}
 
 disk:
 	nix run -L {{justfile_directory()}}
@@ -22,7 +23,7 @@ base-initrd: init
 	xz -d < {{BUILD_DIR}}/result-base-initrd/initrd > {{BUILD_DIR}}/base-initrd
 
 initrd-contents: init
-	echo -e "{{cargo_debug_target_dir}}/tboot-loader\n/init" >{{BUILD_DIR}}/contents
+	echo -e "{{zig_bin_dir}}/tboot-loader\n/init" >{{BUILD_DIR}}/contents
 
 initrd: build initrd-contents
 	test -f {{BUILD_DIR}}/base-initrd || just base-initrd

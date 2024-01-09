@@ -1,17 +1,17 @@
-From 7d1a05ed6d1b96cc9f9ea3b0d3f5c9515d02115a Mon Sep 17 00:00:00 2001
+From 8f595774107c2b256003cc1de607ba4f0ca82ebd Mon Sep 17 00:00:00 2001
 From: Jared Baur <jaredbaur@fastmail.com>
 Date: Sat, 18 Nov 2023 09:04:25 -0800
-Subject: [PATCH 2/4] Fix build for brya
+Subject: [PATCH 2/3] Fix build for brya
 
 ---
  src/mainboard/google/brya/Kconfig | 2 +-
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/src/mainboard/google/brya/Kconfig b/src/mainboard/google/brya/Kconfig
-index 757cfc4136..3dfab45d57 100644
+index 425954478f..858ab9f255 100644
 --- a/src/mainboard/google/brya/Kconfig
 +++ b/src/mainboard/google/brya/Kconfig
-@@ -727,7 +727,7 @@ config VARIANT_DIR
+@@ -302,7 +302,7 @@ config VARIANT_DIR
  
  config VBOOT
  	select VBOOT_EARLY_EC_SYNC if !BOARD_GOOGLE_BASEBOARD_NISSA

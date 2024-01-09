@@ -1,7 +1,7 @@
-From ccfecfbfe03cbf1e36b203f1da4d01143591b677 Mon Sep 17 00:00:00 2001
+From 9d76e0aeaabffc401dfe18b61e2606dcdcb8ba2f Mon Sep 17 00:00:00 2001
 From: Jared Baur <jaredbaur@fastmail.com>
-Date: Sat, 18 Nov 2023 09:07:26 -0800
-Subject: [PATCH 3/4] Allow for fitImage use on mt8183 and mt8192
+Date: Mon, 4 Dec 2023 22:58:55 -0800
+Subject: [PATCH 3/3] Allow for fitImage use on mt8183 and mt8192
 
 ---
  src/soc/mediatek/mt8183/memlayout.ld             | 4 ++--
@@ -9,7 +9,7 @@ Subject: [PATCH 3/4] Allow for fitImage use on mt8183 and mt8192
  2 files changed, 4 insertions(+), 4 deletions(-)
 
 diff --git a/src/soc/mediatek/mt8183/memlayout.ld b/src/soc/mediatek/mt8183/memlayout.ld
-index c5d9d08324..21c01ef6c1 100644
+index 390842693f..e1d9780c75 100644
 --- a/src/soc/mediatek/mt8183/memlayout.ld
 +++ b/src/soc/mediatek/mt8183/memlayout.ld
 @@ -43,8 +43,8 @@ SECTIONS
@@ -17,14 +17,14 @@ index c5d9d08324..21c01ef6c1 100644
  	DRAM_START(0x40000000)
  	DRAM_DMA(0x40000000, 1M)
 -	POSTRAM_CBFS_CACHE(0x40100000, 1M)
--	RAMSTAGE(0x40200000, 2M)
+-	RAMSTAGE(0x40200000, 256K)
 +	POSTRAM_CBFS_CACHE(0x40100000, 10M)
-+	RAMSTAGE(0x41100000, 2M)
++	RAMSTAGE(0x40b00000, 2M)
  
  	BL31(0x54600000, 0x60000)
  }
 diff --git a/src/soc/mediatek/mt8192/include/soc/memlayout.ld b/src/soc/mediatek/mt8192/include/soc/memlayout.ld
-index b1beef0970..304cb73842 100644
+index 6c238c7d8f..b131b8ef08 100644
 --- a/src/soc/mediatek/mt8192/include/soc/memlayout.ld
 +++ b/src/soc/mediatek/mt8192/include/soc/memlayout.ld
 @@ -53,8 +53,8 @@ SECTIONS
@@ -32,9 +32,9 @@ index b1beef0970..304cb73842 100644
  	DRAM_START(0x40000000)
  	DRAM_DMA(0x40000000, 1M)
 -	POSTRAM_CBFS_CACHE(0x40100000, 2M)
--	RAMSTAGE(0x40300000, 2M)
+-	RAMSTAGE(0x40300000, 256K)
 +	POSTRAM_CBFS_CACHE(0x40100000, 10M)
-+	RAMSTAGE(0x41100000, 2M)
++	RAMSTAGE(0x40b00000, 2M)
  
  	BL31(0x54600000, 0x60000)
  }

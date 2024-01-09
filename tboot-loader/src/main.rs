@@ -175,8 +175,7 @@ fn handle_commands(
         match server_rx.recv().unwrap() {
             ClientToServer::UserIsPresent => {}
             ClientToServer::Command(Command::Shell) => {
-                if std::process::Command::new("/bin/busybox")
-                    .arg("sh")
+                if std::process::Command::new("/bin/sh")
                     .env("TERM", "linux")
                     .status()
                     .is_err()

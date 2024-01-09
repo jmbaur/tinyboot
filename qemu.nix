@@ -1,5 +1,6 @@
 { lib, pkgs, config, ... }:
 let
+  strace = pkgs.pkgsStatic.strace;
   busybox = pkgs.pkgsStatic.busybox.override {
     extraConfig = ''
       CONFIG_FEATURE_SH_STANDALONE y
@@ -8,9 +9,19 @@ let
 in
 {
   config = lib.mkIf config.qemu.enable {
-    qemu.flags = [ "-kernel" "${config.build.linux}/kernel" ];
+    qemu.flags = [
+      "-kernel"
+      "${config.build.linux}/kernel"
+      "-display"
+      "none"
+      "-serial"
+      "mon:stdio"
+    ];
     loglevel = lib.mkDefault "debug";
-    extraInitrdContents = [{ object = "${busybox}/bin/busybox"; symlink = "/bin/busybox"; }];
+    extraInitrdContents = [
+      { object = "${busybox}/bin/busybox"; symlink = "/bin/sh"; }
+      { object = "${strace}/bin/strace"; symlink = "/bin/strace"; }
+    ];
     build.qemuScript = pkgs.writeShellApplication {
       name = "tinyboot-qemu";
       runtimeInputs = with pkgs.pkgsBuildBuild; [ swtpm qemu ];
@@ -35,8 +46,6 @@ in
         set -x
 
         qemu-system-${pkgs.hostPlatform.qemuArch} \
-          -device VGA \
-          -serial stdio \
           -smp 2 -m 2G \
           -fw_cfg name=opt/org.tboot/pubkey,file=${config.verifiedBoot.tbootPublicCertificate} \
           -netdev user,id=n1 -device virtio-net-pci,netdev=n1 \

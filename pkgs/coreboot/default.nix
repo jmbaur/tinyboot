@@ -18,7 +18,7 @@ stdenvNoCC.mkDerivation (finalAttrs: {
   patches = [
     ./0001-Add-Kconfig-VBOOT_SIGN-option.patch
     ./0002-Fix-build-for-brya.patch
-    # ./0003-Allow-for-fitImage-use-on-mt8183-and-mt8192.patch
+    ./0003-Allow-for-fitImage-use-on-mt8183-and-mt8192.patch
   ];
   depsBuildBuild = [ pkgsBuildBuild.stdenv.cc pkg-config openssl ];
   nativeBuildInputs = [ python3 ];

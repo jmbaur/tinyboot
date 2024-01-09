@@ -15,7 +15,7 @@
         nixpkgs.overlays = [ inputs.self.overlays.default ];
       };
       overlays.default = final: prev: {
-        tinyboot = prev.pkgsStatic.callPackage ./pkgs/tinyboot.nix { };
+        tinyboot = prev.callPackage ./pkgs/tinyboot.nix { };
         tinybootKernelConfigs = prev.lib.mapAttrs (config: _: ./kernel-configs/${config}) (builtins.readDir ./kernel-configs);
         armTrustedFirmwareMT8183 = prev.callPackage ./pkgs/arm-trusted-firmware-cros.nix { platform = "mt8183"; };
         armTrustedFirmwareMT8192 = prev.callPackage ./pkgs/arm-trusted-firmware-cros.nix { platform = "mt8192"; };

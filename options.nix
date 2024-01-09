@@ -3,10 +3,11 @@ let
   boards = builtins.readDir ./boards;
   tinyboot = pkgs.tinyboot.override { corebootSupport = config.coreboot.enable; };
   buildFitImage = pkgs.callPackage ./fitimage { };
-  testInitrd = pkgs.makeInitrdNG {
+  mkInitrd = contents: pkgs.makeInitrdNG {
     compressor = "xz";
-    contents = [{ object = "${pkgs.busybox}/bin/busybox"; symlink = "/init"; } { object = "${pkgs.busybox}/bin"; symlink = "/bin"; }];
+    contents = contents ++ config.extraInitrdContents;
   };
+  testInitrd = mkInitrd [{ object = "${pkgs.busybox}/bin/busybox"; symlink = "/init"; } { object = "${pkgs.busybox}/bin"; symlink = "/bin"; }];
   kconfigOption = lib.mkOption {
     type = lib.types.attrsOf lib.types.anything;
     default = { };
@@ -93,7 +94,9 @@ in
       type = types.enum [ "off" "error" "warn" "info" "debug" "trace" ];
       default = "info";
     };
-    tinyboot.tty = mkOption { type = types.str; default = "tty1"; };
+    tinyboot = {
+      consoles = mkOption { type = types.listOf types.str; default = [ "tty1" ]; };
+    };
     extraInitrdContents = mkOption {
       type = types.listOf (types.submodule {
         options.object = mkOption { type = types.path; };
@@ -103,8 +106,20 @@ in
     };
   };
   config = {
+    # TODO(jared): only add fbcon param if video is enabled in the kernel
     # The "--" makes linux pass remaining parameters as args to PID1
-    linux.commandLine = [ "fbcon=logo-count:1,logo-pos:center" "console=ttynull" "--" "tboot.loglevel=${config.loglevel}" "tboot.tty=${config.tinyboot.tty}" ];
+    linux.commandLine = [ "fbcon=logo-count:1,logo-pos:center" "console=ttynull" "--" ]
+      ++ map (console: "tboot.console=${console}") config.tinyboot.consoles;
+    extraInitrdContents = lib.optional (config.linux.firmware != [ ]) {
+      symlink = "/lib/firmware";
+      object = pkgs.buildPackages.runCommand "linux-firmware" { } ("mkdir -p $out;" + lib.concatLines (map
+        ({ dir, pattern }: ''
+          pushd ${pkgs.linux-firmware}/lib/firmware
+          find ${dir} -type f -name "${pattern}" -exec install -D --target-directory=$out/${dir} {} \;
+          popd
+        '')
+        config.linux.firmware));
+    };
 
     coreboot.vpd.ro.pubkey = config.verifiedBoot.tbootPublicCertificate;
     coreboot.kconfig = with lib.kernel; {
@@ -134,25 +149,8 @@ in
     };
 
     build = {
-      baseInitrd = pkgs.makeInitrdNG {
-        compressor = "xz";
-        contents = [{
-          symlink = "/lib/firmware";
-          object = pkgs.buildPackages.runCommand "linux-firmware" { } ("mkdir -p $out;" + lib.concatLines (map
-            ({ dir, pattern }: ''
-              pushd ${pkgs.linux-firmware}/lib/firmware
-              find ${dir} -type f -name "${pattern}" -exec install -D --target-directory=$out/${dir} {} \;
-              popd
-            '')
-            config.linux.firmware));
-        }] ++ config.extraInitrdContents;
-      };
-      initrd = config.build.baseInitrd.override {
-        prepend = (pkgs.makeInitrdNG {
-          compressor = "cat"; # prepend cannot be used with a compressed initrd
-          contents = [{ symlink = "/init"; object = "${tinyboot}/bin/tboot-loader"; }];
-        }) + "/initrd";
-      };
+      baseInitrd = mkInitrd [ ];
+      initrd = mkInitrd [{ symlink = "/init"; object = "${tinyboot}/bin/tboot-loader"; }];
       linux = (pkgs.callPackage ./pkgs/linux {
         builtinCmdline = config.linux.commandLine;
         linux = config.linux.package;
