@@ -3,11 +3,10 @@ let
   boards = builtins.readDir ./boards;
   tinyboot = pkgs.tinyboot.override { corebootSupport = config.coreboot.enable; };
   buildFitImage = pkgs.callPackage ./fitimage { };
-  mkInitrd = contents: pkgs.makeInitrdNG {
+  testInitrd = pkgs.makeInitrdNG {
     compressor = "xz";
-    contents = contents ++ config.extraInitrdContents;
+    contents = [{ object = "${pkgs.busybox}/bin/busybox"; symlink = "/init"; } { object = "${pkgs.busybox}/bin"; symlink = "/bin"; }] ++ config.extraInitrdContents;
   };
-  testInitrd = mkInitrd [{ object = "${pkgs.busybox}/bin/busybox"; symlink = "/init"; } { object = "${pkgs.busybox}/bin"; symlink = "/bin"; }];
   kconfigOption = lib.mkOption {
     type = lib.types.attrsOf lib.types.anything;
     default = { };
@@ -149,8 +148,11 @@ in
     };
 
     build = {
-      baseInitrd = mkInitrd [ ];
-      initrd = mkInitrd [{ symlink = "/init"; object = "${tinyboot}/bin/tboot-loader"; }];
+      initrd = pkgs.makeInitrdNG {
+        prepend = "${tinyboot}/tboot-loader.cpio";
+        compressor = "xz";
+        contents = config.extraInitrdContents;
+      };
       linux = (pkgs.callPackage ./pkgs/linux {
         builtinCmdline = config.linux.commandLine;
         linux = config.linux.package;

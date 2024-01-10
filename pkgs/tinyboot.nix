@@ -26,7 +26,7 @@ stdenv.mkDerivation {
 
   buildPhase = ''
     runHook preBuild
-    zig build  ${toString zigArgs}
+    zig build ${toString zigArgs}
     runHook postBuild
   '';
 

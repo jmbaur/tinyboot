@@ -1,23 +1,13 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-// Although this function looks imperative, note that its job is to
-// declaratively construct a build graph that will be executed by an external
-// runner.
-pub fn build(b: *std.Build) void {
+pub fn build(b: *std.Build) !void {
     const coreboot_support = b.option(bool, "coreboot", "Support for coreboot integration") orelse true;
     const tboot_loader_options = b.addOptions();
     tboot_loader_options.addOption(bool, "coreboot_support", coreboot_support);
 
-    // Standard target options allows the person running `zig build` to choose
-    // what target to build for. Here we do not override the defaults, which
-    // means any target is allowed, and the default is native. Other options
-    // for restricting supported target set are available.
     const target = b.standardTargetOptions(.{});
 
-    // Standard optimization options allow the person running `zig build` to select
-    // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall. Here we do not
-    // set a preferred release mode, allowing the user to decide how to optimize.
     var optimize = b.standardOptimizeOption(.{});
 
     const tboot_loader = b.addExecutable(.{
@@ -27,15 +17,28 @@ pub fn build(b: *std.Build) void {
         .optimize = if (optimize == std.builtin.OptimizeMode.Debug)
             std.builtin.OptimizeMode.Debug
         else
+            // Always use release small, smallest size is our goal.
             std.builtin.OptimizeMode.ReleaseSmall,
     });
 
     tboot_loader.addOptions("build_options", tboot_loader_options);
 
-    // This declares intent for the executable to be installed into the
-    // standard location when the user invokes the "install" step (the default
-    // step when running `zig build`).
-    b.installArtifact(tboot_loader);
+    // make the default step just compile tboot-loader
+    b.default_step = &tboot_loader.step;
+
+    // runs on builder
+    const cpio_tool = b.addRunArtifact(b.addExecutable(.{
+        .name = "cpio",
+        .root_source_file = .{ .path = "src/cpio/main.zig" },
+    }));
+    cpio_tool.addArtifactArg(tboot_loader);
+    const install_cpio_archive = b.addInstallFile(
+        cpio_tool.addOutputFileArg("tboot-loader.cpio"),
+        "tboot-loader.cpio",
+    );
+
+    // install the cpio archive during "zig build install"
+    b.getInstallStep().dependOn(&install_cpio_archive.step);
 
     const tboot_bless_boot = b.addExecutable(.{
         .name = "tboot-bless-boot",
@@ -93,7 +96,7 @@ pub fn build(b: *std.Build) void {
     // installation directory rather than directly from within the cache directory.
     // This is not necessary, however, if the application depends on other installed
     // files, this ensures they will be present and in the expected location.
-    run_cmd.step.dependOn(b.getInstallStep());
+    run_cmd.step.dependOn(b.default_step);
 
     // This allows the user to pass arguments to the application in the build
     // command itself, like this: `zig build run -- arg1 arg2 etc`

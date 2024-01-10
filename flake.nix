@@ -27,11 +27,7 @@
         };
       };
       legacyPackages = forAllSystems ({ pkgs, ... }: pkgs);
-      devShells = forAllSystems ({ pkgs, ... }: {
-        default = pkgs.tinyboot.overrideAttrs (old: {
-          nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ (with pkgs; [ just cpio makeInitrdNGTool xz ]);
-        });
-      });
+      devShells = forAllSystems ({ pkgs, ... }: { default = pkgs.tinyboot; });
       apps = forAllSystems ({ pkgs, system, ... }: (
         let
           nixosSystem = inputs.nixpkgs.lib.nixosSystem {
