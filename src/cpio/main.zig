@@ -199,7 +199,7 @@ pub fn main() !void {
     defer init_file.close();
 
     var init_source = std.io.StreamSource{ .file = init_file };
-    try archive.addEntry(&init_source, "init", .File, 0o755);
+    try archive.addEntry(&init_source, "./init", .File, 0o755);
 
     var archive_file = try std.fs.createFileAbsolute(outfile, .{});
     defer archive_file.close();

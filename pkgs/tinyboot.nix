@@ -1,4 +1,4 @@
-{ lib, stdenv, pkgsBuildBuild, corebootSupport ? true }:
+{ lib, stdenv, zig_0_11, corebootSupport ? true }:
 let
   zigArgs = [
     "-Dcpu=baseline"
@@ -14,7 +14,7 @@ stdenv.mkDerivation {
 
   src = ../.;
 
-  depsBuildBuild = [ pkgsBuildBuild.zig_0_11 ];
+  nativeBuildInputs = [ zig_0_11 ];
 
   doCheck = true;
 

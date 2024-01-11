@@ -27,7 +27,12 @@
         };
       };
       legacyPackages = forAllSystems ({ pkgs, ... }: pkgs);
-      devShells = forAllSystems ({ pkgs, ... }: { default = pkgs.tinyboot; });
+      devShells = forAllSystems ({ pkgs, ... }: {
+        default = pkgs.mkShell {
+          inputsFrom = [ pkgs.tinyboot ];
+          env.TINYBOOT_KERNEL = ''${pkgs.coreboot."qemu-${pkgs.stdenv.hostPlatform.qemuArch}".config.build.linux}/kernel'';
+        };
+      });
       apps = forAllSystems ({ pkgs, system, ... }: (
         let
           nixosSystem = inputs.nixpkgs.lib.nixosSystem {
