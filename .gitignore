@@ -1,9 +1,6 @@
 *.iso
 *.qcow2
 /.direnv
-/build
-/outputs
-/target
 /zig-cache
 /zig-out
 result*
