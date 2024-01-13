@@ -39,7 +39,7 @@ let
     '';
 in
 {
-  imports = [ ./qemu.nix ] ++ lib.mapAttrsToList (board: _: ./boards/${board}/config.nix) boards;
+  imports = lib.mapAttrsToList (board: _: ./boards/${board}/config.nix) boards;
   options = with lib; {
     platforms = mkOption { type = types.listOf types.str; default = [ ]; };
     board = mkOption {
@@ -52,8 +52,6 @@ in
         modules = [{ freeformType = with types; lazyAttrsOf (uniq unspecified); }];
       };
     };
-    qemu.enable = mkEnableOption "qemu";
-    qemu.flags = mkOption { type = types.listOf types.str; default = [ ]; };
     flashrom = {
       package = mkPackageOptionMD pkgs "flashrom-cros" { };
       programmer = mkOption { type = types.str; default = "internal"; };

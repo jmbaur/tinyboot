@@ -75,51 +75,26 @@ pub fn build(b: *std.Build) !void {
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&b.addRunArtifact(unit_tests).step);
 
-    const run_cmd = b.addSystemCommand(&.{switch (builtin.target.cpu.arch) {
-        .aarch64 => "qemu-system-aarch64",
-        .x86_64 => "qemu-system-x86_64",
-        else => @compileError("don't know how to run qemu on build system"),
-    }});
-    run_cmd.step.dependOn(&cpio_archive.step);
-
-    // TODO(jared): test for existence of /dev/kvm
-    if (builtin.target.os.tag == .linux) {
-        run_cmd.addArg("-enable-kvm");
-    }
+    const runner_tool = b.addRunArtifact(b.addExecutable(.{
+        .name = "tboot-runner",
+        .root_source_file = .{ .path = "src/runner.zig" },
+    }));
+    runner_tool.step.dependOn(&cpio_archive.step);
+    runner_tool.addArg(b.makeTempPath());
+    runner_tool.addFileArg(cpio_archive.source);
 
     var env = try std.process.getEnvMap(b.allocator);
     defer env.deinit();
 
-    run_cmd.addArgs(&.{ "-machine", switch (builtin.target.cpu.arch) {
-        .aarch64 => "virt",
-        .x86_64 => "q35",
-        else => @compileError("don't know how to run qemu on build system"),
-    } });
-
-    run_cmd.addArgs(&.{
-        // "-fw_cfg",  "name=opt/org.tboot/pubkey,file=TODO",
-        // "-chardev", "socket,id=chrtpm,path=TODO",
-        // "-tpmdev", "emulator,id=tpm0,chardev=chrtpm",
-        "-display", "none",
-        "-serial",  "mon:stdio",
-        "-smp",     "2",
-        "-m",       "2G",
-        "-netdev",  "user,id=n1",
-        "-device",  "virtio-net-pci,netdev=n1",
-    });
-
     if (env.get("TINYBOOT_KERNEL")) |kernel| {
-        run_cmd.addArgs(&.{ "-kernel", kernel });
+        runner_tool.addArg(kernel);
     }
-
-    run_cmd.addArg("-initrd");
-    run_cmd.addFileArg(cpio_archive.source);
 
     // extra args passed through to qemu
     if (b.args) |args| {
-        run_cmd.addArgs(args);
+        runner_tool.addArgs(args);
     }
 
     const run_step = b.step("run", "Run in qemu");
-    run_step.dependOn(&run_cmd.step);
+    run_step.dependOn(&runner_tool.step);
 }
