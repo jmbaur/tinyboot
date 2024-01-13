@@ -20,5 +20,5 @@ nix run github:jmbaur/tinyboot#coreboot.<your_board>.config.build.installScript
 ## Hacking
 
 ```
-just qemu
+zig build run
 ```
