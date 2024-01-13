@@ -1,4 +1,5 @@
 const std = @import("std");
+const log = std.log;
 const builtin = @import("builtin");
 
 pub fn build(b: *std.Build) !void {
@@ -6,7 +7,7 @@ pub fn build(b: *std.Build) !void {
     const tboot_loader_options = b.addOptions();
     tboot_loader_options.addOption(bool, "coreboot_support", coreboot_support);
 
-    const target = b.standardTargetOptions(.{});
+    const target = b.standardTargetOptions(.{ .default_target = .{ .cpu_model = .baseline } });
 
     var optimize = b.standardOptimizeOption(.{});
 
@@ -88,6 +89,12 @@ pub fn build(b: *std.Build) !void {
 
     var env = try std.process.getEnvMap(b.allocator);
     defer env.deinit();
+
+    run_cmd.addArgs(&.{ "-machine", switch (builtin.target.cpu.arch) {
+        .aarch64 => "virt",
+        .x86_64 => "q35",
+        else => @compileError("don't know how to run qemu on build system"),
+    } });
 
     run_cmd.addArgs(&.{
         // "-fw_cfg",  "name=opt/org.tboot/pubkey,file=TODO",

@@ -1,7 +1,6 @@
 { lib, stdenv, zig_0_11, corebootSupport ? true }:
 let
   zigArgs = [
-    "-Dcpu=baseline"
     "-Doptimize=ReleaseSafe"
     "-Dtarget=${stdenv.hostPlatform.qemuArch}-linux"
     "-Dcoreboot=${lib.boolToString corebootSupport}"

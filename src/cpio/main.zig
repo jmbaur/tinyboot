@@ -58,7 +58,7 @@ pub const CpioArchive = struct {
         errdefer cpio.entries.deinit();
 
         // Always start off with a root directory.
-        try cpio.addEntry(null, ".", .Directory, 0o755);
+        try cpio.addEntry(null, "./", .Directory, 0o755);
 
         return cpio;
     }
@@ -136,13 +136,10 @@ pub const CpioArchive = struct {
             try dest.writer().writeAll(entry.filename);
             total_written += entry.filename.len;
 
-            // pad the filename
-            const header_missing = (ASCII_CPIO_HEADER_SIZE + entry.filename.len) % 4;
-            if (header_missing > 0) {
-                const header_padding = 4 - header_missing;
-                try dest.writer().writeByteNTimes(0, header_padding);
-                total_written += header_padding;
-            }
+            // pad the file name
+            const header_padding = (4 - ((ASCII_CPIO_HEADER_SIZE + entry.filename.len) % 4)) % 4;
+            try dest.writer().writeByteNTimes(0, header_padding);
+            total_written += header_padding;
 
             if (entry.source) |source| {
                 var pos: usize = 0;
@@ -158,22 +155,16 @@ pub const CpioArchive = struct {
                     pos += bytes_read;
                 }
 
-                // pad the data
-                const filedata_missing = end % 4;
-                if (filedata_missing > 0) {
-                    const filedata_padding = 4 - filedata_missing;
-                    try dest.writer().writeByteNTimes(0, filedata_padding);
-                    total_written += filedata_padding;
-                }
+                // pad the file data
+                const filedata_padding = (4 - (end % 4)) % 4;
+                try dest.writer().writeByteNTimes(0, filedata_padding);
+                total_written += filedata_padding;
             }
         }
 
-        // We finish off the archive with an even multiple of 16. This is how
-        // GNU cpio does it, don't ask questions.
-        const end_missing = total_written % 16;
-        if (end_missing > 0) {
-            try dest.writer().writeByteNTimes(0, 16 - end_missing);
-        }
+        // Maintain a block size of 512 by adding padding to the end of the
+        // archive.
+        try dest.writer().writeByteNTimes(0, (512 - (total_written % 512)) % 512);
     }
 
     pub fn deinit(self: *@This()) void {
