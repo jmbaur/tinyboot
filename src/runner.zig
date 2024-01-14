@@ -35,16 +35,15 @@ pub fn main() !void {
         try qemu_args.append("-enable-kvm");
     }
 
-    try qemu_args.appendSlice(switch (builtin.target.cpu.arch) {
-        .aarch64 => &.{ "-machine", "virt", "-cpu", "cortex-a53" },
-        .x86_64 => &.{ "-machine", "q35", "-cpu", "max" },
+    try qemu_args.appendSlice(&.{ "-machine", switch (builtin.target.cpu.arch) {
+        .aarch64 => "virt",
+        .x86_64 => "q35",
         else => @compileError("don't know how to run qemu on build system"),
-    });
+    } });
 
-    const swtpm_sock_path = try std.fs.path.join(allocator, &.{ tmpdir, "swtpm.sock" });
-
+    // TODO(jared): "-fw_cfg",  "name=opt/org.tboot/pubkey,file=TODO",
     try qemu_args.appendSlice(&.{
-        // "-fw_cfg",  "name=opt/org.tboot/pubkey,file=TODO",
+        "-cpu",     "max",
         "-display", "none",
         "-serial",  "mon:stdio",
         "-smp",     "2",
@@ -55,6 +54,7 @@ pub fn main() !void {
         "-kernel",  kernel,
     });
 
+    const swtpm_sock_path = try std.fs.path.join(allocator, &.{ tmpdir, "swtpm.sock" });
     try qemu_args.appendSlice(&.{
         "-chardev", try std.fmt.allocPrint(allocator, "socket,id=chrtpm,path={s}", .{swtpm_sock_path}),
         "-tpmdev",  "emulator,id=tpm0,chardev=chrtpm",
