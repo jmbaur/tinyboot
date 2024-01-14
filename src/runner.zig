@@ -1,6 +1,14 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
+fn pathExists(p: []const u8) bool {
+    std.fs.accessAbsolute(p, .{}) catch {
+        return false;
+    };
+
+    return true;
+}
+
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
@@ -23,8 +31,7 @@ pub fn main() !void {
         else => @compileError("don't know how to run qemu on build system"),
     });
 
-    // TODO(jared): test for existence of /dev/kvm
-    if (builtin.target.os.tag == .linux) {
+    if (builtin.target.os.tag == .linux and pathExists("/dev/kvm")) {
         try qemu_args.append("-enable-kvm");
     }
 
