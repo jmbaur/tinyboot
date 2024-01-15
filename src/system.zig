@@ -2,6 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const fs = std.fs;
 const os = std.os;
+const system = std.os.system;
 const linux = std.os.linux;
 
 const MountError = error{
@@ -84,6 +85,16 @@ fn setBaudRate(t: *os.termios, baud: u32) void {
     t.*.cflag |= baud;
 }
 
+fn cfmakeraw(t: *os.termios) void {
+    t.iflag &= ~(system.IGNBRK | system.BRKINT | system.PARMRK | system.ISTRIP | system.INLCR | system.IGNCR | system.ICRNL | system.IXON);
+    t.oflag &= ~system.OPOST;
+    t.lflag &= ~(system.ECHO | system.ECHONL | system.ICANON | system.ISIG | system.IEXTEN);
+    t.cflag &= ~(system.CSIZE | system.PARENB);
+    t.cflag |= system.CS8;
+    t.cc[VMIN] = 1;
+    t.cc[VTIME] = 0;
+}
+
 pub fn setupTty(fd: os.fd_t) !void {
     var termios = try os.tcgetattr(fd);
 
@@ -96,41 +107,22 @@ pub fn setupTty(fd: os.fd_t) !void {
     termios.cc[VSTOP] = 19; // C-s
     termios.cc[VSUSP] = 26; // C-z
 
-    termios.cflag &=
-        CBAUD |
-        CBAUDEX |
-        os.system.CSIZE |
-        os.system.CSTOPB |
-        os.system.PARENB |
-        os.system.PARODD |
-        CRTSCTS;
+    termios.cflag &= CBAUD | CBAUDEX | os.system.CSIZE | os.system.CSTOPB | os.system.PARENB | os.system.PARODD | CRTSCTS;
 
-    termios.cflag |=
-        os.system.CREAD |
-        os.system.HUPCL |
-        os.system.CLOCAL;
+    termios.cflag |= system.CREAD | system.HUPCL | system.CLOCAL;
 
     // input modes
-    termios.iflag =
-        os.system.ICRNL |
-        os.system.IXON |
-        os.system.IXOFF;
+    termios.iflag = system.ICRNL | system.IXON | system.IXOFF;
 
     // output modes
-    termios.oflag =
-        os.system.OPOST |
-        os.system.ONLCR;
+    termios.oflag = system.OPOST | system.ONLCR;
 
     // local modes
-    termios.lflag =
-        os.system.ISIG |
-        os.system.ICANON |
-        os.system.ECHO |
-        os.system.ECHOE |
-        os.system.ECHOK |
-        os.system.IEXTEN;
+    termios.lflag = system.ISIG | system.ICANON | system.ECHO | system.ECHOE | system.ECHOK | system.IEXTEN;
 
     setBaudRate(&termios, os.system.B115200);
+
+    cfmakeraw(&termios);
 
     try os.tcsetattr(fd, os.TCSA.NOW, termios);
 }

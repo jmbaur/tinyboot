@@ -9,25 +9,27 @@ const ServerMsg = @import("./message.zig").ServerMsg;
 const system = @import("./system.zig");
 
 pub const Shell = struct {
-    comm_fd: os.fd_t,
-    arena: std.heap.ArenaAllocator,
-    buffer: ?[]u8,
     user_presence: bool = false,
-    log_buffer: []align(std.mem.page_size) u8,
+    waiting_for_response: bool = false,
+    has_prompt: bool = false,
+    input_position: u16 = 0,
+    comm_fd: os.fd_t,
     old_log_offset: usize = 0,
+    log_buffer: []align(std.mem.page_size) u8,
+    input_buffer: [1 << 16]u8 = undefined,
+    arena: std.heap.ArenaAllocator,
 
     pub fn init(comm_fd: os.fd_t, log_buffer: []align(std.mem.page_size) u8) @This() {
         return @This(){
             .comm_fd = comm_fd,
             .log_buffer = log_buffer,
             .arena = std.heap.ArenaAllocator.init(std.heap.page_allocator),
-            .buffer = null,
         };
     }
 
     fn prompt(self: *@This()) !void {
-        _ = self;
         try std.io.getStdOut().writeAll(">> ");
+        self.has_prompt = true;
     }
 
     pub fn run(self: *@This()) !void {
@@ -73,15 +75,15 @@ pub const Shell = struct {
 
                 if (event.data.fd == self.comm_fd) {
                     try self.handle_comm();
-                } else if (event.data.fd == os.STDIN_FILENO) {
-                    if (!self.user_presence) {
-                        try self.notify_user_presence();
-                        self.user_presence = true;
+                    if (self.waiting_for_response) {
+                        self.waiting_for_response = false;
+                        try self.prompt();
                     }
+                } else if (event.data.fd == os.STDIN_FILENO) {
                     try self.handle_stdin();
                 } else if (event.data.fd == signal_fd) {
                     if (try self.should_quit_shell(signal_fd)) {
-                        std.debug.print("\n\ngoodbye!\n\n", .{});
+                        std.debug.print("\ngoodbye!\n\n", .{});
                         return;
                     }
                 }
@@ -130,48 +132,99 @@ pub const Shell = struct {
     }
 
     fn handle_stdin(self: *@This()) !void {
-        defer self.prompt() catch {};
+        if (!self.user_presence) {
+            try self.notify_user_presence();
+            self.user_presence = true;
 
-        var allocator = self.arena.allocator();
-
-        var input = std.ArrayList(u8).init(allocator);
-        defer input.deinit();
-
-        if (self.buffer) |buffer| {
-            try input.appendSlice(buffer);
-            allocator.free(buffer);
-            self.buffer = null;
-        }
-
-        var buf = [_]u8{0} ** 2048;
-        const n = try os.read(os.STDIN_FILENO, &buf);
-
-        var found = false;
-        for (buf[0..n]) |byte| {
-            if (byte == '\n') {
-                found = true;
-                break;
+            // We may already have a prompt from a boot timeout, so don't print
+            // a prompt if we already have one.
+            if (!self.has_prompt) {
+                try self.prompt();
             }
-            try input.append(byte);
         }
 
-        if (!found) {
-            // save the input for later
-            self.buffer = try input.toOwnedSlice();
-            return;
+        var buf = [_]u8{0};
+        const bytes_read = try os.read(os.STDIN_FILENO, &buf);
+        if (bytes_read != 1) {
+            @panic("TODO: handle bytes_read != 1");
         }
 
-        if (input.items.len == 0) {
-            return;
+        const char = buf[0];
+
+        var done = false;
+
+        switch (char) {
+            // C-k
+            0x0b => {},
+            // C-a
+            0x01 => {},
+            // C-b
+            0x02 => {},
+            // C-c
+            0x03 => {},
+            // C-d
+            0x04 => {},
+            // C-e
+            0x05 => {},
+            // C-h
+            0x08 => {},
+            // C-j
+            0x0a => {},
+            // C-l
+            0x0c => {},
+            // \n
+            0x0d => {
+                _ = try std.io.getStdOut().writeAll("\n");
+                if (self.input_position == 0) {
+                    try self.prompt();
+                } else {
+                    done = true;
+                }
+            },
+            // C-n
+            0x0e => {},
+            // C-p
+            0x10 => {},
+            // C-r
+            0x12 => {},
+            // C-t
+            0x14 => {},
+            // C-u
+            0x15 => {},
+            // C-w
+            0x17 => {},
+            // C-[
+            0x1b => {},
+            else => {
+                if (0x41 <= char // A
+                    and
+                    char <= 0x7a // z
+                ) {
+                    // TODO(jared): add bounds check
+                    self.input_buffer[self.input_position] = char;
+                    self.input_position += 1;
+                    _ = try std.io.getStdOut().writeAll(&buf);
+                } else {
+                    std.debug.print("\nunknown input character: 0x{x}\n", .{char});
+                }
+            },
         }
 
-        const maybe_msg = Command.run(input.items, self) catch |err| {
-            std.debug.print("error running command: {any}\n", .{err});
-            return;
-        };
+        if (done and self.input_position > 0) {
+            const input_position = self.input_position;
+            self.input_position = 0;
 
-        if (maybe_msg) |msg| {
-            _ = try os.write(self.comm_fd, std.mem.asBytes(&msg));
+            const maybe_msg = Command.run(self.input_buffer[0..input_position], self) catch |err| {
+                std.debug.print("error running command: {any}\n", .{err});
+                return;
+            };
+
+            if (maybe_msg) |msg| {
+                _ = try os.write(self.comm_fd, std.mem.asBytes(&msg));
+                self.waiting_for_response = true;
+            } else {
+                try self.prompt();
+            }
         }
     }
 
@@ -189,7 +242,6 @@ pub const Command = struct {
         logs,
         poweroff,
         reboot,
-        shell,
     };
 
     pub fn run(user_input: []const u8, shell_instance: *Shell) !?ClientMsg {
@@ -312,26 +364,6 @@ pub const Command = struct {
             _ = args;
 
             shell_instance.print_logs();
-            return null;
-        }
-    };
-
-    const shell = struct {
-        const short_help = "run posix shell commands";
-        const long_help =
-            \\Run the busybox ash shell.
-            \\
-            \\Usage:
-            \\shell
-        ;
-
-        fn run(a: std.mem.Allocator, args: *ArgsIterator, shell_instance: *Shell) !?ClientMsg {
-            _ = shell_instance;
-            _ = args;
-
-            var child = std.ChildProcess.init(&.{"/bin/sh"}, a);
-            _ = try child.spawnAndWait();
-
             return null;
         }
     };
