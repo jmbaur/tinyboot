@@ -32,54 +32,6 @@ const Config = @import("./config.zig").Config;
 const ClientMsg = @import("./message.zig").ClientMsg;
 const ServerMsg = @import("./message.zig").ServerMsg;
 
-const PtsError = error{
-    GetName,
-    Unlock,
-};
-
-const Pts = struct {
-    const TIOCGPTN = 0x80045430;
-    const TIOCSPTLCK = 0x40045431;
-
-    master: os.fd_t,
-    slave: os.fd_t,
-
-    pub fn init() !@This() {
-        const master = try os.open("/dev/ptmx", os.O.RDWR | os.O.NOCTTY, 0);
-
-        var slave_num: u32 = 0;
-        const get_slave_num_rc = os.linux.ioctl(master, TIOCGPTN, @intFromPtr(&slave_num));
-        switch (os.linux.getErrno(get_slave_num_rc)) {
-            .SUCCESS => {},
-            else => return PtsError.GetName,
-        }
-
-        var unlock: u32 = 0;
-        const unlock_rc = os.linux.ioctl(master, TIOCSPTLCK, @intFromPtr(&unlock));
-        switch (os.linux.getErrno(unlock_rc)) {
-            .SUCCESS => {},
-            else => return PtsError.Unlock,
-        }
-
-        var buf = [_]u8{0} ** 20;
-        const slave_path = try std.fmt.bufPrint(&buf, "/dev/pts/{}", .{slave_num});
-
-        const slave = try os.open(slave_path, os.O.RDWR | os.O.NOCTTY, 0);
-
-        system.setupTty(slave) catch |err| switch (err) {
-            error.NotATerminal => {},
-            else => return err,
-        };
-
-        return @This(){ .master = master, .slave = slave };
-    }
-
-    pub fn deinit(self: *@This()) void {
-        os.close(self.slave);
-        os.close(self.master);
-    }
-};
-
 pub const Console = struct {
     // TODO(jared): use pid_fd to wait for pid to quit
     pid: os.pid_t,
@@ -222,24 +174,4 @@ test "smoke test" {
         const n_echo = try os.read(console1[1], echo_buf);
         try std.testing.expectEqualSlices(u8, buf_input[0..n_written], echo_buf[0..n_echo]);
     }
-}
-
-test "pts smoke test" {
-    var pts = try Pts.init();
-    defer pts.deinit();
-
-    const slave_ping_write_n = try os.write(pts.slave, "ping\n");
-    try std.testing.expectEqual(@as(usize, 5), slave_ping_write_n);
-    var ping_buf = [_]u8{0} ** 6;
-    const master_ping_read_n = try os.read(pts.master, &ping_buf);
-    try std.testing.expectEqual(@as(usize, 6), master_ping_read_n);
-    try std.testing.expectEqualSlices(u8, &.{ 'p', 'i', 'n', 'g', '\r', '\n' }, &ping_buf);
-
-    const master_pong_write_n = try os.write(pts.master, "pong\n");
-    try std.testing.expectEqual(@as(usize, 5), master_pong_write_n);
-
-    var pong_buf = [_]u8{0} ** 5;
-    const slave_pong_read_n = try os.read(pts.slave, &pong_buf);
-    try std.testing.expectEqual(@as(usize, 5), slave_pong_read_n);
-    try std.testing.expectEqualSlices(u8, &.{ 'p', 'o', 'n', 'g', '\n' }, &pong_buf);
 }

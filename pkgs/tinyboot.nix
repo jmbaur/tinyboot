@@ -1,5 +1,6 @@
-{ lib, stdenv, zig_0_11, corebootSupport ? true }:
+{ lib, stdenvNoCC, zig_0_11, corebootSupport ? true }:
 let
+  stdenv = stdenvNoCC;
   zigArgs = [
     "-Doptimize=ReleaseSafe"
     "-Dtarget=${stdenv.hostPlatform.qemuArch}-linux"

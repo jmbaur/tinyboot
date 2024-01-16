@@ -12,23 +12,41 @@ pub const Shell = struct {
     user_presence: bool = false,
     waiting_for_response: bool = false,
     has_prompt: bool = false,
-    input_position: u16 = 0,
+    input_cursor: u16 = 0,
+    input_end: u16 = 0,
     comm_fd: os.fd_t,
     old_log_offset: usize = 0,
     log_buffer: []align(std.mem.page_size) u8,
     input_buffer: [1 << 16]u8 = undefined,
     arena: std.heap.ArenaAllocator,
+    writer: BufferedWriter,
+
+    const buffer_size = 4096;
+    const BufferedWriter = std.io.BufferedWriter(buffer_size, std.fs.File.Writer);
 
     pub fn init(comm_fd: os.fd_t, log_buffer: []align(std.mem.page_size) u8) @This() {
         return @This(){
             .comm_fd = comm_fd,
             .log_buffer = log_buffer,
             .arena = std.heap.ArenaAllocator.init(std.heap.page_allocator),
+            .writer = std.io.bufferedWriter(std.io.getStdOut().writer()),
         };
     }
 
+    fn writeAll(self: *@This(), bytes: []const u8) !void {
+        var index: usize = 0;
+        while (index < bytes.len) {
+            index += try self.writer.write(bytes[index..]);
+        }
+    }
+
+    fn writeAllAndFlush(self: *@This(), bytes: []const u8) !void {
+        try self.writeAll(bytes);
+        return self.writer.flush();
+    }
+
     fn prompt(self: *@This()) !void {
-        try std.io.getStdOut().writeAll(">> ");
+        try self.writeAllAndFlush(">> ");
         self.has_prompt = true;
     }
 
@@ -59,7 +77,7 @@ pub const Shell = struct {
         };
         try os.epoll_ctl(epoll_fd, os.linux.EPOLL.CTL_ADD, signal_fd, &signal_event);
 
-        try std.io.getStdOut().writeAll("\npress <ENTER> to interrupt\n\n");
+        try self.writeAllAndFlush("\npress <ENTER> to interrupt\n\n");
 
         // main event loop
         while (true) {
@@ -74,16 +92,16 @@ pub const Shell = struct {
                 const event = events[i_event];
 
                 if (event.data.fd == self.comm_fd) {
-                    try self.handle_comm();
+                    try self.handleComm();
                     if (self.waiting_for_response) {
                         self.waiting_for_response = false;
                         try self.prompt();
                     }
                 } else if (event.data.fd == os.STDIN_FILENO) {
-                    try self.handle_stdin();
+                    try self.handleStdin();
                 } else if (event.data.fd == signal_fd) {
-                    if (try self.should_quit_shell(signal_fd)) {
-                        std.debug.print("\ngoodbye!\n\n", .{});
+                    if (try self.shouldQuitShell(signal_fd)) {
+                        try self.writeAllAndFlush("\ngoodbye!\n\n");
                         return;
                     }
                 }
@@ -91,12 +109,12 @@ pub const Shell = struct {
         }
     }
 
-    fn notify_user_presence(self: *@This()) !void {
+    fn notifyUserPresence(self: *@This()) !void {
         var msg: ClientMsg = .None;
         _ = try os.write(self.comm_fd, std.mem.asBytes(&msg));
     }
 
-    fn handle_comm(self: *@This()) !void {
+    fn handleComm(self: *@This()) !void {
         var msg: ServerMsg = .None;
         _ = try os.read(self.comm_fd, std.mem.asBytes(&msg));
 
@@ -107,7 +125,7 @@ pub const Shell = struct {
                 }
 
                 if (!self.user_presence) {
-                    std.debug.print("{s}", .{self.log_buffer[self.old_log_offset..offset]});
+                    try self.writeAllAndFlush(self.log_buffer[self.old_log_offset..offset]);
                     self.old_log_offset = offset;
                 }
             },
@@ -116,13 +134,13 @@ pub const Shell = struct {
         }
     }
 
-    pub fn print_logs(self: *@This()) void {
+    pub fn printLogs(self: *@This()) !void {
         if (std.mem.indexOf(u8, self.log_buffer, &.{0})) |end| {
-            std.debug.print("{s}", .{self.log_buffer[0..end]});
+            try self.writeAllAndFlush(self.log_buffer[0..end]);
         }
     }
 
-    fn should_quit_shell(self: *@This(), fd: os.fd_t) !bool {
+    fn shouldQuitShell(self: *@This(), fd: os.fd_t) !bool {
         _ = self;
 
         var siginfo = std.mem.zeroes(os.linux.signalfd_siginfo);
@@ -131,9 +149,32 @@ pub const Shell = struct {
         return siginfo.signo == os.SIG.USR1;
     }
 
-    fn handle_stdin(self: *@This()) !void {
+    /// Caller required to flush
+    fn cursorLeft(self: *@This(), n: u16) void {
+        if (n > 0) {
+            var buf: [5]u8 = undefined;
+            const out = std.fmt.bufPrint(&buf, "{d:0>5}", .{n}) catch return;
+            self.writeAll(&.{ 0x1b, '[', out[0], out[1], out[2], out[3], out[4], 'D' }) catch {};
+        }
+    }
+
+    /// Caller required to flush
+    fn cursorRight(self: *@This(), n: u16) void {
+        if (n > 0) {
+            var buf: [5]u8 = undefined;
+            const out = std.fmt.bufPrint(&buf, "{d:0>5}", .{n}) catch return;
+            self.writeAll(&.{ 0x1b, '[', out[0], out[1], out[2], out[3], out[4], 'C' }) catch {};
+        }
+    }
+
+    /// Caller required to flush
+    fn eraseToEndOfLine(self: *@This()) void {
+        self.writeAll(&.{ 0x1b, '[', 'K' }) catch {};
+    }
+
+    fn handleStdin(self: *@This()) !void {
         if (!self.user_presence) {
-            try self.notify_user_presence();
+            try self.notifyUserPresence();
             self.user_presence = true;
 
             // We may already have a prompt from a boot timeout, so don't print
@@ -153,68 +194,173 @@ pub const Shell = struct {
 
         var done = false;
 
-        switch (char) {
+        const needs_flush = switch (char) {
             // C-k
-            0x0b => {},
+            0x0b => b: {
+                self.eraseToEndOfLine();
+                self.input_end = self.input_cursor;
+                break :b true;
+            },
             // C-a
-            0x01 => {},
+            0x01 => b: {
+                if (self.input_cursor > 0) {
+                    self.cursorLeft(self.input_cursor);
+                    self.input_cursor = 0;
+                    break :b true;
+                }
+
+                break :b false;
+            },
             // C-b
-            0x02 => {},
+            0x02 => b: {
+                if (self.input_cursor > 0) {
+                    self.cursorLeft(1);
+                    self.input_cursor -= 1;
+                    break :b true;
+                }
+
+                break :b false;
+            },
             // C-c
-            0x03 => {},
+            0x03 => false,
             // C-d
-            0x04 => {},
+            0x04 => b: {
+                if (self.input_cursor < self.input_end) {
+                    std.mem.copyForwards(
+                        u8,
+                        self.input_buffer[self.input_cursor .. self.input_end - 1],
+                        self.input_buffer[self.input_cursor + 1 .. self.input_end],
+                    );
+                    self.input_end -= 1;
+                    self.writeAll(self.input_buffer[self.input_cursor..self.input_end]) catch {};
+                    self.eraseToEndOfLine();
+                    self.cursorLeft(self.input_end - self.input_cursor);
+                    break :b true;
+                }
+
+                break :b false;
+            },
             // C-e
-            0x05 => {},
-            // C-h
-            0x08 => {},
-            // C-j
-            0x0a => {},
+            0x05 => b: {
+                if (self.input_cursor < self.input_end) {
+                    self.cursorRight(self.input_end - self.input_cursor);
+                    self.input_cursor = self.input_end;
+                    break :b true;
+                }
+
+                break :b false;
+            },
+            // C-f
+            0x06 => b: {
+                if (self.input_cursor < self.input_end) {
+                    self.cursorRight(1);
+                    self.input_cursor += 1;
+                    break :b true;
+                }
+
+                break :b false;
+            },
+            // C-h, Backspace
+            0x08, 0x7f => b: {
+                if (self.input_cursor > 0) {
+                    std.mem.copyForwards(
+                        u8,
+                        self.input_buffer[self.input_cursor - 1 .. self.input_end - 1],
+                        self.input_buffer[self.input_cursor..self.input_end],
+                    );
+                    self.input_cursor -= 1;
+                    self.input_end -= 1;
+                    self.cursorLeft(1);
+                    self.writeAll(self.input_buffer[self.input_cursor..self.input_end]) catch {};
+                    self.eraseToEndOfLine();
+                    self.cursorLeft(self.input_end - self.input_cursor);
+                    break :b true;
+                }
+
+                break :b false;
+            },
             // C-l
-            0x0c => {},
-            // \n
-            0x0d => {
-                _ = try std.io.getStdOut().writeAll("\n");
-                if (self.input_position == 0) {
+            0x0c => false,
+            // \n, C-j
+            0x0d, 0x0a => b: {
+                self.writeAll("\n") catch {};
+                if (self.input_cursor == 0) {
                     try self.prompt();
                 } else {
                     done = true;
                 }
+                break :b true;
             },
             // C-n
-            0x0e => {},
+            0x0e => false,
             // C-p
-            0x10 => {},
+            0x10 => false,
             // C-r
-            0x12 => {},
+            0x12 => false,
             // C-t
-            0x14 => {},
-            // C-u
-            0x15 => {},
-            // C-w
-            0x17 => {},
-            // C-[
-            0x1b => {},
-            else => {
-                if (0x41 <= char // A
-                    and
-                    char <= 0x7a // z
-                ) {
-                    // TODO(jared): add bounds check
-                    self.input_buffer[self.input_position] = char;
-                    self.input_position += 1;
-                    _ = try std.io.getStdOut().writeAll(&buf);
-                } else {
-                    std.debug.print("\nunknown input character: 0x{x}\n", .{char});
+            0x14 => b: {
+                if (0 < self.input_cursor and self.input_cursor < self.input_end) {
+                    std.mem.swap(
+                        u8,
+                        &self.input_buffer[self.input_cursor - 1],
+                        &self.input_buffer[self.input_cursor],
+                    );
+                    self.cursorLeft(1);
+                    self.input_cursor += 1;
+                    self.writeAll(self.input_buffer[self.input_cursor - 2 .. self.input_cursor]) catch {};
+                    break :b true;
                 }
+
+                break :b false;
             },
+            // C-u
+            0x15 => b: {
+                if (self.input_cursor > 0) {
+                    self.cursorLeft(self.input_cursor);
+                    self.writeAll(self.input_buffer[self.input_cursor..self.input_end]) catch {};
+                    self.eraseToEndOfLine();
+                    self.input_end = self.input_end - self.input_cursor;
+                    self.input_cursor = 0;
+                    self.cursorLeft(self.input_end);
+                    break :b true;
+                }
+
+                break :b false;
+            },
+            // C-w
+            0x17 => false,
+            // space, A-Za-z
+            0x20, 0x41...0x7a => b: {
+                // make sure we have room for another character
+                if (self.input_end + 1 < self.input_buffer.len) {
+                    std.mem.copyBackwards(
+                        u8,
+                        self.input_buffer[self.input_cursor + 1 .. self.input_end + 1],
+                        self.input_buffer[self.input_cursor..self.input_end],
+                    );
+                    self.input_buffer[self.input_cursor] = char;
+                    self.input_end += 1;
+                    self.writeAll(self.input_buffer[self.input_cursor..self.input_end]) catch {};
+                    self.input_cursor += 1;
+                    self.cursorLeft(self.input_end - self.input_cursor);
+                    break :b true;
+                }
+
+                break :b false;
+            },
+            else => false,
+        };
+
+        if (needs_flush) {
+            try self.writer.flush();
         }
 
-        if (done and self.input_position > 0) {
-            const input_position = self.input_position;
-            self.input_position = 0;
+        if (done and self.input_end > 0) {
+            const end = self.input_end;
+            self.input_cursor = 0;
+            self.input_end = 0;
 
-            const maybe_msg = Command.run(self.input_buffer[0..input_position], self) catch |err| {
+            const maybe_msg = Command.run(self.input_buffer[0..end], self) catch |err| {
                 std.debug.print("error running command: {any}\n", .{err});
                 return;
             };
@@ -363,7 +509,7 @@ pub const Command = struct {
             _ = a;
             _ = args;
 
-            shell_instance.print_logs();
+            try shell_instance.printLogs();
             return null;
         }
     };
