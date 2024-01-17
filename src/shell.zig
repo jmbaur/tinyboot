@@ -17,7 +17,7 @@ pub const Shell = struct {
     comm_fd: os.fd_t,
     old_log_offset: usize = 0,
     log_buffer: []align(std.mem.page_size) u8,
-    input_buffer: [1 << 16]u8 = undefined,
+    input_buffer: [buffer_size]u8 = undefined,
     arena: std.heap.ArenaAllocator,
     writer: BufferedWriter,
 
@@ -172,6 +172,14 @@ pub const Shell = struct {
         self.writeAll(&.{ 0x1b, '[', 'K' }) catch {};
     }
 
+    /// Empties the display and moves the cursor to absolute position 0, 0.
+    fn clearScreen(self: *@This()) void {
+        // empties the display
+        self.writeAll(&.{ 0x1b, '[', '2', 'J' }) catch {};
+        // moves the cursor to 0, 0
+        self.writeAll(&.{ 0x1b, '[', '0', ';', '0', 'H' }) catch {};
+    }
+
     fn handleStdin(self: *@This()) !void {
         if (!self.user_presence) {
             try self.notifyUserPresence();
@@ -280,7 +288,13 @@ pub const Shell = struct {
                 break :b false;
             },
             // C-l
-            0x0c => false,
+            0x0c => b: {
+                self.clearScreen();
+                try self.prompt();
+                try self.writeAll(self.input_buffer[0..self.input_end]);
+                self.cursorLeft(self.input_end - self.input_cursor);
+                break :b true;
+            },
             // \n, C-j
             0x0d, 0x0a => b: {
                 self.writeAll("\n") catch {};
