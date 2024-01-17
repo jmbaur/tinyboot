@@ -400,6 +400,7 @@ pub const Command = struct {
     const argv0 = enum {
         help, // NOTE: keep "help" at the top
         logs,
+        dmesg,
         poweroff,
         reboot,
     };
@@ -524,6 +525,24 @@ pub const Command = struct {
             _ = args;
 
             try shell_instance.printLogs();
+            return null;
+        }
+    };
+
+    const dmesg = struct {
+        const short_help = "view kernel logs";
+        const long_help =
+            \\View logs from the kernel.
+            \\
+            \\Usage:
+            \\dmesg
+        ;
+
+        fn run(a: std.mem.Allocator, args: *ArgsIterator, shell_instance: *Shell) !?ClientMsg {
+            _ = args;
+            const kernel_logs = try system.kernelLogs(a);
+            defer a.free(kernel_logs);
+            try shell_instance.writeAllAndFlush(kernel_logs);
             return null;
         }
     };

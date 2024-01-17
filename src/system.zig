@@ -126,3 +126,24 @@ pub fn setupTty(fd: os.fd_t) !void {
 
     try os.tcsetattr(fd, os.TCSA.NOW, termios);
 }
+
+const SYSLOG_ACTION_READ_ALL = 3;
+const SYSLOG_ACTION_UNREAD = 9;
+
+/// Read kernel logs (AKA syslog/dmesg). Caller is responsible for returned slice.
+pub fn kernelLogs(allocator: std.mem.Allocator) ![]const u8 {
+    const bytes_available = linux.syscall3(linux.SYS.syslog, SYSLOG_ACTION_UNREAD, 0, 0);
+    const buf = try allocator.alloc(u8, bytes_available);
+    switch (linux.getErrno(linux.syscall3(linux.SYS.syslog, SYSLOG_ACTION_READ_ALL, @intFromPtr(buf.ptr), buf.len))) {
+        linux.E.INVAL => unreachable, // we provided bad parameters
+        // TODO(jared): make use of these possible outcomes
+        linux.E.NOSYS => {},
+        linux.E.PERM => {},
+        else => {
+            // We don't need to capture the bytes read since we only request
+            // for the exact number of bytes available.
+        },
+    }
+
+    return buf;
+}
