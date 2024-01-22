@@ -3,6 +3,52 @@ const os = std.os;
 
 const BootLoaderSpec = @import("./boot/bls.zig").BootLoaderSpec;
 
+pub const BootEntry = struct {
+    allocator: std.mem.Allocator,
+
+    /// Path to the linux kernel image.
+    linux: []const u8,
+    /// Optional path to the initrd.
+    initrd: ?[]const u8 = null,
+    /// Optional kernel parameters.
+    cmdline: ?[]const []const u8 = null,
+
+    pub fn init(
+        allocator: std.mem.Allocator,
+        mountpoint: []const u8,
+        linux: []const u8,
+        initrd: ?[]const u8,
+        cmdline: ?[]const []const u8,
+    ) !@This() {
+        var self = @This(){
+            .allocator = allocator,
+            .linux = try std.fs.path.join(allocator, &.{ mountpoint, linux }),
+        };
+        if (initrd) |i| {
+            self.initrd = try std.fs.path.join(allocator, &.{ mountpoint, i });
+        }
+        if (cmdline) |c| {
+            self.cmdline = try allocator.dupe([]const u8, c);
+        }
+        return self;
+    }
+
+    pub fn deinit(self: *@This()) void {
+        self.allocator.free(self.linux);
+        if (self.initrd) |initrd| {
+            self.allocator.free(initrd);
+        }
+        if (self.cmdline) |cmdline| {
+            self.allocator.free(cmdline);
+        }
+    }
+};
+
+pub const BootDevice = struct {
+    name: []const u8,
+    entries: []const BootEntry,
+};
+
 pub const BootLoader = union(enum) {
     bls: *BootLoaderSpec,
 
@@ -14,12 +60,12 @@ pub const BootLoader = union(enum) {
         }
     }
 
-    pub fn probe(self: @This()) void {
+    pub fn probe(self: @This(), allocator: std.mem.Allocator) ![]const BootDevice {
         std.log.debug("boot loader probe", .{});
 
-        switch (self) {
-            inline else => |boot_loader| boot_loader.probe(),
-        }
+        return switch (self) {
+            inline else => |boot_loader| boot_loader.probe(allocator),
+        };
     }
 
     pub fn teardown(self: @This()) void {
@@ -31,10 +77,23 @@ pub const BootLoader = union(enum) {
     }
 };
 
+// TODO(jared): don't use magic numbers
+fn need_to_stop(stop_fd: os.fd_t) !bool {
+    var ev: u64 = 0;
+    _ = try os.read(stop_fd, std.mem.asBytes(&ev));
+    return ev > 0xff;
+}
+
 fn autoboot(ready_fd: os.fd_t, stop_fd: os.fd_t) !void {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+
+    const allocator = arena.allocator();
+
     std.log.debug("autoboot started", .{});
 
-    var boot_loader: BootLoader = .{ .bls = &.{} };
+    var bls = BootLoaderSpec.init(std.heap.page_allocator);
+    var boot_loader: BootLoader = .{ .bls = &bls };
     defer {
         boot_loader.teardown();
         std.log.debug("autoboot stopped", .{});
@@ -46,25 +105,18 @@ fn autoboot(ready_fd: os.fd_t, stop_fd: os.fd_t) !void {
 
     try boot_loader.setup();
     {
-        std.log.debug("post setup, checking if we need to stop", .{});
-        // check if we need to stop
-        var ev: u64 = 0;
-        _ = try os.read(stop_fd, std.mem.asBytes(&ev));
-        if (ev > 0xff) {
-            std.log.debug("HERE 1", .{});
+        if (try need_to_stop(stop_fd)) {
+            std.log.debug("stopping autoboot", .{});
             return;
         }
         std.log.debug("post setup, we don't need to stop", .{});
     }
 
-    boot_loader.probe();
+    const boot_devices = try boot_loader.probe(allocator);
+    _ = boot_devices;
     {
-        std.log.debug("post probe, checking if we need to stop", .{});
-        // check if we need to stop
-        var ev: u64 = 0;
-        _ = try os.read(stop_fd, std.mem.asBytes(&ev));
-        if (ev > 0xff) {
-            std.log.debug("HERE 2", .{});
+        if (try need_to_stop(stop_fd)) {
+            std.log.debug("stopping autoboot", .{});
             return;
         }
         std.log.debug("post probe, we don't need to stop", .{});

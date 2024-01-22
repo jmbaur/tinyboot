@@ -1,6 +1,6 @@
 {
   description = "A small linuxboot payload for coreboot";
-  inputs.nixpkgs.url = "github:jmbaur/nixpkgs/nixos-unstable"; # we use this for so we can get vpd
+  inputs.nixpkgs.url = "nixpkgs/nixos-unstable";
   outputs = inputs:
     let
       systems = [ "x86_64-linux" "aarch64-linux" ];

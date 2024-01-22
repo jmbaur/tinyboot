@@ -13,7 +13,7 @@ pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
 
-    var allocator = arena.allocator();
+    const allocator = arena.allocator();
 
     var args = std.process.ArgIterator.init();
     _ = args.next().?;
@@ -42,6 +42,7 @@ pub fn main() !void {
     } });
 
     // TODO(jared): "-fw_cfg",  "name=opt/org.tboot/pubkey,file=TODO",
+    // TODO(jared): "-drive", "if=virtio,file=TODO.raw,format=raw,media=disk"
     try qemu_args.appendSlice(&.{
         "-cpu",     "max",
         "-display", "none",

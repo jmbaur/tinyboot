@@ -1,16 +1,361 @@
 const std = @import("std");
+const os = std.os;
 
-pub const BootLoaderSpec = struct {
-    pub fn setup(self: *@This()) !void {
-        _ = self;
+const BootDevice = @import("../boot.zig").BootDevice;
+const BootEntry = @import("../boot.zig").BootEntry;
+const FsType = @import("../disk/filesystem.zig").FsType;
+const Gpt = @import("../disk/partition_table.zig").Gpt;
+const GptPartitionType = @import("../disk/partition_table.zig").GptPartitionType;
+const device = @import("../device.zig");
+
+const Mount = struct {
+    mountpoint: [:0]const u8,
+    disk_name: []const u8,
+};
+
+fn disk_is_removable(allocator: std.mem.Allocator, devname: []const u8) bool {
+    const removable_path = std.fs.path.join(allocator, &.{
+        std.fs.path.sep_str,
+        "sys",
+        "class",
+        "block",
+        devname,
+        "removable",
+    }) catch return false;
+    defer allocator.free(removable_path);
+
+    const removable_file = std.fs.openFileAbsolute(removable_path, .{}) catch return false;
+    defer removable_file.close();
+
+    var buf: [1]u8 = undefined;
+    if ((removable_file.read(&buf) catch return false) != 1) {
+        return false;
     }
 
-    pub fn probe(self: *@This()) void {
-        _ = self;
+    return std.mem.eql(u8, &buf, "1");
+}
+
+const fallback_vendor = "unknown vendor";
+const fallback_model = "unknown model";
+
+/// Caller is responsible for the returned value.
+fn disk_name(allocator: std.mem.Allocator, devname: []const u8) ![]const u8 {
+    const vendor = b: {
+        const path = std.fs.path.join(allocator, &.{
+            std.fs.path.sep_str,
+            "sys",
+            "class",
+            "block",
+            devname,
+            "device",
+            "vendor",
+        }) catch break :b fallback_vendor;
+        defer allocator.free(path);
+
+        const file = std.fs.openFileAbsolute(path, .{}) catch break :b fallback_vendor;
+        defer file.close();
+
+        var buf: [1024]u8 = undefined;
+        const bytes_read = file.readAll(&buf) catch break :b fallback_vendor;
+        break :b std.mem.trim(u8, buf[0..bytes_read], "\n");
+    };
+
+    const model = b: {
+        const path = std.fs.path.join(allocator, &.{
+            std.fs.path.sep_str,
+            "sys",
+            "class",
+            "block",
+            devname,
+            "device",
+            "model",
+        }) catch break :b fallback_model;
+        defer allocator.free(path);
+
+        const file = std.fs.openFileAbsolute(path, .{}) catch break :b fallback_model;
+        defer file.close();
+
+        var buf: [1024]u8 = undefined;
+        const bytes_read = file.readAll(&buf) catch break :b fallback_model;
+        break :b std.mem.trim(u8, buf[0..bytes_read], "\n");
+    };
+
+    return std.fmt.allocPrint(allocator, "{s} {s} {s}", .{ devname, vendor, model });
+}
+
+pub const BootLoaderSpec = struct {
+    arena: std.heap.ArenaAllocator,
+
+    /// Mounts to block devices that are non-removable (i.e. "internal" to the
+    /// system).
+    internal_mounts: []Mount,
+
+    /// Mounts to block devices that are removable (i.e. "external" to the
+    /// system). This includes USB mass-storage devices, SD cards, etc.
+    external_mounts: []Mount,
+
+    pub fn init(backing_allocator: std.mem.Allocator) @This() {
+        var arena = std.heap.ArenaAllocator.init(backing_allocator);
+
+        return .{
+            .arena = arena,
+            .internal_mounts = &.{},
+            .external_mounts = &.{},
+        };
+    }
+
+    pub fn setup(self: *@This()) !void {
+        std.log.debug("BootLoaderSpec setup", .{});
+
+        const allocator = self.arena.allocator();
+
+        var internal_mounts = std.ArrayList(Mount).init(allocator);
+        var external_mounts = std.ArrayList(Mount).init(allocator);
+
+        var sysfs_block = try std.fs.openIterableDirAbsolute(
+            "/sys/class/block",
+            .{},
+        );
+        defer sysfs_block.close();
+        var it = sysfs_block.iterate();
+
+        while (try it.next()) |entry| {
+            if (entry.kind != .sym_link) {
+                continue;
+            }
+
+            const full_path = try std.fs.path.join(allocator, &.{
+                std.fs.path.sep_str,
+                "sys",
+                "class",
+                "block",
+                entry.name,
+                "uevent",
+            });
+            var uevent_path = try std.fs.openFileAbsolute(full_path, .{});
+            defer uevent_path.close();
+
+            const max_bytes = 10 * 1024 * 1024;
+            const uevent_contents = try uevent_path.readToEndAlloc(allocator, max_bytes);
+
+            var uevent = try device.parseUeventFileContents(allocator, uevent_contents);
+
+            const devtype = uevent.get("DEVTYPE") orelse continue;
+
+            if (!std.mem.eql(u8, devtype, "disk")) {
+                continue;
+            }
+
+            const diskseq = uevent.get("DISKSEQ") orelse continue;
+            const devname = uevent.get("DEVNAME") orelse continue;
+
+            const disk_alias_path = try std.fs.path.join(
+                allocator,
+                &.{
+                    std.fs.path.sep_str,
+                    "dev",
+                    "disk",
+                    try std.fmt.allocPrint(allocator, "disk{s}", .{diskseq}),
+                },
+            );
+
+            var disk_handle = std.fs.openFileAbsolute(disk_alias_path, .{}) catch continue;
+            var disk_source = std.io.StreamSource{ .file = disk_handle };
+            var disk_partition_table = Gpt.init(allocator, &disk_source) catch |err| switch (err) {
+                Gpt.Error.MissingSignature => {
+                    std.log.debug("disk {s} does not contain a GUID partition table", .{disk_alias_path});
+                    continue;
+                },
+                Gpt.Error.HeaderCrcFail => {
+                    std.log.err("disk {s} CRC integrity check failed", .{disk_alias_path});
+                    continue;
+                },
+                else => {
+                    std.log.err("failed to read disk {s}: {}", .{ disk_alias_path, err });
+                    continue;
+                },
+            };
+
+            std.log.debug("found GPT disk {s}", .{disk_alias_path});
+
+            const esp_partn = b: {
+                for (disk_partition_table.partitions, 0..) |partition, i| {
+                    if (partition.type == GptPartitionType.EfiSystem) {
+                        break :b i + 1;
+                    }
+                }
+                break :b null;
+            } orelse continue;
+
+            const partition_filename = try std.fmt.allocPrint(
+                allocator,
+                "disk{s}_part{d}",
+                .{ diskseq, esp_partn },
+            );
+            const esp_alias_path = try std.fs.path.joinZ(
+                allocator,
+                &.{
+                    std.fs.path.sep_str,
+                    "dev",
+                    "disk",
+                    partition_filename,
+                },
+            );
+
+            std.log.debug("found EFI system partition {s}", .{esp_alias_path});
+
+            var esp_handle = try std.fs.openFileAbsoluteZ(esp_alias_path, .{});
+            defer esp_handle.close();
+
+            var esp_file_source = std.io.StreamSource{ .file = esp_handle };
+            const fstype = try FsType.detect(&esp_file_source) orelse {
+                std.log.err("could not detect filesystem on EFI system partition", .{});
+                continue;
+            };
+
+            const mountpoint = try std.fs.path.joinZ(
+                allocator,
+                &.{ std.fs.path.sep_str, "mnt", partition_filename },
+            );
+            std.fs.makeDirAbsoluteZ(mountpoint) catch |err| switch (err) {
+                error.PathAlreadyExists => {},
+                else => {
+                    std.log.err("failed to create mountpoint: {}", .{err});
+                    continue;
+                },
+            };
+
+            const rc = os.linux.mount(
+                esp_alias_path,
+                mountpoint,
+                switch (fstype) {
+                    .Vfat => "vfat",
+                },
+                os.linux.MS.NOSUID | os.linux.MS.NODEV | os.linux.MS.NOEXEC,
+                0,
+            );
+            switch (os.linux.getErrno(rc)) {
+                .SUCCESS => {},
+                else => |err| {
+                    std.log.err("failed to mount {s}: {}", .{ esp_alias_path, err });
+                    continue;
+                },
+            }
+
+            const mount = Mount{
+                .disk_name = try disk_name(allocator, devname),
+                .mountpoint = mountpoint,
+            };
+
+            std.log.info("mounted disk '{s}'", .{mount.disk_name});
+
+            if (disk_is_removable(allocator, devname)) {
+                try external_mounts.append(mount);
+            } else {
+                try internal_mounts.append(mount);
+            }
+        }
+
+        self.internal_mounts = try internal_mounts.toOwnedSlice();
+        self.external_mounts = try external_mounts.toOwnedSlice();
+    }
+
+    /// Caller is responsible for the returned value.
+    fn search_for_entries(self: *@This(), mount: Mount, allocator: std.mem.Allocator) !BootDevice {
+        const internal_allocator = self.arena.allocator();
+
+        var entries = std.ArrayList(BootEntry).init(allocator);
+        errdefer entries.deinit();
+
+        var mountpoint_dir = try std.fs.openDirAbsoluteZ(mount.mountpoint, .{});
+        defer mountpoint_dir.close();
+
+        var loader_conf: LoaderConf = b: {
+            var file = mountpoint_dir.openFile("loader/loader.conf", .{}) catch break :b .{};
+            defer file.close();
+            const contents = try file.readToEndAlloc(internal_allocator, 4096);
+            defer internal_allocator.free(contents);
+            break :b LoaderConf.parse(contents);
+        };
+        _ = loader_conf;
+
+        var entries_dir = try mountpoint_dir.openIterableDir("loader/entries", .{});
+        defer entries_dir.close();
+
+        var it = entries_dir.iterate();
+        while (try it.next()) |dir_entry| {
+            if (dir_entry.kind != .file) {
+                continue;
+            }
+
+            var entry_file = entries_dir.dir.openFile(dir_entry.name, .{}) catch continue;
+            var entry_contents = try entry_file.readToEndAlloc(internal_allocator, 4096);
+            defer internal_allocator.free(entry_contents);
+            var type1_entry = Type1Entry.parse(internal_allocator, entry_contents) catch continue;
+            defer type1_entry.deinit();
+
+            const linux = type1_entry.linux orelse {
+                std.log.err("missing linux kernel in {s}", .{dir_entry.name});
+                continue;
+            };
+
+            // NOTE: Multiple initrds won't work if we have IMA appraisal
+            // of signed initrds, so we can only load one.
+            //
+            // TODO(jared): If IMA appraisal is disabled, we can
+            // concatenate all the initrds together.
+            const initrd = b: {
+                if (type1_entry.initrd) |initrd| {
+                    if (initrd.len > 0) {
+                        break :b initrd[0];
+                    }
+                }
+
+                break :b null;
+            };
+
+            try entries.append(try BootEntry.init(
+                allocator,
+                mount.mountpoint,
+                linux,
+                initrd,
+                type1_entry.options,
+            ));
+        }
+
+        return .{
+            .name = mount.disk_name,
+            .entries = try entries.toOwnedSlice(),
+        };
+    }
+
+    /// Caller is responsible for the returned slice.
+    pub fn probe(self: *@This(), allocator: std.mem.Allocator) ![]const BootDevice {
+        var devices = std.ArrayList(BootDevice).init(allocator);
+
+        for (self.internal_mounts) |mount| {
+            try devices.append(self.search_for_entries(mount, allocator) catch continue);
+        }
+
+        for (self.external_mounts) |mount| {
+            try devices.append(self.search_for_entries(mount, allocator) catch continue);
+        }
+
+        return try devices.toOwnedSlice();
     }
 
     pub fn teardown(self: *@This()) void {
-        _ = self;
+        for (self.external_mounts) |mount| {
+            std.log.info("unmounted disk '{s}'", .{mount.disk_name});
+            _ = os.linux.umount2(mount.mountpoint, os.linux.MNT.DETACH);
+        }
+
+        for (self.internal_mounts) |mount| {
+            std.log.info("unmounted disk '{s}'", .{mount.disk_name});
+            _ = os.linux.umount2(mount.mountpoint, os.linux.MNT.DETACH);
+        }
+
+        self.arena.deinit();
     }
 };
 
@@ -299,9 +644,188 @@ test "loader.conf parsing" {
         \\editor no
     ;
 
-    try std.testing.expectEqualDeep(.{
+    try std.testing.expectEqualDeep(LoaderConf{
         .timeout = 0,
         .default_entry = "01234567890abcdef1234567890abdf0-*",
         .editor = false,
     }, LoaderConf.parse(simple));
+
+    const deformed =
+        \\timeout
+        \\
+        \\default
+        \\editor
+    ;
+
+    // Ensures that even with bad output, we just get back a LoaderConf with
+    // the default values.
+    try std.testing.expectEqualDeep(LoaderConf{}, LoaderConf.parse(deformed));
+}
+
+const Architecture = enum {
+    ia32,
+    x64,
+    arm,
+    aa64,
+    riscv32,
+    riscv64,
+    loongarch32,
+    loongarch64,
+
+    const Error = error{InvalidArchitecture};
+
+    pub fn parse(arch: []const u8) Error!@This() {
+        return if (std.mem.eql(u8, arch, "ia32"))
+            .ia32
+        else if (std.mem.eql(u8, arch, "x64"))
+            .x64
+        else if (std.mem.eql(u8, arch, "arm"))
+            .arm
+        else if (std.mem.eql(u8, arch, "aa64"))
+            .aa64
+        else if (std.mem.eql(u8, arch, "riscv32"))
+            .riscv32
+        else if (std.mem.eql(u8, arch, "riscv64"))
+            .riscv64
+        else if (std.mem.eql(u8, arch, "loongarch32"))
+            .loongarch32
+        else if (std.mem.eql(u8, arch, "loongarch64"))
+            .loongarch64
+        else
+            Error.InvalidArchitecture;
+    }
+};
+
+/// Configuration of the type #1 boot entry as defined in
+/// https://uapi-group.org/specifications/specs/boot_loader_specification/#type-1-boot-loader-specification-entries.
+const Type1Entry = struct {
+    allocator: std.mem.Allocator,
+
+    title: ?[]const u8 = null,
+    version: ?[]const u8 = null,
+    machine_id: ?[]const u8 = null,
+    sort_key: ?[]const u8 = null,
+    linux: ?[]const u8 = null,
+    initrd: ?[]const []const u8 = null,
+    efi: ?[]const u8 = null,
+    options: ?[]const []const u8 = null,
+    devicetree: ?[]const u8 = null,
+    devicetree_overlay: ?[]const []const u8 = null,
+    architecture: ?Architecture = null,
+
+    pub fn parse(allocator: std.mem.Allocator, contents: []const u8) !@This() {
+        var self = @This(){
+            .allocator = allocator,
+        };
+
+        var all_split = std.mem.splitSequence(u8, contents, "\n");
+
+        var initrd = std.ArrayList([]const u8).init(allocator);
+        errdefer initrd.deinit();
+
+        var options = std.ArrayList([]const u8).init(allocator);
+        errdefer options.deinit();
+
+        while (all_split.next()) |line| {
+            if (std.mem.eql(u8, line, "")) {
+                continue;
+            }
+
+            var line_split = std.mem.splitSequence(u8, line, " ");
+
+            var maybe_key: ?[]const u8 = null;
+            var maybe_value: ?[]const u8 = null;
+
+            while (line_split.next()) |section| {
+                if (std.mem.eql(u8, section, "")) {
+                    continue;
+                }
+
+                if (maybe_key == null) {
+                    maybe_key = section;
+                } else if (maybe_value == null) {
+                    maybe_value = section;
+                    break;
+                }
+            }
+
+            if (maybe_key == null or maybe_value == null) {
+                continue;
+            }
+
+            const key = maybe_key.?;
+            const value = maybe_value.?;
+
+            if (std.mem.eql(u8, key, "title")) {
+                self.title = value;
+            } else if (std.mem.eql(u8, key, "version")) {
+                self.version = value;
+            } else if (std.mem.eql(u8, key, "machine-id")) {
+                self.machine_id = value;
+            } else if (std.mem.eql(u8, key, "sort_key")) {
+                self.sort_key = value;
+            } else if (std.mem.eql(u8, key, "linux")) {
+                self.linux = value;
+            } else if (std.mem.eql(u8, key, "initrd")) {
+                try initrd.append(value);
+            } else if (std.mem.eql(u8, key, "efi")) {
+                self.efi = value;
+            } else if (std.mem.eql(u8, key, "options")) {
+                var options_split = std.mem.splitSequence(u8, value, " ");
+                while (options_split.next()) |next| {
+                    try options.append(next);
+                }
+            } else if (std.mem.eql(u8, key, "devicetree")) {
+                self.devicetree = value;
+            } else if (std.mem.eql(u8, key, "devicetree-overlay")) {
+                var devicetree_overlay = std.ArrayList([]const u8).init(allocator);
+                errdefer devicetree_overlay.deinit();
+                var overlays = std.mem.splitSequence(u8, value, " ");
+                while (overlays.next()) |next| {
+                    try devicetree_overlay.append(next);
+                }
+                self.devicetree_overlay = try devicetree_overlay.toOwnedSlice();
+            } else if (std.mem.eql(u8, key, "architecture")) {
+                self.architecture = Architecture.parse(value) catch continue;
+            }
+        }
+
+        if (initrd.items.len > 0) {
+            self.initrd = try initrd.toOwnedSlice();
+        }
+
+        if (options.items.len > 0) {
+            self.options = try options.toOwnedSlice();
+        }
+
+        return self;
+    }
+
+    pub fn deinit(self: *@This()) void {
+        if (self.initrd) |initrd| {
+            self.allocator.free(initrd);
+        }
+        if (self.options) |options| {
+            self.allocator.free(options);
+        }
+        if (self.devicetree_overlay) |dt_overlay| {
+            self.allocator.free(dt_overlay);
+        }
+    }
+};
+
+test "type 1 boot entry parsing" {
+    const simple =
+        \\title Foo
+        \\linux /EFI/foo/Image
+        \\options loglevel=7
+        \\architecture aa64
+    ;
+
+    var type1_entry = try Type1Entry.parse(std.testing.allocator, simple);
+    defer type1_entry.deinit();
+
+    try std.testing.expectEqualStrings("/EFI/foo/Image", type1_entry.linux.?);
+    try std.testing.expect(type1_entry.options.?.len == 1);
+    try std.testing.expectEqualStrings("loglevel=7", type1_entry.options.?[0]);
 }

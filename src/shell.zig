@@ -230,7 +230,13 @@ pub const Shell = struct {
                 break :b false;
             },
             // C-c
-            0x03 => false,
+            0x03 => b: {
+                self.writeAll("\n") catch {};
+                self.input_cursor = 0;
+                self.input_end = 0;
+                try self.prompt();
+                break :b false;
+            },
             // C-d
             0x04 => b: {
                 if (self.input_cursor < self.input_end) {
@@ -408,7 +414,7 @@ pub const Command = struct {
     pub fn run(user_input: []const u8, shell_instance: *Shell) !?ClientMsg {
         var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
         defer arena.deinit();
-        var allocator = arena.allocator();
+        const allocator = arena.allocator();
 
         var args = try ArgsIterator.init(allocator, user_input);
         defer args.deinit();

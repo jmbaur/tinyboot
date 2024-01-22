@@ -10,7 +10,7 @@ const DeviceError = error{
     IncompleteDevice,
 };
 
-fn parseUeventFileContents(a: std.mem.Allocator, contents: []const u8) !Uevent {
+pub fn parseUeventFileContents(a: std.mem.Allocator, contents: []const u8) !Uevent {
     var uevent = Uevent.init(a);
 
     var iter = std.mem.splitSequence(u8, contents, "\n");
@@ -147,7 +147,6 @@ fn scanAndCreateDevices(a: std.mem.Allocator) !void {
     defer sys_class_block.close();
 
     var it = sys_class_block.iterate();
-
     while (try it.next()) |entry| {
         if (entry.kind != .sym_link) {
             continue;
@@ -163,6 +162,7 @@ fn scanAndCreateDevices(a: std.mem.Allocator) !void {
         });
         defer a.free(full_path);
 
+        // TODO(jared): use openFile() relative from dir
         var uevent_path = try std.fs.openFileAbsolute(full_path, .{});
         defer uevent_path.close();
 

@@ -160,12 +160,12 @@ pub fn main() noreturn {
 fn main_unwrapped() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{ .safety = true }){};
     defer _ = gpa.deinit();
-    var alloc = gpa.allocator();
+    const allocator = gpa.allocator();
 
     try system.setupSystem();
 
-    var args = try std.process.ArgIterator.initWithAllocator(alloc);
-    const cfg = try Config.parseFromArgs(alloc, &args);
+    var args = try std.process.ArgIterator.initWithAllocator(allocator);
+    const cfg = try Config.parseFromArgs(allocator, &args);
 
     try log.initLogger();
     defer log.deinitLogger();
@@ -173,13 +173,13 @@ fn main_unwrapped() !void {
     const cmdline = cmdline: {
         var cmdline_file = try std.fs.openFileAbsolute("/proc/self/cmdline", .{ .mode = .read_only });
         defer cmdline_file.close();
-        const cmdline_raw = try cmdline_file.readToEndAlloc(alloc, 2048);
-        defer alloc.free(cmdline_raw);
-        var buf = try alloc.dupe(u8, cmdline_raw);
+        const cmdline_raw = try cmdline_file.readToEndAlloc(allocator, 2048);
+        defer allocator.free(cmdline_raw);
+        var buf = try allocator.dupe(u8, cmdline_raw);
         _ = std.mem.replace(u8, cmdline_raw, &.{0}, " ", buf);
         break :cmdline buf;
     };
-    defer alloc.free(cmdline);
+    defer allocator.free(cmdline);
     std.log.info("{s}", .{cmdline});
 
     std.log.info("tinyboot started", .{});
@@ -188,6 +188,6 @@ fn main_unwrapped() !void {
         std.log.info("built with coreboot support", .{});
     }
 
-    const reboot_cmd = try run_event_loop(alloc, &cfg) orelse os.RebootCommand.POWER_OFF;
+    const reboot_cmd = try run_event_loop(allocator, &cfg) orelse os.RebootCommand.POWER_OFF;
     try os.reboot(reboot_cmd);
 }

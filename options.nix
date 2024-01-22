@@ -168,7 +168,7 @@ in
       firmware = pkgs.runCommand "tinyboot-${config.board}"
         {
           inherit (config.verifiedBoot) requiredSystemFeatures;
-          nativeBuildInputs = with pkgs.buildPackages; [ cbfstool vboot_reference vpd ];
+          nativeBuildInputs = with pkgs.buildPackages; [ cbfstool vboot_reference /*vpd*/ ];
           passthru = { inherit (config.build) linux initrd coreboot; };
           meta.platforms = config.platforms;
           env.CBFSTOOL = "${pkgs.buildPackages.cbfstool}/bin/cbfstool"; # needed by futility
@@ -176,10 +176,12 @@ in
         ''
           dd status=none if=${config.build.coreboot}/coreboot.rom of=$out
 
-          vpd -f $out -i RO_VPD -O
-          ${lib.concatLines (lib.mapAttrsToList (applyVpd "RO_VPD") config.coreboot.vpd.ro)}
-          vpd -f $out -i RW_VPD -O
-          ${lib.concatLines (lib.mapAttrsToList (applyVpd "RW_VPD") config.coreboot.vpd.rw)}
+          ${lib.optionalString (lib.trace "TODO: create vpd image in zig" false) ''
+            vpd -f $out -i RO_VPD -O
+            ${lib.concatLines (lib.mapAttrsToList (applyVpd "RO_VPD") config.coreboot.vpd.ro)}
+            vpd -f $out -i RW_VPD -O
+            ${lib.concatLines (lib.mapAttrsToList (applyVpd "RW_VPD") config.coreboot.vpd.rw)}
+          ''}
 
           futility sign \
             --signprivate "${config.verifiedBoot.vbootFirmwarePrivkey}" \

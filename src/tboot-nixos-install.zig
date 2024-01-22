@@ -508,16 +508,16 @@ pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
 
-    var alloc = arena.allocator();
+    const allocator = arena.allocator();
 
-    const efi_nixos_dir_path = try path.join(alloc, &.{
+    const efi_nixos_dir_path = try path.join(allocator, &.{
         path.sep_str,
         args.efi_sys_mount_point,
         "EFI",
         "nixos",
     });
 
-    const loader_entries_dir_path = try path.join(alloc, &.{
+    const loader_entries_dir_path = try path.join(allocator, &.{
         path.sep_str,
         args.efi_sys_mount_point,
         "loader",
@@ -525,7 +525,7 @@ pub fn main() !void {
     });
 
     try ensureFilesystemState(
-        alloc,
+        allocator,
         loader_entries_dir_path,
         efi_nixos_dir_path,
         args,
@@ -534,7 +534,7 @@ pub fn main() !void {
     var nixos_system_profile_dir = try std.fs.openIterableDirAbsolute("/nix/var/nix/profiles", .{});
     defer nixos_system_profile_dir.close();
 
-    var known_files = StringSet.init(alloc);
+    var known_files = StringSet.init(allocator);
 
     var it = nixos_system_profile_dir.iterate();
     while (try it.next()) |entry| {
@@ -556,7 +556,7 @@ pub fn main() !void {
             }
         };
 
-        const boot_json_path = try path.join(alloc, &.{
+        const boot_json_path = try path.join(allocator, &.{
             path.sep_str,
             "nix",
             "var",
@@ -569,15 +569,15 @@ pub fn main() !void {
         var boot_json_file = try std.fs.openFileAbsolute(boot_json_path, .{});
         defer boot_json_file.close();
 
-        const boot_json_contents = try boot_json_file.readToEndAlloc(alloc, 8192);
+        const boot_json_contents = try boot_json_file.readToEndAlloc(allocator, 8192);
 
-        const boot_json = BootJson.parse(alloc, boot_json_contents) catch |err| {
+        const boot_json = BootJson.parse(allocator, boot_json_contents) catch |err| {
             std.log.err("failed to parse bootspec boot.json: {any}", .{err});
             continue;
         };
 
         try installGeneration(
-            alloc,
+            allocator,
             &known_files,
             &boot_json.spec,
             generation,
@@ -587,7 +587,7 @@ pub fn main() !void {
         if (boot_json.specialisations) |specialisations| {
             for (specialisations) |s| {
                 try installGeneration(
-                    alloc,
+                    allocator,
                     &known_files,
                     &s,
                     generation,
@@ -598,14 +598,14 @@ pub fn main() !void {
         }
 
         if (std.mem.eql(u8, boot_json.spec.toplevel, args.default_nixos_system_closure)) {
-            const loader_conf_path = try path.join(alloc, &.{
+            const loader_conf_path = try path.join(allocator, &.{
                 path.sep_str,
                 args.efi_sys_mount_point,
                 "loader",
                 "loader.conf",
             });
 
-            const loader_conf_contents = try std.fmt.allocPrint(alloc,
+            const loader_conf_contents = try std.fmt.allocPrint(allocator,
                 \\timeout {d}
                 \\default nixos-generation-{d}
             , .{ args.timeout, generation });
@@ -622,8 +622,8 @@ pub fn main() !void {
         }
     }
 
-    try cleanupDir(alloc, &known_files, efi_nixos_dir_path, &args);
-    try cleanupDir(alloc, &known_files, loader_entries_dir_path, &args);
+    try cleanupDir(allocator, &known_files, efi_nixos_dir_path, &args);
+    try cleanupDir(allocator, &known_files, loader_entries_dir_path, &args);
 }
 
 test "boot spec parsing" {
