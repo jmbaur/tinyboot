@@ -37,9 +37,7 @@ pub fn build(b: *std.Build) !void {
             // Always use release small, smallest size is our goal.
             std.builtin.OptimizeMode.ReleaseSmall,
     });
-
     tboot_loader.addModule("linux_headers", linux_headers_module);
-
     tboot_loader.addOptions("build_options", tboot_loader_options);
 
     // make the default step just compile tboot-loader
@@ -88,6 +86,7 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .optimize = optimize,
     });
+    unit_tests.addModule("linux_headers", linux_headers_module);
     unit_tests.addOptions("build_options", tboot_loader_options);
 
     const test_step = b.step("test", "Run unit tests");
