@@ -28,8 +28,8 @@ pub const BootEntry = struct {
         if (initrd) |i| {
             self.initrd = try std.fs.path.join(allocator, &.{ mountpoint, i });
         }
-        if (cmdline) |c| {
-            self.cmdline = try allocator.dupe([]const u8, c);
+        if (cmdline) |_cmdline| {
+            self.cmdline = try allocator.dupe([]const u8, _cmdline);
         }
         return self;
     }
