@@ -2,6 +2,8 @@ const std = @import("std");
 const os = std.os;
 const E = std.os.linux.E;
 
+const linux_headers = @import("linux_headers");
+
 const BootLoaderSpec = @import("./boot/bls.zig").BootLoaderSpec;
 
 pub const BootEntry = struct {
@@ -39,11 +41,6 @@ pub const BootEntry = struct {
         UnknownError,
     };
 
-    const KEXEC_FILE_UNLOAD = 0x00000001;
-    const KEXEC_FILE_ON_CRASH = 0x00000002;
-    const KEXEC_FILE_NO_INITRAMFS = 0x00000004;
-    const KEXEC_FILE_DEBUG = 0x00000008;
-
     pub fn load(self: *const @This()) !void {
         const linux = try std.fs.openFileAbsolute(self.linux, .{});
         defer linux.close();
@@ -77,7 +74,7 @@ pub const BootEntry = struct {
                     0,
                     cmdline.len,
                     @intFromPtr(cmdline.ptr),
-                    KEXEC_FILE_NO_INITRAMFS,
+                    linux_headers.KEXEC_FILE_NO_INITRAMFS,
                 );
             }
         };

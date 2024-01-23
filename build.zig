@@ -11,6 +11,22 @@ pub fn build(b: *std.Build) !void {
 
     var optimize = b.standardOptimizeOption(.{});
 
+    const tboot_loader_optimize = if (optimize == std.builtin.OptimizeMode.Debug)
+        std.builtin.OptimizeMode.Debug
+    else
+        // Always use release small, smallest size is our goal.
+        std.builtin.OptimizeMode.ReleaseSmall;
+
+    const linux_kexec_header_translated = b.addTranslateC(.{
+        .source_file = .{ .path = "src/linux.h" },
+        .target = target,
+        .optimize = tboot_loader_optimize,
+    });
+
+    const linux_headers_module = b.addModule("linux_headers", .{
+        .source_file = .{ .generated = &linux_kexec_header_translated.output_file },
+    });
+
     const tboot_loader = b.addExecutable(.{
         .name = "tboot-loader",
         .root_source_file = .{ .path = "src/tboot-loader.zig" },
@@ -21,6 +37,8 @@ pub fn build(b: *std.Build) !void {
             // Always use release small, smallest size is our goal.
             std.builtin.OptimizeMode.ReleaseSmall,
     });
+
+    tboot_loader.addModule("linux_headers", linux_headers_module);
 
     tboot_loader.addOptions("build_options", tboot_loader_options);
 
