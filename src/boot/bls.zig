@@ -277,7 +277,6 @@ pub const BootLoaderSpec = struct {
             defer internal_allocator.free(contents);
             break :b LoaderConf.parse(contents);
         };
-        _ = loader_conf;
 
         var entries_dir = try mountpoint_dir.openIterableDir("loader/entries", .{});
         defer entries_dir.close();
@@ -325,6 +324,7 @@ pub const BootLoaderSpec = struct {
 
         return .{
             .name = mount.disk_name,
+            .timeout = loader_conf.timeout,
             .entries = try entries.toOwnedSlice(),
         };
     }
@@ -333,6 +333,8 @@ pub const BootLoaderSpec = struct {
     pub fn probe(self: *@This(), allocator: std.mem.Allocator) ![]const BootDevice {
         var devices = std.ArrayList(BootDevice).init(allocator);
 
+        // Internal mounts are ordered before external mounts so they are
+        // prioritized in the boot process.
         for (self.internal_mounts) |mount| {
             try devices.append(self.search_for_entries(mount, allocator) catch continue);
         }

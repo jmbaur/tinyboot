@@ -1,5 +1,6 @@
 const std = @import("std");
 const os = std.os;
+const E = std.os.linux.E;
 
 const BootLoaderSpec = @import("./boot/bls.zig").BootLoaderSpec;
 
@@ -33,6 +34,62 @@ pub const BootEntry = struct {
         return self;
     }
 
+    const LoadError = error{
+        PermissionDenied,
+        UnknownError,
+    };
+
+    const KEXEC_FILE_UNLOAD = 0x00000001;
+    const KEXEC_FILE_ON_CRASH = 0x00000002;
+    const KEXEC_FILE_NO_INITRAMFS = 0x00000004;
+    const KEXEC_FILE_DEBUG = 0x00000008;
+
+    pub fn load(self: *const @This()) !void {
+        const linux = try std.fs.openFileAbsolute(self.linux, .{});
+        defer linux.close();
+
+        const cmdline: [:0]const u8 = b: {
+            if (self.cmdline) |cmdline| {
+                break :b try std.mem.joinZ(self.allocator, " ", cmdline);
+            } else {
+                break :b try self.allocator.dupeZ(u8, "");
+            }
+        };
+        defer self.allocator.free(cmdline);
+
+        const rc = b: {
+            if (self.initrd) |i| {
+                const initrd = try std.fs.openFileAbsolute(i, .{});
+                defer initrd.close();
+
+                break :b os.linux.syscall5(
+                    .kexec_file_load,
+                    @intCast(linux.handle),
+                    @intCast(initrd.handle),
+                    cmdline.len,
+                    @intFromPtr(cmdline.ptr),
+                    0,
+                );
+            } else {
+                break :b os.linux.syscall5(
+                    .kexec_file_load,
+                    @intCast(linux.handle),
+                    0,
+                    cmdline.len,
+                    @intFromPtr(cmdline.ptr),
+                    KEXEC_FILE_NO_INITRAMFS,
+                );
+            }
+        };
+
+        switch (os.linux.getErrno(rc)) {
+            E.SUCCESS => return,
+            // IMA appraisal failed
+            E.PERM => return LoadError.PermissionDenied,
+            else => return LoadError.UnknownError,
+        }
+    }
+
     pub fn deinit(self: *@This()) void {
         self.allocator.free(self.linux);
         if (self.initrd) |initrd| {
@@ -46,6 +103,11 @@ pub const BootEntry = struct {
 
 pub const BootDevice = struct {
     name: []const u8,
+    /// Timeout in seconds which will be used to determine when a boot entry
+    /// should be selected automatically by the bootloader.
+    timeout: u8,
+    /// Boot entries found on this device. The entry at the first index will
+    /// serve as the default entry.
     entries: []const BootEntry,
 };
 
@@ -113,7 +175,6 @@ fn autoboot(ready_fd: os.fd_t, stop_fd: os.fd_t) !void {
     }
 
     const boot_devices = try boot_loader.probe(allocator);
-    _ = boot_devices;
     {
         if (try need_to_stop(stop_fd)) {
             std.log.debug("stopping autoboot", .{});
@@ -122,10 +183,27 @@ fn autoboot(ready_fd: os.fd_t, stop_fd: os.fd_t) !void {
         std.log.debug("post probe, we don't need to stop", .{});
     }
 
-    const kexec_load_done = false;
-    if (kexec_load_done) {
-        var ev: u64 = 0xff1;
-        _ = try os.write(ready_fd, std.mem.asBytes(&ev));
+    for (boot_devices) |dev| {
+        var countdown = @as(u64, dev.timeout);
+        while (countdown > 0) : (countdown -= 1) {
+            std.time.sleep(1 * dev.timeout);
+            if (try need_to_stop(stop_fd)) {
+                std.log.debug("stopping autoboot", .{});
+                return;
+            }
+        }
+
+        for (dev.entries) |entry| {
+            entry.load() catch |err| {
+                std.log.err("failed to load boot entry: {}", .{err});
+                continue;
+            };
+
+            // we are done, ready to kexec
+            var ev: u64 = 0xff1;
+            _ = try os.write(ready_fd, std.mem.asBytes(&ev));
+            return;
+        }
     }
 }
 
