@@ -15,7 +15,7 @@ pub fn main() !void {
 
     const allocator = arena.allocator();
 
-    var args = std.process.ArgIterator.init();
+    var args = std.process.args();
     _ = args.next().?;
     const tmpdir = args.next().?;
     const initrd = args.next().?;

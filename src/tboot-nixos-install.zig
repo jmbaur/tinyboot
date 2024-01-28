@@ -24,7 +24,7 @@ const Args = struct {
     pub fn init() !@This() {
         var self = @This(){};
 
-        var args = std.process.ArgIterator.init();
+        var args = std.process.args();
         while (args.next()) |arg| {
             var split = std.mem.splitSequence(u8, arg, "=");
             const key = split.next().?;

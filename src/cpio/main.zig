@@ -178,7 +178,7 @@ pub fn main() !void {
 
     const allocator = gpa.allocator();
 
-    var args = std.process.ArgIterator.init();
+    var args = std.process.args();
     _ = args.next().?;
     const init = args.next().?;
     const outfile = args.next().?;

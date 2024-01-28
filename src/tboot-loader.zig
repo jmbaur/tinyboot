@@ -164,7 +164,7 @@ fn main_unwrapped() !void {
 
     try system.setupSystem();
 
-    var args = try std.process.ArgIterator.initWithAllocator(allocator);
+    var args = std.process.args();
     const cfg = try Config.parseFromArgs(allocator, &args);
 
     try log.initLogger();

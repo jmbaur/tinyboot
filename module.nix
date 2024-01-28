@@ -65,7 +65,7 @@ in
         serviceConfig = {
           Type = "oneshot";
           RemainAfterExit = true;
-          ExecStart = "${pkgs.tinyboot}/bin/tboot-bless-boot --efi-sys-mount-point ${config.boot.loader.efi.efiSysMountPoint} good";
+          ExecStart = "${pkgs.tinyboot}/bin/tboot-bless-boot ${config.boot.loader.efi.efiSysMountPoint} good";
         };
       };
     }
