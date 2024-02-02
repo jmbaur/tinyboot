@@ -230,7 +230,7 @@ pub const BootLoaderSpec = struct {
                 },
             );
 
-            std.log.debug("found EFI system partition {s}", .{esp_alias_path});
+            std.log.debug("found boot partition {s}", .{esp_alias_path});
 
             var esp_handle = try std.fs.openFileAbsoluteZ(esp_alias_path, .{});
             defer esp_handle.close();
