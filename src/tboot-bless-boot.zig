@@ -180,8 +180,8 @@ pub fn main() !void {
             }
         }
 
-        break :b null;
-    } orelse return Error.MissingBlsEntry;
+        return Error.MissingBlsEntry;
+    };
 
     try find_entry(
         allocator,

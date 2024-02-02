@@ -1,4 +1,6 @@
 const std = @import("std");
+const mem = std.mem;
+const io = std.io;
 
 const GuidError = error{
     InvalidLength,
@@ -653,217 +655,152 @@ pub const GptPartitionType = enum {
     }
 };
 
-pub const Partition = struct {
-    type: GptPartitionType,
-    guid: [16]u8,
+const GptPartitionRecord = extern struct {
+    partition_type: [16]u8,
+    partition_guid: [16]u8,
     first_lba: u64,
-    /// inclusive
-    last_lba: u64,
-    attributes: u64,
-    name: []const u8,
+    last_lba_inclusive: u64,
+    attribute_flags: u64,
+    partition_name: [72]u8,
+
+    /// Caller is responsible for returned slice.
+    pub fn name(self: *const @This(), allocator: mem.Allocator) ![]const u8 {
+        const byte_count = @sizeOf(@TypeOf(self.partition_name)) / @sizeOf(u16);
+        var name_utf16le_bytes: [byte_count]u16 = @bitCast(self.partition_name);
+        var name_utf8_bytes: [byte_count]u8 = undefined;
+        const end = try std.unicode.utf16leToUtf8(&name_utf8_bytes, &name_utf16le_bytes);
+        return try allocator.dupe(u8, std.mem.trimRight(u8, name_utf8_bytes[0..end], &.{0}));
+    }
+
+    pub fn part_type(self: *const @This()) ?GptPartitionType {
+        const guid: std.os.uefi.Guid = @bitCast(self.partition_type);
+        return GptPartitionType.from_guid(guid);
+    }
 };
 
-/// A read-only GUID Partition Table
+const GptHeader = extern struct {
+    signature: [8]u8,
+    revision: u32,
+    header_size: u32,
+    header_crc32: u32,
+    reserved: u32,
+    current_lba: u64,
+    backup_lba: u64,
+    first_usable_lba: u64,
+    last_usable_lba: u64,
+    disk_guid: [16]u8,
+    starting_partition_entry_lba: u64,
+    num_partition_entries: u32,
+    partition_entry_size: u32,
+    partition_entries_crc32: u32,
+    unused_reserved: [420]u8,
+};
+
+/// A read-only GUID partition table
 // TODO(jared):
 // - Parse recovery header
 // - Verify partition CRC
 pub const Gpt = struct {
     pub const Error = error{
-        MissingSignature,
+        NoGptFound,
+        InvalidHeaderSize,
+        InvalidPartitionSize,
+        UnknownPartitionEntrySize,
+        MissingMagicNumber,
         HeaderCrcFail,
     };
 
     const magic = "EFI PART";
 
-    allocator: std.mem.Allocator,
-    block_size: u16,
-    guid: [16]u8,
-    partitions: []Partition,
+    sector_size: u16,
+    source: *io.StreamSource,
+    header: *GptHeader,
 
     /// Caller is responsible for source.
-    pub fn init(allocator: std.mem.Allocator, source: *std.io.StreamSource) !*@This() {
-        const disk = try allocator.create(@This());
-        errdefer allocator.destroy(disk);
-
-        disk.allocator = allocator;
-
-        try disk.check_signature(source);
-
-        try disk.header_crc_check(source);
-
-        disk.guid = b: {
-            try source.seekTo(disk.block_size + 0x38);
-
-            var guid_buf = [_]u8{0} ** 16;
-            _ = try source.reader().readAll(&guid_buf);
-
-            break :b guid_buf;
-        };
-
-        const partition_entry_lba_start = b: {
-            try source.seekTo(disk.block_size * 1 + 72);
-            var partition_entry_lba_start_bytes = [_]u8{0} ** 8;
-            _ = try source.reader().readAll(&partition_entry_lba_start_bytes);
-            break :b std.mem.readIntLittle(u64, &partition_entry_lba_start_bytes);
-        };
-
-        const num_partitions = b: {
-            try source.seekTo(disk.block_size * 1 + 80);
-            var num_partitions_bytes = [_]u8{0} ** 4;
-            _ = try source.reader().readAll(&num_partitions_bytes);
-            break :b std.mem.readIntLittle(u32, &num_partitions_bytes);
-        };
-
-        const partition_entry_size = b: {
-            try source.seekTo(disk.block_size * 1 + 84);
-            var partition_entry_size_bytes = [_]u8{0} ** 4;
-            _ = try source.reader().readAll(&partition_entry_size_bytes);
-            break :b std.mem.readIntLittle(u32, &partition_entry_size_bytes);
-        };
-
-        try disk.parse_partitions(
-            source,
-            partition_entry_lba_start,
-            num_partitions,
-            partition_entry_size,
-        );
-
-        return disk;
-    }
-
-    fn check_signature(self: *@This(), source: *std.io.StreamSource) !void {
-        const block_sizes = [_]u16{ 512, 4096 };
-
-        for (block_sizes) |bs| {
-            // LBA1
-            try source.seekTo(bs * 1);
-
-            var sig_buf = [_]u8{0} ** 8;
-            const bytes_read = try source.read(&sig_buf);
-
-            if (std.mem.eql(u8, sig_buf[0..bytes_read], magic)) {
-                self.block_size = bs;
-                return;
+    pub fn init(source: *io.StreamSource) !@This() {
+        for ([_]u16{ 512, 1024, 2048, 4096 }) |ss| {
+            try source.seekTo(ss * 1); // LBA1
+            var header_bytes: [@sizeOf(GptHeader)]u8 = undefined;
+            const bytes_read = try source.reader().readAll(&header_bytes);
+            if (bytes_read != @sizeOf(GptHeader)) {
+                return Error.InvalidHeaderSize;
             }
-        }
+            var aligned_buf = @as([]align(@alignOf(GptHeader)) u8, @alignCast(&header_bytes));
 
-        return Error.MissingSignature;
-    }
+            const header: *GptHeader = @ptrCast(aligned_buf);
+            if (!mem.eql(u8, &header.signature, magic)) {
+                continue;
+            }
 
-    // The crc is calculated from the beginning of LBA1 until byte 0x5c, where the
-    // rest of LBA1 is "reserved".
-    fn header_crc_check(self: *@This(), source: *std.io.StreamSource) !void {
-        // LBA1
-        try source.seekTo(self.block_size * 1);
+            const calculated_crc = b: {
+                // The CRC calculation is done without the unused bytes.
+                var zeroed_crc_header: [@offsetOf(GptHeader, "unused_reserved")]u8 = undefined;
+                @memcpy(&zeroed_crc_header, header_bytes[0..@offsetOf(GptHeader, "unused_reserved")]);
 
-        var header = [_]u8{0} ** 0x5c;
-        _ = try source.reader().readAll(&header);
-
-        // zero the crc field
-        header[16] = 0;
-        header[17] = 0;
-        header[18] = 0;
-        header[19] = 0;
-
-        const crc_got = std.hash.crc.Crc32.hash(&header);
-
-        try source.seekTo(self.block_size + 16);
-        var crc_want_buf = [_]u8{0} ** 4;
-        _ = try source.read(std.mem.asBytes(&crc_want_buf));
-        const crc_want = std.mem.readIntLittle(u32, &crc_want_buf);
-
-        if (crc_want != crc_got) {
-            return Error.HeaderCrcFail;
-        }
-    }
-
-    fn parse_partitions(
-        self: *@This(),
-        source: *std.io.StreamSource,
-        partition_entry_lba_start: u64,
-        num_partitions: u32,
-        partition_entry_size: u32,
-    ) !void {
-        var partitions = std.ArrayList(Partition).init(self.allocator);
-        errdefer partitions.deinit();
-
-        var partition_offset = partition_entry_lba_start * self.block_size;
-        const partition_end = num_partitions * partition_entry_size + partition_offset;
-
-        outer: while (partition_offset <= partition_end) : (partition_offset += partition_entry_size) {
-            const partition_type = b: {
-                try source.seekTo(partition_offset + 0);
-                var partition_type_guid_bytes = [_]u8{0} ** 16;
-                _ = try source.reader().readAll(&partition_type_guid_bytes);
-                const guid: std.os.uefi.Guid = @bitCast(partition_type_guid_bytes);
-                const partition_type = GptPartitionType.from_guid(guid) orelse continue;
-                if (partition_type == GptPartitionType.UnusedEntry) {
-                    // indication that we are done parsing partitions
-                    break :outer;
+                var i: u8 = 0;
+                while (i < @sizeOf(@TypeOf(header.header_crc32))) : (i += 1) {
+                    zeroed_crc_header[@offsetOf(GptHeader, "header_crc32") + i] = 0;
                 }
-                break :b partition_type;
-            };
 
-            const guid = b: {
-                try source.seekTo(partition_offset + 16);
-                var partition_guid = [_]u8{0} ** 16;
-                _ = try source.reader().readAll(&partition_guid);
-                break :b partition_guid;
+                break :b std.hash.crc.Crc32.hash(&zeroed_crc_header);
             };
+            if (calculated_crc != mem.littleToNative(
+                @TypeOf(header.header_crc32),
+                header.header_crc32,
+            )) {
+                return Error.HeaderCrcFail;
+            }
 
-            const first_lba = b: {
-                try source.seekTo(partition_offset + 32);
-                var first_lba_bytes = [_]u8{0} ** 8;
-                _ = try source.reader().readAll(&first_lba_bytes);
-                const first_lba = std.mem.readIntLittle(u64, &first_lba_bytes);
-                break :b first_lba;
+            return .{
+                .sector_size = ss,
+                .source = source,
+                .header = header,
             };
-
-            const last_lba = b: {
-                try source.seekTo(partition_offset + 40);
-                var last_lba_bytes = [_]u8{0} ** 8;
-                _ = try source.reader().readAll(&last_lba_bytes);
-                const last_lba = std.mem.readIntLittle(u64, &last_lba_bytes);
-                break :b last_lba;
-            };
-
-            const attributes = b: {
-                try source.seekTo(partition_offset + 48);
-                var attributes_bytes = [_]u8{0} ** 8;
-                _ = try source.reader().readAll(&attributes_bytes);
-                const attributes = std.mem.readIntLittle(u64, &attributes_bytes);
-                break :b attributes;
-            };
-
-            const name = b: {
-                try source.seekTo(partition_offset + 56);
-                var name_bytes = [_]u8{0} ** 72;
-                _ = try source.reader().readAll(&name_bytes);
-                var name_utf16le_bytes: [72 / 2]u16 = @bitCast(name_bytes);
-                var name_utf8_bytes = [_]u8{0} ** (72 / 2);
-                _ = try std.unicode.utf16leToUtf8(&name_utf8_bytes, &name_utf16le_bytes);
-                break :b try self.allocator.dupe(u8, std.mem.trimRight(u8, &name_utf8_bytes, &.{0}));
-            };
-
-            try partitions.append(Partition{
-                .type = partition_type,
-                .guid = guid,
-                .first_lba = first_lba,
-                .last_lba = last_lba,
-                .attributes = attributes,
-                .name = name,
-            });
         }
 
-        self.partitions = try partitions.toOwnedSlice();
+        return Error.NoGptFound;
     }
 
-    pub fn deinit(self: *@This()) void {
-        for (self.partitions) |part| {
-            self.allocator.free(part.name);
+    /// Caller is responsible for returned slice.
+    pub fn partitions(self: *@This(), allocator: std.mem.Allocator) ![]GptPartitionRecord {
+        var p = std.ArrayList(GptPartitionRecord).init(allocator);
+        errdefer p.deinit();
+
+        const partition_entry_size = mem.littleToNative(@TypeOf(self.header.partition_entry_size), self.header.partition_entry_size);
+        if (partition_entry_size != @sizeOf(GptPartitionRecord)) {
+            return Error.UnknownPartitionEntrySize;
         }
-        self.allocator.free(self.partitions);
-        self.allocator.destroy(self);
+
+        var partition_offset = mem.littleToNative(@TypeOf(self.header.starting_partition_entry_lba), self.header.starting_partition_entry_lba) * self.sector_size;
+        const partition_end =
+            mem.littleToNative(@TypeOf(self.header.num_partition_entries), self.header.num_partition_entries) *
+            partition_entry_size +
+            partition_offset;
+
+        while (partition_offset <= partition_end) : (partition_offset += partition_entry_size) {
+            try self.source.seekTo(partition_offset);
+
+            var part_bytes: [@sizeOf(GptPartitionRecord)]u8 = undefined;
+            const bytes_read = try self.source.reader().readAll(&part_bytes);
+            if (bytes_read != @sizeOf(GptPartitionRecord)) {
+                return Error.InvalidPartitionSize;
+            }
+            var aligned_buf = @as([]align(@alignOf(GptPartitionRecord)) u8, @alignCast(&part_bytes));
+
+            const part: *GptPartitionRecord = @ptrCast(aligned_buf);
+
+            // UnusedEntry is an indication that there are no longer any valid
+            // partitions at or beyond our current position.
+            if (part.part_type()) |part_type| {
+                if (part_type == .UnusedEntry) {
+                    break;
+                }
+            }
+
+            try p.append(part.*);
+        }
+
+        return p.toOwnedSlice();
     }
 };
 
@@ -879,7 +816,7 @@ test "guid parsing" {
 }
 
 test "gpt parsing" {
-    const GPT_PARTITION_TABLE: []const u8 = &.{
+    const partition_table = [_]u8{
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -970,36 +907,189 @@ test "gpt parsing" {
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     };
 
-    var source = std.io.StreamSource{ .const_buffer = std.io.fixedBufferStream(GPT_PARTITION_TABLE) };
+    var source = io.StreamSource{ .const_buffer = io.fixedBufferStream(partition_table[0..]) };
 
-    var disk = try Gpt.init(std.testing.allocator, &source);
-    defer disk.deinit();
+    var disk = try Gpt.init(&source);
 
-    try std.testing.expectEqual(@as(u16, 512), disk.block_size);
+    try std.testing.expectEqual(@as(u16, 512), disk.sector_size);
 
     try std.testing.expectEqualSlices(
         u8,
         &.{ 0xe3, 0xdb, 0x21, 0xef, 0xdd, 0x06, 0x94, 0x4b, 0xa1, 0x4d, 0xd8, 0x44, 0xa7, 0x25, 0x0a, 0x8a },
-        &disk.guid,
+        &disk.header.disk_guid,
     );
 
-    try std.testing.expect(disk.partitions.len == 2);
+    var partitions = try disk.partitions(std.testing.allocator);
+    defer std.testing.allocator.free(partitions);
 
-    try std.testing.expectEqualDeep(Partition{
-        .type = .EfiSystem,
-        .guid = .{ 0xe5, 0xec, 0x58, 0x10, 0xe3, 0x29, 0x8, 0x48, 0xbd, 0xbe, 0xf3, 0x95, 0xca, 0x2e, 0xba, 0x0f },
-        .first_lba = 2048,
-        .last_lba = 1050623,
-        .attributes = 0,
-        .name = "BOOT",
-    }, disk.partitions[0]);
+    try std.testing.expectEqual(@as(usize, 2), partitions.len);
 
-    try std.testing.expectEqualDeep(Partition{
-        .type = .LinuxFilesystemData,
-        .guid = .{ 0xdb, 0xc2, 0xb6, 0x84, 0x9a, 0xeb, 0x24, 0x41, 0x90, 0xe8, 0xf8, 0x6f, 0x4b, 0x3c, 0x2a, 0x07 },
-        .first_lba = 1050624,
-        .last_lba = 4192255,
-        .attributes = 0,
-        .name = "root",
-    }, disk.partitions[1]);
+    const name1 = try partitions[0].name(std.testing.allocator);
+    defer std.testing.allocator.free(name1);
+    try std.testing.expectEqualStrings("BOOT", name1);
+
+    try std.testing.expectEqual(
+        GptPartitionType.EfiSystem,
+        partitions[0].part_type() orelse @panic("couldn't get partition type"),
+    );
+
+    const name2 = try partitions[1].name(std.testing.allocator);
+    defer std.testing.allocator.free(name2);
+    try std.testing.expectEqualStrings("root", name2);
+
+    try std.testing.expectEqual(
+        GptPartitionType.LinuxFilesystemData,
+        partitions[1].part_type() orelse @panic("couldn't get partition type"),
+    );
+}
+
+pub const MbrPartitionType = enum {
+    Fat16,
+    ProtectedMbr,
+    LinuxExtendedBoot,
+
+    pub fn from_value(val: u8) ?@This() {
+        return switch (val) {
+            0x06 => .Fat16,
+            0xea => .LinuxExtendedBoot,
+            0xee => .ProtectedMbr,
+            else => return null,
+        };
+    }
+};
+
+const MbrPartitionRecord = extern struct {
+    boot_indicator: u8,
+    start_head: u8,
+    start_sector: u8,
+    start_track: u8,
+    os_type: u8,
+    end_head: u8,
+    end_sector: u8,
+    end_track: u8,
+    starting_lba: u32,
+    size_in_lba: u32,
+
+    const bootable_flag = 0x80;
+
+    pub fn is_bootable(self: *const @This()) bool {
+        return self.boot_indicator == bootable_flag;
+    }
+
+    pub fn part_type(self: *const @This()) u8 {
+        return self.os_type;
+    }
+};
+
+const MbrHeader = extern struct {
+    boot_code: [440]u8,
+    unique_mbr_signature: u32 align(2),
+    unknown: u16,
+    partition_records: [4]MbrPartitionRecord align(2),
+    signature: u16,
+};
+
+/// A read-only legacy Master Boot Record partition table
+pub const Mbr = struct {
+    pub const Error = error{
+        InvalidHeaderSize,
+        MissingMagicNumber,
+    };
+
+    const boot_magic = 0x55aa;
+
+    header: *MbrHeader,
+
+    /// Caller is responsible for source.
+    pub fn init(source: *io.StreamSource) !@This() {
+        var header_bytes: [@sizeOf(MbrHeader)]u8 = undefined;
+        const bytes_read = try source.reader().readAll(&header_bytes);
+        if (bytes_read != @sizeOf(MbrHeader)) {
+            return Error.InvalidHeaderSize;
+        }
+        var aligned_buf = @as([]align(@alignOf(MbrHeader)) u8, @alignCast(&header_bytes));
+
+        const header: *MbrHeader = @ptrCast(aligned_buf);
+
+        if (mem.bigToNative(@TypeOf(header.signature), header.signature) != boot_magic) {
+            return Error.MissingMagicNumber;
+        }
+
+        return .{
+            .header = header,
+        };
+    }
+
+    pub fn identifier(self: *const @This()) u32 {
+        return mem.littleToNative(@TypeOf(self.header.unique_mbr_signature), self.header.unique_mbr_signature);
+    }
+
+    pub fn partitions(self: *const @This()) [4]MbrPartitionRecord {
+        return self.header.partition_records;
+    }
+};
+
+test "mbr parsing" {
+    // Disk /dev/sda: 504 MiB, 528482304 bytes, 1032192 sectors
+    // Disk model: QEMU HARDDISK
+    // Units: sectors of 1 * 512 = 512 bytes
+    // Sector size (logical/physical): 512 bytes / 512 bytes
+    // I/O size (minimum/optimal): 512 bytes / 512 bytes
+    // Disklabel type: dos
+    // Disk identifier: 0xbe1afdfa
+    //
+    // Device     Boot Start     End Sectors  Size Id Type
+    // /dev/sda1  *       63 1032191 1032129  504M  6 FAT16
+    const partition_table: []const u8 = &.{
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xfa, 0xfd, 0x1a, 0xbe, 0x00, 0x00, 0x80, 0x01,
+        0x01, 0x00, 0x06, 0x0f, 0xff, 0xff, 0x3f, 0x00, 0x00, 0x00, 0xc1, 0xbf, 0x0f, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x55, 0xaa,
+    };
+
+    var source = io.StreamSource{ .const_buffer = io.fixedBufferStream(partition_table) };
+
+    var disk = try Mbr.init(&source);
+
+    try std.testing.expectEqual(@as(u32, 0xbe1afdfa), disk.identifier());
+    const partitions = disk.partitions();
+    try std.testing.expect(partitions[0].is_bootable());
+    try std.testing.expectEqual(@as(u8, 0x06), partitions[0].part_type());
+}
+
+pub fn main() !void {
+    var disk = try std.fs.openFileAbsolute("/dev/nvme0n1", .{});
+    defer disk.close();
+
+    var source = io.StreamSource{ .file = disk };
+    var gpt = try Gpt.init(std.heap.page_allocator, &source);
+    _ = gpt;
 }

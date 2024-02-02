@@ -6,6 +6,8 @@ const BootEntry = @import("../boot.zig").BootEntry;
 const FsType = @import("../disk/filesystem.zig").FsType;
 const Gpt = @import("../disk/partition_table.zig").Gpt;
 const GptPartitionType = @import("../disk/partition_table.zig").GptPartitionType;
+const Mbr = @import("../disk/partition_table.zig").Mbr;
+const MbrPartitionType = @import("../disk/partition_table.zig").MbrPartitionType;
 const device = @import("../device.zig");
 
 const Mount = struct {
@@ -161,36 +163,62 @@ pub const BootLoaderSpec = struct {
 
             var disk_handle = std.fs.openFileAbsolute(disk_alias_path, .{}) catch continue;
             var disk_source = std.io.StreamSource{ .file = disk_handle };
-            var disk_partition_table = Gpt.init(allocator, &disk_source) catch |err| switch (err) {
-                Gpt.Error.MissingSignature => {
-                    std.log.debug("disk {s} does not contain a GUID partition table", .{disk_alias_path});
-                    continue;
-                },
-                Gpt.Error.HeaderCrcFail => {
-                    std.log.err("disk {s} CRC integrity check failed", .{disk_alias_path});
-                    continue;
-                },
-                else => {
-                    std.log.err("failed to read disk {s}: {}", .{ disk_alias_path, err });
-                    continue;
-                },
+
+            // All GPTs also have an MBR, so we can invalidate the disk
+            // entirely if it does not have an MBR.
+            var mbr = Mbr.init(&disk_source) catch |err| {
+                std.log.err("no MBR found on disk {s}: {}", .{ disk_alias_path, err });
+                continue;
             };
 
-            std.log.debug("found GPT disk {s}", .{disk_alias_path});
+            const boot_partn = b: {
+                for (mbr.partitions(), 1..) |part, mbr_partn| {
+                    const part_type = MbrPartitionType.from_value(part.part_type()) orelse continue;
 
-            const esp_partn = b: {
-                for (disk_partition_table.partitions, 0..) |partition, i| {
-                    if (partition.type == GptPartitionType.EfiSystem) {
-                        break :b i + 1;
+                    if (part.is_bootable() and
+                        // BootLoaderSpec uses this partition type for MBR, see
+                        // https://uapi-group.org/specifications/specs/boot_loader_specification/#the-partitionsl.
+                        (part_type == .LinuxExtendedBoot or
+                        // QEMU uses this partition type when using a FAT
+                        // emulated drive with `-drive file=fat:rw:some/directory`.
+                        part_type == .Fat16))
+                    {
+                        break :b mbr_partn;
+                    }
+
+                    // disk is GPT partitioned
+                    if (!part.is_bootable() and part_type == .ProtectedMbr) {
+                        var gpt = Gpt.init(&disk_source) catch |err| switch (err) {
+                            Gpt.Error.MissingMagicNumber => {
+                                std.log.debug("disk {s} does not contain a GUID partition table", .{disk_alias_path});
+                                continue;
+                            },
+                            Gpt.Error.HeaderCrcFail => {
+                                std.log.err("disk {s} CRC integrity check failed", .{disk_alias_path});
+                                continue;
+                            },
+                            else => {
+                                std.log.err("failed to read disk {s}: {}", .{ disk_alias_path, err });
+                                continue;
+                            },
+                        };
+
+                        var partitions = try gpt.partitions(allocator);
+                        for (partitions, 1..) |partition, gpt_partn| {
+                            if (partition.part_type() orelse continue == .EfiSystem) {
+                                break :b gpt_partn;
+                            }
+                        }
                     }
                 }
-                break :b null;
-            } orelse continue;
+
+                continue;
+            };
 
             const partition_filename = try std.fmt.allocPrint(
                 allocator,
                 "disk{s}_part{d}",
-                .{ diskseq, esp_partn },
+                .{ diskseq, boot_partn },
             );
             const esp_alias_path = try std.fs.path.joinZ(
                 allocator,
@@ -303,15 +331,12 @@ pub const BootLoaderSpec = struct {
             //
             // TODO(jared): If IMA appraisal is disabled, we can
             // concatenate all the initrds together.
-            const initrd = b: {
-                if (type1_entry.initrd) |initrd| {
-                    if (initrd.len > 0) {
-                        break :b initrd[0];
-                    }
+            var initrd: ?[]const u8 = null;
+            if (type1_entry.initrd) |_initrd| {
+                if (_initrd.len > 0) {
+                    initrd = _initrd[0];
                 }
-
-                break :b null;
-            };
+            }
 
             try entries.append(try BootEntry.init(
                 allocator,
