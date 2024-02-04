@@ -8,6 +8,22 @@ const BootLoaderSpec = @import("./boot/bls.zig").BootLoaderSpec;
 
 const kexec_loaded_path = "/sys/kernel/kexec_loaded";
 
+// In eventfd, zero has special meaning (notably it will block reads), so we
+// ensure our enum values aren't zero.
+fn enum_to_eventfd(_enum: anytype) u64 {
+    return @as(u64, @intFromEnum(_enum)) + 1;
+}
+
+fn eventfd_read(fd: os.fd_t) !u64 {
+    var ev: u64 = 0;
+    _ = try os.read(fd, std.mem.asBytes(&ev));
+    return ev;
+}
+
+fn eventfd_write(fd: os.fd_t, val: u64) !void {
+    _ = try os.write(fd, std.mem.asBytes(&val));
+}
+
 fn kexec_is_loaded(f: std.fs.File) bool {
     f.seekTo(0) catch return false;
 
@@ -169,15 +185,11 @@ pub const BootLoader = union(enum) {
     }
 };
 
-// TODO(jared): don't use magic numbers
 fn need_to_stop(stop_fd: os.fd_t) !bool {
     defer {
-        const reset: u64 = 0x1;
-        _ = os.write(stop_fd, std.mem.asBytes(&reset)) catch {};
+        eventfd_write(stop_fd, enum_to_eventfd(Autoboot.StopStatus.keep_going)) catch {};
     }
-    var ev: u64 = 0;
-    _ = try os.read(stop_fd, std.mem.asBytes(&ev));
-    return ev > 0x1;
+    return try eventfd_read(stop_fd) == enum_to_eventfd(Autoboot.StopStatus.stop);
 }
 
 fn autoboot_wrapper(ready_fd: os.fd_t, stop_fd: os.fd_t) void {
@@ -187,13 +199,10 @@ fn autoboot_wrapper(ready_fd: os.fd_t, stop_fd: os.fd_t) void {
     };
 
     if (success) {
-        const autoboot_success: u64 = 0x2;
-        _ = os.write(ready_fd, std.mem.asBytes(&autoboot_success)) catch {};
+        eventfd_write(ready_fd, enum_to_eventfd(Autoboot.ReadyStatus.ready)) catch {};
     } else {
-        // We must write something to ready_fd to ensure reads on it don't
-        // block.
-        const autoboot_fail: u64 = 0x1;
-        _ = os.write(ready_fd, std.mem.asBytes(&autoboot_fail)) catch {};
+        // We must write something to ready_fd to ensure reads don't block.
+        eventfd_write(ready_fd, enum_to_eventfd(Autoboot.ReadyStatus.not_ready)) catch {};
     }
 }
 
@@ -224,9 +233,9 @@ fn autoboot(stop_fd: os.fd_t) !bool {
     }
 
     for (boot_devices) |dev| {
-        var countdown = @as(u64, dev.timeout);
+        var countdown = dev.timeout;
         while (countdown > 0) : (countdown -= 1) {
-            std.time.sleep(1 * std.time.ns_per_s);
+            std.time.sleep(std.time.ns_per_s);
             if (try need_to_stop(stop_fd)) {
                 return false;
             }
@@ -250,12 +259,22 @@ pub const Autoboot = struct {
     stop_fd: os.fd_t,
     thread: ?std.Thread,
 
+    pub const ReadyStatus = enum {
+        ready,
+        not_ready,
+    };
+
+    pub const StopStatus = enum {
+        stop,
+        keep_going,
+    };
+
     pub fn init() !@This() {
         return .{
-            .ready_fd = try os.eventfd(0x0, 0),
-            // Ensure that stop_fd can be read() from right away without
+            .ready_fd = try os.eventfd(0, 0),
+            // Ensure that stop_fd can be read from right away without
             // blocking.
-            .stop_fd = try os.eventfd(0x1, 0),
+            .stop_fd = try os.eventfd(@intCast(enum_to_eventfd(StopStatus.keep_going)), 0),
             .thread = null,
         };
     }
@@ -274,18 +293,15 @@ pub const Autoboot = struct {
     }
 
     pub fn stop(self: *@This()) !void {
-        if (self.thread != null) {
-            const stop_indicator: u64 = 0x2;
-            _ = try os.write(self.stop_fd, std.mem.asBytes(&stop_indicator));
-            self.thread.?.join();
+        if (self.thread) |thread| {
+            try eventfd_write(self.stop_fd, enum_to_eventfd(StopStatus.stop));
+            thread.join();
         }
     }
 
     pub fn finish(self: *@This()) !?os.RebootCommand {
-        var ev: u64 = 0;
-        _ = try os.read(self.ready_fd, std.mem.asBytes(&ev));
-
-        if (ev > 0x1) {
+        const rc = try eventfd_read(self.ready_fd);
+        if (rc == enum_to_eventfd(ReadyStatus.ready)) {
             return os.RebootCommand.KEXEC;
         } else {
             return null;
@@ -295,6 +311,7 @@ pub const Autoboot = struct {
     pub fn deinit(self: *@This()) void {
         os.close(self.ready_fd);
         os.close(self.stop_fd);
+        self.stop() catch {};
         self.thread = null;
     }
 };
