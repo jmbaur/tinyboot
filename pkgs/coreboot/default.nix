@@ -1,4 +1,4 @@
-{ board, configFile, fetchFromGitHub, stdenvNoCC, pkgsBuildBuild, python3, pkg-config, openssl }:
+{ board, configFile, fetchgit, stdenvNoCC, pkgsBuildBuild, python3, pkg-config, openssl }:
 let
   architectures = { i386 = "i386"; x86_64 = "i386"; arm64 = "aarch64"; arm = "arm"; riscv = "riscv"; powerpc = "ppc64"; };
   toolchain = pkgsBuildBuild.coreboot-toolchain.${architectures.${stdenvNoCC.hostPlatform.linuxArch}}.override {
@@ -8,11 +8,10 @@ in
 stdenvNoCC.mkDerivation (finalAttrs: {
   pname = "coreboot-${board}";
   version = "4.21";
-  src = fetchFromGitHub {
-    owner = "jmbaur";
-    repo = "coreboot";
-    rev = "1047cc51b891b56289423293d350f9f350bcdc7c";
-    hash = "sha256-mzv0xMUCxBeirVunThr1dwjNKwzvSUSU7ZY45ic+EJs=";
+  src = fetchgit {
+    url = "https://review.coreboot.org/coreboot";
+    rev = finalAttrs.version;
+    hash = "sha256-bQVD1CglaONcQlivXfTZd963ADCd7cSJzQ0zmKdT2jY=";
     fetchSubmodules = true;
   };
   patches = [
@@ -35,7 +34,7 @@ stdenvNoCC.mkDerivation (finalAttrs: {
     make olddefconfig
     runHook postConfigure
   '';
-  makeFlags = [ "XGCCPATH=${toolchain}/bin/" "KERNELVERSION=${finalAttrs.version}-${builtins.substring 0 7 finalAttrs.src.rev}" "UPDATED_SUBMODULES=1" ];
+  makeFlags = [ "XGCCPATH=${toolchain}/bin/" "KERNELVERSION=${finalAttrs.version}" "UPDATED_SUBMODULES=1" ];
   outputs = [ "out" "dev" ];
   installPhase = ''
     runHook preInstall

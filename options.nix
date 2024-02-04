@@ -99,7 +99,7 @@ in
         options.object = mkOption { type = types.path; };
         options.symlink = mkOption { type = types.str; };
       });
-      default = [ ];
+      default = [{ symlink = "/tmp/empty"; object = pkgs.writeText "empty" ""; }];
     };
   };
   config = {
@@ -142,15 +142,17 @@ in
       PAYLOAD_FIT = yes;
       PAYLOAD_FIT_SUPPORT = yes;
       VBOOT_ARMV8_CE_SHA256_ACCELERATION = yes;
-      VBOOT_SLOTS_RW_A = lib.mkDefault yes; # aarch64 spi flash is usually not large enough for 3 vboot slots
+      VBOOT_SLOTS_RW_A = lib.mkDefault yes; # spi flash on aarch64 chromebooks is usually not large enough for 3 vboot slots
     };
 
     build = {
-      initrd = pkgs.makeInitrdNG {
-        prepend = "${tinyboot}/tboot-loader.cpio";
-        compressor = "xz";
-        contents = config.extraInitrdContents;
-      };
+      initrd =
+        if config.extraInitrdContents != [ ] then
+          (pkgs.makeInitrdNG {
+            prepend = [ "${tinyboot}/tboot-loader.cpio.xz" ];
+            compressor = "xz";
+            contents = config.extraInitrdContents;
+          }) else "${tinyboot}/tboot-loader.cpio.xz";
       linux = (pkgs.callPackage ./pkgs/linux {
         builtinCmdline = config.linux.commandLine;
         linux = config.linux.package;

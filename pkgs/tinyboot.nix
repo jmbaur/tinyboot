@@ -1,4 +1,4 @@
-{ lib, stdenvNoCC, zig_0_11, corebootSupport ? true }:
+{ lib, stdenvNoCC, xz, zig_0_11, corebootSupport ? true }:
 let
   stdenv = stdenvNoCC;
   zigArgs = [
@@ -12,9 +12,12 @@ stdenv.mkDerivation {
   pname = "tinyboot";
   version = "0.1.0";
 
-  src = ../.;
+  src = lib.fileset.toSource {
+    root = ../.;
+    fileset = lib.fileset.unions [ ../build.zig ../src ];
+  };
 
-  nativeBuildInputs = [ zig_0_11 ];
+  nativeBuildInputs = [ zig_0_11 xz ];
 
   doCheck = true;
 
@@ -39,6 +42,7 @@ stdenv.mkDerivation {
   installPhase = ''
     runHook preInstall
     zig build install --prefix $out ${toString zigArgs}
+    xz --check=crc32 --lzma2=dict=512KiB $out/tboot-loader.cpio
     runHook postInstall
   '';
 
