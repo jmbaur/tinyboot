@@ -1,0 +1,12 @@
+{
+  "url": "https://review.coreboot.org/blobs.git",
+  "rev": "a8db7dfe823def043368857b8fbfbba86f2e9e47",
+  "date": "2023-07-24T16:05:01+00:00",
+  "path": "/nix/store/bfgx6sn2y2psczs3wbyp19zwwf40g0rk-blobs-a8db7df",
+  "sha256": "1kh61d8x0axk7wk4l09mainw3hynb7ybc14d8sx2xfidrg6w2kkh",
+  "hash": "sha256-cE7Bzcstui66Ro0EtvxZ1sPBbVQ1AUomP7Mr0FELBs4=",
+  "fetchLFS": false,
+  "fetchSubmodules": false,
+  "deepClone": false,
+  "leaveDotGit": false
+}

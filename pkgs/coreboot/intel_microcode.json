@@ -1,0 +1,12 @@
+{
+  "url": "https://review.coreboot.org/intel-microcode.git",
+  "rev": "6788bb07eb5f9e9b83c31ea1364150fe898f450a",
+  "date": "2023-08-08T12:04:21-06:00",
+  "path": "/nix/store/y6pgjpwxswldxaajlwg0wrl3j7q50kxr-intel-microcode-6788bb0",
+  "sha256": "1n0w6q46xag7a9iddl3v1gh1rzv9h6kiyy739ac6vg3v8lazh9n7",
+  "hash": "sha256-xyb4FUV7vG2YSuN4H6eBaf8c4At70NZiUuepbgg2HNg=",
+  "fetchLFS": false,
+  "fetchSubmodules": false,
+  "deepClone": false,
+  "leaveDotGit": false
+}

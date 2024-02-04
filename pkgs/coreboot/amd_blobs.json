@@ -1,0 +1,12 @@
+{
+  "url": "https://review.coreboot.org/amd_blobs",
+  "rev": "e4519efca74615f0f322d595afa7702c64753914",
+  "date": "2023-11-15T09:02:47-06:00",
+  "path": "/nix/store/2233dw65diqiziqdc7q5fsf50d9awbl6-amd_blobs-e4519ef",
+  "sha256": "1sgfhmyfal5hqs5aa69kgal4j7vxjaigc31m2zjniy2fwkmqw8ik",
+  "hash": "sha256-MyKO6+RO+GjlFzUM9qKSfR9JqHozGaWKxrBQ5XyF7uk=",
+  "fetchLFS": false,
+  "fetchSubmodules": false,
+  "deepClone": false,
+  "leaveDotGit": false
+}

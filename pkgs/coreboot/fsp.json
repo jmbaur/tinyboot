@@ -1,0 +1,12 @@
+{
+  "url": "https://review.coreboot.org/fsp.git",
+  "rev": "481ea7cf0bae0107c3e14aa746e52657647142f3",
+  "date": "2023-09-19T15:21:38-07:00",
+  "path": "/nix/store/73ab92zrq1dnm9bxkmhss9mzqq35b30r-fsp-481ea7c",
+  "sha256": "14m0w2qm57d5x4czx3zwzqskra9rv1lw91hl8byi9in4czh20dh2",
+  "hash": "sha256-AjYg4GfExhT9QhSGxGnYOak8Nf78j/4Z6aWdUrHgoJI=",
+  "fetchLFS": false,
+  "fetchSubmodules": false,
+  "deepClone": false,
+  "leaveDotGit": false
+}
