@@ -1,16 +1,18 @@
 diff --git a/flashrom.c b/flashrom.c
-index 9f1a898a..02e2a772 100644
+index eb503cb6..759606cb 100644
 --- a/flashrom.c
 +++ b/flashrom.c
-@@ -2391,10 +2391,12 @@ int prepare_flash_access(struct flashctx *const flash,
+@@ -2389,12 +2389,14 @@ int prepare_flash_access(struct flashctx *const flash,
  		return 1;
  	}
  
 +#if 0
  	/* FIXME(b/207787495): replace this with locking in futility. */
  	/* Let powerd know that we're updating firmware so machine stays awake. */
- 	if (write_it || erase_it)
- 		disable_power_management();
+ 	if (write_it || erase_it) {
+ 		if (disable_power_management() == 2) /* FIXME(b:314677563): check ret */
+ 			return 1;
+ 	}
 +#endif
  
  	if (map_flash(flash) != 0)
