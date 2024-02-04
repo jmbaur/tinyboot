@@ -2,7 +2,10 @@
 
 cd "$PWD" || exit 1
 
-if [[ ! -d dtbs ]] || [[ ! -f Image.lzma ]] || [[ ! -f initramfs.cpio.xz ]]; then
+kernel=$1
+initrd=$2
+
+if [[ ! -d dtbs ]] || [[ ! -f $kernel ]] || [[ ! -f $initrd ]]; then
 	echo "required files/directories not found"
 	exit 2
 fi
@@ -47,7 +50,7 @@ cat <<EOF
     images {
         kernel {
             description = "kernel";
-            data = /incbin/("Image.lzma");
+            data = /incbin/("$kernel");
             type = "kernel";
             arch = "arm64";
             os = "linux";
@@ -58,7 +61,7 @@ cat <<EOF
         };
         ramdisk {
             description = "ramdisk";
-            data = /incbin/("initramfs.cpio.xz");
+            data = /incbin/("$initrd");
             type = "ramdisk";
             arch = "arm64";
             os = "linux";

@@ -21,8 +21,8 @@ stdenvNoCC.mkDerivation (finalAttrs: {
     ./0002-Fix-build-for-brya.patch
     ./0003-Allow-for-fitImage-use-on-mt8183-and-mt8192.patch
   ];
-  depsBuildBuild = [ pkgsBuildBuild.stdenv.cc ];
-  nativeBuildInputs = [ python3 pkg-config openssl ];
+  depsBuildBuild = [ pkgsBuildBuild.stdenv.cc pkg-config openssl ];
+  nativeBuildInputs = [ python3 ];
   buildInputs = [ ];
   enableParallelBuilding = true;
   # nixpkgs fetchgit fetcher does not fetch a submodule if the repo sets
