@@ -7,12 +7,12 @@ let
 in
 stdenvNoCC.mkDerivation (finalAttrs: {
   pname = "coreboot-${board}";
-  version = "4.21";
+  version = "4.22.01";
   src = fetchgit {
     url = "https://review.coreboot.org/coreboot";
     rev = finalAttrs.version;
-    hash = "sha256-bQVD1CglaONcQlivXfTZd963ADCd7cSJzQ0zmKdT2jY=";
     fetchSubmodules = true;
+    hash = "sha256-RqnCzeA/qVDlEvseFO9By3jcumYAUh4X610RdenYuEk=";
   };
   patches = [
     ./0001-Add-Kconfig-VBOOT_SIGN-option.patch
