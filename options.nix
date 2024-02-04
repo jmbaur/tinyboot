@@ -132,7 +132,7 @@ in
       VBOOT_SIGN = unset; # don't sign during build
       VPD = yes;
     } // lib.optionalAttrs pkgs.hostPlatform.isx86_64 {
-      LINUX_INITRD = freeform "${config.build.initrd}/initrd";
+      LINUX_INITRD = freeform "${config.build.initrd}";
       PAYLOAD_FILE = freeform "${config.build.linux}/${pkgs.stdenv.hostPlatform.linux-kernel.target}";
       PAYLOAD_LINUX = yes;
       VBOOT_SLOTS_RW_AB = lib.mkDefault yes; # x86_64 spi flash is usually large enough for 3 vboot slots
@@ -148,11 +148,11 @@ in
     build = {
       initrd =
         if config.extraInitrdContents != [ ] then
-          (pkgs.makeInitrdNG {
+          ((pkgs.makeInitrdNG {
             prepend = [ "${tinyboot}/tboot-loader.cpio.xz" ];
             compressor = "xz";
             contents = config.extraInitrdContents;
-          }) else "${tinyboot}/tboot-loader.cpio.xz";
+          }) + "/initrd") else "${tinyboot}/tboot-loader.cpio.xz";
       linux = (pkgs.callPackage ./pkgs/linux {
         builtinCmdline = config.linux.commandLine;
         linux = config.linux.package;
