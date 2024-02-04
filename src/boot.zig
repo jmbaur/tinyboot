@@ -6,6 +6,21 @@ const linux_headers = @import("linux_headers");
 
 const BootLoaderSpec = @import("./boot/bls.zig").BootLoaderSpec;
 
+const kexec_loaded_path = "/sys/kernel/kexec_loaded";
+
+fn kexec_is_loaded(f: std.fs.File) bool {
+    f.seekTo(0) catch return false;
+
+    var is_loaded: u8 = 0;
+    const bytes_read = f.read(std.mem.asBytes(&is_loaded)) catch return false;
+
+    if (bytes_read != 1) {
+        return false;
+    }
+
+    return is_loaded == '1';
+}
+
 pub const BootEntry = struct {
     allocator: std.mem.Allocator,
 
@@ -14,26 +29,27 @@ pub const BootEntry = struct {
     /// Optional path to the initrd.
     initrd: ?[]const u8 = null,
     /// Optional kernel parameters.
-    cmdline: ?[]const []const u8 = null,
+    cmdline: ?[]const u8 = null,
 
     pub fn init(
         allocator: std.mem.Allocator,
         mountpoint: []const u8,
         linux: []const u8,
         initrd: ?[]const u8,
-        cmdline: ?[]const []const u8,
+        cmdline: ?[]const u8,
     ) !@This() {
-        var self = @This(){
+        return .{
             .allocator = allocator,
             .linux = try std.fs.path.join(allocator, &.{ mountpoint, linux }),
+            .initrd = if (initrd) |_initrd|
+                try std.fs.path.join(allocator, &.{ mountpoint, _initrd })
+            else
+                null,
+            .cmdline = if (cmdline) |_cmdline|
+                try allocator.dupe(u8, _cmdline)
+            else
+                null,
         };
-        if (initrd) |i| {
-            self.initrd = try std.fs.path.join(allocator, &.{ mountpoint, i });
-        }
-        if (cmdline) |_cmdline| {
-            self.cmdline = try allocator.dupe([]const u8, _cmdline);
-        }
-        return self;
     }
 
     const LoadError = error{
@@ -45,34 +61,36 @@ pub const BootEntry = struct {
         const linux = try std.fs.openFileAbsolute(self.linux, .{});
         defer linux.close();
 
-        const cmdline: [:0]const u8 = b: {
-            if (self.cmdline) |cmdline| {
-                break :b try std.mem.joinZ(self.allocator, " ", cmdline);
-            } else {
-                break :b try self.allocator.dupeZ(u8, "");
-            }
-        };
-        defer self.allocator.free(cmdline);
+        const linux_fd = @as(usize, @bitCast(@as(isize, linux.handle)));
+
+        // dupeZ() returns a null-terminated slice, however the null-terminator
+        // is not included in the length of the slice, so we must add 1.
+        const cmdline = try self.allocator.dupeZ(u8, self.cmdline orelse "");
+        const cmdline_len = cmdline.len + 1;
 
         const rc = b: {
             if (self.initrd) |i| {
                 const initrd = try std.fs.openFileAbsolute(i, .{});
                 defer initrd.close();
 
+                const initrd_fd = @as(usize, @bitCast(@as(isize, initrd.handle)));
+
                 break :b os.linux.syscall5(
                     .kexec_file_load,
-                    @intCast(linux.handle),
-                    @intCast(initrd.handle),
-                    cmdline.len,
+                    linux_fd,
+                    initrd_fd,
+                    cmdline_len,
                     @intFromPtr(cmdline.ptr),
                     0,
                 );
             } else {
+                const initrd_fd = @as(usize, @bitCast(@as(isize, 0)));
+
                 break :b os.linux.syscall5(
                     .kexec_file_load,
-                    @intCast(linux.handle),
-                    0,
-                    cmdline.len,
+                    linux_fd,
+                    initrd_fd,
+                    cmdline_len,
                     @intFromPtr(cmdline.ptr),
                     linux_headers.KEXEC_FILE_NO_INITRAMFS,
                 );
@@ -80,10 +98,25 @@ pub const BootEntry = struct {
         };
 
         switch (os.linux.getErrno(rc)) {
-            E.SUCCESS => return,
+            E.SUCCESS => {
+                // Wait for up to a second for kernel to report for kexec to be
+                // loaded.
+                var i: u8 = 10;
+                var f = try std.fs.openFileAbsolute(kexec_loaded_path, .{});
+                defer f.close();
+                while (!kexec_is_loaded(f) and i > 0) : (i -= 1) {
+                    std.time.sleep(100 * std.time.ns_per_ms);
+                }
+
+                std.log.info("kexec loaded", .{});
+                return;
+            },
             // IMA appraisal failed
             E.PERM => return LoadError.PermissionDenied,
-            else => return LoadError.UnknownError,
+            else => {
+                std.log.err("ERROR: {} {}", .{ rc, os.linux.getErrno(rc) });
+                return LoadError.UnknownError;
+            },
         }
     }
 
@@ -138,12 +171,34 @@ pub const BootLoader = union(enum) {
 
 // TODO(jared): don't use magic numbers
 fn need_to_stop(stop_fd: os.fd_t) !bool {
+    defer {
+        const reset: u64 = 0x1;
+        _ = os.write(stop_fd, std.mem.asBytes(&reset)) catch {};
+    }
     var ev: u64 = 0;
     _ = try os.read(stop_fd, std.mem.asBytes(&ev));
-    return ev > 0xff;
+    return ev > 0x1;
 }
 
-fn autoboot(ready_fd: os.fd_t, stop_fd: os.fd_t) !void {
+fn autoboot_wrapper(ready_fd: os.fd_t, stop_fd: os.fd_t) void {
+    const success = autoboot(stop_fd) catch |err| b: {
+        std.log.err("autoboot failed: {}", .{err});
+        break :b false;
+    };
+
+    if (success) {
+        const autoboot_success: u64 = 0x2;
+        _ = os.write(ready_fd, std.mem.asBytes(&autoboot_success)) catch {};
+    } else {
+        // We must write something to ready_fd to ensure reads on it don't
+        // block.
+        const autoboot_fail: u64 = 0x1;
+        _ = os.write(ready_fd, std.mem.asBytes(&autoboot_fail)) catch {};
+    }
+}
+
+/// Returns true if kexec has been successfully loaded.
+fn autoboot(stop_fd: os.fd_t) !bool {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
 
@@ -156,37 +211,24 @@ fn autoboot(ready_fd: os.fd_t, stop_fd: os.fd_t) !void {
     defer {
         boot_loader.teardown();
         std.log.debug("autoboot stopped", .{});
-
-        // write to ready_fd to ensure reads on it don't block
-        var ev: u64 = 0x1;
-        _ = os.write(ready_fd, std.mem.asBytes(&ev)) catch {};
     }
 
     try boot_loader.setup();
-    {
-        if (try need_to_stop(stop_fd)) {
-            std.log.debug("stopping autoboot", .{});
-            return;
-        }
-        std.log.debug("post setup, we don't need to stop", .{});
+    if (try need_to_stop(stop_fd)) {
+        return false;
     }
 
     const boot_devices = try boot_loader.probe(allocator);
-    {
-        if (try need_to_stop(stop_fd)) {
-            std.log.debug("stopping autoboot", .{});
-            return;
-        }
-        std.log.debug("post probe, we don't need to stop", .{});
+    if (try need_to_stop(stop_fd)) {
+        return false;
     }
 
     for (boot_devices) |dev| {
         var countdown = @as(u64, dev.timeout);
         while (countdown > 0) : (countdown -= 1) {
-            std.time.sleep(1 * dev.timeout);
+            std.time.sleep(1 * std.time.ns_per_s);
             if (try need_to_stop(stop_fd)) {
-                std.log.debug("stopping autoboot", .{});
-                return;
+                return false;
             }
         }
 
@@ -196,12 +238,11 @@ fn autoboot(ready_fd: os.fd_t, stop_fd: os.fd_t) !void {
                 continue;
             };
 
-            // we are done, ready to kexec
-            var ev: u64 = 0xff1;
-            _ = try os.write(ready_fd, std.mem.asBytes(&ev));
-            return;
+            return true;
         }
     }
+
+    return false;
 }
 
 pub const Autoboot = struct {
@@ -210,9 +251,11 @@ pub const Autoboot = struct {
     thread: ?std.Thread,
 
     pub fn init() !@This() {
-        return @This(){
-            .ready_fd = try os.eventfd(0, os.linux.EFD.SEMAPHORE),
-            .stop_fd = try os.eventfd(0xff, os.linux.EFD.SEMAPHORE),
+        return .{
+            .ready_fd = try os.eventfd(0x0, 0),
+            // Ensure that stop_fd can be read() from right away without
+            // blocking.
+            .stop_fd = try os.eventfd(0x1, 0),
             .thread = null,
         };
     }
@@ -227,13 +270,13 @@ pub const Autoboot = struct {
     }
 
     pub fn start(self: *@This()) !void {
-        self.thread = try std.Thread.spawn(.{}, autoboot, .{ self.ready_fd, self.stop_fd });
+        self.thread = try std.Thread.spawn(.{}, autoboot_wrapper, .{ self.ready_fd, self.stop_fd });
     }
 
     pub fn stop(self: *@This()) !void {
         if (self.thread != null) {
-            var ev: u64 = 0xff1;
-            _ = try os.write(self.stop_fd, std.mem.asBytes(&ev));
+            const stop_indicator: u64 = 0x2;
+            _ = try os.write(self.stop_fd, std.mem.asBytes(&stop_indicator));
             self.thread.?.join();
         }
     }
@@ -242,7 +285,7 @@ pub const Autoboot = struct {
         var ev: u64 = 0;
         _ = try os.read(self.ready_fd, std.mem.asBytes(&ev));
 
-        if (ev > 0xff) {
+        if (ev > 0x1) {
             return os.RebootCommand.KEXEC;
         } else {
             return null;

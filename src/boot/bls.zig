@@ -107,7 +107,7 @@ pub const BootLoaderSpec = struct {
     }
 
     pub fn setup(self: *@This()) !void {
-        std.log.debug("BootLoaderSpec setup", .{});
+        std.log.debug("BLS setup", .{});
 
         const allocator = self.arena.allocator();
 
@@ -338,12 +338,17 @@ pub const BootLoaderSpec = struct {
                 }
             }
 
+            const options = if (type1_entry.options) |opts|
+                try std.mem.join(internal_allocator, " ", opts)
+            else
+                null;
+
             try entries.append(try BootEntry.init(
                 allocator,
                 mount.mountpoint,
                 linux,
                 initrd,
-                type1_entry.options,
+                options,
             ));
         }
 
@@ -356,6 +361,7 @@ pub const BootLoaderSpec = struct {
 
     /// Caller is responsible for the returned slice.
     pub fn probe(self: *@This(), allocator: std.mem.Allocator) ![]const BootDevice {
+        std.log.debug("BLS probe", .{});
         var devices = std.ArrayList(BootDevice).init(allocator);
 
         // Internal mounts are ordered before external mounts so they are
@@ -368,10 +374,13 @@ pub const BootLoaderSpec = struct {
             try devices.append(self.search_for_entries(mount, allocator) catch continue);
         }
 
+        std.log.debug("BLS probe found {} devices", .{devices.items.len});
         return try devices.toOwnedSlice();
     }
 
     pub fn teardown(self: *@This()) void {
+        std.log.debug("BLS teardown", .{});
+
         for (self.external_mounts) |mount| {
             std.log.info("unmounted disk '{s}'", .{mount.disk_name});
             _ = os.linux.umount2(mount.mountpoint, os.linux.MNT.DETACH);
@@ -761,59 +770,41 @@ const Type1Entry = struct {
             var line_split = std.mem.splitSequence(u8, line, " ");
 
             var maybe_key: ?[]const u8 = null;
+            _ = maybe_key;
             var maybe_value: ?[]const u8 = null;
+            _ = maybe_value;
 
-            while (line_split.next()) |section| {
-                if (std.mem.eql(u8, section, "")) {
-                    continue;
-                }
-
-                if (maybe_key == null) {
-                    maybe_key = section;
-                } else if (maybe_value == null) {
-                    maybe_value = section;
-                    break;
-                }
-            }
-
-            if (maybe_key == null or maybe_value == null) {
-                continue;
-            }
-
-            const key = maybe_key.?;
-            const value = maybe_value.?;
+            const key = line_split.next() orelse continue;
 
             if (std.mem.eql(u8, key, "title")) {
-                self.title = value;
+                self.title = line_split.rest();
             } else if (std.mem.eql(u8, key, "version")) {
-                self.version = value;
+                self.version = line_split.rest();
             } else if (std.mem.eql(u8, key, "machine-id")) {
-                self.machine_id = value;
+                self.machine_id = line_split.rest();
             } else if (std.mem.eql(u8, key, "sort_key")) {
-                self.sort_key = value;
+                self.sort_key = line_split.rest();
             } else if (std.mem.eql(u8, key, "linux")) {
-                self.linux = value;
+                self.linux = line_split.rest();
             } else if (std.mem.eql(u8, key, "initrd")) {
-                try initrd.append(value);
+                try initrd.append(line_split.rest());
             } else if (std.mem.eql(u8, key, "efi")) {
-                self.efi = value;
+                self.efi = line_split.rest();
             } else if (std.mem.eql(u8, key, "options")) {
-                var options_split = std.mem.splitSequence(u8, value, " ");
-                while (options_split.next()) |next| {
+                while (line_split.next()) |next| {
                     try options.append(next);
                 }
             } else if (std.mem.eql(u8, key, "devicetree")) {
-                self.devicetree = value;
+                self.devicetree = line_split.rest();
             } else if (std.mem.eql(u8, key, "devicetree-overlay")) {
                 var devicetree_overlay = std.ArrayList([]const u8).init(allocator);
                 errdefer devicetree_overlay.deinit();
-                var overlays = std.mem.splitSequence(u8, value, " ");
-                while (overlays.next()) |next| {
+                while (line_split.next()) |next| {
                     try devicetree_overlay.append(next);
                 }
                 self.devicetree_overlay = try devicetree_overlay.toOwnedSlice();
             } else if (std.mem.eql(u8, key, "architecture")) {
-                self.architecture = Architecture.parse(value) catch continue;
+                self.architecture = Architecture.parse(line_split.rest()) catch continue;
             }
         }
 
@@ -845,7 +836,7 @@ test "type 1 boot entry parsing" {
     const simple =
         \\title Foo
         \\linux /EFI/foo/Image
-        \\options loglevel=7
+        \\options console=ttyAMA0 loglevel=7
         \\architecture aa64
     ;
 
@@ -853,6 +844,7 @@ test "type 1 boot entry parsing" {
     defer type1_entry.deinit();
 
     try std.testing.expectEqualStrings("/EFI/foo/Image", type1_entry.linux.?);
-    try std.testing.expect(type1_entry.options.?.len == 1);
-    try std.testing.expectEqualStrings("loglevel=7", type1_entry.options.?[0]);
+    try std.testing.expect(type1_entry.options.?.len == 2);
+    try std.testing.expectEqualStrings("console=ttyAMA0", type1_entry.options.?[0]);
+    try std.testing.expectEqualStrings("loglevel=7", type1_entry.options.?[1]);
 }
