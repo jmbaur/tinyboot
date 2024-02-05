@@ -233,8 +233,10 @@ fn autoboot(stop_fd: os.fd_t) !bool {
     }
 
     for (boot_devices) |dev| {
+        std.log.info("using device '{s}'", .{dev.name});
         var countdown = dev.timeout;
         while (countdown > 0) : (countdown -= 1) {
+            std.log.info("booting in {} seconds", .{countdown});
             std.time.sleep(std.time.ns_per_s);
             if (try need_to_stop(stop_fd)) {
                 return false;

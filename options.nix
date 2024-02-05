@@ -105,8 +105,8 @@ in
   config = {
     # TODO(jared): only add fbcon param if video is enabled in the kernel
     # The "--" makes linux pass remaining parameters as args to PID1
-    linux.commandLine = [ "fbcon=logo-count:1,logo-pos:center" "console=ttynull" "--" ]
-      ++ map (console: "tboot.console=${console}") config.tinyboot.consoles;
+    linux.commandLine = lib.mkBefore ([ "fbcon=logo-count:1" "console=ttynull" "--" ]
+      ++ map (console: "tboot.console=${console}") config.tinyboot.consoles);
     extraInitrdContents = lib.optional (config.linux.firmware != [ ]) {
       symlink = "/lib/firmware";
       object = pkgs.buildPackages.runCommand "linux-firmware" { } ("mkdir -p $out;" + lib.concatLines (map
