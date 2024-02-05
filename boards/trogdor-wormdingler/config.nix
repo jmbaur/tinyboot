@@ -7,6 +7,7 @@
       commandLine = [ "pd_ignore_unused" "clk_ignore_unused" ];
       dtbPattern = "sc7180-trogdor-wormdingler*";
     };
+    tinyboot.consoles = lib.mkDefault [ "tty1" "ttyMSM0" ];
     coreboot.kconfig = with lib.kernel; {
       ARM64_BL31_EXTERNAL_FILE = freeform "${pkgs.armTrustedFirmwareSC7180}/libexec/bl31.elf";
       BOARD_GOOGLE_WORMDINGLER = yes;

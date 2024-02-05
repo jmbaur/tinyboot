@@ -91,15 +91,13 @@ in
       type = types.enum [ "off" "error" "warn" "info" "debug" "trace" ];
       default = "info";
     };
-    tinyboot = {
-      consoles = mkOption { type = types.listOf types.str; default = [ "tty1" ]; };
-    };
+    tinyboot.consoles = mkOption { type = types.listOf types.str; default = [ "tty1" ]; };
     extraInitrdContents = mkOption {
       type = types.listOf (types.submodule {
         options.object = mkOption { type = types.path; };
         options.symlink = mkOption { type = types.str; };
       });
-      default = [{ symlink = "/tmp/empty"; object = pkgs.writeText "empty" ""; }];
+      default = [ ];
     };
   };
   config = {
