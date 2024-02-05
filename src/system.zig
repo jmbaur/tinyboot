@@ -87,7 +87,6 @@ fn setBaudRate(t: *os.termios, baud: u32) void {
 
 fn cfmakeraw(t: *os.termios) void {
     t.iflag &= ~(system.IGNBRK | system.BRKINT | system.PARMRK | system.ISTRIP | system.INLCR | system.IGNCR | system.ICRNL | system.IXON);
-    t.oflag &= ~system.OPOST;
     t.lflag &= ~(system.ECHO | system.ECHONL | system.ICANON | system.ISIG | system.IEXTEN);
     t.cflag &= ~(system.CSIZE | system.PARENB);
     t.cflag |= system.CS8;
