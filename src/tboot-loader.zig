@@ -1,6 +1,7 @@
 const coreboot_support = @import("build_options").coreboot_support;
 
 const std = @import("std");
+const builtin = @import("builtin");
 const os = std.os;
 const fs = std.fs;
 const linux = std.os.linux;
@@ -17,6 +18,10 @@ const system = @import("./system.zig");
 
 pub const std_options = struct {
     pub const logFn = log.logFn;
+    pub const log_level = switch (builtin.mode) {
+        .Debug => .debug,
+        else => .info,
+    };
 };
 
 const State = struct {
