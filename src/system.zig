@@ -75,7 +75,7 @@ const CBAUDEX = switch (builtin.target.cpu.arch) {
     .powerpc, .powerpc64 => 0o00020,
     else => 0o10000,
 };
-const CRTSCTS = 0o20000000000;
+const CRTSCTS: system.tcflag_t = 0o20000000000;
 
 fn setBaudRate(t: *os.termios, baud: u32) void {
     // indicate that we want to set a new baud rate
@@ -94,34 +94,61 @@ fn cfmakeraw(t: *os.termios) void {
     t.cc[VTIME] = 0;
 }
 
-pub fn setupTty(fd: os.fd_t) !void {
+pub const TtyMode = enum {
+    user_input,
+    file_transfer,
+};
+
+pub fn setupTty(fd: os.fd_t, mode: TtyMode) !void {
     var termios = try os.tcgetattr(fd);
 
-    termios.cc[VINTR] = 3; // C-c
-    termios.cc[VQUIT] = 28; // C-\
-    termios.cc[VERASE] = 127; // C-?
-    termios.cc[VKILL] = 21; // C-u
-    termios.cc[VEOF] = 4; // C-d
-    termios.cc[VSTART] = 17; // C-q
-    termios.cc[VSTOP] = 19; // C-s
-    termios.cc[VSUSP] = 26; // C-z
+    switch (mode) {
+        .user_input => {
+            termios.cc[VINTR] = 3; // C-c
+            termios.cc[VQUIT] = 28; // C-\
+            termios.cc[VERASE] = 127; // C-?
+            termios.cc[VKILL] = 21; // C-u
+            termios.cc[VEOF] = 4; // C-d
+            termios.cc[VSTART] = 17; // C-q
+            termios.cc[VSTOP] = 19; // C-s
+            termios.cc[VSUSP] = 26; // C-z
 
-    termios.cflag &= CBAUD | CBAUDEX | os.system.CSIZE | os.system.CSTOPB | os.system.PARENB | os.system.PARODD | CRTSCTS;
+            termios.cflag &= CBAUD | CBAUDEX | system.CSIZE | system.CSTOPB | system.PARENB | system.PARODD | CRTSCTS;
 
-    termios.cflag |= system.CREAD | system.HUPCL | system.CLOCAL;
+            termios.cflag |= system.CREAD | system.HUPCL | system.CLOCAL;
 
-    // input modes
-    termios.iflag = system.ICRNL | system.IXON | system.IXOFF;
+            // input modes
+            termios.iflag = system.ICRNL | system.IXON | system.IXOFF;
 
-    // output modes
-    termios.oflag = system.OPOST | system.ONLCR;
+            // output modes
+            termios.oflag = system.OPOST | system.ONLCR;
 
-    // local modes
-    termios.lflag = system.ISIG | system.ICANON | system.ECHO | system.ECHOE | system.ECHOK | system.IEXTEN;
+            // local modes
+            termios.lflag = system.ISIG | system.ICANON | system.ECHO | system.ECHOE | system.ECHOK | system.IEXTEN;
 
-    setBaudRate(&termios, os.system.B115200);
+            cfmakeraw(&termios);
 
-    cfmakeraw(&termios);
+            setBaudRate(&termios, system.B115200);
+        },
+        .file_transfer => {
+            termios.oflag = 0;
+            termios.cflag = (termios.cflag & ~system.CSIZE) | system.CS8; // 8-bit chars
+            termios.iflag &= ~system.IGNBRK; // disable break processing
+            termios.lflag = 0; // no signaling chars, no echo,
+            termios.oflag = 0; // no remapping, no delays
+            termios.cc[VMIN] = 1; // read doesn't block
+            termios.cc[VTIME] = 5; // 0.5 seconds read timeout
+            termios.iflag &= ~(system.IXON | system.IXOFF | system.IXANY); // shut off xon/xoff ctrl
+
+            // ignore modem controls, enable reading, and shutoff parity
+            termios.cflag |= (system.CLOCAL | system.CREAD);
+            termios.cflag &= ~(system.PARENB | system.PARODD);
+            termios.cflag &= ~system.CSTOPB;
+            termios.cflag &= ~CRTSCTS;
+
+            setBaudRate(&termios, system.B3000000);
+        },
+    }
 
     try os.tcsetattr(fd, os.TCSA.NOW, termios);
 }

@@ -81,6 +81,14 @@ pub fn build(b: *std.Build) !void {
     });
     b.installArtifact(tboot_nixos_install);
 
+    const modem_tool = b.addExecutable(.{
+        .name = "xmodem",
+        .root_source_file = .{ .path = "src/xmodem.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
+    b.installArtifact(modem_tool);
+
     const unit_tests = b.addTest(.{
         .root_source_file = .{ .path = "src/test.zig" },
         .target = target,

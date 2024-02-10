@@ -69,7 +69,7 @@ fn run_event_loop(a: std.mem.Allocator, cfg: *const Config) !?os.RebootCommand {
 
             const pid = try os.fork();
             if (pid == 0) {
-                try system.setupTty(fd);
+                try system.setupTty(fd, .user_input);
 
                 try os.dup2(fd, os.STDIN_FILENO);
                 try os.dup2(fd, os.STDOUT_FILENO);
