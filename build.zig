@@ -9,7 +9,7 @@ pub fn build(b: *std.Build) !void {
 
     const target = b.standardTargetOptions(.{ .default_target = .{ .cpu_model = .baseline } });
 
-    var optimize = b.standardOptimizeOption(.{});
+    const optimize = b.standardOptimizeOption(.{});
 
     const tboot_loader_optimize = if (optimize == std.builtin.OptimizeMode.Debug)
         std.builtin.OptimizeMode.Debug
@@ -24,7 +24,9 @@ pub fn build(b: *std.Build) !void {
     });
 
     const linux_headers_module = b.addModule("linux_headers", .{
-        .source_file = .{ .generated = &linux_kexec_header_translated.output_file },
+        .source_file = .{
+            .generated = &linux_kexec_header_translated.output_file,
+        },
     });
 
     const tboot_loader = b.addExecutable(.{
