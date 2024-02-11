@@ -725,7 +725,7 @@ pub const Gpt = struct {
             if (bytes_read != @sizeOf(GptHeader)) {
                 return Error.InvalidHeaderSize;
             }
-            var aligned_buf = @as([]align(@alignOf(GptHeader)) u8, @alignCast(&header_bytes));
+            const aligned_buf = @as([]align(@alignOf(GptHeader)) u8, @alignCast(&header_bytes));
 
             const header: *GptHeader = @ptrCast(aligned_buf);
             if (!mem.eql(u8, &header.signature, magic)) {
@@ -785,7 +785,7 @@ pub const Gpt = struct {
             if (bytes_read != @sizeOf(GptPartitionRecord)) {
                 return Error.InvalidPartitionSize;
             }
-            var aligned_buf = @as([]align(@alignOf(GptPartitionRecord)) u8, @alignCast(&part_bytes));
+            const aligned_buf = @as([]align(@alignOf(GptPartitionRecord)) u8, @alignCast(&part_bytes));
 
             const part: *GptPartitionRecord = @ptrCast(aligned_buf);
 
@@ -1007,7 +1007,7 @@ pub const Mbr = struct {
         if (bytes_read != @sizeOf(MbrHeader)) {
             return Error.InvalidHeaderSize;
         }
-        var aligned_buf = @as([]align(@alignOf(MbrHeader)) u8, @alignCast(&header_bytes));
+        const aligned_buf = @as([]align(@alignOf(MbrHeader)) u8, @alignCast(&header_bytes));
 
         const header: *MbrHeader = @ptrCast(aligned_buf);
 
@@ -1083,13 +1083,4 @@ test "mbr parsing" {
     const partitions = disk.partitions();
     try std.testing.expect(partitions[0].is_bootable());
     try std.testing.expectEqual(@as(u8, 0x06), partitions[0].part_type());
-}
-
-pub fn main() !void {
-    var disk = try std.fs.openFileAbsolute("/dev/nvme0n1", .{});
-    defer disk.close();
-
-    var source = io.StreamSource{ .file = disk };
-    var gpt = try Gpt.init(std.heap.page_allocator, &source);
-    _ = gpt;
 }

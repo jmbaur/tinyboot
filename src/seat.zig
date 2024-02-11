@@ -114,12 +114,12 @@ test "smoke test" {
     try std.testing.expectEqual(@as(usize, 0), os.linux.socketpair(os.linux.PF.LOCAL, os.SOCK.STREAM, 0, &console2));
     defer os.close(console2[1]);
 
-    var input_pipe = try os.pipe();
+    const input_pipe = try os.pipe();
     defer {
         os.close(input_pipe[0]);
         os.close(input_pipe[1]);
     }
-    var output_pipe = try os.pipe();
+    const output_pipe = try os.pipe();
     defer {
         os.close(output_pipe[0]);
         os.close(output_pipe[1]);

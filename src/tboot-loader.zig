@@ -180,7 +180,7 @@ fn main_unwrapped() !void {
         defer cmdline_file.close();
         const cmdline_raw = try cmdline_file.readToEndAlloc(allocator, 2048);
         defer allocator.free(cmdline_raw);
-        var buf = try allocator.dupe(u8, cmdline_raw);
+        const buf = try allocator.dupe(u8, cmdline_raw);
         _ = std.mem.replace(u8, cmdline_raw, &.{0}, " ", buf);
         break :cmdline buf;
     };

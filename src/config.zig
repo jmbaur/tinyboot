@@ -12,7 +12,7 @@ pub const Console = struct {
             return @This(){};
         }
 
-        var rest = std.mem.trimLeft(u8, tty, "tty");
+        const rest = std.mem.trimLeft(u8, tty, "tty");
 
         _ = std.fmt.parseInt(u8, rest, 10) catch {
             return @This(){ .serial_char_device = tty };

@@ -447,7 +447,7 @@ fn installGeneration(
 
         if (std.mem.eql(u8, existing_entry.name, entry_name)) {
             std.log.debug("entry {s} already installed", .{entry_name});
-            var known_entry = try path.join(alloc, &.{
+            const known_entry = try path.join(alloc, &.{
                 path.sep_str,
                 args.efi_sys_mount_point,
                 "loader",

@@ -97,10 +97,8 @@ pub const BootLoaderSpec = struct {
     external_mounts: []Mount,
 
     pub fn init(backing_allocator: std.mem.Allocator) @This() {
-        var arena = std.heap.ArenaAllocator.init(backing_allocator);
-
         return .{
-            .arena = arena,
+            .arena = std.heap.ArenaAllocator.init(backing_allocator),
             .internal_mounts = &.{},
             .external_mounts = &.{},
         };
@@ -161,7 +159,7 @@ pub const BootLoaderSpec = struct {
                 },
             );
 
-            var disk_handle = std.fs.openFileAbsolute(disk_alias_path, .{}) catch continue;
+            const disk_handle = std.fs.openFileAbsolute(disk_alias_path, .{}) catch continue;
             var disk_source = std.io.StreamSource{ .file = disk_handle };
 
             // All GPTs also have an MBR, so we can invalidate the disk
@@ -203,7 +201,7 @@ pub const BootLoaderSpec = struct {
                             },
                         };
 
-                        var partitions = try gpt.partitions(allocator);
+                        const partitions = try gpt.partitions(allocator);
                         for (partitions, 1..) |partition, gpt_partn| {
                             if (partition.part_type() orelse continue == .EfiSystem) {
                                 break :b gpt_partn;
@@ -298,7 +296,7 @@ pub const BootLoaderSpec = struct {
         var mountpoint_dir = try std.fs.openDirAbsoluteZ(mount.mountpoint, .{});
         defer mountpoint_dir.close();
 
-        var loader_conf: LoaderConf = b: {
+        const loader_conf: LoaderConf = b: {
             var file = mountpoint_dir.openFile("loader/loader.conf", .{}) catch break :b .{};
             defer file.close();
             const contents = try file.readToEndAlloc(internal_allocator, 4096);
@@ -316,7 +314,7 @@ pub const BootLoaderSpec = struct {
             }
 
             var entry_file = entries_dir.dir.openFile(dir_entry.name, .{}) catch continue;
-            var entry_contents = try entry_file.readToEndAlloc(internal_allocator, 4096);
+            const entry_contents = try entry_file.readToEndAlloc(internal_allocator, 4096);
             defer internal_allocator.free(entry_contents);
             var type1_entry = Type1Entry.parse(internal_allocator, entry_contents) catch continue;
             defer type1_entry.deinit();
@@ -768,11 +766,6 @@ const Type1Entry = struct {
             }
 
             var line_split = std.mem.splitSequence(u8, line, " ");
-
-            var maybe_key: ?[]const u8 = null;
-            _ = maybe_key;
-            var maybe_value: ?[]const u8 = null;
-            _ = maybe_value;
 
             const key = line_split.next() orelse continue;
 
