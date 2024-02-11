@@ -50,12 +50,12 @@ fn xmodem_send(fd: os.fd_t, filename: []const u8) !void {
 
     var chunk: XmodemChunk = .{
         .block = 1,
+        .start = X_STX,
     };
-
-    chunk.start = X_STX;
 
     var len = stat.size;
     var buf_index: usize = 0;
+
     while (len > 0) {
         var chunk_len: usize = 0;
 
@@ -72,14 +72,22 @@ fn xmodem_send(fd: os.fd_t, filename: []const u8) !void {
             return Error.InvalidSendLength;
         }
 
-        var answer = [_]u8{0};
-        const answer_n = try os.read(fd, &answer);
-        if (answer_n != answer.len) {
-            return Error.InvalidReceiveLength;
-        }
+        const answer = b: while (true) {
+            var answer_buf = [_]u8{0};
+            const answer_n_read = try os.read(fd, &answer_buf);
+            if (answer_n_read != answer_buf.len) {
+                return Error.InvalidReceiveLength;
+            }
 
-        const print: []const u8 = b: {
-            switch (answer[0]) {
+            // consume remaining initial pings
+            if (answer_buf[0] == 'C') {
+                continue;
+            }
+            break :b answer_buf[0];
+        };
+
+        const status_char: []const u8 = b: {
+            switch (answer) {
                 X_ACK => {
                     chunk.block +%= 1;
                     len -= chunk_len;
@@ -91,7 +99,7 @@ fn xmodem_send(fd: os.fd_t, filename: []const u8) !void {
             }
         };
 
-        std.debug.print("{s}", .{print});
+        std.debug.print("{s}", .{status_char});
     }
 
     if (try os.write(fd, &.{X_EOF}) != 1) {
@@ -118,6 +126,9 @@ fn xmodem_recv(
 
     var started = false;
 
+    var buf = std.ArrayList(u8).init(allocator);
+    defer buf.deinit();
+
     outer: while (true) {
         const ping_n = try os.write(fd, &.{'C'});
         if (ping_n != 1) {
@@ -126,12 +137,9 @@ fn xmodem_recv(
 
         var block_index: u8 = 1;
 
-        var buf = std.ArrayList(u8).init(allocator);
-        defer buf.deinit();
-
         while (true) {
             var events = [_]os.linux.epoll_event{undefined};
-            const n_events = os.epoll_wait(epoll_fd, &events, std.time.ms_per_s);
+            const n_events = os.epoll_wait(epoll_fd, &events, 10 * std.time.ms_per_s);
             if (n_events == 0) {
                 // timeout
                 if (!started) {
