@@ -23,9 +23,7 @@ pub fn build(b: *std.Build) !void {
         .optimize = tboot_loader_optimize,
     });
 
-    const linux_headers_module = b.addModule("linux_headers", .{
-        .source_file = linux_kexec_header_translated.getOutput(),
-    });
+    const linux_headers_module = linux_kexec_header_translated.createModule();
 
     const tboot_loader = b.addExecutable(.{
         .name = "tboot-loader",
