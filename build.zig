@@ -24,9 +24,7 @@ pub fn build(b: *std.Build) !void {
     });
 
     const linux_headers_module = b.addModule("linux_headers", .{
-        .source_file = .{
-            .generated = &linux_kexec_header_translated.output_file,
-        },
+        .source_file = linux_kexec_header_translated.getOutput(),
     });
 
     const tboot_loader = b.addExecutable(.{
