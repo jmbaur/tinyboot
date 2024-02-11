@@ -7,6 +7,7 @@ const system = @import("./system.zig");
 const Error = error{
     InvalidReceiveLength,
     InvalidSendLength,
+    Timeout,
 };
 
 const X_STX: u8 = 0x02;
@@ -34,7 +35,31 @@ fn xmodem_send(fd: os.fd_t, filename: []const u8) !void {
 
     std.debug.print("waiting for receiver ping\n", .{});
 
+    const epoll_fd = try os.epoll_create1(0);
+    defer os.close(epoll_fd);
+
+    var read_ready_event = os.linux.epoll_event{
+        .data = .{ .fd = fd },
+        .events = os.linux.EPOLL.IN,
+    };
+    try os.epoll_ctl(epoll_fd, os.linux.EPOLL.CTL_ADD, fd, &read_ready_event);
+
+    var num_timeouts: u8 = 0;
+
     while (true) {
+        var events = [_]os.linux.epoll_event{undefined};
+        const n_events = os.epoll_wait(epoll_fd, &events, 1 * std.time.ms_per_s);
+        if (n_events == 0) {
+            // timeout
+            if (num_timeouts + 1 >= 10) {
+                return Error.Timeout;
+            }
+            num_timeouts += 1;
+            continue;
+        } else if (n_events != 1) {
+            return Error.InvalidReceiveLength;
+        }
+
         var ping = [_]u8{0};
         const n = try os.read(fd, &ping);
         if (n != ping.len) {
@@ -129,6 +154,8 @@ fn xmodem_recv(
     var buf = std.ArrayList(u8).init(allocator);
     defer buf.deinit();
 
+    var num_timeouts: u8 = 0;
+
     outer: while (true) {
         const ping_n = try os.write(fd, &.{'C'});
         if (ping_n != 1) {
@@ -143,6 +170,10 @@ fn xmodem_recv(
             if (n_events == 0) {
                 // timeout
                 if (!started) {
+                    if (num_timeouts + 1 >= 10) {
+                        return Error.Timeout;
+                    }
+                    num_timeouts += 1;
                     continue :outer;
                 } else {
                     continue;
