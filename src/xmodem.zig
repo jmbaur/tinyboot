@@ -19,7 +19,7 @@ const XmodemChunk = extern struct {
     block: u8 = 0,
     block_neg: u8 = 0,
     payload: [1024]u8 = undefined,
-    crc: u16 = 0,
+    crc: u16 align(1) = 0,
 };
 
 fn xmodem_send(fd: os.fd_t, filename: []const u8) !void {
@@ -155,7 +155,10 @@ fn xmodem_recv(
             switch (try os.read(fd, std.mem.asBytes(&chunk))) {
                 1 => {
                     switch (chunk.start) {
-                        X_EOF => return try buf.toOwnedSlice(),
+                        X_EOF => {
+                            try ack(fd);
+                            return try buf.toOwnedSlice();
+                        },
                         X_STX => {
                             if (!started) {
                                 // TODO(jared): should we outright fail here?
@@ -225,6 +228,11 @@ fn usage(prog_name: []const u8) noreturn {
         \\  action:            "send" or "recv"
         \\  serial-device:     path to serial device (e.g. /dev/ttyUSB0)
         \\  file:              filepath to send from or receive into
+        \\
+        \\To use with sx/rx, use binary transfer with 1K block sizes and CRC16.
+        \\For example:
+        \\  send: sx -kb /path/to/send_file < /dev/ttyUSB0 > /dev/ttyUSB0
+        \\  recv: rx -cb /path/to/recv_file < /dev/ttyUSB0 > /dev/ttyUSB0
         \\
     , .{prog_name});
 
