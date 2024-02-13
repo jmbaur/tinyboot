@@ -194,8 +194,13 @@ pub fn xmodem_recv(
                 var events = [_]os.linux.epoll_event{undefined};
                 const n_events = os.epoll_wait(epoll_fd, &events, 5 * std.time.ms_per_s);
                 if (n_events == 0) {
+                    if (ms_without_bytes * std.time.ms_per_s > 25) {
+                        return Error.Timeout;
+                    }
+                    ms_without_bytes += 5 + std.time.ms_per_s;
                     continue :outer;
                 } else {
+                    ms_without_bytes = 0;
                     have_bytes = true;
                 }
             }
