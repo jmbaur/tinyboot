@@ -5,6 +5,8 @@ const os = std.os;
 const system = std.os.system;
 const linux = std.os.linux;
 
+const linux_headers = @import("linux_headers");
+
 const MountError = error{
     Todo,
 };
@@ -48,34 +50,30 @@ pub fn setupSystem() !void {
     try os.symlink("/proc/self/fd/2", "/dev/stderr");
 }
 
-// Not defined in zig standard library
-const VINTR = 0;
-const VQUIT = 1;
-const VERASE = 2;
-const VKILL = 3;
-const VMIN = 4;
-const VTIME = 5;
-const VEOL2 = 6;
-const VSWTC = 7;
-const VSWTCH = 7;
-const VSTART = 8;
-const VSTOP = 9;
-const VSUSP = 10;
-const VREPRINT = 12;
-const VDISCARD = 13;
-const VWERASE = 14;
-const VLNEXT = 15;
-const VEOF = 16;
-const VEOL = 17;
-const CBAUD = switch (builtin.target.cpu.arch) {
-    .powerpc, .powerpc64 => 0o377,
-    else => 0o10017,
-};
-const CBAUDEX = switch (builtin.target.cpu.arch) {
-    .powerpc, .powerpc64 => 0o00020,
-    else => 0o10000,
-};
-const CRTSCTS: system.tcflag_t = 0o20000000000;
+const CBAUD = linux_headers.CBAUD;
+const CBAUDEX = linux_headers.CBAUDEX;
+const CRTSCTS = linux_headers.CRTSCTS;
+const TCFLSH = linux_headers.TCFLSH;
+const TCIOFLUSH = linux_headers.TCIOFLUSH;
+const TCOON = linux_headers.TCOON;
+const VDISCARD = linux_headers.VDISCARD;
+const VEOF = linux_headers.VEOF;
+const VEOL = linux_headers.VEOL;
+const VEOL2 = linux_headers.VEOL2;
+const VERASE = linux_headers.VERASE;
+const VINTR = linux_headers.VINTR;
+const VKILL = linux_headers.VKILL;
+const VLNEXT = linux_headers.VLNEXT;
+const VMIN = linux_headers.VMIN;
+const VQUIT = linux_headers.VQUIT;
+const VREPRINT = linux_headers.VREPRINT;
+const VSTART = linux_headers.VSTART;
+const VSTOP = linux_headers.VSTOP;
+const VSUSP = linux_headers.VSUSP;
+const VSWTC = linux_headers.VSWTC;
+const VSWTCH = linux_headers.VSWTCH;
+const VTIME = linux_headers.VTIME;
+const VWERASE = linux_headers.VWERASE;
 
 fn setBaudRate(t: *os.termios, baud: u32) void {
     // indicate that we want to set a new baud rate
@@ -113,7 +111,7 @@ pub fn setupTty(fd: os.fd_t, mode: TtyMode) !void {
             termios.cc[VSTOP] = 19; // C-s
             termios.cc[VSUSP] = 26; // C-z
 
-            termios.cflag &= CBAUD | CBAUDEX | system.CSIZE | system.CSTOPB | system.PARENB | system.PARODD | CRTSCTS;
+            termios.cflag &= CBAUD | CBAUDEX | system.CSIZE | system.CSTOPB | system.PARENB | system.PARODD;
 
             termios.cflag |= system.CREAD | system.HUPCL | system.CLOCAL;
 
@@ -131,26 +129,23 @@ pub fn setupTty(fd: os.fd_t, mode: TtyMode) !void {
             setBaudRate(&termios, system.B115200);
         },
         .file_transfer => {
+            termios.iflag = system.IGNBRK;
+            termios.lflag &= ~(system.ECHO | system.ICANON | system.ISIG | system.IEXTEN);
             termios.oflag = 0;
-            termios.cflag = (termios.cflag & ~system.CSIZE) | system.CS8; // 8-bit chars
-            termios.iflag &= ~system.IGNBRK; // disable break processing
-            termios.lflag = 0; // no signaling chars, no echo,
-            termios.oflag = 0; // no remapping, no delays
-            termios.cc[VMIN] = 1; // read doesn't block
-            termios.cc[VTIME] = 5; // 0.5 seconds read timeout
-            termios.iflag &= ~(system.IXON | system.IXOFF | system.IXANY); // shut off xon/xoff ctrl
-
-            // ignore modem controls, enable reading, and shutoff parity
-            termios.cflag |= (system.CLOCAL | system.CREAD);
-            termios.cflag &= ~(system.PARENB | system.PARODD);
-            termios.cflag &= ~system.CSTOPB;
-            termios.cflag &= ~CRTSCTS;
+            termios.cflag &= ~system.PARENB;
+            termios.cflag &= ~system.CSIZE;
+            termios.cflag |= system.CS8;
+            termios.cc[VMIN] = 1;
+            termios.cc[VTIME] = 1;
 
             setBaudRate(&termios, system.B3000000);
         },
     }
 
-    try os.tcsetattr(fd, os.TCSA.NOW, termios);
+    _ = system.tcdrain(fd);
+    _ = system.ioctl(fd, TCFLSH, TCIOFLUSH);
+    try os.tcsetattr(fd, os.TCSA.DRAIN, termios);
+    _ = system.ioctl(fd, TCFLSH, TCOON);
 }
 
 // These aren't defined in the UAPI linux headers for some odd reason.

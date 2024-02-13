@@ -7,6 +7,7 @@ const Config = @import("./config.zig").Config;
 const Seat = @import("./seat.zig").Seat;
 const ServerMsg = @import("./message.zig").ServerMsg;
 const system = @import("./system.zig");
+const xmodem_recv = @import("./xmodem.zig").xmodem_recv;
 
 pub const Shell = struct {
     user_presence: bool = false,
@@ -381,7 +382,8 @@ pub const Shell = struct {
             self.input_end = 0;
 
             const maybe_msg = Command.run(self.input_buffer[0..end], self) catch |err| {
-                std.debug.print("error running command: {any}\n", .{err});
+                std.debug.print("\nerror running command: {any}\n", .{err});
+                try self.prompt();
                 return;
             };
 
@@ -405,8 +407,9 @@ pub const Command = struct {
 
     const argv0 = enum {
         help, // NOTE: keep "help" at the top
-        logs,
+        boot_xmodem,
         dmesg,
+        logs,
         poweroff,
         reboot,
     };
@@ -549,6 +552,55 @@ pub const Command = struct {
             const kernel_logs = try system.kernelLogs(a);
             defer a.free(kernel_logs);
             try shell_instance.writeAllAndFlush(kernel_logs);
+
+            return null;
+        }
+    };
+
+    const boot_xmodem = struct {
+        const short_help = "boot over xmodem";
+        const long_help =
+            \\Boot via kernel and initrd obtained over the xmodem protocol.
+            \\
+            \\Usage:
+            \\boot_xmodem [-n]
+            \\
+            \\Options:
+            \\  -n    no initrd
+        ;
+
+        fn run(a: std.mem.Allocator, args: *ArgsIterator, shell_instance: *Shell) !?ClientMsg {
+            defer system.setupTty(os.STDIN_FILENO, .user_input) catch {};
+
+            try system.setupTty(os.STDIN_FILENO, .file_transfer);
+
+            _ = shell_instance;
+
+            const skip_initrd = if (args.next()) |next| std.mem.eql(u8, next, "-n") else false;
+
+            std.log.info("fetching kernel over xmodem", .{});
+            var kernel_bytes = try xmodem_recv(a, os.STDIN_FILENO);
+            defer a.free(kernel_bytes);
+            var kernel = try std.fs.createFileAbsolute("/run/kernel", .{ .read = true });
+            defer kernel.close();
+            try kernel.writeAll(kernel_bytes);
+            std.log.info("received kernel of size {} bytes", .{kernel_bytes.len});
+
+            if (!skip_initrd) {
+                std.log.info("fetching initrd over xmodem", .{});
+                var initrd_bytes = try xmodem_recv(a, os.STDIN_FILENO);
+                defer a.free(initrd_bytes);
+                var initrd = try std.fs.createFileAbsolute("/run/initrd", .{ .read = true });
+                defer initrd.close();
+                try initrd.writeAll(initrd_bytes);
+                std.log.info("received initrd of size {} bytes", .{initrd_bytes.len});
+            }
+
+            std.log.info("fetching kernel params over xmodem", .{});
+            const kernel_params_bytes = try xmodem_recv(a, os.STDIN_FILENO);
+            defer a.free(kernel_params_bytes);
+            std.log.info("received kernel params '{any}'", .{kernel_params_bytes[0..16]});
+
             return null;
         }
     };

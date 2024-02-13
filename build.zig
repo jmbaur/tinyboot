@@ -85,6 +85,7 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .optimize = optimize,
     });
+    modem_tool.addModule("linux_headers", linux_headers_module);
     b.installArtifact(modem_tool);
 
     const unit_tests = b.addTest(.{

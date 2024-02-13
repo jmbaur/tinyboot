@@ -2,12 +2,15 @@ const std = @import("std");
 const os = std.os;
 const Crc16Xmodem = std.hash.crc.Crc16Xmodem;
 
+const linux_headers = @import("linux_headers");
+
 const system = @import("./system.zig");
 
 const Error = error{
     InvalidReceiveLength,
     InvalidSendLength,
     Timeout,
+    TooManyNaks,
 };
 
 const X_STX: u8 = 0x02;
@@ -23,9 +26,7 @@ const XmodemChunk = extern struct {
     crc: u16 align(1) = 0,
 };
 
-fn xmodem_send(fd: os.fd_t, filename: []const u8) !void {
-    try system.setupTty(fd, .file_transfer);
-
+pub fn xmodem_send(fd: os.fd_t, filename: []const u8) !void {
     var file = try std.fs.openFileAbsolute(filename, .{});
     defer file.close();
 
@@ -48,7 +49,7 @@ fn xmodem_send(fd: os.fd_t, filename: []const u8) !void {
 
     while (true) {
         var events = [_]os.linux.epoll_event{undefined};
-        const n_events = os.epoll_wait(epoll_fd, &events, 1 * std.time.ms_per_s);
+        const n_events = os.epoll_wait(epoll_fd, &events, 10 * std.time.ms_per_s);
         if (n_events == 0) {
             // timeout
             if (num_timeouts + 1 >= 10) {
@@ -81,7 +82,9 @@ fn xmodem_send(fd: os.fd_t, filename: []const u8) !void {
     var len = stat.size;
     var buf_index: usize = 0;
 
-    while (len > 0) {
+    var num_errors: u8 = 0;
+
+    while (len > 0 and num_errors < 10) {
         var chunk_len: usize = 0;
 
         chunk_len = std.mem.min(usize, &.{ len, chunk.payload.len });
@@ -119,8 +122,14 @@ fn xmodem_send(fd: os.fd_t, filename: []const u8) !void {
                     buf_index += chunk_len;
                     break :b ".";
                 },
-                X_NAK => break :b "N",
-                else => break :b "?",
+                X_NAK => {
+                    num_errors += 1;
+                    break :b "N";
+                },
+                else => {
+                    num_errors += 1;
+                    break :b "?";
+                },
             }
         };
 
@@ -131,21 +140,32 @@ fn xmodem_send(fd: os.fd_t, filename: []const u8) !void {
         return Error.InvalidSendLength;
     }
 
-    std.debug.print("done\n", .{});
+    var answer_buf = [_]u8{0};
+    if (try os.read(fd, &answer_buf) != 1) {
+        return Error.InvalidReceiveLength;
+    }
+
+    if (answer_buf[0] == X_ACK) {
+        std.debug.print("done\n", .{});
+        return;
+    }
+
+    std.debug.print("\ntoo many errors encountered, sending aborted\n", .{});
 }
 
-fn xmodem_recv(
+pub fn xmodem_recv(
     allocator: std.mem.Allocator,
     fd: os.fd_t,
 ) ![]u8 {
-    try system.setupTty(fd, .file_transfer);
-
     const epoll_fd = try os.epoll_create1(0);
     defer os.close(epoll_fd);
 
+    // We create a oneshot epoll event since VTIME does not return if the
+    // receiver has yet to receive any bytes. So we use epoll to wait for our
+    // first bytes, then we use VTIME.
     var read_ready_event = os.linux.epoll_event{
         .data = .{ .fd = fd },
-        .events = os.linux.EPOLL.IN,
+        .events = os.linux.EPOLL.IN | os.linux.EPOLL.ONESHOT,
     };
     try os.epoll_ctl(epoll_fd, os.linux.EPOLL.CTL_ADD, fd, &read_ready_event);
 
@@ -154,7 +174,8 @@ fn xmodem_recv(
     var buf = std.ArrayList(u8).init(allocator);
     defer buf.deinit();
 
-    var num_timeouts: u8 = 0;
+    var have_bytes = false;
+    var ms_without_bytes: u32 = 0;
 
     outer: while (true) {
         const ping_n = try os.write(fd, &.{'C'});
@@ -163,82 +184,93 @@ fn xmodem_recv(
         }
 
         var block_index: u8 = 1;
+        var num_errors: u8 = 0;
 
-        while (true) {
-            var events = [_]os.linux.epoll_event{undefined};
-            const n_events = os.epoll_wait(epoll_fd, &events, 10 * std.time.ms_per_s);
-            if (n_events == 0) {
-                // timeout
-                if (!started) {
-                    if (num_timeouts + 1 >= 10) {
-                        return Error.Timeout;
-                    }
-                    num_timeouts += 1;
+        var unused_buf_len: usize = 0;
+        var unused_buf: [@sizeOf(XmodemChunk)]u8 = undefined;
+
+        while (num_errors < 10) {
+            if (!have_bytes) {
+                var events = [_]os.linux.epoll_event{undefined};
+                const n_events = os.epoll_wait(epoll_fd, &events, 5 * std.time.ms_per_s);
+                if (n_events == 0) {
                     continue :outer;
                 } else {
-                    continue;
+                    have_bytes = true;
                 }
-            } else if (n_events != 1) {
-                return Error.InvalidReceiveLength;
             }
 
             var chunk: XmodemChunk = .{};
-            switch (try os.read(fd, std.mem.asBytes(&chunk))) {
-                1 => {
-                    switch (chunk.start) {
-                        X_EOF => {
-                            try ack(fd);
-                            return try buf.toOwnedSlice();
-                        },
-                        X_STX => {
-                            if (!started) {
-                                // TODO(jared): should we outright fail here?
-                                continue :outer;
-                            } else {
-                                started = true;
-                            }
-                        },
-                        else => {
-                            try nak(fd);
-                            continue;
-                        },
-                    }
-                },
-                @sizeOf(XmodemChunk) => {
-                    if (block_index == chunk.block -% 1) {
-                        // The sender did not increment the block number,
-                        // possibly indicating that they did not receive our
-                        // prior ack. Resend an ack in the hopes that they will
-                        // increment the block number they send.
-                        try ack(fd);
-                        continue;
-                    } else if (block_index != chunk.block) {
-                        try nak(fd);
-                        continue;
-                    }
+            var raw_chunk: [@sizeOf(XmodemChunk)]u8 = undefined;
 
-                    block_index +%= 1;
+            const chunk_n_read = try os.read(fd, &raw_chunk);
 
-                    const crc_got = std.mem.nativeToBig(
-                        u16,
-                        Crc16Xmodem.hash(&chunk.payload),
-                    );
+            if (chunk_n_read == 0) {
+                ms_without_bytes += 100; // VTIME is 1 tenth of a second
+                if (!started and std.time.ms_per_s * ms_without_bytes >= 5) {
+                    continue :outer; // resend ping
+                }
+                continue;
+            } else {
+                ms_without_bytes = 0;
+            }
 
-                    if (crc_got != chunk.crc) {
-                        try nak(fd);
-                        continue;
-                    }
+            if (unused_buf_len + chunk_n_read >= @sizeOf(XmodemChunk)) {
+                const len_for_unused = @sizeOf(XmodemChunk) - unused_buf_len;
+                std.mem.copyForwards(u8, unused_buf[unused_buf_len..], raw_chunk[0..len_for_unused]);
+                @memcpy(std.mem.asBytes(&chunk), &unused_buf);
+                std.mem.copyForwards(u8, &unused_buf, raw_chunk[len_for_unused..]);
+                unused_buf_len = chunk_n_read - len_for_unused;
 
-                    try buf.appendSlice(&chunk.payload);
+                if (!started and chunk.start != X_STX) {
+                    try nak(fd);
+                    continue :outer;
+                } else {
+                    started = true;
+                }
+
+                // process chunk
+                if (block_index == chunk.block -% 1) {
+                    // The sender did not increment the block number,
+                    // possibly indicating that they did not receive our
+                    // prior ack. Resend an ack in the hopes that they will
+                    // increment the block number they send.
                     try ack(fd);
-                },
-                else => {
+                    continue;
+                } else if (block_index != chunk.block) {
+                    num_errors += 1;
                     try nak(fd);
                     continue;
-                },
+                }
+
+                block_index +%= 1;
+
+                const crc_got = std.mem.nativeToBig(
+                    u16,
+                    Crc16Xmodem.hash(&chunk.payload),
+                );
+
+                if (crc_got != chunk.crc) {
+                    num_errors += 1;
+                    try nak(fd);
+                    continue;
+                }
+
+                try buf.appendSlice(&chunk.payload);
+                try ack(fd);
+            } else {
+                @memcpy(unused_buf[unused_buf_len .. unused_buf_len + chunk_n_read], raw_chunk[0..chunk_n_read]);
+                unused_buf_len += chunk_n_read;
+            }
+
+            if (unused_buf[0] == X_EOF) {
+                try ack(fd);
+                return try buf.toOwnedSlice();
             }
         }
     }
+
+    return Error.TooManyNaks;
 }
 
 fn ack(fd: os.fd_t) !void {
@@ -278,11 +310,13 @@ pub fn main() !void {
 
     var serial = try std.fs.openFileAbsolute(
         args.next() orelse usage(prog_name),
-        .{ .mode = .read_write },
+        .{ .mode = .read_write, .lock = .exclusive },
     );
     defer serial.close();
 
     const filepath = args.next() orelse usage(prog_name);
+
+    try system.setupTty(serial.handle, .file_transfer);
 
     if (std.mem.eql(u8, action, "send")) {
         try xmodem_send(serial.handle, filepath);
@@ -295,10 +329,7 @@ pub fn main() !void {
         var file = try std.fs.createFileAbsolute(filepath, .{});
         defer file.close();
 
-        const file_bytes = try xmodem_recv(
-            allocator,
-            serial.handle,
-        );
+        const file_bytes = try xmodem_recv(allocator, serial.handle);
         defer allocator.free(file_bytes);
 
         try file.writeAll(file_bytes);
