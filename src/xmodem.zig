@@ -171,107 +171,99 @@ pub fn xmodem_recv(
 
     var started = false;
 
-    var buf = std.ArrayList(u8).init(allocator);
-    defer buf.deinit();
+    var data_buf = std.ArrayList(u8).init(allocator);
+    defer data_buf.deinit();
 
-    var have_bytes = false;
     var ms_without_bytes: u32 = 0;
 
-    outer: while (true) {
+    while (true) {
         const ping_n = try os.write(fd, &.{'C'});
         if (ping_n != 1) {
             return Error.InvalidSendLength;
         }
 
-        var block_index: u8 = 1;
-        var num_errors: u8 = 0;
-
-        var unused_buf_len: usize = 0;
-        var unused_buf: [@sizeOf(XmodemChunk)]u8 = undefined;
-
-        while (num_errors < 10) {
-            if (!have_bytes) {
-                var events = [_]os.linux.epoll_event{undefined};
-                const n_events = os.epoll_wait(epoll_fd, &events, 5 * std.time.ms_per_s);
-                if (n_events == 0) {
-                    if (ms_without_bytes * std.time.ms_per_s > 25) {
-                        return Error.Timeout;
-                    }
-                    ms_without_bytes += 5 + std.time.ms_per_s;
-                    continue :outer;
-                } else {
-                    ms_without_bytes = 0;
-                    have_bytes = true;
-                }
+        var events = [_]os.linux.epoll_event{undefined};
+        const n_events = os.epoll_wait(epoll_fd, &events, 5 * std.time.ms_per_s);
+        if (n_events == 0) {
+            if (ms_without_bytes / std.time.ms_per_s > 25) {
+                return Error.Timeout;
             }
+            ms_without_bytes += 5 * std.time.ms_per_s;
+        } else {
+            ms_without_bytes = 0;
+            break;
+        }
+    }
 
-            var chunk: XmodemChunk = .{};
-            var raw_chunk: [@sizeOf(XmodemChunk)]u8 = undefined;
+    var block_index: u8 = 1;
+    var num_errors: u8 = 0;
 
-            const chunk_n_read = try os.read(fd, &raw_chunk);
+    var chunk_buf: [@sizeOf(XmodemChunk)]u8 = undefined;
+    var chunk_buf_index: usize = 0;
 
-            if (chunk_n_read == 0) {
-                ms_without_bytes += 100; // VTIME is 1 tenth of a second
-                if (!started and std.time.ms_per_s * ms_without_bytes >= 5) {
-                    continue :outer; // resend ping
-                }
+    while (num_errors < 10) {
+        var chunk: XmodemChunk = .{};
+
+        const chunk_n_read = try os.read(fd, chunk_buf[chunk_buf_index..]);
+
+        if (chunk_n_read == 0) {
+            ms_without_bytes += 100; // We set VTIME to 1 tenth of a second
+            if (ms_without_bytes / std.time.ms_per_s >= 5) {
+                return Error.Timeout;
+            }
+            continue;
+        } else {
+            ms_without_bytes = 0;
+        }
+
+        if (chunk_buf_index + chunk_n_read == @sizeOf(XmodemChunk)) {
+            @memcpy(std.mem.asBytes(&chunk), &chunk_buf);
+            chunk_buf_index = 0;
+
+            if (!started and chunk.start != X_STX) {
+                num_errors += 1;
+                try nak(fd);
                 continue;
             } else {
-                ms_without_bytes = 0;
+                started = true;
             }
 
-            if (unused_buf_len + chunk_n_read >= @sizeOf(XmodemChunk)) {
-                const len_for_unused = @sizeOf(XmodemChunk) - unused_buf_len;
-                std.mem.copyForwards(u8, unused_buf[unused_buf_len..], raw_chunk[0..len_for_unused]);
-                @memcpy(std.mem.asBytes(&chunk), &unused_buf);
-                std.mem.copyForwards(u8, &unused_buf, raw_chunk[len_for_unused..]);
-                unused_buf_len = chunk_n_read - len_for_unused;
-
-                if (!started and chunk.start != X_STX) {
-                    try nak(fd);
-                    continue :outer;
-                } else {
-                    started = true;
-                }
-
-                // process chunk
-                if (block_index == chunk.block -% 1) {
-                    // The sender did not increment the block number,
-                    // possibly indicating that they did not receive our
-                    // prior ack. Resend an ack in the hopes that they will
-                    // increment the block number they send.
-                    try ack(fd);
-                    continue;
-                } else if (block_index != chunk.block) {
-                    num_errors += 1;
-                    try nak(fd);
-                    continue;
-                }
-
-                block_index +%= 1;
-
-                const crc_got = std.mem.nativeToBig(
-                    u16,
-                    Crc16Xmodem.hash(&chunk.payload),
-                );
-
-                if (crc_got != chunk.crc) {
-                    num_errors += 1;
-                    try nak(fd);
-                    continue;
-                }
-
-                try buf.appendSlice(&chunk.payload);
+            // process chunk
+            if (block_index == chunk.block -% 1) {
+                // The sender did not increment the block number,
+                // possibly indicating that they did not receive our
+                // prior ack. Resend an ack in the hopes that they will
+                // increment the block number they send.
                 try ack(fd);
-            } else {
-                @memcpy(unused_buf[unused_buf_len .. unused_buf_len + chunk_n_read], raw_chunk[0..chunk_n_read]);
-                unused_buf_len += chunk_n_read;
+                continue;
+            } else if (block_index != chunk.block) {
+                num_errors += 1;
+                try nak(fd);
+                continue;
             }
 
-            if (unused_buf[0] == X_EOF) {
-                try ack(fd);
-                return try buf.toOwnedSlice();
+            block_index +%= 1;
+
+            const crc_got = std.mem.nativeToBig(
+                u16,
+                Crc16Xmodem.hash(&chunk.payload),
+            );
+
+            if (crc_got != chunk.crc) {
+                num_errors += 1;
+                try nak(fd);
+                continue;
             }
+
+            try data_buf.appendSlice(&chunk.payload);
+            try ack(fd);
+        } else {
+            chunk_buf_index += chunk_n_read;
+        }
+
+        if (chunk_buf[0] == X_EOF) {
+            try ack(fd);
+            return try data_buf.toOwnedSlice();
         }
     }
 
