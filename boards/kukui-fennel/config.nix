@@ -6,7 +6,6 @@
       commandLine = [ "console=ttyS0,115200" "console=tty1" ];
       dtbPattern = "mt8183-kukui-jacuzzi-fennel*";
     };
-    tinyboot.consoles = lib.mkDefault [ "tty1" "ttyS0" ];
     coreboot.kconfig = with lib.kernel; {
       ARM64_BL31_EXTERNAL_FILE = freeform "${pkgs.armTrustedFirmwareMT8183}/libexec/bl31.elf";
       BOARD_GOOGLE_FENNEL = yes;

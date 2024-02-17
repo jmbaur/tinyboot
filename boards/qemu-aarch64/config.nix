@@ -8,7 +8,6 @@
         qemu-system-aarch64 -M virt,secure=on,virtualization=on,dumpdtb=$out -cpu cortex-a53 -m 2G -smp 2 -nographic
       '');
     };
-    tinyboot.consoles = lib.mkDefault [ "ttyAMA0" "tty1" ];
     coreboot.kconfig = with lib.kernel; {
       BOARD_EMULATION = yes;
       BOARD_EMULATION_QEMU_AARCH64 = yes;

@@ -91,7 +91,6 @@ in
       type = types.enum [ "off" "error" "warn" "info" "debug" "trace" ];
       default = "info";
     };
-    tinyboot.consoles = mkOption { type = types.listOf types.str; default = [ "tty1" ]; };
     extraInitrdContents = mkOption {
       type = types.listOf (types.submodule {
         options.object = mkOption { type = types.path; };
@@ -103,8 +102,7 @@ in
   config = {
     # TODO(jared): only add fbcon param if video is enabled in the kernel
     # The "--" makes linux pass remaining parameters as args to PID1
-    linux.commandLine = lib.mkBefore ([ "fbcon=logo-count:1" "console=ttynull" "--" ]
-      ++ map (console: "tboot.console=${console}") config.tinyboot.consoles);
+    linux.commandLine = lib.mkBefore [ "fbcon=logo-count:1" "console=ttynull" "--" ];
     extraInitrdContents = lib.optional (config.linux.firmware != [ ]) {
       symlink = "/lib/firmware";
       object = pkgs.buildPackages.runCommand "linux-firmware" { } ("mkdir -p $out;" + lib.concatLines (map

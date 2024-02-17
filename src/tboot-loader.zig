@@ -7,9 +7,7 @@ const fs = std.fs;
 const linux = std.os.linux;
 
 const Autoboot = @import("./boot.zig").Autoboot;
-const Config = @import("./config.zig").Config;
 const Console = @import("./seat.zig").Console;
-const DeviceWatcher = @import("./device.zig").DeviceWatcher;
 const Seat = @import("./seat.zig").Seat;
 const Shell = @import("./shell.zig").Shell;
 const device = @import("./device.zig");
@@ -35,36 +33,30 @@ const State = struct {
     device_timer_fd: os.fd_t,
 };
 
-fn run_event_loop(a: std.mem.Allocator, cfg: *const Config) !?os.RebootCommand {
+fn run_event_loop(allocator: std.mem.Allocator) !?os.RebootCommand {
     const epoll_fd = try os.epoll_create1(0);
     defer os.close(epoll_fd);
 
-    var device_watcher = try DeviceWatcher.init();
+    var device_watcher = try device.DeviceWatcher.init();
     try device_watcher.register(epoll_fd);
     defer device_watcher.deinit();
 
     var seat = s: {
-        var pids = std.ArrayList(os.pid_t).init(a);
+        var pids = std.ArrayList(os.pid_t).init(allocator);
         errdefer pids.deinit();
 
-        var fds = std.ArrayList(os.fd_t).init(a);
+        var fds = std.ArrayList(os.fd_t).init(allocator);
         errdefer fds.deinit();
 
-        var consoles = std.ArrayList(Console).init(a);
+        var consoles = std.ArrayList(Console).init(allocator);
 
-        for (cfg.consoles) |console| {
-            const path = try std.fs.path.join(a, &.{
-                std.fs.path.sep_str,
-                "dev",
-                console.serial_char_device orelse "tty1",
-            });
-            defer a.free(path);
+        const active_consoles = try device.findActiveConsoles(allocator);
+        defer allocator.free(active_consoles);
 
-            const fd = os.open(path, os.O.RDWR | os.O.NOCTTY, 0) catch continue;
-
+        for (active_consoles) |fd| {
             var sock_pair = [2]os.fd_t{ 0, 0 };
             if (os.linux.socketpair(os.linux.PF.LOCAL, os.SOCK.STREAM, 0, &sock_pair) != 0) {
-                return error.Todo;
+                continue;
             }
 
             const pid = try os.fork();
@@ -79,6 +71,9 @@ fn run_event_loop(a: std.mem.Allocator, cfg: *const Config) !?os.RebootCommand {
                 defer shell.deinit();
 
                 shell.run() catch |err| {
+                    // Use std.debug.print since we want to print the error
+                    // directly to stderr of the child process, as there won't
+                    // be a way to stream output from std.log.* calls.
                     std.debug.print("failed to run shell: {any}\n", .{err});
                 };
 
@@ -91,8 +86,6 @@ fn run_event_loop(a: std.mem.Allocator, cfg: *const Config) !?os.RebootCommand {
                 });
                 log.addConsole(sock_pair[1]);
             }
-
-            std.log.info("using console {s}", .{path});
         }
 
         break :s Seat.init(try consoles.toOwnedSlice());
@@ -169,9 +162,6 @@ fn main_unwrapped() !void {
 
     try system.setupSystem();
 
-    var args = std.process.args();
-    const cfg = try Config.parseFromArgs(allocator, &args);
-
     try log.initLogger();
     defer log.deinitLogger();
 
@@ -193,6 +183,6 @@ fn main_unwrapped() !void {
         std.log.info("built with coreboot support", .{});
     }
 
-    const reboot_cmd = try run_event_loop(allocator, &cfg) orelse os.RebootCommand.POWER_OFF;
+    const reboot_cmd = try run_event_loop(allocator) orelse os.RebootCommand.POWER_OFF;
     try os.reboot(reboot_cmd);
 }

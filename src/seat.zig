@@ -28,7 +28,6 @@ const builtin = @import("builtin");
 const os = std.os;
 
 const system = @import("./system.zig");
-const Config = @import("./config.zig").Config;
 const ClientMsg = @import("./message.zig").ClientMsg;
 const ServerMsg = @import("./message.zig").ServerMsg;
 

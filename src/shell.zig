@@ -3,7 +3,6 @@ const os = std.os;
 const process = std.process;
 
 const ClientMsg = @import("./message.zig").ClientMsg;
-const Config = @import("./config.zig").Config;
 const Seat = @import("./seat.zig").Seat;
 const ServerMsg = @import("./message.zig").ServerMsg;
 const system = @import("./system.zig");
