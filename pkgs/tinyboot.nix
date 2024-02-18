@@ -1,4 +1,4 @@
-{ lib, stdenvNoCC, xz, zig_0_11, corebootSupport ? true }:
+{ lib, callPackage, stdenvNoCC, xz, zig_0_11, corebootSupport ? true }:
 let
   stdenv = stdenvNoCC;
   zigArgs = [
@@ -24,6 +24,7 @@ stdenv.mkDerivation {
   configurePhase = ''
     runHook preConfigure
     export ZIG_GLOBAL_CACHE_DIR=/tmp
+    ln -s ${callPackage ../deps.nix { }} $ZIG_GLOBAL_CACHE_DIR/p
     runHook postConfigure
   '';
 

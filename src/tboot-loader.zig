@@ -126,7 +126,9 @@ fn run_event_loop(allocator: std.mem.Allocator) !?os.RebootCommand {
                     seat.force_shell();
                 }
             } else if (event.data.fd == device_watcher.nl_fd) {
-                try device_watcher.handle_new_event();
+                device_watcher.handle_new_event() catch |err| {
+                    std.log.err("failed to handle new device: {}", .{err});
+                };
             } else {
                 if (!user_presence) {
                     try autoboot.stop();
@@ -145,7 +147,7 @@ fn run_event_loop(allocator: std.mem.Allocator) !?os.RebootCommand {
 // PID1 should not return
 pub fn main() noreturn {
     if (os.linux.getpid() != 1) {
-        std.debug.panic("not pid 1", .{});
+        std.debug.panic("not pid 1\n", .{});
     }
 
     main_unwrapped() catch |err| {

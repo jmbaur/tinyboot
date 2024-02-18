@@ -30,12 +30,15 @@ pub fn parseUeventFileContents(allocator: std.mem.Allocator, contents: []const u
 const Action = enum {
     add,
     remove,
+    bind,
 
     fn parse(action: []const u8) ?@This() {
         if (std.mem.eql(u8, action, "add")) {
             return .add;
         } else if (std.mem.eql(u8, action, "remove")) {
             return .remove;
+        } else if (std.mem.eql(u8, action, "bind")) {
+            return .bind;
         }
 
         return null;
@@ -46,9 +49,13 @@ const Kobject = struct {
     action: Action,
     device_path: []const u8,
     uevent: Uevent,
+
+    pub fn deinit(self: *@This()) void {
+        self.uevent.deinit();
+    }
 };
 
-fn parseUeventKobjectContents(allocator: std.mem.Allocator, contents: []const u8) !Kobject {
+fn parseUeventKobjectContents(allocator: std.mem.Allocator, contents: []const u8) !?Kobject {
     var iter = std.mem.splitSequence(u8, contents, &.{0});
 
     const first_line = iter.next().?;
@@ -72,7 +79,7 @@ fn parseUeventKobjectContents(allocator: std.mem.Allocator, contents: []const u8
         };
     }
 
-    @panic("hi");
+    return null;
 }
 
 fn makedev(major: u32, minor: u32) u32 {
@@ -101,7 +108,7 @@ fn createBlkAlias(
 ) !void {
     const diskseq = uevent.get("DISKSEQ") orelse return DeviceError.IncompleteDevice;
 
-    var buf: [16]u8 = undefined;
+    var buf: [32]u8 = undefined;
     const diskseq_partn_filename = name: {
         if (uevent.get("PARTN")) |partn| {
             break :name try std.fmt.bufPrint(&buf, "disk{d}_part{d}", .{ diskseq, partn });
@@ -109,7 +116,6 @@ fn createBlkAlias(
             break :name try std.fmt.bufPrint(&buf, "disk{d}", .{diskseq});
         }
     };
-    defer allocator.free(diskseq_partn_filename);
 
     const alias_path = try path.join(allocator, &.{ path.sep_str, "dev", "disk", diskseq_partn_filename });
     defer allocator.free(alias_path);
@@ -132,7 +138,7 @@ fn createCharAlias(
     major: u32,
     minor: u32,
 ) !void {
-    var buf: [8]u8 = undefined;
+    var buf: [32]u8 = undefined;
     const filename = try std.fmt.bufPrint(&buf, "{d}:{d}", .{ major, minor });
 
     const alias_path = try path.join(allocator, &.{ path.sep_str, "dev", "char", filename });
@@ -142,18 +148,26 @@ fn createCharAlias(
 }
 
 fn createDevice(allocator: std.mem.Allocator, uevent: Uevent) !void {
-    const major_str = uevent.get("MAJOR") orelse return DeviceError.IncompleteDevice;
-    const minor_str = uevent.get("MINOR") orelse return DeviceError.IncompleteDevice;
-    const devname = uevent.get("DEVNAME") orelse return DeviceError.IncompleteDevice;
-    const devtype = uevent.get("DEVTYPE");
-
-    const dev_path = path.join(allocator, &.{ path.sep_str, "dev", devname }) catch return;
-    defer allocator.free(dev_path);
+    // Nothing to do if we don't have major or minor.
+    const major_str = uevent.get("MAJOR") orelse return;
+    const minor_str = uevent.get("MINOR") orelse return;
 
     const major = try std.fmt.parseInt(u32, major_str, 10);
     const minor = try std.fmt.parseInt(u32, minor_str, 10);
 
-    const mode = special(devtype);
+    const mode = special(uevent.get("DEVTYPE"));
+
+    const devname = uevent.get("DEVNAME") orelse return DeviceError.IncompleteDevice;
+
+    const dev_path = path.join(allocator, &.{ path.sep_str, "dev", devname }) catch return;
+    defer allocator.free(dev_path);
+
+    if (path.dirname(dev_path)) |parent| {
+        std.fs.makeDirAbsolute(parent) catch |err| switch (err) {
+            error.PathAlreadyExists => {},
+            else => return err,
+        };
+    }
 
     const dev_path_cstr = try allocator.dupeZ(u8, dev_path);
     defer allocator.free(dev_path_cstr);
@@ -172,9 +186,16 @@ fn createDevice(allocator: std.mem.Allocator, uevent: Uevent) !void {
     }
 }
 
+fn removeDevice(allocator: std.mem.Allocator, uevent: Uevent) !void {
+    _ = uevent;
+    _ = allocator;
+    std.log.warn("TODO: remove device", .{});
+}
+
 fn scanAndCreateDevices(allocator: std.mem.Allocator) !void {
     {
         try std.fs.makeDirAbsolute("/dev/disk"); // prepare disk alias directory
+        try std.fs.makeDirAbsolute("/dev/block"); // prepare block alias directory
 
         var sys_class_block = try std.fs.openIterableDirAbsolute(
             "/sys/class/block",
@@ -220,7 +241,7 @@ fn scanAndCreateDevices(allocator: std.mem.Allocator) !void {
     }
 
     {
-        try std.fs.makeDirAbsolute("/dev/char"); // prepare disk alias directory
+        try std.fs.makeDirAbsolute("/dev/char"); // prepare char alias directory
 
         var sys_class_tty = try std.fs.openIterableDirAbsolute(
             "/sys/class/tty",
@@ -273,6 +294,12 @@ fn scanAndCreateDevices(allocator: std.mem.Allocator) !void {
 }
 
 pub const DeviceWatcher = struct {
+    // busybox uses these buffer sizes
+    const USER_RCVBUF = 3 * 1024;
+    const KERN_RCVBUF = 128 * 1024 * 1024;
+
+    arena: std.heap.ArenaAllocator,
+
     /// Netlink socket fd for subscribing to new device events.
     nl_fd: os.fd_t,
 
@@ -281,19 +308,24 @@ pub const DeviceWatcher = struct {
 
     pub fn init() !@This() {
         var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-        defer arena.deinit();
+        errdefer arena.deinit();
+        defer _ = arena.reset(.retain_capacity);
 
         try scanAndCreateDevices(arena.allocator());
 
         var self = @This(){
+            .arena = arena,
             .nl_fd = try os.socket(
                 linux.AF.NETLINK,
-                linux.SOCK.RAW,
+                linux.SOCK.DGRAM,
                 linux.NETLINK.KOBJECT_UEVENT,
             ),
             .settle_fd = try os.timerfd_create(os.CLOCK.REALTIME, 0),
         };
         errdefer self.deinit();
+
+        try os.setsockopt(self.nl_fd, os.SOL.SOCKET, os.SO.RCVBUF, &std.mem.toBytes(@as(c_int, KERN_RCVBUF)));
+        try os.setsockopt(self.nl_fd, os.SOL.SOCKET, os.SO.RCVBUFFORCE, &std.mem.toBytes(@as(c_int, KERN_RCVBUF)));
 
         const nls = os.sockaddr.nl{
             .groups = 1, // KOBJECT_UEVENT groups bitmask must be 1
@@ -320,22 +352,36 @@ pub const DeviceWatcher = struct {
 
     pub fn start_settle_timer(self: *@This()) !void {
         const timerspec = os.linux.itimerspec{
-            .it_interval = .{ .tv_sec = 0, .tv_nsec = 0 }, // oneshot
-            .it_value = .{ .tv_sec = 2, .tv_nsec = 0 }, // consider settled after 2 seconds without any new events
+            // oneshot
+            .it_interval = .{ .tv_sec = 0, .tv_nsec = 0 },
+            // consider settled after 2 seconds without any new events
+            .it_value = .{ .tv_sec = 2, .tv_nsec = 0 },
         };
         try os.timerfd_settime(self.settle_fd, 0, &timerspec, null);
     }
 
     pub fn handle_new_event(self: *@This()) !void {
-        std.log.warn("TODO: handle new device event\n", .{});
-
         // reset the timer
         try self.start_settle_timer();
 
-        // TODO(jared): handle new event
+        var recv_bytes: [USER_RCVBUF]u8 = undefined;
+
+        const bytes_read = try os.read(self.nl_fd, &recv_bytes);
+
+        const allocator = self.arena.allocator();
+
+        var kobject = try parseUeventKobjectContents(allocator, recv_bytes[0..bytes_read]) orelse return;
+        defer kobject.deinit();
+
+        switch (kobject.action) {
+            .add => try createDevice(allocator, kobject.uevent),
+            .remove => try removeDevice(allocator, kobject.uevent),
+            else => {},
+        }
     }
 
     pub fn deinit(self: *@This()) void {
+        self.arena.deinit();
         os.closeSocket(self.nl_fd);
         os.closeSocket(self.settle_fd);
     }
@@ -409,8 +455,9 @@ test "uevent kobject add chardev parsing" {
     });
     defer std.testing.allocator.free(content);
 
-    var kobject = try parseUeventKobjectContents(std.testing.allocator, content);
-    defer kobject.uevent.deinit();
+    var kobject = try parseUeventKobjectContents(std.testing.allocator, content) orelse unreachable;
+    defer kobject.deinit();
+
     try std.testing.expectEqual(Action.add, kobject.action);
     try std.testing.expectEqualStrings("/devices/platform/serial8250/tty/ttyS6", kobject.device_path);
     try std.testing.expectEqualStrings("0", kobject.uevent.get("SYNTH_UUID").?);
@@ -430,8 +477,9 @@ test "uevent kobject remove chardev parsing" {
     });
     defer std.testing.allocator.free(content);
 
-    var kobject = try parseUeventKobjectContents(std.testing.allocator, content);
-    defer kobject.uevent.deinit();
+    var kobject = try parseUeventKobjectContents(std.testing.allocator, content) orelse unreachable;
+    defer kobject.deinit();
+
     try std.testing.expectEqual(Action.remove, kobject.action);
     try std.testing.expectEqualStrings("/devices/platform/serial8250/tty/ttyS6", kobject.device_path);
     try std.testing.expectEqualStrings("3471", kobject.uevent.get("SEQNUM").?);
@@ -483,7 +531,7 @@ pub fn findActiveConsoles(allocator: std.mem.Allocator) ![]os.fd_t {
                 const fd = try os.open(fullpath, os.O.RDWR | os.O.NOCTTY, 0);
 
                 if (serialDeviceIsConnected(fd)) {
-                    std.debug.print("found active serial device at {s}\n", .{fullpath});
+                    std.log.info("found active serial device at {s}", .{fullpath});
                     try devs.append(fd);
                 } else {
                     os.close(fd);

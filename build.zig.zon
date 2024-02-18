@@ -1,0 +1,11 @@
+.{
+    .name = "tinyboot",
+    .version = "0.0.1",
+
+    .dependencies = .{
+        .zbor = .{
+            .url = "https://github.com/r4gus/zbor/archive/refs/tags/0.12.3.tar.gz",
+            .hash = "1220bbea0285a5d555320b00dde5ced378254c8be144d155d8f886ab4a4e9a855881",
+        },
+    },
+}

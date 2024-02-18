@@ -25,17 +25,20 @@ pub fn build(b: *std.Build) !void {
 
     const linux_headers_module = linux_kexec_header_translated.createModule();
 
+    const zbor_dep = b.dependency("zbor", .{
+        .target = target,
+        .optimize = tboot_loader_optimize,
+    });
+    const zbor_module = zbor_dep.module("zbor");
+
     const tboot_loader = b.addExecutable(.{
         .name = "tboot-loader",
         .root_source_file = .{ .path = "src/tboot-loader.zig" },
         .target = target,
-        .optimize = if (optimize == std.builtin.OptimizeMode.Debug)
-            std.builtin.OptimizeMode.Debug
-        else
-            // Always use release small, smallest size is our goal.
-            std.builtin.OptimizeMode.ReleaseSmall,
+        .optimize = tboot_loader_optimize,
     });
     tboot_loader.addModule("linux_headers", linux_headers_module);
+    tboot_loader.addModule("zbor", zbor_module);
     tboot_loader.addOptions("build_options", tboot_loader_options);
 
     // make the default step just compile tboot-loader
