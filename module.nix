@@ -1,18 +1,20 @@
 { config, pkgs, lib, ... }:
 let
   cfg = config.tinyboot;
+
+  inherit ((lib.evalModules {
+    modules = [
+      ({ _module.args = { inherit pkgs; inherit (cfg) board; }; })
+      ./options.nix
+      ./boards/${cfg.board}/config.nix
+    ];
+  }).config.build) firmware;
 in
 {
-  options.tinyboot = with lib; mkOption {
-    type = types.submodule [
-      { _module.args = { inherit pkgs; }; }
-      ./options.nix
-      {
-        options.enable = mkEnableOption "tinyboot bootloader";
-        options.maxFailedBootAttempts = mkOption { type = types.int; default = 3; };
-      }
-    ];
-    default = { };
+  options.tinyboot = with lib; {
+    enable = mkEnableOption "tinyboot bootloader";
+    board = mkOption { type = types.enum (builtins.attrNames (builtins.readDir ./boards)); };
+    maxFailedBootAttempts = mkOption { type = types.int; default = 3; };
   };
   config = lib.mkIf cfg.enable (lib.mkMerge [
     {
@@ -77,7 +79,7 @@ in
         package = lib.mkDefault cfg.flashrom.package;
       };
 
-      system.build = { inherit (cfg.build) firmware; };
+      system.build = { inherit firmware; };
 
       boot.kernelPackages = lib.mkDefault pkgs.linuxPackages_latest;
       boot.kernelPatches = with lib.kernel; with (whenHelpers config.boot.kernelPackages.kernel.version); [{

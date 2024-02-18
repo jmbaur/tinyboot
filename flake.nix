@@ -14,24 +14,23 @@
         imports = [ ./module.nix ];
         nixpkgs.overlays = [ inputs.self.overlays.default ];
       };
-      overlays.default = final: prev: {
+      overlays.default = final: prev: ({
         tinyboot = prev.callPackage ./pkgs/tinyboot.nix { };
         tinybootKernelConfigs = prev.lib.mapAttrs (config: _: ./kernel-configs/${config}) (builtins.readDir ./kernel-configs);
         armTrustedFirmwareMT8183 = prev.callPackage ./pkgs/arm-trusted-firmware-cros.nix { platform = "mt8183"; };
         armTrustedFirmwareMT8192 = prev.callPackage ./pkgs/arm-trusted-firmware-cros.nix { platform = "mt8192"; };
         armTrustedFirmwareSC7180 = prev.callPackage ./pkgs/arm-trusted-firmware-cros.nix { platform = "sc7180"; };
         flashrom-cros = prev.callPackage ./pkgs/flashrom-cros { };
-        coreboot = import ./boards.nix final;
         kernelPatches = prev.kernelPatches // {
           ima_tpm_early_init = { name = "ima_tpm_early_init"; patch = ./pkgs/linux/tpm-probe.patch; };
         };
-      };
+      } // import ./boards.nix { pkgs = final; inherit (prev) lib; });
       legacyPackages = forAllSystems ({ pkgs, ... }: pkgs);
       devShells = forAllSystems ({ pkgs, ... }: {
         default = pkgs.mkShell {
           inputsFrom = [ pkgs.tinyboot ];
           packages = [ pkgs.swtpm pkgs.qemu ];
-          env.TINYBOOT_KERNEL = ''${pkgs.coreboot."qemu-${pkgs.stdenv.hostPlatform.qemuArch}".config.build.linux}/kernel'';
+          env.TINYBOOT_KERNEL = ''${pkgs."coreboot-qemu-${pkgs.stdenv.hostPlatform.qemuArch}".config.build.linux}/kernel'';
         };
       });
       apps = forAllSystems ({ pkgs, system, ... }: (

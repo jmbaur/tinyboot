@@ -1,6 +1,5 @@
-{ config, pkgs, lib, ... }:
+{ config, pkgs, lib, board, ... }:
 let
-  boards = builtins.readDir ./boards;
   tinyboot = pkgs.tinyboot.override { corebootSupport = config.coreboot.enable; };
   buildFitImage = pkgs.callPackage ./fitimage { };
   testInitrd = pkgs.makeInitrdNG {
@@ -39,13 +38,8 @@ let
     '';
 in
 {
-  imports = lib.mapAttrsToList (board: _: ./boards/${board}/config.nix) boards;
   options = with lib; {
     platforms = mkOption { type = types.listOf types.str; default = [ ]; };
-    board = mkOption {
-      type = types.nullOr (types.enum (mapAttrsToList (board: _: board) boards));
-      default = null;
-    };
     build = mkOption {
       default = { };
       type = types.submoduleWith {
@@ -155,15 +149,15 @@ in
         inherit (config.linux) configFile;
       });
       fitImage = buildFitImage {
-        inherit (config) board;
+        inherit board;
         inherit (config.build) linux initrd;
         inherit (config.linux) dtb dtbPattern;
       };
       coreboot = pkgs.callPackage ./pkgs/coreboot {
-        inherit (config) board;
+        inherit board;
         configFile = config.coreboot.kconfig.__resolved;
       };
-      firmware = pkgs.runCommand "tinyboot-${config.board}"
+      firmware = pkgs.runCommand "tinyboot-${board}"
         {
           inherit (config.verifiedBoot) requiredSystemFeatures;
           nativeBuildInputs = with pkgs.buildPackages; [ cbfstool vboot_reference /*vpd*/ ];
@@ -175,17 +169,17 @@ in
           dd status=none if=${config.build.coreboot}/coreboot.rom of=$out
 
           ${lib.optionalString (lib.trace "TODO: create vpd image in zig" false) ''
-            vpd -f $out -i RO_VPD -O
-            ${lib.concatLines (lib.mapAttrsToList (applyVpd "RO_VPD") config.coreboot.vpd.ro)}
-            vpd -f $out -i RW_VPD -O
-            ${lib.concatLines (lib.mapAttrsToList (applyVpd "RW_VPD") config.coreboot.vpd.rw)}
+          vpd -f $out -i RO_VPD -O
+          ${lib.concatLines (lib.mapAttrsToList (applyVpd "RO_VPD") config.coreboot.vpd.ro)}
+          vpd -f $out -i RW_VPD -O
+          ${lib.concatLines (lib.mapAttrsToList (applyVpd "RW_VPD") config.coreboot.vpd.rw)}
           ''}
 
           futility sign \
-            --signprivate "${config.verifiedBoot.vbootFirmwarePrivkey}" \
-            --keyblock "${config.verifiedBoot.vbootKeyblock}" \
-            --kernelkey "${config.verifiedBoot.vbootFirmwareKey}" \
-            $out
+          --signprivate "${config.verifiedBoot.vbootFirmwarePrivkey}" \
+          --keyblock "${config.verifiedBoot.vbootKeyblock}" \
+          --kernelkey "${config.verifiedBoot.vbootFirmwareKey}" \
+          $out
         '';
       # useful for testing kernel configurations
       testScript =
@@ -196,8 +190,8 @@ in
         in
         pkgs.writeShellScriptBin "tboot-test" ''
           kexec -l ${linux}/${pkgs.stdenv.hostPlatform.linux-kernel.target} \
-            --initrd=${testInitrd}/initrd \
-            --command-line="${toString commonConsoles}"
+          --initrd=${testInitrd}/initrd \
+          --command-line="${toString commonConsoles}"
           systemctl kexec
         '';
     };

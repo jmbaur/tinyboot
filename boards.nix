@@ -1,17 +1,14 @@
-pkgs:
-let
-  inherit (pkgs) lib;
-in
-lib.mapAttrs
-  (board: _: lib.makeOverridable
+{ pkgs, lib }:
+lib.mapAttrs'
+  (board: _: lib.nameValuePair "coreboot-${board}" (lib.makeOverridable
     ({ config ? { } }:
     lib.evalModules {
       modules = [
-        ({ _module.args = { inherit pkgs; }; })
+        ({ _module.args = { inherit pkgs board; }; })
         ./options.nix
-        ({ inherit board; })
+        ./boards/${board}/config.nix
         config
       ];
     })
-  { })
+  { }))
   (builtins.readDir ./boards)
