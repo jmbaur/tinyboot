@@ -99,13 +99,7 @@ fn special(devtype: ?[]const u8) u32 {
     return linux.S.IFCHR;
 }
 
-fn createBlkAlias(
-    allocator: std.mem.Allocator,
-    dev_path: []const u8,
-    major: u32,
-    minor: u32,
-    uevent: Uevent,
-) !void {
+fn diskAliasPath(allocator: std.mem.Allocator, uevent: Uevent) ![]const u8 {
     const diskseq = uevent.get("DISKSEQ") orelse return DeviceError.IncompleteDevice;
 
     var buf: [32]u8 = undefined;
@@ -117,19 +111,65 @@ fn createBlkAlias(
         }
     };
 
-    const alias_path = try path.join(allocator, &.{ path.sep_str, "dev", "disk", diskseq_partn_filename });
+    return try path.join(allocator, &.{ path.sep_str, "dev", "disk", diskseq_partn_filename });
+}
+
+fn createBlkAlias(
+    allocator: std.mem.Allocator,
+    dev_path: []const u8,
+    major: u32,
+    minor: u32,
+    uevent: Uevent,
+) !void {
+    const alias_path = try diskAliasPath(allocator, uevent);
     defer allocator.free(alias_path);
 
-    try std.os.symlink(dev_path, alias_path);
+    std.fs.symLinkAbsolute(dev_path, alias_path, .{}) catch |err| switch (err) {
+        error.PathAlreadyExists => {},
+        else => return err,
+    };
 
+    var buf: [32]u8 = undefined;
     const major_minor_filename = try std.fmt.bufPrint(&buf, "{d}:{d}", .{ major, minor });
 
     const major_minor_alias_path = try path.join(allocator, &.{ path.sep_str, "dev", "block", major_minor_filename });
     defer allocator.free(major_minor_alias_path);
 
-    try std.os.symlink(dev_path, major_minor_alias_path);
+    std.fs.symLinkAbsolute(dev_path, major_minor_alias_path, .{}) catch |err| switch (err) {
+        error.PathAlreadyExists => {},
+        else => return err,
+    };
 
     std.log.info("created block device aliases for {s}", .{dev_path});
+}
+
+fn removeBlkAlias(
+    allocator: std.mem.Allocator,
+    dev_path: []const u8,
+    major: u32,
+    minor: u32,
+    uevent: Uevent,
+) !void {
+    const alias_path = try diskAliasPath(allocator, uevent);
+    defer allocator.free(alias_path);
+
+    std.fs.symLinkAbsolute(dev_path, alias_path, .{}) catch |err| switch (err) {
+        error.PathAlreadyExists => {},
+        else => return err,
+    };
+
+    var buf: [32]u8 = undefined;
+    const major_minor_filename = try std.fmt.bufPrint(&buf, "{d}:{d}", .{ major, minor });
+
+    const major_minor_alias_path = try path.join(allocator, &.{ path.sep_str, "dev", "block", major_minor_filename });
+    defer allocator.free(major_minor_alias_path);
+
+    std.fs.deleteFileAbsolute(major_minor_alias_path) catch |err| switch (err) {
+        error.FileNotFound => {},
+        else => return err,
+    };
+
+    std.log.info("removed block device aliases for {s}", .{dev_path});
 }
 
 fn createCharAlias(
@@ -144,7 +184,27 @@ fn createCharAlias(
     const alias_path = try path.join(allocator, &.{ path.sep_str, "dev", "char", filename });
     defer allocator.free(alias_path);
 
-    try std.os.symlink(dev_path, alias_path);
+    std.fs.symLinkAbsolute(dev_path, alias_path, .{}) catch |err| switch (err) {
+        error.PathAlreadyExists => {},
+        else => return err,
+    };
+}
+
+fn removeCharAlias(
+    allocator: std.mem.Allocator,
+    major: u32,
+    minor: u32,
+) !void {
+    var buf: [32]u8 = undefined;
+    const filename = try std.fmt.bufPrint(&buf, "{d}:{d}", .{ major, minor });
+
+    const alias_path = try path.join(allocator, &.{ path.sep_str, "dev", "char", filename });
+    defer allocator.free(alias_path);
+
+    std.fs.deleteFileAbsolute(alias_path) catch |err| switch (err) {
+        error.FileNotFound => {},
+        else => return err,
+    };
 }
 
 fn createDevice(allocator: std.mem.Allocator, uevent: Uevent) !void {
@@ -187,9 +247,27 @@ fn createDevice(allocator: std.mem.Allocator, uevent: Uevent) !void {
 }
 
 fn removeDevice(allocator: std.mem.Allocator, uevent: Uevent) !void {
-    _ = uevent;
-    _ = allocator;
-    std.log.warn("TODO: remove device", .{});
+    // Nothing to do if we don't have major or minor.
+    const major_str = uevent.get("MAJOR") orelse return;
+    const minor_str = uevent.get("MINOR") orelse return;
+    const major = try std.fmt.parseInt(u32, major_str, 10);
+    const minor = try std.fmt.parseInt(u32, minor_str, 10);
+    const mode = special(uevent.get("DEVTYPE"));
+
+    const devname = uevent.get("DEVNAME") orelse return DeviceError.IncompleteDevice;
+    const dev_path = path.join(allocator, &.{ path.sep_str, "dev", devname }) catch return;
+    defer allocator.free(dev_path);
+
+    std.fs.deleteFileAbsolute(dev_path) catch |err| switch (err) {
+        error.FileNotFound => {},
+        else => return err,
+    };
+
+    switch (mode) {
+        linux.S.IFBLK => try removeBlkAlias(allocator, dev_path, major, minor, uevent),
+        linux.S.IFCHR => try removeCharAlias(allocator, major, minor),
+        else => {},
+    }
 }
 
 fn scanAndCreateDevices(allocator: std.mem.Allocator) !void {

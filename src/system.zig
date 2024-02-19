@@ -45,9 +45,9 @@ pub fn setupSystem() !void {
 
     try fs.makeDirAbsolute("/mnt");
 
-    try os.symlink("/proc/self/fd/0", "/dev/stdin");
-    try os.symlink("/proc/self/fd/1", "/dev/stdout");
-    try os.symlink("/proc/self/fd/2", "/dev/stderr");
+    try fs.symLinkAbsolute("/proc/self/fd/0", "/dev/stdin", .{});
+    try fs.symLinkAbsolute("/proc/self/fd/1", "/dev/stdout", .{});
+    try fs.symLinkAbsolute("/proc/self/fd/2", "/dev/stderr", .{});
 }
 
 const CBAUD = linux_headers.CBAUD;
