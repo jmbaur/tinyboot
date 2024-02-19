@@ -14,7 +14,7 @@ stdenv.mkDerivation {
 
   src = lib.fileset.toSource {
     root = ../.;
-    fileset = lib.fileset.unions [ ../build.zig ../src ];
+    fileset = lib.fileset.unions [ ../build.zig ../build.zig.zon ../src ];
   };
 
   nativeBuildInputs = [ zig_0_11 xz ];
