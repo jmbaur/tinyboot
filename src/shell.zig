@@ -571,7 +571,7 @@ pub const Command = struct {
         fn run(a: std.mem.Allocator, args: *ArgsIterator, shell_instance: *Shell) !?ClientMsg {
             defer system.setupTty(os.STDIN_FILENO, .user_input) catch {};
 
-            try system.setupTty(os.STDIN_FILENO, .file_transfer);
+            try system.setupTty(os.STDIN_FILENO, .file_transfer_recv);
 
             _ = shell_instance;
 

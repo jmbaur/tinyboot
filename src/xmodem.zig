@@ -48,7 +48,7 @@ pub fn xmodem_send(fd: os.fd_t, filename: []const u8) !void {
     var num_timeouts: u8 = 0;
 
     while (true) {
-        var events = [_]os.linux.epoll_event{undefined};
+        var events: [1]os.linux.epoll_event = undefined;
         const n_events = os.epoll_wait(epoll_fd, &events, 10 * std.time.ms_per_s);
         if (n_events == 0) {
             // timeout
@@ -160,9 +160,6 @@ pub fn xmodem_recv(
     const epoll_fd = try os.epoll_create1(0);
     defer os.close(epoll_fd);
 
-    // We create a oneshot epoll event since VTIME does not return if the
-    // receiver has yet to receive any bytes. So we use epoll to wait for our
-    // first bytes, then we use VTIME.
     var read_ready_event = os.linux.epoll_event{
         .data = .{ .fd = fd },
         .events = os.linux.EPOLL.IN | os.linux.EPOLL.ONESHOT,
@@ -177,12 +174,11 @@ pub fn xmodem_recv(
     var ms_without_bytes: u32 = 0;
 
     while (true) {
-        const ping_n = try os.write(fd, &.{'C'});
-        if (ping_n != 1) {
+        if (try os.write(fd, &.{'C'}) != 1) {
             return Error.InvalidSendLength;
         }
 
-        var events = [_]os.linux.epoll_event{undefined};
+        var events: [1]os.linux.epoll_event = undefined;
         const n_events = os.epoll_wait(epoll_fd, &events, 5 * std.time.ms_per_s);
         if (n_events == 0) {
             if (ms_without_bytes / std.time.ms_per_s > 25) {
@@ -205,12 +201,12 @@ pub fn xmodem_recv(
         var chunk: XmodemChunk = .{};
 
         const chunk_n_read = try os.read(fd, chunk_buf[chunk_buf_index..]);
-
         if (chunk_n_read == 0) {
-            ms_without_bytes += 100; // We set VTIME to 1 tenth of a second
-            if (ms_without_bytes / std.time.ms_per_s >= 5) {
+            if (ms_without_bytes / std.time.ms_per_s > 25) {
                 return Error.Timeout;
             }
+            // VMIN is equal to 5 seconds
+            ms_without_bytes += 5 * std.time.ms_per_s;
             continue;
         } else {
             ms_without_bytes = 0;
@@ -313,11 +309,13 @@ pub fn main() !void {
 
     const filepath = args.next() orelse usage(prog_name);
 
-    try system.setupTty(serial.handle, .file_transfer);
-
     if (std.mem.eql(u8, action, "send")) {
+        try system.setupTty(serial.handle, .file_transfer_send);
+
         try xmodem_send(serial.handle, filepath);
     } else if (std.mem.eql(u8, action, "recv")) {
+        try system.setupTty(serial.handle, .file_transfer_recv);
+
         var gpa = std.heap.GeneralPurposeAllocator(.{ .safety = true }){};
         defer _ = gpa.deinit();
 

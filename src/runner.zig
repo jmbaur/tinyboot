@@ -45,7 +45,7 @@ pub fn main() !void {
     // TODO(jared): "-drive", "if=virtio,file=TODO.raw,format=raw,media=disk"
     try qemu_args.appendSlice(&.{
         "-display", "none",
-        "-serial",  "mon:stdio",
+        "-serial",  "stdio",
         "-cpu",     "max",
         "-smp",     "2",
         "-m",       "2G",

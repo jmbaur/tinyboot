@@ -94,7 +94,8 @@ fn cfmakeraw(t: *os.termios) void {
 
 pub const TtyMode = enum {
     user_input,
-    file_transfer,
+    file_transfer_recv,
+    file_transfer_send,
 };
 
 pub fn setupTty(fd: os.fd_t, mode: TtyMode) !void {
@@ -128,24 +129,24 @@ pub fn setupTty(fd: os.fd_t, mode: TtyMode) !void {
 
             setBaudRate(&termios, system.B115200);
         },
-        .file_transfer => {
-            termios.iflag = system.IGNBRK;
+        .file_transfer_recv, .file_transfer_send => {
+            termios.iflag = system.IGNBRK | system.IXOFF;
             termios.lflag &= ~(system.ECHO | system.ICANON | system.ISIG | system.IEXTEN);
             termios.oflag = 0;
             termios.cflag &= ~system.PARENB;
             termios.cflag &= ~system.CSIZE;
             termios.cflag |= system.CS8;
-            termios.cc[VMIN] = 1;
-            termios.cc[VTIME] = 1;
+            termios.cflag |= CRTSCTS;
+            termios.cflag |= system.CREAD | system.CLOCAL;
+            termios.cc[VMIN] = if (mode == .file_transfer_recv) 0 else 1;
+            termios.cc[VTIME] = 50;
 
             setBaudRate(&termios, system.B3000000);
         },
     }
 
-    _ = system.tcdrain(fd);
     _ = system.ioctl(fd, TCFLSH, TCIOFLUSH);
-    try os.tcsetattr(fd, os.TCSA.DRAIN, termios);
-    _ = system.ioctl(fd, TCFLSH, TCOON);
+    try os.tcsetattr(fd, os.TCSA.NOW, termios);
 }
 
 // These aren't defined in the UAPI linux headers for some odd reason.
