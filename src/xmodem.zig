@@ -31,7 +31,14 @@ pub fn xmodem_send(fd: os.fd_t, filename: []const u8) !void {
     defer file.close();
 
     const stat = try file.stat();
-    var buf = try os.mmap(null, stat.size, os.PROT.READ, os.MAP.PRIVATE, file.handle, 0);
+    var buf = try os.mmap(
+        null,
+        stat.size,
+        os.PROT.READ,
+        .{ .TYPE = .PRIVATE },
+        file.handle,
+        0,
+    );
     defer os.munmap(buf);
 
     std.debug.print("waiting for receiver ping\n", .{});

@@ -18,7 +18,7 @@ pub fn initLogger() !void {
             null,
             LOG_BUFFER_SIZE,
             os.PROT.READ | os.PROT.WRITE,
-            os.MAP.SHARED | os.MAP.ANONYMOUS,
+            .{ .TYPE = .SHARED, .ANONYMOUS = true },
             -1,
             0,
         );
