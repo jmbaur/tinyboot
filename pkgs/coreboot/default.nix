@@ -9,12 +9,12 @@ let
 in
 stdenvNoCC.mkDerivation (finalAttrs: {
   pname = "coreboot-${board}";
-  version = "4.22.01";
+  version = "24.02";
   src = fetchgit {
     url = "https://review.coreboot.org/coreboot";
     rev = finalAttrs.version;
     fetchSubmodules = true;
-    hash = "sha256-wgLkcq7Iexo9GcRrgkdc9kD8oW5xC4to1jXrmNx1f1g=";
+    hash = "sha256-whALKP9MetyMJSmXVf0WYd9dP8AGa+ADAB8cmIqt4HU=";
   };
   patches = [
     ./0001-Add-Kconfig-VBOOT_SIGN-option.patch
