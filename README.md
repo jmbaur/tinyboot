@@ -14,7 +14,7 @@ more configs are welcome!
 ## Usage
 
 ```
-nix run github:jmbaur/tinyboot#coreboot.<your_board>.config.build.installScript
+nix run github:jmbaur/tinyboot#coreboot-<your_board>.config.build.installScript
 ```
 
 ## Hacking

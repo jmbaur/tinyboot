@@ -1,4 +1,4 @@
-{ board, configFile, lib, fetchgit, stdenvNoCC, pkgsBuildBuild, python3, pkg-config, openssl }:
+{ board, configFile, lib, fetchgit, stdenvNoCC, pkgsBuildBuild, python3, pkg-config, openssl, nss }:
 let
   architectures = { i386 = "i386"; x86_64 = "i386"; arm64 = "aarch64"; arm = "arm"; riscv = "riscv"; powerpc = "ppc64"; };
   toolchain = pkgsBuildBuild.coreboot-toolchain.${architectures.${stdenvNoCC.hostPlatform.linuxArch}}.override {
@@ -9,19 +9,19 @@ let
 in
 stdenvNoCC.mkDerivation (finalAttrs: {
   pname = "coreboot-${board}";
-  version = "4.22.01";
+  version = "24.02.01";
   src = fetchgit {
     url = "https://review.coreboot.org/coreboot";
     rev = finalAttrs.version;
     fetchSubmodules = true;
-    hash = "sha256-wgLkcq7Iexo9GcRrgkdc9kD8oW5xC4to1jXrmNx1f1g=";
+    hash = "sha256-OV6OsnAAXU51IZYzAIZQu4qZqau8n/rVAc22Lfjt4iw=";
   };
   patches = [
     ./0001-Add-Kconfig-VBOOT_SIGN-option.patch
     ./0002-Fix-build-for-brya.patch
     ./0003-Allow-for-fitImage-use-on-mt8183-and-mt8192.patch
   ];
-  depsBuildBuild = [ pkgsBuildBuild.stdenv.cc pkg-config openssl ];
+  depsBuildBuild = [ pkgsBuildBuild.stdenv.cc pkg-config openssl nss ];
   nativeBuildInputs = [ python3 ];
   buildInputs = [ ];
   enableParallelBuilding = true;

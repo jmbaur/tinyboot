@@ -1,4 +1,4 @@
-From f5a914f4684d9e08e43362b3cf482a392a6f0c3a Mon Sep 17 00:00:00 2001
+From 9bb6b834273324c806f04a2dc607daf0bcc092f6 Mon Sep 17 00:00:00 2001
 From: Jared Baur <jaredbaur@fastmail.com>
 Date: Sat, 18 Nov 2023 09:04:25 -0800
 Subject: [PATCH 2/3] Fix build for brya
@@ -8,10 +8,10 @@ Subject: [PATCH 2/3] Fix build for brya
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/src/mainboard/google/brya/Kconfig b/src/mainboard/google/brya/Kconfig
-index 757cfc4136..3dfab45d57 100644
+index 4a38af5f2c..9bbdade7a6 100644
 --- a/src/mainboard/google/brya/Kconfig
 +++ b/src/mainboard/google/brya/Kconfig
-@@ -727,7 +727,7 @@ config VARIANT_DIR
+@@ -730,7 +730,7 @@ config VARIANT_DIR
  
  config VBOOT
  	select VBOOT_EARLY_EC_SYNC if !BOARD_GOOGLE_BASEBOARD_NISSA
@@ -21,5 +21,5 @@ index 757cfc4136..3dfab45d57 100644
  config DIMM_SPD_SIZE
  	default 512
 -- 
-2.43.0
+2.43.1
 

@@ -1,4 +1,4 @@
-From af5b9ac07e4fed86983096d8b74e09fcc8623576 Mon Sep 17 00:00:00 2001
+From 7ddc61f490410c7b3e89aded8791a54d70a1252b Mon Sep 17 00:00:00 2001
 From: Jared Baur <jaredbaur@fastmail.com>
 Date: Sat, 3 Feb 2024 23:10:51 -0800
 Subject: [PATCH 3/3] Allow for fitImage use on mt8183 and mt8192
@@ -39,5 +39,5 @@ index b1beef0970..b131b8ef08 100644
  	BL31(0x54600000, 0x60000)
  }
 -- 
-2.43.0
+2.43.1
 
