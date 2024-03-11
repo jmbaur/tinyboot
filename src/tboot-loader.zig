@@ -13,6 +13,7 @@ const Shell = @import("./shell.zig").Shell;
 const device = @import("./device.zig");
 const log = @import("./log.zig");
 const system = @import("./system.zig");
+const security = @import("./security.zig");
 
 pub const std_options = struct {
     pub const logFn = log.logFn;
@@ -185,6 +186,11 @@ fn main_unwrapped() !void {
         std.log.info("built with coreboot support", .{});
     }
 
+    security.initialize_security(allocator) catch |err| {
+        std.log.warn("failed to initialize secure boot: {}", .{err});
+    };
+
     const reboot_cmd = try run_event_loop(allocator) orelse os.RebootCommand.POWER_OFF;
+
     try os.reboot(reboot_cmd);
 }
