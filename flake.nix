@@ -10,6 +10,7 @@
       });
     in
     {
+      formatter = inputs.nixpkgs.lib.mapAttrs (_: pkgs: pkgs.nixfmt-rfc-style) inputs.self.legacyPackages;
       nixosModules.default = {
         imports = [ ./module.nix ];
         nixpkgs.overlays = [ inputs.self.overlays.default ];
