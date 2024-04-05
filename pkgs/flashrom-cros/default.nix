@@ -1,4 +1,18 @@
-{ stdenv, fetchgit, cmocka, meson, ninja, libftdi1, libjaylink, libusb1, pciutils, pkg-config, sphinx, bash-completion, ... }:
+{
+  stdenv,
+  fetchgit,
+  cmocka,
+  meson,
+  ninja,
+  libftdi1,
+  libjaylink,
+  libusb1,
+  pciutils,
+  pkg-config,
+  sphinx,
+  bash-completion,
+  ...
+}:
 stdenv.mkDerivation (finalAttrs: {
   pname = "flashrom-cros";
   version = "unstable-${builtins.substring 0 7 finalAttrs.src.rev}";
@@ -9,9 +23,25 @@ stdenv.mkDerivation (finalAttrs: {
     hash = "sha256-trlkJU4qSmzZXEe33fpmVmwOd3w9H45CUlyiB/lkzDA=";
   };
   patches = [ ./power-management.patch ];
-  outputs = [ "out" "lib" "dev" ];
+  outputs = [
+    "out"
+    "lib"
+    "dev"
+  ];
   dontUseCmakeConfigure = true;
-  nativeBuildInputs = [ meson ninja pkg-config sphinx bash-completion ];
-  buildInputs = [ cmocka libftdi1 libusb1 pciutils libjaylink ];
+  nativeBuildInputs = [
+    meson
+    ninja
+    pkg-config
+    sphinx
+    bash-completion
+  ];
+  buildInputs = [
+    cmocka
+    libftdi1
+    libusb1
+    pciutils
+    libjaylink
+  ];
   meta.mainProgram = "flashrom";
 })

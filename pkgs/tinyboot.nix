@@ -1,4 +1,11 @@
-{ lib, callPackage, stdenvNoCC, xz, zig_0_11, corebootSupport ? true }:
+{
+  lib,
+  callPackage,
+  stdenvNoCC,
+  xz,
+  zig_0_11,
+  corebootSupport ? true,
+}:
 let
   stdenv = stdenvNoCC;
   zigArgs = [
@@ -14,10 +21,17 @@ stdenv.mkDerivation {
 
   src = lib.fileset.toSource {
     root = ../.;
-    fileset = lib.fileset.unions [ ../build.zig ../build.zig.zon ../src ];
+    fileset = lib.fileset.unions [
+      ../build.zig
+      ../build.zig.zon
+      ../src
+    ];
   };
 
-  nativeBuildInputs = [ zig_0_11 xz ];
+  nativeBuildInputs = [
+    zig_0_11
+    xz
+  ];
 
   doCheck = true;
 

@@ -1,8 +1,22 @@
-{ pkgs, lib, ... }: {
+{ pkgs, lib, ... }:
+{
   platforms = [ "aarch64-linux" ];
   linux = {
-    configFile = with pkgs.tinybootKernelConfigs; lib.mkDefault (pkgs.concatText "kukui-fennel-kernel.config" [ generic video aarch64 chromebook mediatek ]);
-    commandLine = [ "console=ttyS0,115200" "console=tty1" ];
+    configFile =
+      with pkgs.tinybootKernelConfigs;
+      lib.mkDefault (
+        pkgs.concatText "kukui-fennel-kernel.config" [
+          generic
+          video
+          aarch64
+          chromebook
+          mediatek
+        ]
+      );
+    commandLine = [
+      "console=ttyS0,115200"
+      "console=tty1"
+    ];
     dtbPattern = "mt8183-kukui-jacuzzi-fennel*";
   };
   coreboot.kconfig = with lib.kernel; {

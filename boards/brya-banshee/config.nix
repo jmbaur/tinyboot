@@ -1,6 +1,17 @@
-{ pkgs, lib, ... }: {
+{ pkgs, lib, ... }:
+{
   platforms = [ "x86_64-linux" ];
-  linux.configFile = with pkgs.tinybootKernelConfigs; lib.mkDefault (pkgs.concatText "brya-banshee-kernel.config" [ generic video x86_64 alderlake chromebook ]);
+  linux.configFile =
+    with pkgs.tinybootKernelConfigs;
+    lib.mkDefault (
+      pkgs.concatText "brya-banshee-kernel.config" [
+        generic
+        video
+        x86_64
+        alderlake
+        chromebook
+      ]
+    );
   coreboot = {
     # start=0x01800000 length=0x00800000 (upper 1/4)
     wpRange.start = "0x01800000";

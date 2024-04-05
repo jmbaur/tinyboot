@@ -1,7 +1,18 @@
-{ pkgs, lib, ... }: {
+{ pkgs, lib, ... }:
+{
   platforms = [ "aarch64-linux" ];
   linux = {
-    configFile = with pkgs.tinybootKernelConfigs; lib.mkDefault (pkgs.concatText "asurada-spherion-kernel.config" [ generic video aarch64 chromebook mediatek ]);
+    configFile =
+      with pkgs.tinybootKernelConfigs;
+      lib.mkDefault (
+        pkgs.concatText "asurada-spherion-kernel.config" [
+          generic
+          video
+          aarch64
+          chromebook
+          mediatek
+        ]
+      );
     dtbPattern = "mt8192-asurada-spherion*";
   };
   coreboot.kconfig = with lib.kernel; {

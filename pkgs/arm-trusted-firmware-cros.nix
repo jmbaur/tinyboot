@@ -1,4 +1,8 @@
-{ platform, buildArmTrustedFirmware, fetchgit }:
+{
+  platform,
+  buildArmTrustedFirmware,
+  fetchgit,
+}:
 buildArmTrustedFirmware {
   inherit platform;
   version = "2.10.0";
