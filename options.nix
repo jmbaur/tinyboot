@@ -187,7 +187,7 @@ in
             { dir, pattern }:
             ''
               pushd ${pkgs.linux-firmware}/lib/firmware
-              find ${dir} -type f -name "${pattern}" -exec install -D --target-directory=$out/${dir} {} \;
+              find ${dir} -type f -name "${pattern}" -exec install -Dm0444 --target-directory=$out/${dir} {} \;
               popd
             ''
           ) config.linux.firmware
@@ -291,10 +291,10 @@ in
             ''}
 
             futility sign \
-            --signprivate "${config.verifiedBoot.vbootFirmwarePrivkey}" \
-            --keyblock "${config.verifiedBoot.vbootKeyblock}" \
-            --kernelkey "${config.verifiedBoot.vbootFirmwareKey}" \
-            $out
+              --signprivate "${config.verifiedBoot.vbootFirmwarePrivkey}" \
+              --keyblock "${config.verifiedBoot.vbootKeyblock}" \
+              --kernelkey "${config.verifiedBoot.vbootFirmwareKey}" \
+              $out
           '';
       # useful for testing kernel configurations
       testScript =
