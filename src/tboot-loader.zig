@@ -3,6 +3,7 @@ const coreboot_support = @import("build_options").coreboot_support;
 const std = @import("std");
 const builtin = @import("builtin");
 const os = std.os;
+const posix = std.posix;
 const fs = std.fs;
 const linux = std.os.linux;
 
@@ -15,38 +16,38 @@ const log = @import("./log.zig");
 const system = @import("./system.zig");
 const security = @import("./security.zig");
 
-pub const std_options = struct {
-    pub const logFn = log.logFn;
-    pub const log_level = switch (builtin.mode) {
+pub const std_options = .{
+    .logFn = log.logFn,
+    .log_level = switch (builtin.mode) {
         .Debug => .debug,
         else => .info,
-    };
+    },
 };
 
 const State = struct {
     /// Master epoll file descriptor for driving the event loop.
-    epoll_fd: os.fd_t,
+    epoll_fd: posix.fd_t,
 
     /// Netlink socket for capturing new Kobject uevent events.
-    device_nl_fd: os.fd_t,
+    device_nl_fd: posix.fd_t,
 
     /// Timer for determining when new Kobject uevent events have settled.
-    device_timer_fd: os.fd_t,
+    device_timer_fd: posix.fd_t,
 };
 
-fn run_event_loop(allocator: std.mem.Allocator) !?os.RebootCommand {
-    const epoll_fd = try os.epoll_create1(0);
-    defer os.close(epoll_fd);
+fn run_event_loop(allocator: std.mem.Allocator) !?posix.RebootCommand {
+    const epoll_fd = try posix.epoll_create1(0);
+    defer posix.close(epoll_fd);
 
     var device_watcher = try device.DeviceWatcher.init();
     try device_watcher.register(epoll_fd);
     defer device_watcher.deinit();
 
     var seat = s: {
-        var pids = std.ArrayList(os.pid_t).init(allocator);
+        var pids = std.ArrayList(posix.pid_t).init(allocator);
         errdefer pids.deinit();
 
-        var fds = std.ArrayList(os.fd_t).init(allocator);
+        var fds = std.ArrayList(posix.fd_t).init(allocator);
         errdefer fds.deinit();
 
         var consoles = std.ArrayList(Console).init(allocator);
@@ -55,18 +56,18 @@ fn run_event_loop(allocator: std.mem.Allocator) !?os.RebootCommand {
         defer allocator.free(active_consoles);
 
         for (active_consoles) |fd| {
-            var sock_pair = [2]os.fd_t{ 0, 0 };
-            if (os.linux.socketpair(os.linux.PF.LOCAL, os.SOCK.STREAM, 0, &sock_pair) != 0) {
+            var sock_pair = [2]posix.fd_t{ 0, 0 };
+            if (os.linux.socketpair(os.linux.PF.LOCAL, os.linux.SOCK.STREAM, 0, &sock_pair) != 0) {
                 continue;
             }
 
-            const pid = try os.fork();
+            const pid = try posix.fork();
             if (pid == 0) {
                 try system.setupTty(fd, .user_input);
 
-                try os.dup2(fd, os.STDIN_FILENO);
-                try os.dup2(fd, os.STDOUT_FILENO);
-                try os.dup2(fd, os.STDERR_FILENO);
+                try posix.dup2(fd, posix.STDIN_FILENO);
+                try posix.dup2(fd, posix.STDOUT_FILENO);
+                try posix.dup2(fd, posix.STDERR_FILENO);
 
                 var shell = Shell.init(sock_pair[0], log.log_buffer.?);
                 defer shell.deinit();
@@ -78,11 +79,11 @@ fn run_event_loop(allocator: std.mem.Allocator) !?os.RebootCommand {
                     std.debug.print("failed to run shell: {any}\n", .{err});
                 };
 
-                os.exit(0);
+                posix.exit(0);
             } else {
                 try consoles.append(.{
                     .pid = pid,
-                    .pid_fd = @as(os.fd_t, @intCast(os.linux.pidfd_open(pid, 0))),
+                    .pid_fd = @as(posix.fd_t, @intCast(os.linux.pidfd_open(pid, 0))),
                     .comm_fd = sock_pair[1],
                 });
                 log.addConsole(sock_pair[1]);
@@ -108,7 +109,7 @@ fn run_event_loop(allocator: std.mem.Allocator) !?os.RebootCommand {
         const events_one: os.linux.epoll_event = undefined;
         var events = [_]os.linux.epoll_event{events_one} ** max_events;
 
-        const n_events = os.epoll_wait(epoll_fd, &events, -1);
+        const n_events = posix.epoll_wait(epoll_fd, &events, -1);
 
         var i_event: usize = 0;
         while (i_event < n_events) : (i_event += 1) {
@@ -190,7 +191,7 @@ fn main_unwrapped() !void {
         std.log.warn("failed to initialize secure boot: {}", .{err});
     };
 
-    const reboot_cmd = try run_event_loop(allocator) orelse os.RebootCommand.POWER_OFF;
+    const reboot_cmd = try run_event_loop(allocator) orelse posix.RebootCommand.POWER_OFF;
 
-    try os.reboot(reboot_cmd);
+    try posix.reboot(reboot_cmd);
 }

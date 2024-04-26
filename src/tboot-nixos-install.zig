@@ -73,15 +73,15 @@ const BootJson = struct {
     spec: BootSpecV1,
     specialisations: ?[]BootSpecV1 = null,
     allocator: std.mem.Allocator,
+    tree: json.Parsed(json.Value),
 
     const Error = error{
         Invalid,
-        Todo,
     };
 
     pub fn parse(allocator: std.mem.Allocator, contents: []const u8) !@This() {
         const tree = try json.parseFromSlice(json.Value, allocator, contents, .{});
-        defer tree.deinit();
+        errdefer tree.deinit();
 
         const toplevel_object = o: {
             switch (tree.value) {
@@ -134,6 +134,7 @@ const BootJson = struct {
             .spec = spec,
             .specialisations = specialisations,
             .allocator = allocator,
+            .tree = tree,
         };
     }
 
@@ -147,6 +148,8 @@ const BootJson = struct {
 
             self.allocator.free(specialisations);
         }
+
+        self.tree.deinit();
     }
 };
 
@@ -434,7 +437,10 @@ fn installGeneration(
         entry_filename_with_counters,
     });
 
-    var entries_dir = try std.fs.openIterableDirAbsolute(loader_entries_dir_path, .{});
+    var entries_dir = try std.fs.openDirAbsolute(
+        loader_entries_dir_path,
+        .{ .iterate = true },
+    );
     defer entries_dir.close();
 
     var it = entries_dir.iterate();
@@ -476,7 +482,7 @@ fn cleanupDir(
     dir: []const u8,
     args: *const Args,
 ) !void {
-    var open_dir = try std.fs.openIterableDirAbsolute(dir, .{});
+    var open_dir = try std.fs.openDirAbsolute(dir, .{ .iterate = true });
     defer open_dir.close();
 
     var it = open_dir.iterate();
@@ -531,7 +537,10 @@ pub fn main() !void {
         args,
     );
 
-    var nixos_system_profile_dir = try std.fs.openIterableDirAbsolute("/nix/var/nix/profiles", .{});
+    var nixos_system_profile_dir = try std.fs.openDirAbsolute(
+        "/nix/var/nix/profiles",
+        .{ .iterate = true },
+    );
     defer nixos_system_profile_dir.close();
 
     var known_files = StringSet.init(allocator);

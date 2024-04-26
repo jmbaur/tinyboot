@@ -1,7 +1,8 @@
 const std = @import("std");
 const os = std.os;
+const posix = std.posix;
 const path = std.fs.path;
-const linux = std.os.linux;
+const linux = os.linux;
 
 const linux_headers = @import("linux_headers");
 
@@ -233,7 +234,7 @@ fn createDevice(allocator: std.mem.Allocator, uevent: Uevent) !void {
     defer allocator.free(dev_path_cstr);
 
     const rc = linux.mknod(dev_path_cstr, mode, makedev(major, minor));
-    switch (linux.getErrno(rc)) {
+    switch (linux.E.init(rc)) {
         .SUCCESS => std.log.debug("created device {s}", .{dev_path}),
         .EXIST => {}, // device already exists
         else => return DeviceError.CreateFailed,
@@ -275,9 +276,9 @@ fn scanAndCreateDevices(allocator: std.mem.Allocator) !void {
         try std.fs.makeDirAbsolute("/dev/disk"); // prepare disk alias directory
         try std.fs.makeDirAbsolute("/dev/block"); // prepare block alias directory
 
-        var sys_class_block = try std.fs.openIterableDirAbsolute(
+        var sys_class_block = try std.fs.openDirAbsolute(
             "/sys/class/block",
-            .{},
+            .{ .iterate = true },
         );
         defer sys_class_block.close();
 
@@ -321,9 +322,9 @@ fn scanAndCreateDevices(allocator: std.mem.Allocator) !void {
     {
         try std.fs.makeDirAbsolute("/dev/char"); // prepare char alias directory
 
-        var sys_class_tty = try std.fs.openIterableDirAbsolute(
+        var sys_class_tty = try std.fs.openDirAbsolute(
             "/sys/class/tty",
-            .{},
+            .{ .iterate = true },
         );
         defer sys_class_tty.close();
 
@@ -379,10 +380,10 @@ pub const DeviceWatcher = struct {
     arena: std.heap.ArenaAllocator,
 
     /// Netlink socket fd for subscribing to new device events.
-    nl_fd: os.fd_t,
+    nl_fd: posix.fd_t,
 
     /// Timer fd for determining when new events have "settled".
-    settle_fd: os.fd_t,
+    settle_fd: posix.fd_t,
 
     pub fn init() !@This() {
         var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -393,39 +394,39 @@ pub const DeviceWatcher = struct {
 
         var self = @This(){
             .arena = arena,
-            .nl_fd = try os.socket(
+            .nl_fd = try posix.socket(
                 linux.AF.NETLINK,
                 linux.SOCK.DGRAM,
                 linux.NETLINK.KOBJECT_UEVENT,
             ),
-            .settle_fd = try os.timerfd_create(os.CLOCK.REALTIME, 0),
+            .settle_fd = try posix.timerfd_create(posix.CLOCK.REALTIME, .{}),
         };
         errdefer self.deinit();
 
-        try os.setsockopt(self.nl_fd, os.SOL.SOCKET, os.SO.RCVBUF, &std.mem.toBytes(@as(c_int, KERN_RCVBUF)));
-        try os.setsockopt(self.nl_fd, os.SOL.SOCKET, os.SO.RCVBUFFORCE, &std.mem.toBytes(@as(c_int, KERN_RCVBUF)));
+        try posix.setsockopt(self.nl_fd, posix.SOL.SOCKET, posix.SO.RCVBUF, &std.mem.toBytes(@as(c_int, KERN_RCVBUF)));
+        try posix.setsockopt(self.nl_fd, posix.SOL.SOCKET, posix.SO.RCVBUFFORCE, &std.mem.toBytes(@as(c_int, KERN_RCVBUF)));
 
-        const nls = os.sockaddr.nl{
+        const nls = posix.sockaddr.nl{
             .groups = 1, // KOBJECT_UEVENT groups bitmask must be 1
-            .pid = @bitCast(os.system.getpid()),
+            .pid = @bitCast(os.linux.getpid()),
         };
-        try os.bind(self.nl_fd, @ptrCast(&nls), @sizeOf(os.sockaddr.nl));
+        try posix.bind(self.nl_fd, @ptrCast(&nls), @sizeOf(posix.sockaddr.nl));
 
         return self;
     }
 
-    pub fn register(self: *@This(), epoll_fd: os.fd_t) !void {
+    pub fn register(self: *@This(), epoll_fd: posix.fd_t) !void {
         var device_event = os.linux.epoll_event{
             .data = .{ .fd = self.nl_fd },
             .events = os.linux.EPOLL.IN,
         };
-        try os.epoll_ctl(epoll_fd, os.linux.EPOLL.CTL_ADD, self.nl_fd, &device_event);
+        try posix.epoll_ctl(epoll_fd, os.linux.EPOLL.CTL_ADD, self.nl_fd, &device_event);
 
         var timer_event = os.linux.epoll_event{
             .data = .{ .fd = self.settle_fd },
             .events = os.linux.EPOLL.IN | os.linux.EPOLL.ONESHOT,
         };
-        try os.epoll_ctl(epoll_fd, os.linux.EPOLL.CTL_ADD, self.settle_fd, &timer_event);
+        try posix.epoll_ctl(epoll_fd, os.linux.EPOLL.CTL_ADD, self.settle_fd, &timer_event);
     }
 
     pub fn start_settle_timer(self: *@This()) !void {
@@ -435,7 +436,7 @@ pub const DeviceWatcher = struct {
             // consider settled after 2 seconds without any new events
             .it_value = .{ .tv_sec = 2, .tv_nsec = 0 },
         };
-        try os.timerfd_settime(self.settle_fd, 0, &timerspec, null);
+        try posix.timerfd_settime(self.settle_fd, .{}, &timerspec, null);
     }
 
     pub fn handle_new_event(self: *@This()) !void {
@@ -444,7 +445,7 @@ pub const DeviceWatcher = struct {
 
         var recv_bytes: [USER_RCVBUF]u8 = undefined;
 
-        const bytes_read = try os.read(self.nl_fd, &recv_bytes);
+        const bytes_read = try posix.read(self.nl_fd, &recv_bytes);
 
         const allocator = self.arena.allocator();
 
@@ -460,8 +461,8 @@ pub const DeviceWatcher = struct {
 
     pub fn deinit(self: *@This()) void {
         self.arena.deinit();
-        os.closeSocket(self.nl_fd);
-        os.closeSocket(self.settle_fd);
+        posix.close(self.nl_fd);
+        posix.close(self.settle_fd);
     }
 };
 
@@ -565,15 +566,18 @@ test "uevent kobject remove chardev parsing" {
 
 /// Find all active serial and virtual terminals where we can spawn a console.
 /// Caller is responsible for the returned list.
-pub fn findActiveConsoles(allocator: std.mem.Allocator) ![]os.fd_t {
-    var devs = std.ArrayList(os.fd_t).init(allocator);
+pub fn findActiveConsoles(allocator: std.mem.Allocator) ![]posix.fd_t {
+    var devs = std.ArrayList(posix.fd_t).init(allocator);
     errdefer devs.deinit();
 
     // TODO(jared): don't assume a monitor is connected
-    const tty0_fd = try os.open("/dev/tty0", os.O.RDWR | os.O.NOCTTY, 0);
+    const tty0_fd = try posix.open("/dev/tty0", .{ .ACCMODE = .RDWR, .NOCTTY = true }, 0);
     try devs.append(tty0_fd);
 
-    var char_devices_dir = try std.fs.openIterableDirAbsolute("/dev/char", .{});
+    var char_devices_dir = try std.fs.openDirAbsolute(
+        "/dev/char",
+        .{ .iterate = true },
+    );
     defer char_devices_dir.close();
 
     var walker = try char_devices_dir.walk(allocator);
@@ -604,15 +608,15 @@ pub fn findActiveConsoles(allocator: std.mem.Allocator) ![]os.fd_t {
                 }
 
                 var fullpath_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
-                const fullpath = char_devices_dir.dir.realpath(entry.path, &fullpath_buf) catch continue;
+                const fullpath = char_devices_dir.realpath(entry.path, &fullpath_buf) catch continue;
 
-                const fd = try os.open(fullpath, os.O.RDWR | os.O.NOCTTY, 0);
+                const fd = try posix.open(fullpath, .{ .ACCMODE = .RDWR, .NOCTTY = true }, 0);
 
                 if (serialDeviceIsConnected(fd)) {
                     std.log.info("found active serial device at {s}", .{fullpath});
                     try devs.append(fd);
                 } else {
-                    os.close(fd);
+                    posix.close(fd);
                 }
             },
             else => {},
@@ -622,7 +626,7 @@ pub fn findActiveConsoles(allocator: std.mem.Allocator) ![]os.fd_t {
     return devs.toOwnedSlice();
 }
 
-fn serialDeviceIsConnected(fd: os.fd_t) bool {
+fn serialDeviceIsConnected(fd: posix.fd_t) bool {
     var serial: c_int = 0;
 
     if (os.linux.ioctl(fd, linux_headers.TIOCMGET, @intFromPtr(&serial)) != 0) {

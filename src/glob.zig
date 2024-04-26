@@ -3,6 +3,8 @@ const mem = std.mem;
 
 const open_flags = .{
     .access_sub_paths = true,
+    // TODO(jared): may break things
+    .iterate = true,
 };
 
 pub const Iterator = struct {
@@ -101,7 +103,7 @@ pub const Iterator = struct {
                     },
                     .Directory => {
                         if (i < self.segments.items.len - 1) {
-                            const dir = try it.dir.openIterableDir(entry.name, open_flags);
+                            const dir = try it.dir.openDir(entry.name, open_flags);
                             try self.stack.append(self.allocator, dir.iterate());
                             try self.components.append(self.allocator, entry.name);
                             i += 1;

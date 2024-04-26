@@ -36,8 +36,8 @@ const CpioEntryType = enum {
 
     fn to_mode(self: @This()) u32 {
         return @as(u32, switch (self) {
-            .Directory => std.os.S.IFDIR,
-            .File => std.os.S.IFREG,
+            .Directory => std.posix.S.IFDIR,
+            .File => std.posix.S.IFREG,
         });
     }
 };

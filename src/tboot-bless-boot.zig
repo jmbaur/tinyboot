@@ -130,7 +130,10 @@ fn find_entry(
         &.{ efi_sys_mount_point, "loader", "entries" },
     );
 
-    var entries_dir = try std.fs.openIterableDirAbsolute(entries_path, .{});
+    var entries_dir = try std.fs.openDirAbsolute(
+        entries_path,
+        .{ .iterate = true },
+    );
     defer entries_dir.close();
 
     var iter = entries_dir.iterate();
@@ -140,7 +143,10 @@ fn find_entry(
         }
 
         const bls_entry = bls.EntryFilename.parse(entry.name) catch |err| {
-            std.log.debug("failed to parse boot entry {s}: {}", .{ entry.name, err });
+            std.log.debug(
+                "failed to parse boot entry {s}: {}",
+                .{ entry.name, err },
+            );
             continue;
         };
 
