@@ -1,18 +1,16 @@
 {
-  lib,
   callPackage,
-  stdenvNoCC,
-  xz,
-  zig_0_11,
   corebootSupport ? true,
+  lib,
+  stdenv,
+  xz,
+  zig,
 }:
 let
-  stdenv = stdenvNoCC;
   zigArgs = [
     "-Doptimize=ReleaseSafe"
     "-Dtarget=${stdenv.hostPlatform.qemuArch}-linux"
     "-Dcoreboot=${lib.boolToString corebootSupport}"
-    "--verbose"
   ];
 in
 stdenv.mkDerivation {
@@ -29,7 +27,7 @@ stdenv.mkDerivation {
   };
 
   nativeBuildInputs = [
-    zig_0_11
+    zig
     xz
   ];
 

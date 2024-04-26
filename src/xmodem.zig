@@ -1,5 +1,6 @@
 const std = @import("std");
 const os = std.os;
+const posix = std.posix;
 const Crc16Xmodem = std.hash.crc.Crc16Xmodem;
 
 const linux_headers = @import("linux_headers");
@@ -26,30 +27,37 @@ const XmodemChunk = extern struct {
     crc: u16 align(1) = 0,
 };
 
-pub fn xmodem_send(fd: os.fd_t, filename: []const u8) !void {
+pub fn xmodem_send(fd: posix.fd_t, filename: []const u8) !void {
     var file = try std.fs.openFileAbsolute(filename, .{});
     defer file.close();
 
     const stat = try file.stat();
-    var buf = try os.mmap(null, stat.size, os.PROT.READ, os.MAP.PRIVATE, file.handle, 0);
-    defer os.munmap(buf);
+    var buf = try posix.mmap(
+        null,
+        stat.size,
+        posix.PROT.READ,
+        .{ .TYPE = .PRIVATE },
+        file.handle,
+        0,
+    );
+    defer posix.munmap(buf);
 
     std.debug.print("waiting for receiver ping\n", .{});
 
-    const epoll_fd = try os.epoll_create1(0);
-    defer os.close(epoll_fd);
+    const epoll_fd = try posix.epoll_create1(0);
+    defer posix.close(epoll_fd);
 
     var read_ready_event = os.linux.epoll_event{
         .data = .{ .fd = fd },
         .events = os.linux.EPOLL.IN,
     };
-    try os.epoll_ctl(epoll_fd, os.linux.EPOLL.CTL_ADD, fd, &read_ready_event);
+    try posix.epoll_ctl(epoll_fd, os.linux.EPOLL.CTL_ADD, fd, &read_ready_event);
 
     var num_timeouts: u8 = 0;
 
     while (true) {
         var events: [1]os.linux.epoll_event = undefined;
-        const n_events = os.epoll_wait(epoll_fd, &events, 10 * std.time.ms_per_s);
+        const n_events = posix.epoll_wait(epoll_fd, &events, 10 * std.time.ms_per_s);
         if (n_events == 0) {
             // timeout
             if (num_timeouts + 1 >= 10) {
@@ -62,7 +70,7 @@ pub fn xmodem_send(fd: os.fd_t, filename: []const u8) !void {
         }
 
         var ping = [_]u8{0};
-        const n = try os.read(fd, &ping);
+        const n = try posix.read(fd, &ping);
         if (n != ping.len) {
             return Error.InvalidReceiveLength;
         }
@@ -95,14 +103,14 @@ pub fn xmodem_send(fd: os.fd_t, filename: []const u8) !void {
         chunk.block_neg = 0xff - chunk.block;
 
         const bytes = std.mem.asBytes(&chunk);
-        const n = try os.write(fd, bytes);
+        const n = try posix.write(fd, bytes);
         if (n != bytes.len) {
             return Error.InvalidSendLength;
         }
 
         const answer = b: while (true) {
             var answer_buf = [_]u8{0};
-            const answer_n_read = try os.read(fd, &answer_buf);
+            const answer_n_read = try posix.read(fd, &answer_buf);
             if (answer_n_read != answer_buf.len) {
                 return Error.InvalidReceiveLength;
             }
@@ -136,12 +144,12 @@ pub fn xmodem_send(fd: os.fd_t, filename: []const u8) !void {
         std.debug.print("{s}", .{status_char});
     }
 
-    if (try os.write(fd, &.{X_EOF}) != 1) {
+    if (try posix.write(fd, &.{X_EOF}) != 1) {
         return Error.InvalidSendLength;
     }
 
     var answer_buf = [_]u8{0};
-    if (try os.read(fd, &answer_buf) != 1) {
+    if (try posix.read(fd, &answer_buf) != 1) {
         return Error.InvalidReceiveLength;
     }
 
@@ -155,16 +163,16 @@ pub fn xmodem_send(fd: os.fd_t, filename: []const u8) !void {
 
 pub fn xmodem_recv(
     allocator: std.mem.Allocator,
-    fd: os.fd_t,
+    fd: posix.fd_t,
 ) ![]u8 {
-    const epoll_fd = try os.epoll_create1(0);
-    defer os.close(epoll_fd);
+    const epoll_fd = try posix.epoll_create1(0);
+    defer posix.close(epoll_fd);
 
     var read_ready_event = os.linux.epoll_event{
         .data = .{ .fd = fd },
         .events = os.linux.EPOLL.IN | os.linux.EPOLL.ONESHOT,
     };
-    try os.epoll_ctl(epoll_fd, os.linux.EPOLL.CTL_ADD, fd, &read_ready_event);
+    try posix.epoll_ctl(epoll_fd, os.linux.EPOLL.CTL_ADD, fd, &read_ready_event);
 
     var started = false;
 
@@ -174,12 +182,12 @@ pub fn xmodem_recv(
     var ms_without_bytes: u32 = 0;
 
     while (true) {
-        if (try os.write(fd, &.{'C'}) != 1) {
+        if (try posix.write(fd, &.{'C'}) != 1) {
             return Error.InvalidSendLength;
         }
 
         var events: [1]os.linux.epoll_event = undefined;
-        const n_events = os.epoll_wait(epoll_fd, &events, 5 * std.time.ms_per_s);
+        const n_events = posix.epoll_wait(epoll_fd, &events, 5 * std.time.ms_per_s);
         if (n_events == 0) {
             if (ms_without_bytes / std.time.ms_per_s > 25) {
                 return Error.Timeout;
@@ -200,7 +208,7 @@ pub fn xmodem_recv(
     while (num_errors < 10) {
         var chunk: XmodemChunk = .{};
 
-        const chunk_n_read = try os.read(fd, chunk_buf[chunk_buf_index..]);
+        const chunk_n_read = try posix.read(fd, chunk_buf[chunk_buf_index..]);
         if (chunk_n_read == 0) {
             if (ms_without_bytes / std.time.ms_per_s > 25) {
                 return Error.Timeout;
@@ -266,14 +274,14 @@ pub fn xmodem_recv(
     return Error.TooManyNaks;
 }
 
-fn ack(fd: os.fd_t) !void {
-    if (try os.write(fd, &.{X_ACK}) != 1) {
+fn ack(fd: posix.fd_t) !void {
+    if (try posix.write(fd, &.{X_ACK}) != 1) {
         return Error.InvalidSendLength;
     }
 }
 
-fn nak(fd: os.fd_t) !void {
-    if (try os.write(fd, &.{X_NAK}) != 1) {
+fn nak(fd: posix.fd_t) !void {
+    if (try posix.write(fd, &.{X_NAK}) != 1) {
         return Error.InvalidSendLength;
     }
 }

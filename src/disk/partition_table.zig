@@ -777,6 +777,10 @@ pub const Gpt = struct {
             partition_entry_size +
             partition_offset;
 
+        // TODO(jared): Initial seek here seems to be necessary, even though we
+        // seek as soon as we iterate to the first partition offset.
+        try self.source.seekTo(partition_offset);
+
         while (partition_offset <= partition_end) : (partition_offset += partition_entry_size) {
             try self.source.seekTo(partition_offset);
 
@@ -813,6 +817,12 @@ test "guid parsing" {
 
     const partition_type = GptPartitionType.from_guid(got_guid).?;
     try std.testing.expectEqual(GptPartitionType.EfiSystem, partition_type);
+}
+
+test "gpt header struct sizes and offset" {
+    try std.testing.expectEqual(512, @sizeOf(GptHeader));
+    try std.testing.expectEqual(128, @sizeOf(GptPartitionRecord));
+    try std.testing.expectEqual(84, @offsetOf(GptHeader, "partition_entry_size"));
 }
 
 test "gpt parsing" {

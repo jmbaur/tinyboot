@@ -1,5 +1,6 @@
 const std = @import("std");
 const os = std.os;
+const posix = std.posix;
 const O = std.os.O;
 const S = std.os.S;
 
@@ -9,23 +10,23 @@ const LOG_BUFFER_SIZE = 2 << 12;
 
 pub var log_buffer: ?[]align(std.mem.page_size) u8 = null;
 
-var console_comm_fds = [_]?os.fd_t{null} ** 10; // arbitrary limit of 10 consoles
+var console_comm_fds = [_]?posix.fd_t{null} ** 10; // arbitrary limit of 10 consoles
 var offset: usize = 0;
 
 pub fn initLogger() !void {
     if (log_buffer == null) {
-        log_buffer = try os.mmap(
+        log_buffer = try posix.mmap(
             null,
             LOG_BUFFER_SIZE,
-            os.PROT.READ | os.PROT.WRITE,
-            os.MAP.SHARED | os.MAP.ANONYMOUS,
+            posix.PROT.READ | posix.PROT.WRITE,
+            .{ .TYPE = .SHARED, .ANONYMOUS = true },
             -1,
             0,
         );
     }
 }
 
-pub fn addConsole(new_fd: os.fd_t) void {
+pub fn addConsole(new_fd: posix.fd_t) void {
     for (&console_comm_fds) |*fd| {
         if (fd.* == null) {
             fd.* = new_fd;
@@ -36,7 +37,7 @@ pub fn addConsole(new_fd: os.fd_t) void {
 
 pub fn deinitLogger() void {
     if (log_buffer) |buf| {
-        os.munmap(buf);
+        posix.munmap(buf);
     }
 }
 
@@ -65,7 +66,7 @@ pub fn logFn(
     for (console_comm_fds) |fd| {
         if (fd) |real_fd| {
             var msg: ServerMsg = .{ .NewLogOffset = offset };
-            _ = os.write(real_fd, std.mem.asBytes(&msg)) catch continue;
+            _ = posix.write(real_fd, std.mem.asBytes(&msg)) catch continue;
         } else {
             break;
         }

@@ -1,5 +1,6 @@
 const std = @import("std");
 const os = std.os;
+const posix = std.posix;
 const E = std.os.linux.E;
 
 const linux_headers = @import("linux_headers");
@@ -14,14 +15,14 @@ fn enum_to_eventfd(_enum: anytype) u64 {
     return @as(u64, @intFromEnum(_enum)) + 1;
 }
 
-fn eventfd_read(fd: os.fd_t) !u64 {
+fn eventfd_read(fd: posix.fd_t) !u64 {
     var ev: u64 = 0;
-    _ = try os.read(fd, std.mem.asBytes(&ev));
+    _ = try posix.read(fd, std.mem.asBytes(&ev));
     return ev;
 }
 
-fn eventfd_write(fd: os.fd_t, val: u64) !void {
-    _ = try os.write(fd, std.mem.asBytes(&val));
+fn eventfd_write(fd: posix.fd_t, val: u64) !void {
+    _ = try posix.write(fd, std.mem.asBytes(&val));
 }
 
 fn kexec_is_loaded(f: std.fs.File) bool {
@@ -113,7 +114,7 @@ pub const BootEntry = struct {
             }
         };
 
-        switch (os.linux.getErrno(rc)) {
+        switch (os.linux.E.init(rc)) {
             E.SUCCESS => {
                 // Wait for up to a second for kernel to report for kexec to be
                 // loaded.
@@ -130,7 +131,7 @@ pub const BootEntry = struct {
             // IMA appraisal failed
             E.PERM => return LoadError.PermissionDenied,
             else => {
-                std.log.err("ERROR: {} {}", .{ rc, os.linux.getErrno(rc) });
+                std.log.err("ERROR: {} {}", .{ rc, os.linux.E.init(rc) });
                 return LoadError.UnknownError;
             },
         }
@@ -185,14 +186,14 @@ pub const BootLoader = union(enum) {
     }
 };
 
-fn need_to_stop(stop_fd: os.fd_t) !bool {
+fn need_to_stop(stop_fd: posix.fd_t) !bool {
     defer {
         eventfd_write(stop_fd, enum_to_eventfd(Autoboot.StopStatus.keep_going)) catch {};
     }
     return try eventfd_read(stop_fd) == enum_to_eventfd(Autoboot.StopStatus.stop);
 }
 
-fn autoboot_wrapper(ready_fd: os.fd_t, stop_fd: os.fd_t) void {
+fn autoboot_wrapper(ready_fd: posix.fd_t, stop_fd: posix.fd_t) void {
     const success = autoboot(stop_fd) catch |err| b: {
         std.log.err("autoboot failed: {}", .{err});
         break :b false;
@@ -207,7 +208,7 @@ fn autoboot_wrapper(ready_fd: os.fd_t, stop_fd: os.fd_t) void {
 }
 
 /// Returns true if kexec has been successfully loaded.
-fn autoboot(stop_fd: os.fd_t) !bool {
+fn autoboot(stop_fd: posix.fd_t) !bool {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
 
@@ -257,8 +258,8 @@ fn autoboot(stop_fd: os.fd_t) !bool {
 }
 
 pub const Autoboot = struct {
-    ready_fd: os.fd_t,
-    stop_fd: os.fd_t,
+    ready_fd: posix.fd_t,
+    stop_fd: posix.fd_t,
     thread: ?std.Thread,
 
     pub const ReadyStatus = enum {
@@ -273,21 +274,21 @@ pub const Autoboot = struct {
 
     pub fn init() !@This() {
         return .{
-            .ready_fd = try os.eventfd(0, 0),
+            .ready_fd = try posix.eventfd(0, 0),
             // Ensure that stop_fd can be read from right away without
             // blocking.
-            .stop_fd = try os.eventfd(@intCast(enum_to_eventfd(StopStatus.keep_going)), 0),
+            .stop_fd = try posix.eventfd(@intCast(enum_to_eventfd(StopStatus.keep_going)), 0),
             .thread = null,
         };
     }
 
-    pub fn register(self: *@This(), epoll_fd: os.fd_t) !void {
+    pub fn register(self: *@This(), epoll_fd: posix.fd_t) !void {
         var ready_event = os.linux.epoll_event{
             .data = .{ .fd = self.ready_fd },
             // we will only be ready to boot once
             .events = os.linux.EPOLL.IN | os.linux.EPOLL.ONESHOT,
         };
-        try os.epoll_ctl(epoll_fd, os.linux.EPOLL.CTL_ADD, self.ready_fd, &ready_event);
+        try posix.epoll_ctl(epoll_fd, os.linux.EPOLL.CTL_ADD, self.ready_fd, &ready_event);
     }
 
     pub fn start(self: *@This()) !void {
@@ -301,18 +302,18 @@ pub const Autoboot = struct {
         }
     }
 
-    pub fn finish(self: *@This()) !?os.RebootCommand {
+    pub fn finish(self: *@This()) !?posix.RebootCommand {
         const rc = try eventfd_read(self.ready_fd);
         if (rc == enum_to_eventfd(ReadyStatus.ready)) {
-            return os.RebootCommand.KEXEC;
+            return posix.RebootCommand.KEXEC;
         } else {
             return null;
         }
     }
 
     pub fn deinit(self: *@This()) void {
-        os.close(self.ready_fd);
-        os.close(self.stop_fd);
+        posix.close(self.ready_fd);
+        posix.close(self.stop_fd);
         self.stop() catch {};
         self.thread = null;
     }

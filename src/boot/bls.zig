@@ -112,9 +112,9 @@ pub const BootLoaderSpec = struct {
         var internal_mounts = std.ArrayList(Mount).init(allocator);
         var external_mounts = std.ArrayList(Mount).init(allocator);
 
-        var sysfs_block = try std.fs.openIterableDirAbsolute(
+        var sysfs_block = try std.fs.openDirAbsolute(
             "/sys/class/block",
-            .{},
+            .{ .iterate = true },
         );
         defer sysfs_block.close();
         var it = sysfs_block.iterate();
@@ -260,7 +260,7 @@ pub const BootLoaderSpec = struct {
                 os.linux.MS.NOSUID | os.linux.MS.NODEV | os.linux.MS.NOEXEC,
                 0,
             );
-            switch (os.linux.getErrno(rc)) {
+            switch (os.linux.E.init(rc)) {
                 .SUCCESS => {},
                 else => |err| {
                     std.log.err("failed to mount {s}: {}", .{ esp_alias_path, err });
@@ -304,7 +304,10 @@ pub const BootLoaderSpec = struct {
             break :b LoaderConf.parse(contents);
         };
 
-        var entries_dir = try mountpoint_dir.openIterableDir("loader/entries", .{});
+        var entries_dir = try mountpoint_dir.openDir(
+            "loader/entries",
+            .{ .iterate = true },
+        );
         defer entries_dir.close();
 
         var it = entries_dir.iterate();
@@ -313,7 +316,7 @@ pub const BootLoaderSpec = struct {
                 continue;
             }
 
-            var entry_file = entries_dir.dir.openFile(dir_entry.name, .{}) catch continue;
+            var entry_file = entries_dir.openFile(dir_entry.name, .{}) catch continue;
             const entry_contents = try entry_file.readToEndAlloc(internal_allocator, 4096);
             defer internal_allocator.free(entry_contents);
             var type1_entry = Type1Entry.parse(internal_allocator, entry_contents) catch continue;
@@ -453,42 +456,42 @@ test "entry filename parsing" {
     );
 
     try std.testing.expectEqualDeep(
-        .{ .name = "my-entry" },
+        EntryFilename{ .name = "my-entry" },
         EntryFilename.parse("my-entry.conf"),
     );
 
     try std.testing.expectEqualDeep(
-        .{ .name = "my-entry-1" },
+        EntryFilename{ .name = "my-entry-1" },
         EntryFilename.parse("my-entry-1.conf"),
     );
 
     try std.testing.expectEqualDeep(
-        .{ .name = "my-entry", .tries_done = 1 },
+        EntryFilename{ .name = "my-entry", .tries_done = 1 },
         EntryFilename.parse("my-entry+1.conf"),
     );
 
     try std.testing.expectEqualDeep(
-        .{ .name = "my-entry", .tries_done = 0 },
+        EntryFilename{ .name = "my-entry", .tries_done = 0 },
         EntryFilename.parse("my-entry+0.conf"),
     );
 
     try std.testing.expectEqualDeep(
-        .{ .name = "my-entry", .tries_done = 0, .tries_left = 3 },
+        EntryFilename{ .name = "my-entry", .tries_done = 0, .tries_left = 3 },
         EntryFilename.parse("my-entry+0-3.conf"),
     );
 
     try std.testing.expectEqualDeep(
-        .{ .name = "my-entry-1", .tries_done = 5, .tries_left = 0 },
+        EntryFilename{ .name = "my-entry-1", .tries_done = 5, .tries_left = 0 },
         EntryFilename.parse("my-entry-1+5-0.conf"),
     );
 
     try std.testing.expectEqualDeep(
-        .{ .name = "my-entry-2", .tries_done = 3, .tries_left = 1 },
+        EntryFilename{ .name = "my-entry-2", .tries_done = 3, .tries_left = 1 },
         EntryFilename.parse("my-entry-2+3-1.conf"),
     );
 
     try std.testing.expectEqualDeep(
-        .{ .name = "my-entry-3", .tries_done = 2 },
+        EntryFilename{ .name = "my-entry-3", .tries_done = 2 },
         EntryFilename.parse("my-entry-3+2.conf"),
     );
 }

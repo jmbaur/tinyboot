@@ -3,13 +3,12 @@ const log = std.log;
 const builtin = @import("builtin");
 
 pub fn build(b: *std.Build) !void {
+    const target = b.standardTargetOptions(.{ .default_target = .{ .cpu_model = .baseline } });
+    const optimize = b.standardOptimizeOption(.{});
+
     const coreboot_support = b.option(bool, "coreboot", "Support for coreboot integration") orelse true;
     const tboot_loader_options = b.addOptions();
     tboot_loader_options.addOption(bool, "coreboot_support", coreboot_support);
-
-    const target = b.standardTargetOptions(.{ .default_target = .{ .cpu_model = .baseline } });
-
-    const optimize = b.standardOptimizeOption(.{});
 
     const tboot_loader_optimize = if (optimize == std.builtin.OptimizeMode.Debug)
         std.builtin.OptimizeMode.Debug
@@ -17,13 +16,13 @@ pub fn build(b: *std.Build) !void {
         // Always use release small, smallest size is our goal.
         std.builtin.OptimizeMode.ReleaseSmall;
 
-    const linux_kexec_header_translated = b.addTranslateC(.{
-        .source_file = .{ .path = "src/linux.h" },
+    const linux_headers_translated = b.addTranslateC(.{
+        .root_source_file = .{ .path = "src/linux.h" },
         .target = target,
         .optimize = tboot_loader_optimize,
     });
 
-    const linux_headers_module = linux_kexec_header_translated.createModule();
+    const linux_headers_module = linux_headers_translated.addModule("linux_headers");
 
     const zbor_dep = b.dependency("zbor", .{
         .target = target,
@@ -37,16 +36,16 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .optimize = tboot_loader_optimize,
     });
-    tboot_loader.addModule("linux_headers", linux_headers_module);
-    tboot_loader.addModule("zbor", zbor_module);
-    tboot_loader.addOptions("build_options", tboot_loader_options);
+    tboot_loader.root_module.addImport("zbor", zbor_module);
+    tboot_loader.root_module.addOptions("build_options", tboot_loader_options);
+    tboot_loader.root_module.addImport("linux_headers", linux_headers_module);
 
     // make the default step just compile tboot-loader
     b.default_step = &tboot_loader.step;
 
-    // runs on builder
     const cpio_tool = b.addRunArtifact(b.addExecutable(.{
         .name = "cpio",
+        .target = b.host,
         .root_source_file = .{ .path = "src/cpio/main.zig" },
     }));
     cpio_tool.addArtifactArg(tboot_loader);
@@ -88,7 +87,7 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .optimize = optimize,
     });
-    modem_tool.addModule("linux_headers", linux_headers_module);
+    modem_tool.root_module.addImport("linux_headers", linux_headers_module);
     b.installArtifact(modem_tool);
 
     const unit_tests = b.addTest(.{
@@ -96,14 +95,15 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .optimize = optimize,
     });
-    unit_tests.addModule("linux_headers", linux_headers_module);
-    unit_tests.addOptions("build_options", tboot_loader_options);
 
+    unit_tests.root_module.addOptions("build_options", tboot_loader_options);
+    unit_tests.root_module.addImport("linux_headers", linux_headers_module);
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&b.addRunArtifact(unit_tests).step);
 
     const runner_tool = b.addRunArtifact(b.addExecutable(.{
         .name = "tboot-runner",
+        .target = b.host,
         .root_source_file = .{ .path = "src/runner.zig" },
     }));
     runner_tool.step.dependOn(&cpio_archive.step);

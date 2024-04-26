@@ -21,7 +21,7 @@ pub fn main() !void {
     const initrd = args.next().?;
     const kernel = args.next().?;
 
-    try std.os.chdir(tmpdir);
+    try std.posix.chdir(tmpdir);
 
     var qemu_args = std.ArrayList([]const u8).init(allocator);
 

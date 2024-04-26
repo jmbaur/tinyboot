@@ -2,7 +2,8 @@ const std = @import("std");
 const builtin = @import("builtin");
 const fs = std.fs;
 const os = std.os;
-const system = std.os.system;
+const posix = std.posix;
+const system = std.posix.system;
 const linux = std.os.linux;
 
 const linux_headers = @import("linux_headers");
@@ -18,7 +19,7 @@ fn mountPseudoFs(
 ) MountError!void {
     const rc = linux.mount("", path, fstype, flags, 0);
 
-    switch (linux.getErrno(rc)) {
+    switch (linux.E.init(rc)) {
         .SUCCESS => {},
         // TODO(jared): parse errno
         else => return MountError.Todo,
@@ -50,44 +51,41 @@ pub fn setupSystem() !void {
     try fs.symLinkAbsolute("/proc/self/fd/2", "/dev/stderr", .{});
 }
 
-const CBAUD = linux_headers.CBAUD;
-const CBAUDEX = linux_headers.CBAUDEX;
-const CRTSCTS = linux_headers.CRTSCTS;
 const TCFLSH = linux_headers.TCFLSH;
 const TCIOFLUSH = linux_headers.TCIOFLUSH;
-const TCOON = linux_headers.TCOON;
-const VDISCARD = linux_headers.VDISCARD;
 const VEOF = linux_headers.VEOF;
-const VEOL = linux_headers.VEOL;
-const VEOL2 = linux_headers.VEOL2;
 const VERASE = linux_headers.VERASE;
 const VINTR = linux_headers.VINTR;
 const VKILL = linux_headers.VKILL;
-const VLNEXT = linux_headers.VLNEXT;
 const VMIN = linux_headers.VMIN;
 const VQUIT = linux_headers.VQUIT;
-const VREPRINT = linux_headers.VREPRINT;
 const VSTART = linux_headers.VSTART;
 const VSTOP = linux_headers.VSTOP;
 const VSUSP = linux_headers.VSUSP;
-const VSWTC = linux_headers.VSWTC;
-const VSWTCH = linux_headers.VSWTCH;
 const VTIME = linux_headers.VTIME;
-const VWERASE = linux_headers.VWERASE;
 
-fn setBaudRate(t: *os.termios, baud: u32) void {
+fn setBaudRate(t: *posix.termios, speed: posix.speed_t) void {
     // indicate that we want to set a new baud rate
-    t.*.cflag &= ~@as(os.tcflag_t, CBAUD);
-
-    // set the new baud rate
-    t.*.cflag |= baud;
+    t.*.ispeed = speed;
+    t.*.ospeed = speed;
 }
 
-fn cfmakeraw(t: *os.termios) void {
-    t.iflag &= ~(system.IGNBRK | system.BRKINT | system.PARMRK | system.ISTRIP | system.INLCR | system.IGNCR | system.ICRNL | system.IXON);
-    t.lflag &= ~(system.ECHO | system.ECHONL | system.ICANON | system.ISIG | system.IEXTEN);
-    t.cflag &= ~(system.CSIZE | system.PARENB);
-    t.cflag |= system.CS8;
+fn cfmakeraw(t: *posix.termios) void {
+    t.iflag.IGNBRK = false;
+    t.iflag.BRKINT = false;
+    t.iflag.PARMRK = false;
+    t.iflag.INLCR = false;
+    t.iflag.IGNCR = false;
+    t.iflag.IXON = false;
+
+    t.lflag.ECHO = false;
+    t.lflag.ECHONL = false;
+    t.lflag.ICANON = false;
+    t.lflag.ISIG = false;
+    t.lflag.IEXTEN = false;
+
+    t.cflag.CSIZE = .CS8;
+    t.cflag.PARENB = false;
     t.cc[VMIN] = 1;
     t.cc[VTIME] = 0;
 }
@@ -98,8 +96,8 @@ pub const TtyMode = enum {
     file_transfer_send,
 };
 
-pub fn setupTty(fd: os.fd_t, mode: TtyMode) !void {
-    var termios = try os.tcgetattr(fd);
+pub fn setupTty(fd: posix.fd_t, mode: TtyMode) !void {
+    var termios = try posix.tcgetattr(fd);
 
     switch (mode) {
         .user_input => {
@@ -112,41 +110,61 @@ pub fn setupTty(fd: os.fd_t, mode: TtyMode) !void {
             termios.cc[VSTOP] = 19; // C-s
             termios.cc[VSUSP] = 26; // C-z
 
-            termios.cflag &= CBAUD | CBAUDEX | system.CSIZE | system.CSTOPB | system.PARENB | system.PARODD;
-
-            termios.cflag |= system.CREAD | system.HUPCL | system.CLOCAL;
+            termios.cflag.CSIZE = .CS8;
+            termios.cflag.CSTOPB = true;
+            termios.cflag.PARENB = true;
+            termios.cflag.PARODD = true;
+            termios.cflag.CREAD = true;
+            termios.cflag.HUPCL = true;
+            termios.cflag.CLOCAL = true;
 
             // input modes
-            termios.iflag = system.ICRNL | system.IXON | system.IXOFF;
+            termios.iflag.ICRNL = true;
+            termios.iflag.IXON = true;
+            termios.iflag.IXOFF = true;
 
             // output modes
-            termios.oflag = system.OPOST | system.ONLCR;
+            termios.oflag.OPOST = true;
+            termios.oflag.ONLCR = true;
 
             // local modes
-            termios.lflag = system.ISIG | system.ICANON | system.ECHO | system.ECHOE | system.ECHOK | system.IEXTEN;
+            termios.lflag.ISIG = true;
+            termios.lflag.ICANON = true;
+            termios.lflag.ECHO = true;
+            termios.lflag.ECHOE = true;
+            termios.lflag.ECHOK = true;
+            termios.lflag.IEXTEN = true;
 
             cfmakeraw(&termios);
 
-            setBaudRate(&termios, system.B115200);
+            setBaudRate(&termios, posix.speed_t.B115200);
         },
         .file_transfer_recv, .file_transfer_send => {
-            termios.iflag = system.IGNBRK | system.IXOFF;
-            termios.lflag &= ~(system.ECHO | system.ICANON | system.ISIG | system.IEXTEN);
-            termios.oflag = 0;
-            termios.cflag &= ~system.PARENB;
-            termios.cflag &= ~system.CSIZE;
-            termios.cflag |= system.CS8;
-            termios.cflag |= CRTSCTS;
-            termios.cflag |= system.CREAD | system.CLOCAL;
+            termios.iflag = .{
+                .IGNBRK = true,
+                .IXOFF = true,
+            };
+
+            termios.lflag.ECHO = false;
+            termios.lflag.ICANON = false;
+            termios.lflag.ISIG = false;
+            termios.lflag.IEXTEN = false;
+
+            termios.oflag = .{};
+
+            termios.cflag.PARENB = false;
+            termios.cflag.CSIZE = .CS8;
+            termios.cflag.CREAD = true;
+            termios.cflag.CLOCAL = true;
             termios.cc[VMIN] = if (mode == .file_transfer_recv) 0 else 1;
             termios.cc[VTIME] = 50;
 
-            setBaudRate(&termios, system.B3000000);
+            setBaudRate(&termios, posix.speed_t.B3000000);
         },
     }
 
     _ = system.ioctl(fd, TCFLSH, TCIOFLUSH);
-    try os.tcsetattr(fd, os.TCSA.NOW, termios);
+    try posix.tcsetattr(fd, posix.TCSA.NOW, termios);
 }
 
 // These aren't defined in the UAPI linux headers for some odd reason.
@@ -158,7 +176,7 @@ const SYSLOG_ACTION_UNREAD = 9;
 pub fn kernelLogs(allocator: std.mem.Allocator) ![]const u8 {
     const bytes_available = linux.syscall3(linux.SYS.syslog, SYSLOG_ACTION_UNREAD, 0, 0);
     const buf = try allocator.alloc(u8, bytes_available);
-    switch (linux.getErrno(linux.syscall3(linux.SYS.syslog, SYSLOG_ACTION_READ_ALL, @intFromPtr(buf.ptr), buf.len))) {
+    switch (linux.E.init(linux.syscall3(linux.SYS.syslog, SYSLOG_ACTION_READ_ALL, @intFromPtr(buf.ptr), buf.len))) {
         linux.E.INVAL => unreachable, // we provided bad parameters
         // TODO(jared): make use of these possible outcomes
         linux.E.NOSYS => {},

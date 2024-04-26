@@ -2,10 +2,12 @@
     .name = "tinyboot",
     .version = "0.0.1",
 
+    .paths = .{ "build.zig", "build.zig.zon", "src" },
+
     .dependencies = .{
         .zbor = .{
-            .url = "https://github.com/r4gus/zbor/archive/refs/tags/0.12.3.tar.gz",
-            .hash = "1220bbea0285a5d555320b00dde5ced378254c8be144d155d8f886ab4a4e9a855881",
+            .url = "https://github.com/r4gus/zbor/archive/refs/tags/0.13.1.tar.gz",
+            .hash = "122051750f4d7ecc9b705f1bbea1d431956306c74dafa4e9b625b11a34fab4c06933",
         },
     },
 }
