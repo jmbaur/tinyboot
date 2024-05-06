@@ -8,9 +8,9 @@ buildArmTrustedFirmware {
   version = "2.10.0";
   src = fetchgit {
     url = "https://chromium.googlesource.com/chromiumos/third_party/arm-trusted-firmware";
-    branchName = "release-R122-15753.B";
-    rev = "02091541d70e6438c04d6f7b5b323c62f792ab43";
-    hash = "sha256-PtVVLzN1k6xdCSBa1pAF+DyfIuyjlelxpPhqHzzYKwk=";
+    branchName = "release-R125-15853.B";
+    rev = "17bef2248d4547242463e27cfe48ec96029626b4";
+    hash = "sha256-4Y50B+Xa8fRTa/0R8nm5KQhv1gU9MtAxyh6l5RO5LBM=";
   };
   filesToInstall = [ "build/${platform}/release/bl31/bl31.elf" ];
   extraMakeFlags = [ "COREBOOT=1" ];

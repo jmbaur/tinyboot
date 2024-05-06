@@ -18,9 +18,9 @@ stdenv.mkDerivation (finalAttrs: {
   version = "unstable-${builtins.substring 0 7 finalAttrs.src.rev}";
   src = fetchgit {
     url = "https://chromium.googlesource.com/chromiumos/third_party/flashrom";
-    branchName = "master";
-    rev = "763aa467b938cb28e137a6b69b55658f07836298";
-    hash = "sha256-trlkJU4qSmzZXEe33fpmVmwOd3w9H45CUlyiB/lkzDA=";
+    branchName = "release-R125-15853.B";
+    rev = "90e2f5c9516d4e9bebecd10ae7aeefbb5fca7734";
+    hash = "sha256-RonTIForEv2rU0nEEjisYATgat91VBC+JJ8VgsFLfuw=";
   };
   patches = [ ./power-management.patch ];
   outputs = [
