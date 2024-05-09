@@ -96,9 +96,9 @@ pub const BootLoaderSpec = struct {
     /// system). This includes USB mass-storage devices, SD cards, etc.
     external_mounts: []Mount,
 
-    pub fn init(backing_allocator: std.mem.Allocator) @This() {
+    pub fn init() @This() {
         return .{
-            .arena = std.heap.ArenaAllocator.init(backing_allocator),
+            .arena = std.heap.ArenaAllocator.init(std.heap.page_allocator),
             .internal_mounts = &.{},
             .external_mounts = &.{},
         };

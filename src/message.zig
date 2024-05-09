@@ -12,8 +12,6 @@ pub const ClientMsg = union(enum) {
 
 /// Message that can be sent to a client
 pub const ServerMsg = union(enum) {
-    /// New log exists at offset
-    NewLogOffset: usize,
     /// Spawn a shell prompt, even if the user is not present
     ForceShell,
     /// Empty message

@@ -44,7 +44,7 @@ pub fn xmodem_send(fd: posix.fd_t, filename: []const u8) !void {
 
     std.debug.print("waiting for receiver ping\n", .{});
 
-    const epoll_fd = try posix.epoll_create1(0);
+    const epoll_fd = try posix.epoll_create1(linux_headers.EPOLL_CLOEXEC);
     defer posix.close(epoll_fd);
 
     var read_ready_event = os.linux.epoll_event{
@@ -165,7 +165,7 @@ pub fn xmodem_recv(
     allocator: std.mem.Allocator,
     fd: posix.fd_t,
 ) ![]u8 {
-    const epoll_fd = try posix.epoll_create1(0);
+    const epoll_fd = try posix.epoll_create1(linux_headers.EPOLL_CLOEXEC);
     defer posix.close(epoll_fd);
 
     var read_ready_event = os.linux.epoll_event{

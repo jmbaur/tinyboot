@@ -7,10 +7,11 @@ const posix = std.posix;
 const fs = std.fs;
 const linux = std.os.linux;
 
+const linux_headers = @import("linux_headers");
+
 const Autoboot = @import("./boot.zig").Autoboot;
-const Console = @import("./seat.zig").Console;
-const Seat = @import("./seat.zig").Seat;
-const Shell = @import("./shell.zig").Shell;
+const Server = @import("./server.zig").Server;
+const Client = @import("./client.zig").Client;
 const device = @import("./device.zig");
 const log = @import("./log.zig");
 const system = @import("./system.zig");
@@ -28,75 +29,78 @@ const State = struct {
     /// Master epoll file descriptor for driving the event loop.
     epoll_fd: posix.fd_t,
 
-    /// Netlink socket for capturing new Kobject uevent events.
-    device_nl_fd: posix.fd_t,
+    /// All children processes managed by us.
+    children: std.ArrayList(posix.pid_t),
 
-    /// Timer for determining when new Kobject uevent events have settled.
-    device_timer_fd: posix.fd_t,
+    pub fn init(allocator: std.mem.Allocator) !@This() {
+        return @This(){
+            .epoll_fd = try posix.epoll_create1(linux_headers.EPOLL_CLOEXEC),
+            .children = std.ArrayList(posix.fd_t).init(allocator),
+        };
+    }
+
+    pub fn deinit(self: *@This()) void {
+        defer self.children.deinit();
+
+        for (self.children.items) |child| {
+            _ = posix.waitpid(child, 0);
+        }
+
+        posix.close(self.epoll_fd);
+    }
 };
 
 fn run_event_loop(allocator: std.mem.Allocator) !?posix.RebootCommand {
-    const epoll_fd = try posix.epoll_create1(0);
-    defer posix.close(epoll_fd);
+    var state = try State.init(allocator);
+    defer state.deinit();
 
     var device_watcher = try device.DeviceWatcher.init();
-    try device_watcher.register(epoll_fd);
+    try device_watcher.register(state.epoll_fd);
     defer device_watcher.deinit();
 
-    var seat = s: {
-        var pids = std.ArrayList(posix.pid_t).init(allocator);
-        errdefer pids.deinit();
+    var server = try Server.init(allocator);
+    try server.register_self(state.epoll_fd);
+    // NOTE: This must be _after_ state.deinit() so that we are ensured that
+    // the server is deinitialized _before_ state deinit is called, since state
+    // deinit waits for all children to exit, which will only succeed after the
+    // server's connections to each client has been closed.
+    //
+    // TODO(jared): Just put the server
+    // on the state instance so we can encode this ordering properly in a
+    // single function.
+    defer server.deinit();
 
-        var fds = std.ArrayList(posix.fd_t).init(allocator);
-        errdefer fds.deinit();
+    const active_consoles = try device.findActiveConsoles(allocator);
+    defer allocator.free(active_consoles);
 
-        var consoles = std.ArrayList(Console).init(allocator);
+    // Spawn off clients
+    {
+        const argv_buf = try allocator.allocSentinel(?[*:0]const u8, 1, null);
+        defer allocator.free(argv_buf);
+        const argv0 = try allocator.dupeZ(u8, "/proc/self/exe");
+        defer allocator.free(argv0);
+        argv_buf[0] = argv0.ptr;
+        const envp_buf = try allocator.allocSentinel(?[*:0]u8, 0, null);
+        defer allocator.free(envp_buf);
 
-        const active_consoles = try device.findActiveConsoles(allocator);
-        defer allocator.free(active_consoles);
-
+        std.log.debug("using {} console(s)", .{active_consoles.len});
         for (active_consoles) |fd| {
-            var sock_pair = [2]posix.fd_t{ 0, 0 };
-            if (os.linux.socketpair(os.linux.PF.LOCAL, os.linux.SOCK.STREAM, 0, &sock_pair) != 0) {
-                continue;
-            }
-
             const pid = try posix.fork();
             if (pid == 0) {
-                try system.setupTty(fd, .user_input);
-
                 try posix.dup2(fd, posix.STDIN_FILENO);
                 try posix.dup2(fd, posix.STDOUT_FILENO);
                 try posix.dup2(fd, posix.STDERR_FILENO);
 
-                var shell = Shell.init(sock_pair[0], log.log_buffer.?);
-                defer shell.deinit();
-
-                shell.run() catch |err| {
-                    // Use std.debug.print since we want to print the error
-                    // directly to stderr of the child process, as there won't
-                    // be a way to stream output from std.log.* calls.
-                    std.debug.print("failed to run shell: {any}\n", .{err});
-                };
-
-                posix.exit(0);
+                const err = posix.execveZ(argv_buf.ptr[0].?, argv_buf.ptr, envp_buf);
+                std.log.err("failed to spawn console process: {}", .{err});
             } else {
-                try consoles.append(.{
-                    .pid = pid,
-                    .pid_fd = @as(posix.fd_t, @intCast(os.linux.pidfd_open(pid, 0))),
-                    .comm_fd = sock_pair[1],
-                });
-                log.addConsole(sock_pair[1]);
+                try state.children.append(pid);
             }
         }
-
-        break :s Seat.init(try consoles.toOwnedSlice());
-    };
-    try seat.register(epoll_fd);
-    defer seat.deinit();
+    }
 
     var autoboot = try Autoboot.init();
-    try autoboot.register(epoll_fd);
+    try autoboot.register(state.epoll_fd);
     defer autoboot.deinit();
 
     try device_watcher.start_settle_timer();
@@ -106,10 +110,9 @@ fn run_event_loop(allocator: std.mem.Allocator) !?posix.RebootCommand {
     // main event loop
     while (true) {
         const max_events = 8;
-        const events_one: os.linux.epoll_event = undefined;
-        var events = [_]os.linux.epoll_event{events_one} ** max_events;
+        var events = [_]os.linux.epoll_event{undefined} ** max_events;
 
-        const n_events = posix.epoll_wait(epoll_fd, &events, -1);
+        const n_events = posix.epoll_wait(state.epoll_fd, &events, -1);
 
         var i_event: usize = 0;
         while (i_event < n_events) : (i_event += 1) {
@@ -125,12 +128,16 @@ fn run_event_loop(allocator: std.mem.Allocator) !?posix.RebootCommand {
                     return outcome;
                 } else {
                     std.log.info("nothing to boot", .{});
-                    seat.force_shell();
+                    server.force_shell();
                 }
             } else if (event.data.fd == device_watcher.nl_fd) {
                 device_watcher.handle_new_event() catch |err| {
                     std.log.err("failed to handle new device: {}", .{err});
                 };
+            } else if (event.data.fd == server.inner.stream.handle) {
+                const conn = try server.inner.accept();
+                std.log.debug("new client connected", .{});
+                try server.register_client(state.epoll_fd, conn.stream);
             } else {
                 if (!user_presence) {
                     try autoboot.stop();
@@ -138,7 +145,8 @@ fn run_event_loop(allocator: std.mem.Allocator) !?posix.RebootCommand {
                     std.log.info("user presence detected", .{});
                 }
 
-                if (try seat.handle_new_event(event)) |outcome| {
+                if (try server.handle_new_event(event)) |outcome| {
+                    std.log.debug("got outcome {}", .{outcome});
                     return outcome;
                 }
             }
@@ -146,27 +154,26 @@ fn run_event_loop(allocator: std.mem.Allocator) !?posix.RebootCommand {
     }
 }
 
-// PID1 should not return
-pub fn main() noreturn {
-    if (os.linux.getpid() != 1) {
-        std.debug.panic("not pid 1\n", .{});
-    }
+fn console_client() !void {
+    try system.setupTty(posix.STDIN_FILENO, .user_input);
 
-    main_unwrapped() catch |err| {
-        std.debug.panic("failed to boot: {any}\n", .{err});
-    };
+    try log.initLogger(.Client);
+    defer log.deinitLogger();
 
-    std.debug.panic("epic failure :/", .{});
+    var client = try Client.init();
+    defer client.deinit();
+
+    try client.run();
 }
 
-fn main_unwrapped() !void {
+fn pid1() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{ .safety = true }){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
     try system.setupSystem();
 
-    try log.initLogger();
+    try log.initLogger(.Server);
     defer log.deinitLogger();
 
     const cmdline = cmdline: {
@@ -194,4 +201,17 @@ fn main_unwrapped() !void {
     const reboot_cmd = try run_event_loop(allocator) orelse posix.RebootCommand.POWER_OFF;
 
     try posix.reboot(reboot_cmd);
+}
+
+pub fn main() !void {
+    switch (os.linux.getpid()) {
+        1 => {
+            pid1() catch |err| {
+                std.log.err("failed to boot: {any}\n", .{err});
+            };
+
+            std.debug.panic("epic failure :/", .{});
+        },
+        else => try console_client(),
+    }
 }

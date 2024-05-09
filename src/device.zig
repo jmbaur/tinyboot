@@ -271,7 +271,9 @@ fn removeDevice(allocator: std.mem.Allocator, uevent: Uevent) !void {
     }
 }
 
-fn scanAndCreateDevices(allocator: std.mem.Allocator) !void {
+fn scanAndCreateDevices(arena: *std.heap.ArenaAllocator) !void {
+    const allocator = arena.allocator();
+
     {
         try std.fs.makeDirAbsolute("/dev/disk"); // prepare disk alias directory
         try std.fs.makeDirAbsolute("/dev/block"); // prepare block alias directory
@@ -296,7 +298,6 @@ fn scanAndCreateDevices(allocator: std.mem.Allocator) !void {
                 entry.name,
                 "uevent",
             });
-            defer allocator.free(full_path);
 
             // TODO(jared): use openFile() relative from dir
             var uevent_path = try std.fs.openFileAbsolute(full_path, .{});
@@ -307,10 +308,8 @@ fn scanAndCreateDevices(allocator: std.mem.Allocator) !void {
                 allocator,
                 max_bytes,
             );
-            defer allocator.free(uevent_contents);
 
-            var uevent = try parseUeventFileContents(allocator, uevent_contents);
-            defer uevent.deinit();
+            const uevent = try parseUeventFileContents(allocator, uevent_contents);
 
             createDevice(allocator, uevent) catch |err| {
                 std.log.err("failed to create device: {any}", .{err});
@@ -342,7 +341,6 @@ fn scanAndCreateDevices(allocator: std.mem.Allocator) !void {
                 entry.name,
                 "uevent",
             });
-            defer allocator.free(full_path);
 
             // skip known non serial devices
             if (std.mem.eql(u8, entry.name, "tty") or
@@ -359,10 +357,8 @@ fn scanAndCreateDevices(allocator: std.mem.Allocator) !void {
 
             const max_bytes = 10 * 1024 * 1024;
             const uevent_contents = try uevent_path.readToEndAlloc(allocator, max_bytes);
-            defer allocator.free(uevent_contents);
 
-            var uevent = try parseUeventFileContents(allocator, uevent_contents);
-            defer uevent.deinit();
+            const uevent = try parseUeventFileContents(allocator, uevent_contents);
 
             createDevice(allocator, uevent) catch |err| {
                 std.log.err("failed to create device: {any}", .{err});
@@ -388,9 +384,8 @@ pub const DeviceWatcher = struct {
     pub fn init() !@This() {
         var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
         errdefer arena.deinit();
-        defer _ = arena.reset(.retain_capacity);
 
-        try scanAndCreateDevices(arena.allocator());
+        try scanAndCreateDevices(&arena);
 
         var self = @This(){
             .arena = arena,

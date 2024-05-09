@@ -331,7 +331,7 @@ fn installGeneration(
         if (!args.dry_run) {
             try std.fs.copyFileAbsolute(spec.kernel, full_linux_path, .{});
 
-            var kernel_child = std.ChildProcess.init(&.{
+            var kernel_child = std.process.Child.init(&.{
                 args.sign_file,
                 "sha256",
                 args.private_key,
@@ -370,7 +370,7 @@ fn installGeneration(
         if (!args.dry_run) {
             try std.fs.copyFileAbsolute(spec.initrd.?, full_initrd_path, .{});
 
-            var initrd_child = std.ChildProcess.init(&.{
+            var initrd_child = std.process.Child.init(&.{
                 args.sign_file,
                 "sha256",
                 args.private_key,
