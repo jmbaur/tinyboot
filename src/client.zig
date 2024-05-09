@@ -3,35 +3,45 @@ const os = std.os;
 const posix = std.posix;
 const process = std.process;
 
+const linux_headers = @import("linux_headers");
+
 const ClientMsg = @import("./message.zig").ClientMsg;
-const Seat = @import("./seat.zig").Seat;
 const ServerMsg = @import("./message.zig").ServerMsg;
 const system = @import("./system.zig");
 const xmodem_recv = @import("./xmodem.zig").xmodem_recv;
 
-pub const Shell = struct {
-    user_presence: bool = false,
+pub const Client = struct {
     waiting_for_response: bool = false,
     has_prompt: bool = false,
+    watching_logs: bool = true,
     input_cursor: u16 = 0,
     input_end: u16 = 0,
-    comm_fd: posix.fd_t,
-    old_log_offset: usize = 0,
-    log_buffer: []align(std.mem.page_size) u8,
+    stream: std.net.Stream,
     input_buffer: [buffer_size]u8 = undefined,
+    log_file: std.fs.File,
     arena: std.heap.ArenaAllocator,
     writer: BufferedWriter,
 
     const buffer_size = 4096;
     const BufferedWriter = std.io.BufferedWriter(buffer_size, std.fs.File.Writer);
 
-    pub fn init(comm_fd: posix.fd_t, log_buffer: []align(std.mem.page_size) u8) @This() {
+    pub fn init() !@This() {
         return @This(){
-            .comm_fd = comm_fd,
-            .log_buffer = log_buffer,
+            .stream = try std.net.connectUnixSocket("/run/bus"),
             .arena = std.heap.ArenaAllocator.init(std.heap.page_allocator),
             .writer = std.io.bufferedWriter(std.io.getStdOut().writer()),
+            .log_file = try std.fs.openFileAbsolute("/run/log", .{}),
         };
+    }
+
+    pub fn deinit(self: *@This()) void {
+        self.log_file.close();
+        self.stream.close();
+        self.arena.deinit();
+    }
+
+    fn flush(self: *@This()) !void {
+        try self.writer.flush();
     }
 
     fn writeAll(self: *@This(), bytes: []const u8) !void {
@@ -43,22 +53,20 @@ pub const Shell = struct {
 
     fn writeAllAndFlush(self: *@This(), bytes: []const u8) !void {
         try self.writeAll(bytes);
-        return self.writer.flush();
+        return self.flush();
     }
 
     fn prompt(self: *@This()) !void {
         try self.writeAllAndFlush(">> ");
-        self.has_prompt = true;
     }
 
     pub fn run(self: *@This()) !void {
-        const epoll_fd = try posix.epoll_create1(0);
+        try self.writeAllAndFlush("\npress <ENTER> to interrupt\n\n");
+
+        try self.printLogs(.{}); // print all logs we've received up to now
+
+        const epoll_fd = try posix.epoll_create1(linux_headers.EPOLL_CLOEXEC);
         defer posix.close(epoll_fd);
-
-        var set: posix.sigset_t = undefined;
-        posix.sigprocmask(posix.SIG.BLOCK, &os.linux.all_mask, &set);
-
-        const signal_fd = try posix.signalfd(-1, &os.linux.all_mask, 0);
 
         var stdin_event = os.linux.epoll_event{
             .data = .{ .fd = posix.STDIN_FILENO },
@@ -66,25 +74,27 @@ pub const Shell = struct {
         };
         try posix.epoll_ctl(epoll_fd, os.linux.EPOLL.CTL_ADD, posix.STDIN_FILENO, &stdin_event);
 
-        var comm_event = os.linux.epoll_event{
-            .data = .{ .fd = self.comm_fd },
+        var server_event = os.linux.epoll_event{
+            .data = .{ .fd = self.stream.handle },
             .events = os.linux.EPOLL.IN,
         };
-        try posix.epoll_ctl(epoll_fd, os.linux.EPOLL.CTL_ADD, self.comm_fd, &comm_event);
+        try posix.epoll_ctl(epoll_fd, os.linux.EPOLL.CTL_ADD, self.stream.handle, &server_event);
 
-        var signal_event = os.linux.epoll_event{
-            .data = .{ .fd = signal_fd },
+        const inotify_fd = try posix.inotify_init1(0);
+        const logs_watch_fd = try posix.inotify_add_watch(inotify_fd, "/run/log", os.linux.IN.MODIFY);
+        defer posix.close(inotify_fd);
+        var inotify_event = os.linux.epoll_event{
+            .data = .{ .fd = inotify_fd },
             .events = os.linux.EPOLL.IN,
         };
-        try posix.epoll_ctl(epoll_fd, os.linux.EPOLL.CTL_ADD, signal_fd, &signal_event);
+        try posix.epoll_ctl(epoll_fd, os.linux.EPOLL.CTL_ADD, inotify_fd, &inotify_event);
 
-        try self.writeAllAndFlush("\npress <ENTER> to interrupt\n\n");
+        defer self.writeAllAndFlush("\ngoodbye!\n\n") catch {};
 
         // main event loop
         while (true) {
-            const max_events = 8;
-            const events_one: os.linux.epoll_event = undefined;
-            var events = [_]os.linux.epoll_event{events_one} ** max_events;
+            const max_events = 8; // arbitrary
+            var events = [_]os.linux.epoll_event{undefined} ** max_events;
 
             const n_events = posix.epoll_wait(epoll_fd, &events, -1);
 
@@ -92,19 +102,35 @@ pub const Shell = struct {
             while (i_event < n_events) : (i_event += 1) {
                 const event = events[i_event];
 
-                if (event.data.fd == self.comm_fd) {
-                    try self.handleComm();
+                // If we got an event that wasn't on the inotify fd, it means
+                // the client will no longer need to passively watch logs, so
+                // we remove the inotify watcher.
+                if (event.data.fd != inotify_fd and self.watching_logs) {
+                    try posix.epoll_ctl(epoll_fd, os.linux.EPOLL.CTL_DEL, inotify_fd, null);
+                    posix.inotify_rm_watch(inotify_fd, logs_watch_fd);
+                    self.watching_logs = false;
+                }
+
+                if (event.data.fd == self.stream.handle) {
+                    const should_quit = try self.handleMsg();
+                    if (should_quit) {
+                        return;
+                    }
+
                     if (self.waiting_for_response) {
                         self.waiting_for_response = false;
                         try self.prompt();
                     }
                 } else if (event.data.fd == posix.STDIN_FILENO) {
                     try self.handleStdin();
-                } else if (event.data.fd == signal_fd) {
-                    if (try self.shouldQuitShell(signal_fd)) {
-                        try self.writeAllAndFlush("\ngoodbye!\n\n");
-                        return;
-                    }
+                } else if (event.data.fd == inotify_fd and self.watching_logs) {
+                    // Consume the event on the inotify fd. We don't
+                    // actually use the data since we only have one file
+                    // registered. If we don't do this, we will continue to
+                    // get epoll notifications for this fd.
+                    var buf: [@sizeOf(os.linux.inotify_event)]u8 = undefined;
+                    _ = posix.read(inotify_fd, &buf) catch {};
+                    try self.printLogs(.{ .from_start = false });
                 }
             }
         }
@@ -112,42 +138,47 @@ pub const Shell = struct {
 
     fn notifyUserPresence(self: *@This()) !void {
         var msg: ClientMsg = .None;
-        _ = try posix.write(self.comm_fd, std.mem.asBytes(&msg));
+        try self.stream.writeAll(std.mem.asBytes(&msg));
     }
 
-    fn handleComm(self: *@This()) !void {
+    /// Returns true if the remote side shutdown, indicating we are done.
+    fn handleMsg(self: *@This()) !bool {
         var msg: ServerMsg = .None;
-        _ = try posix.read(self.comm_fd, std.mem.asBytes(&msg));
+        if (try self.stream.readAll(std.mem.asBytes(&msg)) == 0) {
+            // If we end up here, this means our connection was dropped on the
+            // other side. This should only happen if the server has completed
+            // successfully or if I wrote a bug :).
+            return true;
+        }
 
         switch (msg) {
-            .NewLogOffset => |offset| {
-                if (offset < self.old_log_offset) {
-                    self.old_log_offset = 0;
-                }
-
-                if (!self.user_presence) {
-                    try self.writeAllAndFlush(self.log_buffer[self.old_log_offset..offset]);
-                    self.old_log_offset = offset;
-                }
+            .ForceShell => {
+                std.log.debug("shell forced from server", .{});
+                try self.prompt();
+                self.has_prompt = true;
             },
-            .ForceShell => try self.prompt(),
             .None => {},
         }
+
+        return false;
     }
 
-    pub fn printLogs(self: *@This()) !void {
-        if (std.mem.indexOf(u8, self.log_buffer, &.{0})) |end| {
-            try self.writeAllAndFlush(self.log_buffer[0..end]);
+    pub fn printLogs(self: *@This(), opts: struct {
+        from_start: bool = true,
+    }) !void {
+        if (opts.from_start) {
+            try self.log_file.seekTo(0);
         }
-    }
 
-    fn shouldQuitShell(self: *@This(), fd: posix.fd_t) !bool {
-        _ = self;
-
-        var siginfo = std.mem.zeroes(os.linux.signalfd_siginfo);
-        _ = try posix.read(fd, std.mem.asBytes(&siginfo));
-
-        return siginfo.signo == posix.SIG.USR1;
+        while (true) {
+            var buf: [4096]u8 = undefined;
+            const n_bytes = try self.log_file.reader().readAll(&buf);
+            try self.writeAll(buf[0..n_bytes]);
+            if (n_bytes < buf.len) {
+                try self.flush();
+                break;
+            }
+        }
     }
 
     /// Caller required to flush
@@ -182,21 +213,19 @@ pub const Shell = struct {
     }
 
     fn handleStdin(self: *@This()) !void {
-        if (!self.user_presence) {
+        // We may already have a prompt from a boot timeout, so don't print
+        // a prompt if we already have one.
+        if (!self.has_prompt) {
             try self.notifyUserPresence();
-            self.user_presence = true;
-
-            // We may already have a prompt from a boot timeout, so don't print
-            // a prompt if we already have one.
-            if (!self.has_prompt) {
-                try self.prompt();
-            }
+            try self.prompt();
+            self.has_prompt = true;
         }
 
+        // We should only ever get 1 byte of data from stdin since we put the
+        // terminal in raw mode.
         var buf = [_]u8{0};
-        const bytes_read = try posix.read(posix.STDIN_FILENO, &buf);
-        if (bytes_read != 1) {
-            @panic("TODO: handle bytes_read != 1");
+        if (try posix.read(posix.STDIN_FILENO, &buf) != 1) {
+            return;
         }
 
         const char = buf[0];
@@ -232,7 +261,7 @@ pub const Shell = struct {
             },
             // C-c
             0x03 => b: {
-                self.writeAll("\n") catch {};
+                try self.writeAll("\n");
                 self.input_cursor = 0;
                 self.input_end = 0;
                 try self.prompt();
@@ -247,7 +276,7 @@ pub const Shell = struct {
                         self.input_buffer[self.input_cursor + 1 .. self.input_end],
                     );
                     self.input_end -= 1;
-                    self.writeAll(self.input_buffer[self.input_cursor..self.input_end]) catch {};
+                    try self.writeAll(self.input_buffer[self.input_cursor..self.input_end]);
                     self.eraseToEndOfLine();
                     self.cursorLeft(self.input_end - self.input_cursor);
                     break :b true;
@@ -286,7 +315,7 @@ pub const Shell = struct {
                     self.input_cursor -= 1;
                     self.input_end -= 1;
                     self.cursorLeft(1);
-                    self.writeAll(self.input_buffer[self.input_cursor..self.input_end]) catch {};
+                    try self.writeAll(self.input_buffer[self.input_cursor..self.input_end]);
                     self.eraseToEndOfLine();
                     self.cursorLeft(self.input_end - self.input_cursor);
                     break :b true;
@@ -304,7 +333,7 @@ pub const Shell = struct {
             },
             // \n, C-j
             0x0d, 0x0a => b: {
-                self.writeAll("\n") catch {};
+                try self.writeAll("\n");
                 if (self.input_cursor == 0) {
                     try self.prompt();
                 } else {
@@ -328,7 +357,7 @@ pub const Shell = struct {
                     );
                     self.cursorLeft(1);
                     self.input_cursor += 1;
-                    self.writeAll(self.input_buffer[self.input_cursor - 2 .. self.input_cursor]) catch {};
+                    try self.writeAll(self.input_buffer[self.input_cursor - 2 .. self.input_cursor]);
                     break :b true;
                 }
 
@@ -338,7 +367,7 @@ pub const Shell = struct {
             0x15 => b: {
                 if (self.input_cursor > 0) {
                     self.cursorLeft(self.input_cursor);
-                    self.writeAll(self.input_buffer[self.input_cursor..self.input_end]) catch {};
+                    try self.writeAll(self.input_buffer[self.input_cursor..self.input_end]);
                     self.eraseToEndOfLine();
                     self.input_end = self.input_end - self.input_cursor;
                     self.input_cursor = 0;
@@ -361,7 +390,7 @@ pub const Shell = struct {
                     );
                     self.input_buffer[self.input_cursor] = char;
                     self.input_end += 1;
-                    self.writeAll(self.input_buffer[self.input_cursor..self.input_end]) catch {};
+                    try self.writeAll(self.input_buffer[self.input_cursor..self.input_end]);
                     self.input_cursor += 1;
                     self.cursorLeft(self.input_end - self.input_cursor);
                     break :b true;
@@ -388,17 +417,13 @@ pub const Shell = struct {
             };
 
             if (maybe_msg) |msg| {
-                _ = try posix.write(self.comm_fd, std.mem.asBytes(&msg));
+                try self.stream.writeAll(std.mem.asBytes(&msg));
                 self.waiting_for_response = true;
             } else {
+                // Write the next prompt
                 try self.prompt();
             }
         }
-    }
-
-    pub fn deinit(self: *@This()) void {
-        self.arena.deinit();
-        posix.close(self.comm_fd);
     }
 };
 
@@ -414,7 +439,7 @@ pub const Command = struct {
         reboot,
     };
 
-    pub fn run(user_input: []const u8, shell_instance: *Shell) !?ClientMsg {
+    pub fn run(user_input: []const u8, shell_instance: *Client) !?ClientMsg {
         var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
         defer arena.deinit();
         const allocator = arena.allocator();
@@ -453,7 +478,7 @@ pub const Command = struct {
             \\help [command]
         ;
 
-        fn run(a: std.mem.Allocator, args: *ArgsIterator, shell_instance: *Shell) !?ClientMsg {
+        fn run(a: std.mem.Allocator, args: *ArgsIterator, shell_instance: *Client) !?ClientMsg {
             _ = shell_instance;
             _ = a;
 
@@ -493,7 +518,7 @@ pub const Command = struct {
             \\poweroff
         ;
 
-        fn run(a: std.mem.Allocator, args: *ArgsIterator, shell_instance: *Shell) !?ClientMsg {
+        fn run(a: std.mem.Allocator, args: *ArgsIterator, shell_instance: *Client) !?ClientMsg {
             _ = shell_instance;
             _ = args;
             _ = a;
@@ -511,7 +536,7 @@ pub const Command = struct {
             \\reboot
         ;
 
-        fn run(a: std.mem.Allocator, args: *ArgsIterator, shell_instance: *Shell) !?ClientMsg {
+        fn run(a: std.mem.Allocator, args: *ArgsIterator, shell_instance: *Client) !?ClientMsg {
             _ = shell_instance;
             _ = args;
             _ = a;
@@ -529,11 +554,11 @@ pub const Command = struct {
             \\logs
         ;
 
-        fn run(a: std.mem.Allocator, args: *ArgsIterator, shell_instance: *Shell) !?ClientMsg {
+        fn run(a: std.mem.Allocator, args: *ArgsIterator, shell_instance: *Client) !?ClientMsg {
             _ = a;
             _ = args;
 
-            try shell_instance.printLogs();
+            try shell_instance.printLogs(.{});
             return null;
         }
     };
@@ -547,7 +572,7 @@ pub const Command = struct {
             \\dmesg
         ;
 
-        fn run(a: std.mem.Allocator, args: *ArgsIterator, shell_instance: *Shell) !?ClientMsg {
+        fn run(a: std.mem.Allocator, args: *ArgsIterator, shell_instance: *Client) !?ClientMsg {
             _ = args;
             const kernel_logs = try system.kernelLogs(a);
             defer a.free(kernel_logs);
@@ -569,7 +594,7 @@ pub const Command = struct {
             \\  -n    no initrd
         ;
 
-        fn run(a: std.mem.Allocator, args: *ArgsIterator, shell_instance: *Shell) !?ClientMsg {
+        fn run(a: std.mem.Allocator, args: *ArgsIterator, shell_instance: *Client) !?ClientMsg {
             defer system.setupTty(posix.STDIN_FILENO, .user_input) catch {};
 
             try system.setupTty(posix.STDIN_FILENO, .file_transfer_recv);

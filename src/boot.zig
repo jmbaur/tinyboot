@@ -216,7 +216,7 @@ fn autoboot(stop_fd: posix.fd_t) !bool {
 
     std.log.debug("autoboot started", .{});
 
-    var bls = BootLoaderSpec.init(std.heap.page_allocator);
+    var bls = BootLoaderSpec.init();
     var boot_loader: BootLoader = .{ .bls = &bls };
     defer {
         boot_loader.teardown();

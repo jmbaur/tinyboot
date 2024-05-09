@@ -71,7 +71,7 @@ pub fn main() !void {
         try qemu_args.append(arg);
     }
 
-    var swtpm_child = std.ChildProcess.init(&.{
+    var swtpm_child = std.process.Child.init(&.{
         "swtpm",
         "socket",
         "--terminate",
@@ -84,6 +84,6 @@ pub fn main() !void {
     try swtpm_child.spawn();
     defer _ = swtpm_child.kill() catch {};
 
-    var qemu_child = std.ChildProcess.init(try qemu_args.toOwnedSlice(), allocator);
+    var qemu_child = std.process.Child.init(try qemu_args.toOwnedSlice(), allocator);
     _ = try qemu_child.spawnAndWait();
 }
