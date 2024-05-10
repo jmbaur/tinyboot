@@ -1,5 +1,5 @@
 {
-  "url": "https://review.coreboot.org/amd_blobs",
+  "url": "https://github.com/coreboot/amd_blobs",
   "rev": "64cdd7c8ef199f5d79be14e7972fb7316f41beed",
   "date": "2023-12-01T01:00:44+01:00",
   "path": "/nix/store/ysx825yw5d8kylqcxdrn529ymhfsksax-amd_blobs-64cdd7c",

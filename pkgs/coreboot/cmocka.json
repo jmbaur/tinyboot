@@ -1,5 +1,5 @@
 {
-  "url": "https://review.coreboot.org/cmocka",
+  "url": "https://github.com/coreboot/cmocka",
   "rev": "8931845c35e78b5123d73430b071affd537d5935",
   "date": "2020-10-12T08:24:45+02:00",
   "path": "/nix/store/zbllhkby34x4rd4qfmpaln5b9rbi75j7-cmocka-8931845",

@@ -1,5 +1,5 @@
 {
-  "url": "https://review.coreboot.org/intel-microcode",
+  "url": "https://github.com/coreboot/intel-microcode",
   "rev": "ece0d294a29a1375397941a4e6f2f7217910bc89",
   "date": "2023-11-14T10:19:09-06:00",
   "path": "/nix/store/a9g4p9qksky6ypj4rjp6mqfrsbi7pb37-intel-microcode-ece0d29",

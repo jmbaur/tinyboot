@@ -40,7 +40,7 @@ stdenvNoCC.mkDerivation (finalAttrs: {
   pname = "coreboot-${board}";
   version = "24.02.01";
   src = fetchgit {
-    url = "https://review.coreboot.org/coreboot";
+    url = "https://github.com/coreboot/coreboot";
     rev = finalAttrs.version;
     fetchSubmodules = true;
     hash = "sha256-OV6OsnAAXU51IZYzAIZQu4qZqau8n/rVAc22Lfjt4iw=";

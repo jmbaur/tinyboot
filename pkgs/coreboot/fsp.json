@@ -1,5 +1,5 @@
 {
-  "url": "https://review.coreboot.org/fsp",
+  "url": "https://github.com/coreboot/fsp",
   "rev": "507ef01cce16dc1e1af898e60de96dbb8e9d6d17",
   "date": "2024-01-11T10:49:14+08:00",
   "path": "/nix/store/p25vla9kyd0sb5si5k0zwny6f7rl27xf-fsp-507ef01",
