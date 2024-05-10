@@ -29,6 +29,7 @@ stdenv.mkDerivation {
     runHook preConfigure
     cat ${configFile} $extraConfigPath > all.config
     make ARCH=${stdenv.hostPlatform.linuxArch} KCONFIG_ALLCONFIG=1 allnoconfig
+    bash ${./check_config.bash} all.config .config
     runHook postConfigure
   '';
   buildFlags = [
