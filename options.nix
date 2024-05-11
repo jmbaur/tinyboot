@@ -177,13 +177,7 @@ in
   };
   config = {
     linux.kconfig.CMDLINE = lib.kernel.freeform (
-      toString (
-        lib.optionals config.video [ "fbcon=logo-count:1" ]
-        ++ [
-          "earlycon=uart8250,io,0x3f8,115200n8"
-          "console=ttyS0" # "console=ttynull"
-        ]
-      )
+      toString (lib.optionals config.video [ "fbcon=logo-count:1" ] ++ [ "console=ttynull" ])
     );
     extraInitrdContents = lib.optional (config.linux.firmware != [ ]) {
       symlink = "/lib/firmware";
