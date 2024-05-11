@@ -24,26 +24,36 @@ let
   kconfigOption = lib.mkOption {
     type = lib.types.attrsOf lib.types.anything;
     default = { };
-    apply = attrs: {
-      inherit attrs;
-      __resolved = lib.concatLines (
+    apply =
+      attrs:
+      lib.concatLines (
         lib.mapAttrsToList (
-          option: response:
-          if response ? freeform then
-            let
-              val = if lib.isInt response.freeform then response.freeform else ''"${response.freeform}"'';
-            in
-            "CONFIG_${option}=${val}"
-          else
-            assert response ? tristate;
-            if response.tristate == null then
-              "# CONFIG_${option} is not set"
-            else
-              assert response.tristate != "m"; # coreboot does not have modules
-              "CONFIG_${option}=${response.tristate}"
+          kconfOption: answer:
+          let
+            optionName = "CONFIG_${kconfOption}";
+            kconfLine =
+              if answer ? freeform then
+                if
+                  (
+                    (lib.isPath answer.freeform || lib.isDerivation answer.freeform)
+                    || (lib.isString answer.freeform && builtins.match "[0-9]+" answer.freeform == null)
+                  )
+                  && !(lib.hasPrefix "0x" answer.freeform)
+                then
+                  "${optionName}=\"${answer.freeform}\""
+                else
+                  "${optionName}=${toString answer.freeform}"
+              else
+                assert answer ? tristate;
+                assert answer.tristate != "m";
+                if answer.tristate == null then
+                  "# ${optionName} is not set"
+                else
+                  "${optionName}=${toString answer.tristate}";
+          in
+          kconfLine
         ) attrs
       );
-    };
   };
   vpdOption = lib.mkOption {
     type = lib.types.attrsOf (lib.types.either lib.types.str lib.types.path);
@@ -63,11 +73,8 @@ let
       '';
 in
 {
+  imports = [ ./kernel-configs ];
   options = with lib; {
-    platforms = mkOption {
-      type = types.listOf types.str;
-      default = [ ];
-    };
     build = mkOption {
       default = { };
       type = types.submoduleWith {
@@ -81,16 +88,25 @@ in
         default = "internal";
       };
     };
+    debug = mkEnableOption "debug";
+    video = mkEnableOption "video";
+    network = mkEnableOption "network";
+    chromebook = mkEnableOption "chromebook";
+    platform = mkOption {
+      type = types.attrTag {
+        alderlake = mkEnableOption "alderlake";
+        mediatek = mkEnableOption "mediatek";
+        qemu = mkEnableOption "qemu";
+        qualcomm = mkEnableOption "qualcomm";
+        tigerlake = mkEnableOption "tigerlake";
+      };
+    };
     linux = {
       package = mkOption {
         type = types.package;
         default = pkgs.linux_latest;
       };
-      configFile = mkOption { type = types.path; };
-      commandLine = mkOption {
-        type = types.listOf types.str;
-        default = [ ];
-      };
+      kconfig = kconfigOption;
       dtb = mkOption {
         type = types.nullOr types.path;
         default = null;
@@ -149,17 +165,6 @@ in
         default = ./test/keys/firmware/key.keyblock;
       };
     };
-    loglevel = mkOption {
-      type = types.enum [
-        "off"
-        "error"
-        "warn"
-        "info"
-        "debug"
-        "trace"
-      ];
-      default = "info";
-    };
     extraInitrdContents = mkOption {
       type = types.listOf (
         types.submodule {
@@ -171,13 +176,15 @@ in
     };
   };
   config = {
-    # TODO(jared): only add fbcon param if video is enabled in the kernel
-    # The "--" makes linux pass remaining parameters as args to PID1
-    linux.commandLine = lib.mkBefore [
-      "fbcon=logo-count:1"
-      "console=ttynull"
-      "--"
-    ];
+    linux.kconfig.CMDLINE = lib.kernel.freeform (
+      toString (
+        lib.optionals config.video [ "fbcon=logo-count:1" ]
+        ++ [
+          "earlycon=uart8250,io,0x3f8,115200n8"
+          "console=ttyS0" # "console=ttynull"
+        ]
+      )
+    );
     extraInitrdContents = lib.optional (config.linux.firmware != [ ]) {
       symlink = "/lib/firmware";
       object = pkgs.buildPackages.runCommand "linux-firmware" { } (
@@ -199,18 +206,7 @@ in
     coreboot.kconfig =
       with lib.kernel;
       {
-        "DEFAULT_CONSOLE_LOGLEVEL_${
-          toString
-            {
-              "off" = 2;
-              "error" = 3;
-              "warn" = 4;
-              "info" = 6;
-              "debug" = 7;
-              "trace" = 8;
-            }
-            .${config.loglevel}
-        }" = yes;
+        "DEFAULT_CONSOLE_LOGLEVEL_${if config.debug then "7" else "6"}" = yes;
         PAYLOAD_NONE = unset;
         VBOOT = yes;
         VBOOT_ALWAYS_ENABLE_DISPLAY = yes;
@@ -252,9 +248,8 @@ in
           "${tinyboot}/tboot-loader.cpio.xz";
       linux = (
         pkgs.callPackage ./pkgs/linux {
-          builtinCmdline = config.linux.commandLine;
           linux = config.linux.package;
-          inherit (config.linux) configFile;
+          inherit (config.linux) kconfig;
         }
       );
       fitImage = buildFitImage {
@@ -264,7 +259,7 @@ in
       };
       coreboot = pkgs.callPackage ./pkgs/coreboot {
         inherit board;
-        configFile = config.coreboot.kconfig.__resolved;
+        inherit (config.coreboot) kconfig;
       };
       firmware =
         pkgs.runCommand "tinyboot-${board}"
@@ -277,7 +272,6 @@ in
             passthru = {
               inherit (config.build) linux initrd coreboot;
             };
-            meta.platforms = config.platforms;
             env.CBFSTOOL = "${pkgs.buildPackages.cbfstool}/bin/cbfstool"; # needed by futility
           }
           ''
@@ -310,10 +304,9 @@ in
             ])
             ++ [ "tty1" ]
           );
-          linux = config.build.linux.override { builtinCmdline = [ ]; };
         in
         pkgs.writeShellScriptBin "tboot-test" ''
-          kexec -l ${linux}/${pkgs.stdenv.hostPlatform.linux-kernel.target} \
+          kexec -l ${config.build.linux}/${pkgs.stdenv.hostPlatform.linux-kernel.target} \
           --initrd=${testInitrd}/initrd \
           --command-line="${toString commonConsoles}"
           systemctl kexec

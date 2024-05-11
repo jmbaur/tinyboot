@@ -290,21 +290,16 @@ fn scanAndCreateDevices(arena: *std.heap.ArenaAllocator) !void {
                 continue;
             }
 
-            const full_path = try path.join(allocator, &.{
-                path.sep_str,
-                "sys",
-                "class",
-                "block",
+            const uevent_path = try path.join(allocator, &.{
                 entry.name,
                 "uevent",
             });
 
-            // TODO(jared): use openFile() relative from dir
-            var uevent_path = try std.fs.openFileAbsolute(full_path, .{});
-            defer uevent_path.close();
+            var uevent_file = try sys_class_block.openFile(uevent_path, .{});
+            defer uevent_file.close();
 
             const max_bytes = 10 * 1024 * 1024;
-            const uevent_contents = try uevent_path.readToEndAlloc(
+            const uevent_contents = try uevent_file.readToEndAlloc(
                 allocator,
                 max_bytes,
             );
@@ -333,16 +328,7 @@ fn scanAndCreateDevices(arena: *std.heap.ArenaAllocator) !void {
                 continue;
             }
 
-            const full_path = try path.join(allocator, &.{
-                path.sep_str,
-                "sys",
-                "class",
-                "tty",
-                entry.name,
-                "uevent",
-            });
-
-            // skip known non serial devices
+            // skip known non-serial devices
             if (std.mem.eql(u8, entry.name, "tty") or
                 std.mem.eql(u8, entry.name, "console") or
                 std.mem.eql(u8, entry.name, "ptmx") or
@@ -351,12 +337,16 @@ fn scanAndCreateDevices(arena: *std.heap.ArenaAllocator) !void {
                 continue;
             }
 
-            // TODO(jared): use openFile() relative from dir
-            var uevent_path = try std.fs.openFileAbsolute(full_path, .{});
-            defer uevent_path.close();
+            const tty_uevent_path = try path.join(allocator, &.{
+                entry.name,
+                "uevent",
+            });
+
+            var uevent_file = try sys_class_tty.openFile(tty_uevent_path, .{});
+            defer uevent_file.close();
 
             const max_bytes = 10 * 1024 * 1024;
-            const uevent_contents = try uevent_path.readToEndAlloc(allocator, max_bytes);
+            const uevent_contents = try uevent_file.readToEndAlloc(allocator, max_bytes);
 
             const uevent = try parseUeventFileContents(allocator, uevent_contents);
 

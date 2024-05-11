@@ -258,43 +258,31 @@ const BootSpecV1 = struct {
 };
 
 fn ensureFilesystemState(
-    alloc: std.mem.Allocator,
-    loader_entries_dir_path: []const u8,
-    efi_nixos_dir_path: []const u8,
-    args: Args,
+    esp: std.fs.Dir,
+    args: *const Args,
 ) !void {
     std.log.debug("ensuring filesystem state", .{});
 
-    var root = try std.fs.openDirAbsolute("/", .{});
-    defer root.close();
-
     if (!args.dry_run) {
-        try root.makePath(loader_entries_dir_path);
-        try root.makePath(efi_nixos_dir_path);
+        try esp.makePath("EFI/nixos");
+        try esp.makePath("loader/entries");
     }
 
-    const entries_srel_path = try path.join(alloc, &.{
-        path.sep_str,
-        args.efi_sys_mount_point,
-        "loader",
-        "entries.srel",
-    });
-
-    if (!pathExists(entries_srel_path)) {
+    if (!pathExists(esp, "loader/entries.srel")) {
         if (!args.dry_run) {
-            var entries_srel_file = try std.fs.createFileAbsolute(entries_srel_path, .{});
+            var entries_srel_file = try esp.createFile("loader/entries.srel", .{});
             defer entries_srel_file.close();
 
             try entries_srel_file.writeAll("type1\n");
         }
-        std.log.info("installed {s}", .{entries_srel_path});
+        std.log.info("installed entries.srel", .{});
     }
 
     std.log.debug("filesystem state is good", .{});
 }
 
-fn pathExists(p: []const u8) bool {
-    std.fs.accessAbsolute(p, .{}) catch {
+fn pathExists(d: std.fs.Dir, p: []const u8) bool {
+    d.access(p, .{}) catch {
         return false;
     };
 
@@ -306,7 +294,7 @@ fn installGeneration(
     known_files: *StringSet,
     spec: *const BootSpecV1,
     generation: u32,
-    loader_entries_dir_path: []const u8,
+    esp: std.fs.Dir,
     args: *const Args,
 ) !void {
     const linux_target_filename = try std.fmt.allocPrint(
@@ -316,7 +304,6 @@ fn installGeneration(
     );
 
     const linux_target = try path.join(alloc, &.{
-        path.sep_str,
         "EFI",
         "nixos",
         linux_target_filename,
@@ -327,9 +314,9 @@ fn installGeneration(
         &.{ args.efi_sys_mount_point, linux_target },
     );
 
-    if (!pathExists(full_linux_path)) {
+    if (!pathExists(esp, linux_target)) {
         if (!args.dry_run) {
-            try std.fs.copyFileAbsolute(spec.kernel, full_linux_path, .{});
+            try std.fs.cwd().copyFile(spec.kernel, esp, linux_target, .{});
 
             var kernel_child = std.process.Child.init(&.{
                 args.sign_file,
@@ -354,7 +341,6 @@ fn installGeneration(
     );
 
     const initrd_target = try path.join(alloc, &.{
-        path.sep_str,
         "EFI",
         "nixos",
         initrd_target_filename,
@@ -366,9 +352,9 @@ fn installGeneration(
         initrd_target,
     });
 
-    if (!pathExists(full_initrd_path)) {
+    if (!pathExists(esp, initrd_target)) {
         if (!args.dry_run) {
-            try std.fs.copyFileAbsolute(spec.initrd.?, full_initrd_path, .{});
+            try std.fs.cwd().copyFile(spec.initrd.?, esp, initrd_target, .{});
 
             var initrd_child = std.process.Child.init(&.{
                 args.sign_file,
@@ -430,15 +416,13 @@ fn installGeneration(
     );
 
     const entry_path = try path.join(alloc, &.{
-        path.sep_str,
-        args.efi_sys_mount_point,
         "loader",
         "entries",
         entry_filename_with_counters,
     });
 
-    var entries_dir = try std.fs.openDirAbsolute(
-        loader_entries_dir_path,
+    var entries_dir = try esp.openDir(
+        entry_path,
         .{ .iterate = true },
     );
     defer entries_dir.close();
@@ -479,10 +463,11 @@ fn installGeneration(
 fn cleanupDir(
     alloc: std.mem.Allocator,
     known_files: *StringSet,
+    parent_dir: std.fs.Dir,
     dir: []const u8,
     args: *const Args,
 ) !void {
-    var open_dir = try std.fs.openDirAbsolute(dir, .{ .iterate = true });
+    var open_dir = try parent_dir.openDir(dir, .{ .iterate = true });
     defer open_dir.close();
 
     var it = open_dir.iterate();
@@ -516,25 +501,13 @@ pub fn main() !void {
 
     const allocator = arena.allocator();
 
-    const efi_nixos_dir_path = try path.join(allocator, &.{
-        path.sep_str,
-        args.efi_sys_mount_point,
-        "EFI",
-        "nixos",
-    });
-
-    const loader_entries_dir_path = try path.join(allocator, &.{
-        path.sep_str,
-        args.efi_sys_mount_point,
-        "loader",
-        "entries",
+    const esp = try std.fs.openDirAbsolute(args.efi_sys_mount_point, .{
+        .iterate = true,
     });
 
     try ensureFilesystemState(
-        allocator,
-        loader_entries_dir_path,
-        efi_nixos_dir_path,
-        args,
+        esp,
+        &args,
     );
 
     var nixos_system_profile_dir = try std.fs.openDirAbsolute(
@@ -566,16 +539,11 @@ pub fn main() !void {
         };
 
         const boot_json_path = try path.join(allocator, &.{
-            path.sep_str,
-            "nix",
-            "var",
-            "nix",
-            "profiles",
             entry.name,
             "boot.json",
         });
 
-        var boot_json_file = try std.fs.openFileAbsolute(boot_json_path, .{});
+        var boot_json_file = try nixos_system_profile_dir.openFile(boot_json_path, .{});
         defer boot_json_file.close();
 
         const boot_json_contents = try boot_json_file.readToEndAlloc(allocator, 8192);
@@ -590,7 +558,7 @@ pub fn main() !void {
             &known_files,
             &boot_json.spec,
             generation,
-            loader_entries_dir_path,
+            esp,
             &args,
         );
         if (boot_json.specialisations) |specialisations| {
@@ -600,7 +568,7 @@ pub fn main() !void {
                     &known_files,
                     &s,
                     generation,
-                    loader_entries_dir_path,
+                    esp,
                     &args,
                 );
             }
@@ -608,8 +576,6 @@ pub fn main() !void {
 
         if (std.mem.eql(u8, boot_json.spec.toplevel, args.default_nixos_system_closure)) {
             const loader_conf_path = try path.join(allocator, &.{
-                path.sep_str,
-                args.efi_sys_mount_point,
                 "loader",
                 "loader.conf",
             });
@@ -620,7 +586,7 @@ pub fn main() !void {
             , .{ args.timeout, generation });
 
             if (!args.dry_run) {
-                var loader_conf_file = try std.fs.createFileAbsolute(loader_conf_path, .{});
+                var loader_conf_file = try esp.createFile(loader_conf_path, .{});
                 defer loader_conf_file.close();
 
                 try loader_conf_file.writeAll(loader_conf_contents);
@@ -631,8 +597,8 @@ pub fn main() !void {
         }
     }
 
-    try cleanupDir(allocator, &known_files, efi_nixos_dir_path, &args);
-    try cleanupDir(allocator, &known_files, loader_entries_dir_path, &args);
+    try cleanupDir(allocator, &known_files, esp, "EFI/nixos", &args);
+    try cleanupDir(allocator, &known_files, esp, "loader/entries", &args);
 }
 
 test "boot spec parsing" {

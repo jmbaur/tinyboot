@@ -1,25 +1,18 @@
-{ pkgs, lib, ... }:
+# TODO(jared): https://gitlab.freedesktop.org/drm/msm/-/issues/13
+{ lib, ... }:
 {
-  platforms = [ "aarch64-linux" ];
+  platform.qualcomm = true;
+  chromebook = true;
+  video = true;
   linux = {
-    configFile =
-      with pkgs.tinybootKernelConfigs;
-      lib.mkDefault (
-        pkgs.concatText "trogdor-wormdingler-kernel.config" [
-          generic
-          video
-          aarch64
-          chromebook
-          qcom
-          sc7180
-          ./kernel.config
-        ]
-      );
-    # https://gitlab.freedesktop.org/drm/msm/-/issues/13
-    commandLine = [
-      "pd_ignore_unused"
-      "clk_ignore_unused"
-    ];
+    kconfig = with lib.kernel; {
+      HID_GOOGLE_HAMMER = yes;
+      I2C_CROS_EC_TUNNEL = yes;
+      I2C_HID_OF = yes;
+      KEYBOARD_CROS_EC = yes;
+      LEDS_CLASS = yes;
+      NEW_LEDS = yes;
+    };
     dtbPattern = "sc7180-trogdor-wormdingler*";
   };
   coreboot.kconfig = with lib.kernel; {

@@ -1,19 +1,14 @@
-{ pkgs, lib, ... }:
+{ lib, ... }:
 {
-  platforms = [ "x86_64-linux" ];
-  linux.configFile =
-    with pkgs.tinybootKernelConfigs;
-    lib.mkDefault (
-      pkgs.concatText "qemu-x86_64-kernel.config" [
-        generic
-        debug
-        network
-        qemu
-        x86_64
-        video
-        ./kernel.config
-      ]
-    );
+  platform.qemu = true;
+  network = true;
+  video = true;
+  debug = true;
+  linux.kconfig = with lib.kernel; {
+    FB_VESA = yes;
+    FB_VGA16 = yes;
+    VGA_ARB = yes;
+  };
   coreboot.kconfig = with lib.kernel; {
     BOARD_EMULATION_QEMU_X86_Q35 = yes;
     VENDOR_EMULATION = yes;

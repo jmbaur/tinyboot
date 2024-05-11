@@ -1,8 +1,7 @@
-diff --git a/drivers/char/tpm/tpm_tis_spi_main.c b/drivers/char/tpm/tpm_tis_spi_main.c
-index c5c3197ee29f..fe7c75f837f7 100644
---- a/drivers/char/tpm/tpm_tis_spi_main.c
-+++ b/drivers/char/tpm/tpm_tis_spi_main.c
-@@ -347,7 +347,11 @@ static struct spi_driver tpm_tis_spi_driver = {
+diff -Naur a/linux-6.8.9/drivers/char/tpm/tpm_tis_spi_main.c b/linux-6.8.9/drivers/char/tpm/tpm_tis_spi_main.c
+--- a/drivers/char/tpm/tpm_tis_spi_main.c	2024-05-02 14:35:35.000000000 +0000
++++ b/drivers/char/tpm/tpm_tis_spi_main.c	2024-05-11 01:32:52.467923228 +0000
+@@ -347,7 +347,11 @@
  		.pm = &tpm_tis_pm,
  		.of_match_table = of_match_ptr(of_tis_spi_match),
  		.acpi_match_table = ACPI_PTR(acpi_tis_spi_match),
@@ -14,11 +13,10 @@ index c5c3197ee29f..fe7c75f837f7 100644
  	},
  	.probe = tpm_tis_spi_driver_probe,
  	.remove = tpm_tis_spi_remove,
-diff --git a/drivers/spi/spi.c b/drivers/spi/spi.c
-index 8d6304cb061e..834d92681431 100644
---- a/drivers/spi/spi.c
-+++ b/drivers/spi/spi.c
-@@ -4635,4 +4635,4 @@ static int __init spi_init(void)
+diff -Naur a/linux-6.8.9/drivers/spi/spi.c b/linux-6.8.9/drivers/spi/spi.c
+--- a/drivers/spi/spi.c	2024-05-02 14:35:35.000000000 +0000
++++ b/drivers/spi/spi.c	2024-05-11 01:33:18.267023406 +0000
+@@ -4832,4 +4832,4 @@
   * driver registration) _could_ be dynamically linked (modular) ... Costs
   * include needing to have boardinfo data structures be much more public.
   */

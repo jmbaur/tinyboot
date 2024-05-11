@@ -1,26 +1,28 @@
 {
   board,
-  configFile,
-  lib,
   fetchgit,
-  stdenvNoCC,
+  kconfig ? "",
+  lib,
+  nss,
+  openssl,
+  pkg-config,
   pkgsBuildBuild,
   python3,
-  pkg-config,
-  openssl,
-  nss,
+  stdenvNoCC,
 }:
 let
-  architectures = {
-    i386 = "i386";
-    x86_64 = "i386";
-    arm64 = "aarch64";
-    arm = "arm";
-    riscv = "riscv";
-    powerpc = "ppc64";
-  };
   toolchain =
-    pkgsBuildBuild.coreboot-toolchain.${architectures.${stdenvNoCC.hostPlatform.linuxArch}}.override
+    pkgsBuildBuild.coreboot-toolchain.${
+      {
+        i386 = "i386";
+        x86_64 = "i386";
+        arm64 = "aarch64";
+        arm = "arm";
+        riscv = "riscv";
+        powerpc = "ppc64";
+      }
+      .${stdenvNoCC.hostPlatform.linuxArch}
+    }.override
       { withAda = stdenvNoCC.hostPlatform.isx86_64; };
   importJsonSource = source: {
     inherit (lib.importJSON source)
@@ -70,11 +72,11 @@ stdenvNoCC.mkDerivation (finalAttrs: {
     ${installSubmodule ./intel_microcode.json "3rdparty/intel-microcode"}
     ${installSubmodule ./qc_blobs.json "3rdparty/qc_blobs"}
   '';
-  inherit configFile;
-  passAsFile = [ "configFile" ];
+  inherit kconfig;
+  passAsFile = [ "kconfig" ];
   configurePhase = ''
     runHook preConfigure
-    cat $configFilePath > .config
+    cat $kconfigPath > .config
     make olddefconfig
     runHook postConfigure
   '';

@@ -28,7 +28,7 @@ const XmodemChunk = extern struct {
 };
 
 pub fn xmodem_send(fd: posix.fd_t, filename: []const u8) !void {
-    var file = try std.fs.openFileAbsolute(filename, .{});
+    var file = try std.fs.cwd().openFile(filename, .{});
     defer file.close();
 
     const stat = try file.stat();
@@ -309,7 +309,7 @@ pub fn main() !void {
 
     const action = args.next() orelse usage(prog_name);
 
-    var serial = try std.fs.openFileAbsolute(
+    var serial = try std.fs.cwd().openFile(
         args.next() orelse usage(prog_name),
         .{ .mode = .read_write, .lock = .exclusive },
     );

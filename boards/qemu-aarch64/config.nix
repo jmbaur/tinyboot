@@ -1,20 +1,23 @@
 # TODO(jared): vboot not tested on this platform
 { pkgs, lib, ... }:
 {
-  platforms = [ "aarch64-linux" ];
+  platform.qemu = true;
+  network = true;
+  debug = true;
   linux = {
-    configFile =
-      with pkgs.tinybootKernelConfigs;
-      lib.mkDefault (
-        pkgs.concatText "qemu-aarch64-kernel.config" [
-          debug
-          generic
-          aarch64
-          qemu
-          network
-          ./kernel.config
-        ]
-      );
+    kconfig = with lib.kernel; {
+      GPIOLIB = yes;
+      GPIO_PL061 = yes;
+      MEMORY_HOTPLUG = yes;
+      MEMORY_HOTREMOVE = yes;
+      MIGRATION = yes;
+      PCI_HOST_GENERIC = yes;
+      PCI_PRI = yes;
+      PL330_DMA = yes;
+      RTC_DRV_PL031 = yes;
+      SERIAL_AMBA_PL011 = yes;
+      SERIAL_AMBA_PL011_CONSOLE = yes;
+    };
     dtb = lib.mkDefault (
       pkgs.buildPackages.runCommand "qemu-aarch64.dtb" { depsBuildBuild = [ pkgs.pkgsBuildBuild.qemu ]; }
         ''

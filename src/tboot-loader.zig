@@ -2,9 +2,7 @@ const coreboot_support = @import("build_options").coreboot_support;
 
 const std = @import("std");
 const builtin = @import("builtin");
-const os = std.os;
 const posix = std.posix;
-const fs = std.fs;
 const linux = std.os.linux;
 
 const linux_headers = @import("linux_headers");
@@ -110,7 +108,7 @@ fn run_event_loop(allocator: std.mem.Allocator) !?posix.RebootCommand {
     // main event loop
     while (true) {
         const max_events = 8;
-        var events = [_]os.linux.epoll_event{undefined} ** max_events;
+        var events = [_]std.os.linux.epoll_event{undefined} ** max_events;
 
         const n_events = posix.epoll_wait(state.epoll_fd, &events, -1);
 
@@ -204,7 +202,7 @@ fn pid1() !void {
 }
 
 pub fn main() !void {
-    switch (os.linux.getpid()) {
+    switch (std.os.linux.getpid()) {
         1 => {
             pid1() catch |err| {
                 std.log.err("failed to boot: {any}\n", .{err});

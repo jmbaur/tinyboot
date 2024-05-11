@@ -1,18 +1,12 @@
-{ pkgs, lib, ... }:
+{ lib, ... }:
 {
-  platforms = [ "x86_64-linux" ];
+  network = true;
+  chromebook = true;
   linux = {
-    configFile =
-      with pkgs.tinybootKernelConfigs;
-      lib.mkDefault (
-        pkgs.concatText "fizz-fizz-kernel.config" [
-          generic
-          x86_64
-          network
-          chromebook
-          ./kernel.config
-        ]
-      );
+    kconfig = with lib.kernel; {
+      NET_VENDOR_REALTEK = yes;
+      R8169 = yes;
+    };
     firmware = [
       {
         dir = "rtl_nic";
