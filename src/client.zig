@@ -7,6 +7,8 @@ const linux_headers = @import("linux_headers");
 
 const ClientMsg = @import("./message.zig").ClientMsg;
 const ServerMsg = @import("./message.zig").ServerMsg;
+const read_message = @import("./message.zig").read_message;
+const write_message = @import("./message.zig").write_message;
 const system = @import("./system.zig");
 const xmodem_recv = @import("./xmodem.zig").xmodem_recv;
 
@@ -26,9 +28,12 @@ pub const Client = struct {
     const BufferedWriter = std.io.BufferedWriter(buffer_size, std.fs.File.Writer);
 
     pub fn init() !@This() {
+        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        errdefer arena.deinit();
+
         return @This(){
             .stream = try std.net.connectUnixSocket("/run/bus"),
-            .arena = std.heap.ArenaAllocator.init(std.heap.page_allocator),
+            .arena = arena,
             .writer = std.io.bufferedWriter(std.io.getStdOut().writer()),
             .log_file = try std.fs.openFileAbsolute("/run/log", .{}),
         };
@@ -137,19 +142,17 @@ pub const Client = struct {
     }
 
     fn notifyUserPresence(self: *@This()) !void {
-        var msg: ClientMsg = .None;
-        try self.stream.writeAll(std.mem.asBytes(&msg));
+        try write_message(ClientMsg.None, self.stream.writer());
     }
 
     /// Returns true if the remote side shutdown, indicating we are done.
     fn handleMsg(self: *@This()) !bool {
-        var msg: ServerMsg = .None;
-        if (try self.stream.readAll(std.mem.asBytes(&msg)) == 0) {
-            // If we end up here, this means our connection was dropped on the
-            // other side. This should only happen if the server has completed
-            // successfully or if I wrote a bug :).
-            return true;
-        }
+        const msg = read_message(ServerMsg, self.stream.reader()) catch |err| {
+            if (err == error.EOF) {
+                return true;
+            }
+            return false;
+        };
 
         switch (msg) {
             .ForceShell => {
@@ -157,7 +160,6 @@ pub const Client = struct {
                 try self.prompt();
                 self.has_prompt = true;
             },
-            .None => {},
         }
 
         return false;

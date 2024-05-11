@@ -1,10 +1,6 @@
 {
   description = "A small linuxboot payload for coreboot";
-  inputs = {
-    nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
-    zig-overlay.inputs.nixpkgs.follows = "nixpkgs";
-    zig-overlay.url = "github:mitchellh/zig-overlay";
-  };
+  inputs.nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
   outputs = inputs: {
     formatter = inputs.nixpkgs.lib.mapAttrs (_: pkgs: pkgs.nixfmt-rfc-style) inputs.self.legacyPackages;
     nixosModules.default = {
@@ -15,9 +11,7 @@
       final: prev:
       (
         {
-          tinyboot = prev.callPackage ./pkgs/tinyboot.nix {
-            zig = inputs.zig-overlay.packages.${prev.buildPlatform.system}.master-2024-04-25;
-          };
+          tinyboot = prev.callPackage ./pkgs/tinyboot.nix { };
           tinybootKernelConfigs = prev.lib.mapAttrs (config: _: ./kernel-configs/${config}) (
             builtins.readDir ./kernel-configs
           );
@@ -53,10 +47,7 @@
           system:
           import inputs.nixpkgs {
             inherit system;
-            overlays = [
-              inputs.self.overlays.default
-              inputs.zig-overlay.overlays.default
-            ];
+            overlays = [ inputs.self.overlays.default ];
           }
         );
     devShells = inputs.nixpkgs.lib.mapAttrs (_: pkgs: {

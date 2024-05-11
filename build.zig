@@ -24,19 +24,12 @@ pub fn build(b: *std.Build) !void {
 
     const linux_headers_module = linux_headers_translated.addModule("linux_headers");
 
-    const zbor_dep = b.dependency("zbor", .{
-        .target = target,
-        .optimize = tboot_loader_optimize,
-    });
-    const zbor_module = zbor_dep.module("zbor");
-
     const tboot_loader = b.addExecutable(.{
         .name = "tboot-loader",
         .root_source_file = .{ .path = "src/tboot-loader.zig" },
         .target = target,
         .optimize = tboot_loader_optimize,
     });
-    tboot_loader.root_module.addImport("zbor", zbor_module);
     tboot_loader.root_module.addOptions("build_options", tboot_loader_options);
     tboot_loader.root_module.addImport("linux_headers", linux_headers_module);
 

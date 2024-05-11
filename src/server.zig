@@ -3,11 +3,11 @@ const builtin = @import("builtin");
 const os = std.os;
 const posix = std.posix;
 
-const zbor = @import("zbor");
-
 const system = @import("./system.zig");
 const ClientMsg = @import("./message.zig").ClientMsg;
 const ServerMsg = @import("./message.zig").ServerMsg;
+const read_message = @import("./message.zig").read_message;
+const write_message = @import("./message.zig").write_message;
 
 pub const Server = struct {
     allocator: std.mem.Allocator,
@@ -46,18 +46,15 @@ pub const Server = struct {
 
     pub fn force_shell(self: *@This()) void {
         for (self.clients.items) |client| {
-            var msg: ServerMsg = .ForceShell;
-            client.writeAll(std.mem.asBytes(&msg)) catch {};
+            write_message(ServerMsg.ForceShell, client.writer()) catch {};
         }
     }
 
     pub fn handle_new_event(self: *@This(), event: os.linux.epoll_event) !?posix.RebootCommand {
         std.log.debug("got new event on server: {}", .{event.data.fd});
         for (self.clients.items) |client| {
-            std.log.debug("looking at client: {}", .{client.handle});
             if (event.data.fd == client.handle) {
-                var msg: ClientMsg = .None;
-                _ = try client.readAll(std.mem.asBytes(&msg));
+                const msg = try read_message(ClientMsg, client.reader());
 
                 switch (msg) {
                     .Reboot => return posix.RebootCommand.RESTART,

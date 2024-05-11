@@ -1,10 +1,11 @@
 {
   callPackage,
   corebootSupport ? true,
+  fetchpatch,
   lib,
   stdenv,
   xz,
-  zig,
+  zig_0_12,
 }:
 let
   zigArgs = [
@@ -27,7 +28,15 @@ stdenv.mkDerivation {
   };
 
   nativeBuildInputs = [
-    zig
+    (zig_0_12.overrideAttrs (old: {
+      patches = (old.patches or [ ]) ++ [
+        (fetchpatch {
+          name = "Fix usage of unexpectedErrno";
+          url = "https://github.com/ziglang/zig/commit/e4b86875ebdebd5279bea546b7cde143ba4ddb23.patch";
+          hash = "sha256-dBdx7k8uDO8+OsvLAiF8y+jSdkV2zu/1VfQS6v3i3Tk=";
+        })
+      ];
+    }))
     xz
   ];
 
@@ -36,7 +45,6 @@ stdenv.mkDerivation {
   configurePhase = ''
     runHook preConfigure
     export ZIG_GLOBAL_CACHE_DIR=/tmp
-    ln -s ${callPackage ../deps.nix { }} $ZIG_GLOBAL_CACHE_DIR/p
     runHook postConfigure
   '';
 
