@@ -54,10 +54,9 @@
     devShells = inputs.nixpkgs.lib.mapAttrs (_: pkgs: {
       default = pkgs.mkShell {
         inputsFrom = [ pkgs.tinyboot ];
-        packages = [
-          pkgs.swtpm
-          pkgs.qemu
-          pkgs.zon2nix
+        packages = with pkgs; [
+          swtpm
+          qemu
         ];
         env.TINYBOOT_KERNEL = ''${
           pkgs."coreboot-qemu-${pkgs.stdenv.hostPlatform.qemuArch}".config.build.linux

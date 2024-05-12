@@ -51,6 +51,8 @@ pub fn setupSystem() !void {
 
 const TCFLSH = linux_headers.TCFLSH;
 const TCIOFLUSH = linux_headers.TCIOFLUSH;
+const TCOON = linux_headers.TCOON;
+const TCXONC = linux_headers.TCXONC;
 const VEOF = linux_headers.VEOF;
 const VERASE = linux_headers.VERASE;
 const VINTR = linux_headers.VINTR;
@@ -161,8 +163,16 @@ pub fn setupTty(fd: posix.fd_t, mode: TtyMode) !void {
         },
     }
 
+    // wait until everything is sent
+    _ = system.tcdrain(fd);
+
+    // flush input queue
     _ = system.ioctl(fd, TCFLSH, TCIOFLUSH);
-    try posix.tcsetattr(fd, posix.TCSA.NOW, termios);
+
+    try posix.tcsetattr(fd, posix.TCSA.DRAIN, termios);
+
+    // restart output
+    _ = system.ioctl(fd, TCXONC, TCOON);
 }
 
 // These aren't defined in the UAPI linux headers for some odd reason.
