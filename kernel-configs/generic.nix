@@ -1,4 +1,7 @@
-{ lib, ... }:
+{ config, lib, ... }:
+let
+  efi = !config.coreboot.enable;
+in
 {
   linux.kconfig = with lib.kernel; {
     "64BIT" = yes;
@@ -18,11 +21,14 @@
     CRYPTO_HW = yes;
     CRYPTO_SHA256 = yes;
     CRYPTO_SHA512 = yes;
+    DEBUG_FS = yes; # some drivers want to write here
     DEFAULT_HOSTNAME = freeform "tinyboot";
     DEFAULT_INIT = freeform "/init";
     DEVMEM = yes;
     DEVTMPFS = yes;
     DMADEVICES = yes;
+    EFI = lib.mkIf efi yes;
+    EFI_STUB = lib.mkIf efi yes;
     EPOLL = yes;
     EVENTFD = yes;
     EXPERT = yes;
@@ -66,7 +72,7 @@
     MODULE_SIG_FORMAT = yes;
     MSDOS_FS = yes;
     MULTIUSER = yes; # not really needed
-    NET = yes;
+    NET = yes; # needed for unix domain sockets
     NLS = yes;
     NLS_CODEPAGE_437 = yes;
     NLS_ISO8859_1 = yes;
@@ -95,8 +101,9 @@
     TIMERFD = yes;
     TMPFS = yes;
     TTY = yes;
+    TTY_PRINTK = yes;
+    TTY_PRINTK_LEVEL = freeform (if config.debug then 7 else 6);
     UNIX = yes;
-    UNIX98_PTYS = yes;
     USB = yes;
     USB_EHCI_HCD = yes;
     USB_EHCI_PCI = yes;

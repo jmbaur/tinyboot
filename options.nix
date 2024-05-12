@@ -8,6 +8,17 @@
 let
   tinyboot = pkgs.tinyboot.override { corebootSupport = config.coreboot.enable; };
   buildFitImage = pkgs.callPackage ./fitimage { };
+  testStartupScript = pkgs.writeScript "installer-startup-script" ''
+    #!/bin/sh
+    mkdir -p /proc && mount -t proc proc /proc
+    mkdir -p /sys && mount -t sysfs sysfs /sys
+    mkdir -p /dev && mount -t devtmpfs devtmpfs /dev
+    mkdir -p /run && mount -t tmpfs tmpfs /run
+    ln -sfn /proc/self/fd /dev/fd
+    ln -sfn /proc/self/fd/0 /dev/stdin
+    ln -sfn /proc/self/fd/1 /dev/stdout
+    ln -sfn /proc/self/fd/2 /dev/stderr
+  '';
   testInitrd = pkgs.makeInitrdNG {
     compressor = "xz";
     contents = [
@@ -18,6 +29,10 @@ let
       {
         object = "${pkgs.busybox}/bin";
         symlink = "/bin";
+      }
+      {
+        object = testStartupScript;
+        symlink = "/etc/init.d/rcS";
       }
     ] ++ config.extraInitrdContents;
   };
@@ -228,6 +243,7 @@ in
       };
 
     build = {
+      inherit testInitrd;
       initrd =
         if config.extraInitrdContents != [ ] then
           (
