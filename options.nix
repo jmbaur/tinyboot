@@ -6,18 +6,34 @@
   ...
 }:
 let
-  tinyboot = pkgs.tinyboot.override { corebootSupport = config.coreboot.enable; };
+  tinyboot = pkgs.tinyboot.override {
+    inherit (config) debug;
+    corebootSupport = config.coreboot.enable;
+  };
   buildFitImage = pkgs.callPackage ./fitimage { };
   testStartupScript = pkgs.writeScript "installer-startup-script" ''
     #!/bin/sh
     mkdir -p /proc && mount -t proc proc /proc
     mkdir -p /sys && mount -t sysfs sysfs /sys
     mkdir -p /dev && mount -t devtmpfs devtmpfs /dev
+    mkdir -p /dev/pts && mount -t devpts devpts /dev/pts
     mkdir -p /run && mount -t tmpfs tmpfs /run
     ln -sfn /proc/self/fd /dev/fd
     ln -sfn /proc/self/fd/0 /dev/stdin
     ln -sfn /proc/self/fd/1 /dev/stdout
     ln -sfn /proc/self/fd/2 /dev/stderr
+  '';
+  testInittab = pkgs.writeText "inittab" ''
+    ::sysinit:/etc/init.d/rcS
+    ::askfirst:/bin/sh
+    ::ctrlaltdel:/bin/reboot
+    ::shutdown:/bin/swapoff -a
+    ::shutdown:/bin/umount -a -r
+    ::restart:/bin/init
+    tty2::askfirst:/bin/sh
+    tty3::askfirst:/bin/sh
+    tty4::askfirst:/bin/sh
+    ttyS0::askfirst:/bin/sh
   '';
   testInitrd = pkgs.makeInitrdNG {
     compressor = "xz";
@@ -33,6 +49,10 @@ let
       {
         object = testStartupScript;
         symlink = "/etc/init.d/rcS";
+      }
+      {
+        object = testInittab;
+        symlink = "/etc/inittab";
       }
     ] ++ config.extraInitrdContents;
   };
@@ -108,13 +128,16 @@ in
     network = mkEnableOption "network";
     chromebook = mkEnableOption "chromebook";
     platform = mkOption {
-      type = types.attrTag {
-        alderlake = mkEnableOption "alderlake";
-        mediatek = mkEnableOption "mediatek";
-        qemu = mkEnableOption "qemu";
-        qualcomm = mkEnableOption "qualcomm";
-        tigerlake = mkEnableOption "tigerlake";
-      };
+      type = types.nullOr (
+        types.attrTag {
+          alderlake = mkEnableOption "alderlake";
+          mediatek = mkEnableOption "mediatek";
+          qemu = mkEnableOption "qemu";
+          qualcomm = mkEnableOption "qualcomm";
+          tigerlake = mkEnableOption "tigerlake";
+        }
+      );
+      default = null;
     };
     linux = {
       package = mkOption {
@@ -142,7 +165,7 @@ in
     };
     coreboot = {
       enable = mkEnableOption "coreboot integration" // {
-        default = true;
+        default = config.chromebook;
       };
       wpRange.start = mkOption { type = types.str; };
       wpRange.length = mkOption { type = types.str; };
@@ -192,7 +215,13 @@ in
   };
   config = {
     linux.kconfig.CMDLINE = lib.kernel.freeform (
-      toString (lib.optionals config.video [ "fbcon=logo-count:1" ] ++ [ "console=ttynull" ])
+      toString (
+        lib.optionals config.video [ "fbcon=logo-count:1" ]
+        ++ [
+          "console=ttynull"
+          "loglevel=${if config.debug then "7" else "6"}"
+        ]
+      )
     );
     extraInitrdContents = lib.optional (config.linux.firmware != [ ]) {
       symlink = "/lib/firmware";

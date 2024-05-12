@@ -7,13 +7,13 @@
       ACPI_BUTTON = yes;
       ACPI_PROCESSOR = yes;
       ACPI_THERMAL = yes;
-      ACPI_VIDEO = yes;
       ACPI_WMI = yes;
       ATA_ACPI = yes;
       CMDLINE_BOOL = yes;
       CPU_MITIGATIONS = yes;
       CRYPTO_SHA256_SSSE3 = yes;
       CRYPTO_SHA512_SSSE3 = yes;
+      DMA_ACPI = yes;
       DW_DMAC = yes;
       GPIO_ACPI = yes;
       IRQ_REMAP = yes;
@@ -59,6 +59,8 @@
       X86_64 = yes;
       X86_INTEL_LPSS = yes;
       X86_IOPL_IOPERM = yes;
+      X86_IO_APIC = yes;
+      X86_LOCAL_APIC = yes;
       X86_PAT = yes;
       X86_PLATFORM_DEVICES = yes;
       X86_REROUTE_FOR_BROKEN_BOOT_IRQS = yes;

@@ -2,7 +2,7 @@ const std = @import("std");
 const os = std.os;
 
 const BootDevice = @import("../boot.zig").BootDevice;
-const BootEntry = @import("../boot.zig").BootEntry;
+const Entry = @import("../boot.zig").Entry;
 const FsType = @import("../disk/filesystem.zig").FsType;
 const Gpt = @import("../disk/partition_table.zig").Gpt;
 const GptPartitionType = @import("../disk/partition_table.zig").GptPartitionType;
@@ -290,7 +290,7 @@ pub const BootLoaderSpec = struct {
     fn search_for_entries(self: *@This(), mount: Mount, allocator: std.mem.Allocator) !BootDevice {
         const internal_allocator = self.arena.allocator();
 
-        var entries = std.ArrayList(BootEntry).init(allocator);
+        var entries = std.ArrayList(Entry).init(allocator);
         errdefer entries.deinit();
 
         var mountpoint_dir = try std.fs.openDirAbsoluteZ(mount.mountpoint, .{});
@@ -322,10 +322,11 @@ pub const BootLoaderSpec = struct {
             var type1_entry = Type1Entry.parse(internal_allocator, entry_contents) catch continue;
             defer type1_entry.deinit();
 
-            const linux = type1_entry.linux orelse {
+            const linux = try mountpoint_dir.realpathAlloc(internal_allocator, type1_entry.linux orelse {
                 std.log.err("missing linux kernel in {s}", .{dir_entry.name});
                 continue;
-            };
+            });
+            defer internal_allocator.free(linux);
 
             // NOTE: Multiple initrds won't work if we have IMA appraisal
             // of signed initrds, so we can only load one.
@@ -335,7 +336,16 @@ pub const BootLoaderSpec = struct {
             var initrd: ?[]const u8 = null;
             if (type1_entry.initrd) |_initrd| {
                 if (_initrd.len > 0) {
-                    initrd = _initrd[0];
+                    initrd = try mountpoint_dir.realpathAlloc(internal_allocator, _initrd[0]);
+                }
+
+                if (_initrd.len > 1) {
+                    std.log.warn("cannot verify more than 1 initrd, using first initrd", .{});
+                }
+            }
+            defer {
+                if (initrd) |_initrd| {
+                    internal_allocator.free(_initrd);
                 }
             }
 
@@ -343,13 +353,19 @@ pub const BootLoaderSpec = struct {
                 try std.mem.join(internal_allocator, " ", opts)
             else
                 null;
+            defer {
+                if (options) |_options| {
+                    internal_allocator.free(_options);
+                }
+            }
 
-            try entries.append(try BootEntry.init(
+            try entries.append(try Entry.init(
                 allocator,
-                mount.mountpoint,
-                linux,
-                initrd,
-                options,
+                .{
+                    .cmdline = options,
+                    .initrd = initrd,
+                    .linux = linux,
+                },
             ));
         }
 
@@ -367,10 +383,12 @@ pub const BootLoaderSpec = struct {
 
         // Internal mounts are ordered before external mounts so they are
         // prioritized in the boot process.
+        std.log.debug("BLS probe found {} internal devices", .{self.internal_mounts.len});
         for (self.internal_mounts) |mount| {
             try devices.append(self.search_for_entries(mount, allocator) catch continue);
         }
 
+        std.log.debug("BLS probe found {} external devices", .{self.internal_mounts.len});
         for (self.external_mounts) |mount| {
             try devices.append(self.search_for_entries(mount, allocator) catch continue);
         }

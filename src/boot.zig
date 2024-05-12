@@ -7,7 +7,7 @@ const linux_headers = @import("linux_headers");
 
 const BootLoaderSpec = @import("./boot/bls.zig").BootLoaderSpec;
 
-const kexec_loaded_path = "/sys/kernel/kexec_loaded";
+const KEXEC_LOADED = "/sys/kernel/kexec_loaded";
 
 // In eventfd, zero has special meaning (notably it will block reads), so we
 // ensure our enum values aren't zero.
@@ -39,33 +39,38 @@ fn kexec_is_loaded(f: std.fs.File) bool {
 }
 
 pub const BootEntry = struct {
-    allocator: std.mem.Allocator,
-
     /// Path to the linux kernel image.
     linux: []const u8,
     /// Optional path to the initrd.
     initrd: ?[]const u8 = null,
     /// Optional kernel parameters.
     cmdline: ?[]const u8 = null,
+};
 
+pub const Entry = struct {
+    allocator: std.mem.Allocator,
+
+    inner: BootEntry,
+
+    // TODO(jared): This is bad that we end up allocating these things twice,
+    // it is most definitely unecessary.
     pub fn init(
         allocator: std.mem.Allocator,
-        mountpoint: []const u8,
-        linux: []const u8,
-        initrd: ?[]const u8,
-        cmdline: ?[]const u8,
+        entry: BootEntry,
     ) !@This() {
         return .{
             .allocator = allocator,
-            .linux = try std.fs.path.join(allocator, &.{ mountpoint, linux }),
-            .initrd = if (initrd) |_initrd|
-                try std.fs.path.join(allocator, &.{ mountpoint, _initrd })
-            else
-                null,
-            .cmdline = if (cmdline) |_cmdline|
-                try allocator.dupe(u8, _cmdline)
-            else
-                null,
+            .inner = .{
+                .linux = try allocator.dupe(u8, entry.linux),
+                .initrd = if (entry.initrd) |initrd|
+                    try allocator.dupe(u8, initrd)
+                else
+                    null,
+                .cmdline = if (entry.cmdline) |cmdline|
+                    try allocator.dupe(u8, cmdline)
+                else
+                    null,
+            },
         };
     }
 
@@ -75,51 +80,52 @@ pub const BootEntry = struct {
     };
 
     pub fn load(self: *const @This()) !void {
-        const linux = try std.fs.openFileAbsolute(self.linux, .{});
+        std.log.info("preparing kexec", .{});
+
+        std.log.debug("loading kernel {s}", .{self.inner.linux});
+        const linux = try std.fs.cwd().openFile(self.inner.linux, .{});
         defer linux.close();
 
         const linux_fd = @as(usize, @bitCast(@as(isize, linux.handle)));
 
-        // dupeZ() returns a null-terminated slice, however the null-terminator
-        // is not included in the length of the slice, so we must add 1.
-        const cmdline = try self.allocator.dupeZ(u8, self.cmdline orelse "");
-        const cmdline_len = cmdline.len + 1;
-
-        const rc = b: {
-            if (self.initrd) |i| {
-                const initrd = try std.fs.openFileAbsolute(i, .{});
-                defer initrd.close();
-
-                const initrd_fd = @as(usize, @bitCast(@as(isize, initrd.handle)));
-
-                break :b os.linux.syscall5(
-                    .kexec_file_load,
-                    linux_fd,
-                    initrd_fd,
-                    cmdline_len,
-                    @intFromPtr(cmdline.ptr),
-                    0,
-                );
+        const initrd_fd = b: {
+            if (self.inner.initrd) |initrd| {
+                std.log.debug("loading initrd {s}", .{initrd});
+                const file = try std.fs.cwd().openFile(initrd, .{});
+                break :b file.handle;
             } else {
-                const initrd_fd = @as(usize, @bitCast(@as(isize, 0)));
-
-                break :b os.linux.syscall5(
-                    .kexec_file_load,
-                    linux_fd,
-                    initrd_fd,
-                    cmdline_len,
-                    @intFromPtr(cmdline.ptr),
-                    linux_headers.KEXEC_FILE_NO_INITRAMFS,
-                );
+                break :b 0;
             }
         };
+
+        defer {
+            if (initrd_fd != 0) {
+                posix.close(initrd_fd);
+            }
+        }
+
+        // dupeZ() returns a null-terminated slice, however the null-terminator
+        // is not included in the length of the slice, so we must add 1.
+        std.log.debug("loading kernel params '{s}'", .{self.inner.cmdline orelse ""});
+        const cmdline = try self.allocator.dupeZ(u8, self.inner.cmdline orelse "");
+        defer self.allocator.free(cmdline);
+        const cmdline_len = cmdline.len + 1;
+
+        const rc = os.linux.syscall5(
+            .kexec_file_load,
+            linux_fd,
+            @as(usize, @bitCast(@as(isize, initrd_fd))),
+            cmdline_len,
+            @intFromPtr(cmdline.ptr),
+            if (initrd_fd == 0) linux_headers.KEXEC_FILE_NO_INITRAMFS else 0,
+        );
 
         switch (os.linux.E.init(rc)) {
             E.SUCCESS => {
                 // Wait for up to a second for kernel to report for kexec to be
                 // loaded.
                 var i: u8 = 10;
-                var f = try std.fs.openFileAbsolute(kexec_loaded_path, .{});
+                var f = try std.fs.cwd().openFile(KEXEC_LOADED, .{});
                 defer f.close();
                 while (!kexec_is_loaded(f) and i > 0) : (i -= 1) {
                     std.time.sleep(100 * std.time.ns_per_ms);
@@ -131,18 +137,18 @@ pub const BootEntry = struct {
             // IMA appraisal failed
             E.PERM => return LoadError.PermissionDenied,
             else => {
-                std.log.err("ERROR: {} {}", .{ rc, os.linux.E.init(rc) });
+                std.log.err("kexec load failed: {}", .{os.linux.E.init(rc)});
                 return LoadError.UnknownError;
             },
         }
     }
 
     pub fn deinit(self: *@This()) void {
-        self.allocator.free(self.linux);
-        if (self.initrd) |initrd| {
+        self.allocator.free(self.inner.linux);
+        if (self.inner.initrd) |initrd| {
             self.allocator.free(initrd);
         }
-        if (self.cmdline) |cmdline| {
+        if (self.inner.cmdline) |cmdline| {
             self.allocator.free(cmdline);
         }
     }
@@ -155,7 +161,7 @@ pub const BootDevice = struct {
     timeout: u8,
     /// Boot entries found on this device. The entry at the first index will
     /// serve as the default entry.
-    entries: []const BootEntry,
+    entries: []const Entry,
 };
 
 pub const BootLoader = union(enum) {
@@ -212,8 +218,6 @@ fn autoboot(stop_fd: posix.fd_t) !bool {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
 
-    const allocator = arena.allocator();
-
     std.log.debug("autoboot started", .{});
 
     var bls = BootLoaderSpec.init();
@@ -228,7 +232,7 @@ fn autoboot(stop_fd: posix.fd_t) !bool {
         return false;
     }
 
-    const boot_devices = try boot_loader.probe(allocator);
+    const boot_devices = try boot_loader.probe(arena.allocator());
     if (try need_to_stop(stop_fd)) {
         return false;
     }

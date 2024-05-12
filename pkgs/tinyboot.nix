@@ -1,7 +1,7 @@
 {
-  callPackage,
   corebootSupport ? true,
-  fetchpatch,
+  debug ? false,
+  zigSrc,
   lib,
   stdenv,
   xz,
@@ -12,6 +12,7 @@ let
     "-Doptimize=ReleaseSafe"
     "-Dtarget=${stdenv.hostPlatform.qemuArch}-linux"
     "-Dcoreboot=${lib.boolToString corebootSupport}"
+    "-Dloglevel=${toString (if debug then 3 else 2)}" # https://github.com/ziglang/zig/blob/084c2cd90f79d5e7edf76b7ddd390adb95a27f0c/lib/std/log.zig#L78
   ];
 in
 stdenv.mkDerivation {
@@ -28,15 +29,7 @@ stdenv.mkDerivation {
   };
 
   nativeBuildInputs = [
-    (zig_0_12.overrideAttrs (old: {
-      patches = (old.patches or [ ]) ++ [
-        (fetchpatch {
-          name = "Fix usage of unexpectedErrno";
-          url = "https://github.com/ziglang/zig/commit/e4b86875ebdebd5279bea546b7cde143ba4ddb23.patch";
-          hash = "sha256-dBdx7k8uDO8+OsvLAiF8y+jSdkV2zu/1VfQS6v3i3Tk=";
-        })
-      ];
-    }))
+    (zig_0_12.overrideAttrs (old: { src = zigSrc; }))
     xz
   ];
 

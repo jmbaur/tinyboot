@@ -1,6 +1,10 @@
 {
   description = "A small linuxboot payload for coreboot";
-  inputs.nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
+  inputs = {
+    nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
+    zig.flake = false;
+    zig.url = "github:ziglang/zig/0.12.x";
+  };
   outputs = inputs: {
     formatter = inputs.nixpkgs.lib.mapAttrs (_: pkgs: pkgs.nixfmt-rfc-style) inputs.self.legacyPackages;
     nixosModules.default = {
@@ -11,7 +15,7 @@
       final: prev:
       (
         {
-          tinyboot = prev.callPackage ./pkgs/tinyboot.nix { };
+          tinyboot = prev.callPackage ./pkgs/tinyboot.nix { zigSrc = inputs.zig.outPath; };
           armTrustedFirmwareMT8183 = prev.callPackage ./pkgs/arm-trusted-firmware-cros.nix {
             platform = "mt8183";
           };

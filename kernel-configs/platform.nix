@@ -1,6 +1,6 @@
 { config, lib, ... }:
 {
-  linux.kconfig =
+  linux.kconfig = lib.mkIf (config.platform != null) (
     with lib.kernel;
     {
       "qemu" = {
@@ -9,7 +9,6 @@
         E1000 = yes;
         FW_CFG_SYSFS = yes;
         I2C_VIRTIO = yes;
-        IKCONFIG = yes;
         NETWORK_FILESYSTEMS = yes;
         NET_9P = yes;
         NET_9P_VIRTIO = yes;
@@ -210,5 +209,6 @@
         USB_XHCI_MTK = yes;
       };
     }
-    .${lib.head (lib.attrNames config.platform)};
+    .${lib.head (lib.attrNames config.platform)}
+  );
 }

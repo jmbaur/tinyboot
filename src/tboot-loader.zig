@@ -1,26 +1,23 @@
-const coreboot_support = @import("build_options").coreboot_support;
-
 const std = @import("std");
 const builtin = @import("builtin");
 const posix = std.posix;
 const linux = std.os.linux;
 
 const linux_headers = @import("linux_headers");
+const coreboot_support = @import("build_options").coreboot_support;
+const log_level: std.log.Level = @enumFromInt(@import("build_options").loglevel);
 
 const Autoboot = @import("./boot.zig").Autoboot;
-const Server = @import("./server.zig").Server;
 const Client = @import("./client.zig").Client;
+const Server = @import("./server.zig").Server;
 const device = @import("./device.zig");
 const log = @import("./log.zig");
-const system = @import("./system.zig");
 const security = @import("./security.zig");
+const system = @import("./system.zig");
 
 pub const std_options = .{
     .logFn = log.logFn,
-    .log_level = switch (builtin.mode) {
-        .Debug => .debug,
-        else => .info,
-    },
+    .log_level = log_level,
 };
 
 const State = struct {
@@ -202,6 +199,19 @@ fn pid1() !void {
 }
 
 pub fn main() !void {
+    if (false) {
+        const foo =
+            \\{"msg":{"Boot":{"linux":"/run/GQrY5amWP1ZbtbAZ/kernel","initrd":null,"cmdline":"console=ttyS0,115200n8"}}}
+        ;
+
+        if (std.unicode.utf8ValidateSlice(foo)) {
+            std.log.info("is valid", .{});
+        } else {
+            std.log.info("is not valid", .{});
+        }
+        return;
+    }
+
     switch (std.os.linux.getpid()) {
         1 => {
             pid1() catch |err| {

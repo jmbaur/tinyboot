@@ -4,6 +4,7 @@ const os = std.os;
 const posix = std.posix;
 
 const system = @import("./system.zig");
+const Entry = @import("./boot.zig").Entry;
 const ClientMsg = @import("./message.zig").ClientMsg;
 const ServerMsg = @import("./message.zig").ServerMsg;
 const readMessage = @import("./message.zig").readMessage;
@@ -51,24 +52,45 @@ pub const Server = struct {
     }
 
     pub fn handle_new_event(self: *@This(), event: os.linux.epoll_event) !?posix.RebootCommand {
-        std.log.debug("got new event on server: {}", .{event.data.fd});
-        for (self.clients.items) |client| {
-            if (event.data.fd == client.handle) {
-                const msg = readMessage(ClientMsg, self.allocator, client.reader()) catch |err| switch (err) {
-                    error.EOF => continue, // Handle client disconnects
-                    else => return err,
-                };
-                defer msg.deinit();
-
-                switch (msg.value.msg) {
-                    .Reboot => return posix.RebootCommand.RESTART,
-                    .Poweroff => return posix.RebootCommand.POWER_OFF,
-                    .Empty => {},
+        const client = b: {
+            for (self.clients.items) |client| {
+                if (event.data.fd == client.handle) {
+                    break :b client;
                 }
             }
-        }
 
-        return null;
+            return null;
+        };
+
+        const msg = readMessage(ClientMsg, self.allocator, client.reader()) catch |err| switch (err) {
+            error.EOF => return null, // Handle client disconnects
+            else => return err,
+        };
+        defer msg.deinit();
+
+        switch (msg.value.msg) {
+            .Empty => return null,
+            .Reboot => return posix.RebootCommand.RESTART,
+            .Poweroff => return posix.RebootCommand.POWER_OFF,
+            .Boot => |boot_entry| {
+                std.log.info("got boot entry! {s} {s}", .{ boot_entry.linux, boot_entry.cmdline orelse "no params" });
+                // TODO(jared): why does self.allocator not work??
+                var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+                defer arena.deinit();
+
+                var entry = try Entry.init(arena.allocator(), boot_entry);
+                std.log.info("using boot entry! {s} {s}", .{ entry.inner.linux, entry.inner.cmdline orelse "no params" });
+                entry.load() catch |err| {
+                    std.log.err(
+                        "failed to boot entry {s}: {}",
+                        .{ entry.inner.linux, err },
+                    );
+                    return null;
+                };
+
+                return posix.RebootCommand.KEXEC;
+            },
+        }
     }
 
     pub fn deinit(self: *@This()) void {

@@ -17,6 +17,7 @@ in
     BLOCK = yes;
     CC_OPTIMIZE_FOR_PERFORMANCE = unset;
     CC_OPTIMIZE_FOR_SIZE = yes;
+    COMMON_CLK = yes;
     CONSOLE_TRANSLATIONS = yes;
     CRYPTO_HW = yes;
     CRYPTO_SHA256 = yes;
@@ -101,8 +102,6 @@ in
     TIMERFD = yes;
     TMPFS = yes;
     TTY = yes;
-    TTY_PRINTK = yes;
-    TTY_PRINTK_LEVEL = freeform (if config.debug then 7 else 6);
     UNIX = yes;
     USB = yes;
     USB_EHCI_HCD = yes;

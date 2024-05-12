@@ -1,5 +1,6 @@
 const std = @import("std");
 const json = std.json;
+const BootEntry = @import("./boot.zig").BootEntry;
 
 fn message(comptime T: type) type {
     return struct {
@@ -15,6 +16,9 @@ pub const ClientMsg = message(union(enum) {
     /// Request to the server that the system should be rebooted.
     Reboot,
 
+    /// Request to the server that this boot entry should be booted.
+    Boot: BootEntry,
+
     /// Empty message
     Empty,
 });
@@ -26,7 +30,7 @@ pub const ServerMsg = message(union(enum) {
 });
 
 // This number is arbitrary, we may need to increase it at some point.
-const MAX_BUF_SIZE = 1 << 10;
+const MAX_BUF_SIZE = 1 << 12;
 
 /// Caller is responsible for return value's memory.
 pub fn readMessage(comptime T: type, allocator: std.mem.Allocator, r: std.net.Stream.Reader) !json.Parsed(T) {

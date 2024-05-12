@@ -11,6 +11,7 @@ const readMessage = @import("./message.zig").readMessage;
 const writeMessage = @import("./message.zig").writeMessage;
 const system = @import("./system.zig");
 const xmodem_recv = @import("./xmodem.zig").xmodem_recv;
+const tmp = @import("./tmp.zig");
 
 pub const Client = struct {
     waiting_for_response: bool = false,
@@ -337,7 +338,7 @@ pub const Client = struct {
                 self.cursorLeft(self.input_end - self.input_cursor);
                 break :b true;
             },
-            // \n, C-j
+            // \r, \n; \n is also known as C-j
             0x0d, 0x0a => b: {
                 try self.writeAll("\n");
                 if (self.input_cursor == 0) {
@@ -385,8 +386,8 @@ pub const Client = struct {
             },
             // C-w
             0x17 => false,
-            // space, A-Za-z
-            0x20, 0x41...0x7a => b: {
+            // Space...~
+            0x20...0x7e => b: {
                 // make sure we have room for another character
                 if (self.input_end + 1 < self.input_buffer.len) {
                     std.mem.copyBackwards(
@@ -416,15 +417,26 @@ pub const Client = struct {
             self.input_cursor = 0;
             self.input_end = 0;
 
-            const maybe_msg = Command.run(self.input_buffer[0..end], self) catch |err| {
+            var cmd = Command{
+                .allocator = self.arena.allocator(),
+                .user_input = self.input_buffer[0..end],
+                .shell_instance = self,
+            };
+
+            const maybe_msg = cmd.run() catch |err| {
                 std.debug.print("\nerror running command: {any}\n", .{err});
                 try self.prompt();
                 return;
             };
 
             if (maybe_msg) |msg| {
-                try writeMessage(msg, self.stream.writer());
-                self.waiting_for_response = true;
+                defer free_msg(self.arena.allocator(), msg);
+
+                if (writeMessage(msg, self.stream.writer())) {
+                    self.waiting_for_response = true;
+                } else |err| {
+                    std.log.err("failed to send message to server: {}", .{err});
+                }
             } else {
                 // Write the next prompt
                 try self.prompt();
@@ -433,7 +445,29 @@ pub const Client = struct {
     }
 };
 
+fn free_msg(a: std.mem.Allocator, m: ClientMsg) void {
+    switch (m.msg) {
+        .Boot => |entry| {
+            if (entry.cmdline) |cmdline| {
+                a.free(cmdline);
+            }
+
+            if (entry.initrd) |initrd| {
+                a.free(initrd);
+            }
+
+            a.free(entry.linux);
+        },
+
+        else => {},
+    }
+}
+
 pub const Command = struct {
+    allocator: std.mem.Allocator,
+    user_input: []const u8,
+    shell_instance: *Client,
+
     const ArgsIterator = process.ArgIteratorGeneral(.{});
 
     const argv0 = enum {
@@ -446,12 +480,8 @@ pub const Command = struct {
         reboot,
     };
 
-    pub fn run(user_input: []const u8, shell_instance: *Client) !?ClientMsg {
-        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-        defer arena.deinit();
-        const allocator = arena.allocator();
-
-        var args = try ArgsIterator.init(allocator, user_input);
+    pub fn run(self: *@This()) !?ClientMsg {
+        var args = try ArgsIterator.init(self.allocator, self.user_input);
         defer args.deinit();
 
         if (args.next()) |cmd| {
@@ -460,11 +490,7 @@ pub const Command = struct {
             inline for (std.meta.fields(argv0)) |field| {
                 if (std.mem.eql(u8, field.name, cmd)) {
                     found = true;
-                    return @field(@This(), field.name).run(
-                        allocator,
-                        &args,
-                        shell_instance,
-                    );
+                    return @field(@This(), field.name).run(self, &args);
                 }
             }
 
@@ -485,9 +511,8 @@ pub const Command = struct {
             \\help [command]
         ;
 
-        fn run(a: std.mem.Allocator, args: *ArgsIterator, shell_instance: *Client) !?ClientMsg {
-            _ = shell_instance;
-            _ = a;
+        fn run(c: *Command, args: *ArgsIterator) !?ClientMsg {
+            _ = c;
 
             if (args.next()) |next| {
                 var found = false;
@@ -525,10 +550,9 @@ pub const Command = struct {
             \\poweroff
         ;
 
-        fn run(a: std.mem.Allocator, args: *ArgsIterator, shell_instance: *Client) !?ClientMsg {
-            _ = shell_instance;
+        fn run(c: *Command, args: *ArgsIterator) !?ClientMsg {
             _ = args;
-            _ = a;
+            _ = c;
 
             return .{ .msg = .Poweroff };
         }
@@ -543,10 +567,9 @@ pub const Command = struct {
             \\reboot
         ;
 
-        fn run(a: std.mem.Allocator, args: *ArgsIterator, shell_instance: *Client) !?ClientMsg {
-            _ = shell_instance;
+        fn run(c: *Command, args: *ArgsIterator) !?ClientMsg {
+            _ = c;
             _ = args;
-            _ = a;
 
             return .{ .msg = .Reboot };
         }
@@ -561,11 +584,10 @@ pub const Command = struct {
             \\logs
         ;
 
-        fn run(a: std.mem.Allocator, args: *ArgsIterator, shell_instance: *Client) !?ClientMsg {
-            _ = a;
+        fn run(c: *Command, args: *ArgsIterator) !?ClientMsg {
             _ = args;
 
-            try shell_instance.printLogs(.{});
+            try c.shell_instance.printLogs(.{});
             return null;
         }
     };
@@ -579,11 +601,12 @@ pub const Command = struct {
             \\dmesg
         ;
 
-        fn run(a: std.mem.Allocator, args: *ArgsIterator, shell_instance: *Client) !?ClientMsg {
+        fn run(c: *Command, args: *ArgsIterator) !?ClientMsg {
             _ = args;
-            const kernel_logs = try system.kernelLogs(a);
-            defer a.free(kernel_logs);
-            try shell_instance.writeAllAndFlush(kernel_logs);
+
+            const kernel_logs = try system.kernelLogs(c.allocator);
+            defer c.allocator.free(kernel_logs);
+            try c.shell_instance.writeAllAndFlush(kernel_logs);
 
             return null;
         }
@@ -598,11 +621,10 @@ pub const Command = struct {
             \\clear
         ;
 
-        fn run(a: std.mem.Allocator, args: *ArgsIterator, shell_instance: *Client) !?ClientMsg {
-            _ = a;
+        fn run(c: *Command, args: *ArgsIterator) !?ClientMsg {
             _ = args;
 
-            shell_instance.clearScreen();
+            c.shell_instance.clearScreen();
 
             return null;
         }
@@ -611,7 +633,12 @@ pub const Command = struct {
     const boot_xmodem = struct {
         const short_help = "boot over xmodem";
         const long_help =
-            \\Boot via kernel and initrd obtained over the xmodem protocol.
+            \\Boot via kernel and initrd obtained over the xmodem protocol. The
+            \\serial console will fetch the following content over xmodem in
+            \\succession:
+            \\ - kernel
+            \\ - initrd (optional)
+            \\ - kernel params
             \\
             \\Usage:
             \\boot_xmodem [-n]
@@ -620,39 +647,51 @@ pub const Command = struct {
             \\  -n    no initrd
         ;
 
-        fn run(a: std.mem.Allocator, args: *ArgsIterator, shell_instance: *Client) !?ClientMsg {
-            defer system.setupTty(posix.STDIN_FILENO, .user_input) catch {};
+        fn run(c: *Command, args: *ArgsIterator) !?ClientMsg {
+            var tmp_dir = try tmp.tmpDir(.{});
+            // defer tmp_dir.cleanup(); // TODO(jared): we need to clean these up
+
+            errdefer system.setupTty(posix.STDIN_FILENO, .user_input) catch {};
 
             try system.setupTty(posix.STDIN_FILENO, .file_transfer_recv);
 
-            _ = shell_instance;
+            const kernel_bytes = try xmodem_recv(c.allocator, posix.STDIN_FILENO);
+            defer c.allocator.free(kernel_bytes);
+            var kernel = try tmp_dir.dir.createFile("kernel", .{ .read = true });
+            defer kernel.close();
+            try kernel.writeAll(kernel_bytes);
 
             const skip_initrd = if (args.next()) |next| std.mem.eql(u8, next, "-n") else false;
 
-            std.log.info("fetching kernel over xmodem", .{});
-            const kernel_bytes = try xmodem_recv(a, posix.STDIN_FILENO);
-            defer a.free(kernel_bytes);
-            var kernel = try std.fs.createFileAbsolute("/run/kernel", .{ .read = true });
-            defer kernel.close();
-            try kernel.writeAll(kernel_bytes);
-            std.log.info("received kernel of size {} bytes", .{kernel_bytes.len});
-
             if (!skip_initrd) {
-                std.log.info("fetching initrd over xmodem", .{});
-                const initrd_bytes = try xmodem_recv(a, posix.STDIN_FILENO);
-                defer a.free(initrd_bytes);
-                var initrd = try std.fs.createFileAbsolute("/run/initrd", .{ .read = true });
+                const initrd_bytes = try xmodem_recv(c.allocator, posix.STDIN_FILENO);
+                defer c.allocator.free(initrd_bytes);
+                var initrd = try tmp_dir.dir.createFile("initrd", .{ .read = true });
                 defer initrd.close();
                 try initrd.writeAll(initrd_bytes);
-                std.log.info("received initrd of size {} bytes", .{initrd_bytes.len});
             }
 
-            std.log.info("fetching kernel params over xmodem", .{});
-            const kernel_params_bytes = try xmodem_recv(a, posix.STDIN_FILENO);
-            defer a.free(kernel_params_bytes);
-            std.log.info("received kernel params '{any}'", .{kernel_params_bytes[0..16]});
+            const kernel_params_bytes = try xmodem_recv(c.allocator, posix.STDIN_FILENO);
+            defer c.allocator.free(kernel_params_bytes);
 
-            return null;
+            // trim out the xmodem filler character (0xff) and newlines (0x0a)
+            const kernel_params_ = std.mem.trimRight(u8, kernel_params_bytes, &.{ 0xff, 0x0a });
+            const kernel_params = try c.allocator.dupe(u8, kernel_params_);
+
+            const linux = try tmp_dir.dir.realpathAlloc(c.allocator, "kernel");
+            const initrd = if (!skip_initrd) try tmp_dir.dir.realpathAlloc(c.allocator, "initrd") else null;
+
+            system.setupTty(posix.STDIN_FILENO, .user_input) catch {};
+
+            return .{
+                .msg = .{
+                    .Boot = .{
+                        .linux = linux,
+                        .initrd = initrd,
+                        .cmdline = if (kernel_params.len > 0) kernel_params else null,
+                    },
+                },
+            };
         }
     };
 };

@@ -1,5 +1,6 @@
 { lib, ... }:
 {
+  debug = true;
   platform.tigerlake = true;
   chromebook = true;
   video = true;

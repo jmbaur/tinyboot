@@ -21,6 +21,9 @@ pub fn main() !void {
     const initrd = args.next().?;
     const kernel = args.next().?;
 
+    // get path to tboot key before changing directory
+    const tboot_key = try std.fs.cwd().realpathAlloc(allocator, "test/keys/tboot/key.pem");
+
     try std.posix.chdir(tmpdir);
 
     var qemu_args = std.ArrayList([]const u8).init(allocator);
@@ -41,16 +44,17 @@ pub fn main() !void {
         else => @compileError("don't know how to run qemu on build system"),
     } });
 
-    // TODO(jared): "-fw_cfg",  "name=opt/org.tboot/pubkey,file=TODO",
     // TODO(jared): "-drive", "if=virtio,file=TODO.raw,format=raw,media=disk"
     try qemu_args.appendSlice(&.{
         "-display", "none",
         "-serial",  "stdio",
+        "-serial",  "pty",
         "-cpu",     "max",
         "-smp",     "2",
         "-m",       "2G",
         "-netdev",  "user,id=n1",
         "-device",  "virtio-net-pci,netdev=n1",
+        "-fw_cfg",  try std.fmt.allocPrint(allocator, "name=opt/org.tboot/pubkey,file={s}", .{tboot_key}),
         "-initrd",  initrd,
         "-kernel",  kernel,
     });

@@ -16,7 +16,6 @@
       CROS_EC_SPI = yes;
       HID_VIVALDI = yes;
       I2C_CROS_EC_TUNNEL = yes;
-      INPUT_VIVALDIFMAP = yes;
       KEYBOARD_CROS_EC = yes;
       MMC = yes;
       MMC_BLOCK = yes;

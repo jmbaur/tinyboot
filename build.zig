@@ -7,8 +7,10 @@ pub fn build(b: *std.Build) !void {
     const optimize = b.standardOptimizeOption(.{});
 
     const coreboot_support = b.option(bool, "coreboot", "Support for coreboot integration") orelse true;
+    const loglevel = b.option(u8, "loglevel", "Log level") orelse 3;
     const tboot_loader_options = b.addOptions();
     tboot_loader_options.addOption(bool, "coreboot_support", coreboot_support);
+    tboot_loader_options.addOption(u8, "loglevel", loglevel);
 
     const tboot_loader_optimize = if (optimize == std.builtin.OptimizeMode.Debug)
         std.builtin.OptimizeMode.Debug
