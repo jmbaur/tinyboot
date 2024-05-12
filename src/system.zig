@@ -34,12 +34,10 @@ pub fn setupSystem() !void {
     try fs.makeDirAbsolute("/sys");
     try mountPseudoFs("/sys", "sysfs", linux.MS.NOSUID | linux.MS.NODEV | linux.MS.NOEXEC | linux.MS.RELATIME);
     try mountPseudoFs("/sys/kernel/security", "securityfs", linux.MS.NOSUID | linux.MS.NODEV | linux.MS.NOEXEC | linux.MS.RELATIME);
+    try mountPseudoFs("/sys/kernel/debug", "debugfs", linux.MS.NOSUID | linux.MS.NODEV | linux.MS.NOEXEC | linux.MS.RELATIME);
 
     // we use CONFIG_DEVTMPFS, so we don't need to create /dev
     try mountPseudoFs("/dev", "devtmpfs", linux.MS.SILENT | linux.MS.NOSUID | linux.MS.NOEXEC);
-
-    try fs.makeDirAbsolute("/dev/pts");
-    try mountPseudoFs("/dev/pts", "devpts", linux.MS.NOSUID | linux.MS.NOEXEC | linux.MS.RELATIME);
 
     try fs.makeDirAbsolute("/run");
     try mountPseudoFs("/run", "tmpfs", linux.MS.NOSUID | linux.MS.NODEV);

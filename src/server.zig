@@ -6,8 +6,8 @@ const posix = std.posix;
 const system = @import("./system.zig");
 const ClientMsg = @import("./message.zig").ClientMsg;
 const ServerMsg = @import("./message.zig").ServerMsg;
-const read_message = @import("./message.zig").read_message;
-const write_message = @import("./message.zig").write_message;
+const readMessage = @import("./message.zig").readMessage;
+const writeMessage = @import("./message.zig").writeMessage;
 
 pub const Server = struct {
     allocator: std.mem.Allocator,
@@ -46,7 +46,7 @@ pub const Server = struct {
 
     pub fn force_shell(self: *@This()) void {
         for (self.clients.items) |client| {
-            write_message(ServerMsg.ForceShell, client.writer()) catch {};
+            writeMessage(ServerMsg{ .msg = .ForceShell }, client.writer()) catch {};
         }
     }
 
@@ -54,12 +54,16 @@ pub const Server = struct {
         std.log.debug("got new event on server: {}", .{event.data.fd});
         for (self.clients.items) |client| {
             if (event.data.fd == client.handle) {
-                const msg = try read_message(ClientMsg, client.reader());
+                const msg = readMessage(ClientMsg, self.allocator, client.reader()) catch |err| switch (err) {
+                    error.EOF => continue, // Handle client disconnects
+                    else => return err,
+                };
+                defer msg.deinit();
 
-                switch (msg) {
+                switch (msg.value.msg) {
                     .Reboot => return posix.RebootCommand.RESTART,
                     .Poweroff => return posix.RebootCommand.POWER_OFF,
-                    .None => {},
+                    .Empty => {},
                 }
             }
         }

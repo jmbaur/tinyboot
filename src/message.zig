@@ -1,8 +1,14 @@
 const std = @import("std");
 const json = std.json;
 
+fn message(comptime T: type) type {
+    return struct {
+        msg: T,
+    };
+}
+
 /// Message that can be sent to the server
-pub const ClientMsg = union(enum) {
+pub const ClientMsg = message(union(enum) {
     /// Request to the server that the system should be powered off.
     Poweroff,
 
@@ -10,18 +16,24 @@ pub const ClientMsg = union(enum) {
     Reboot,
 
     /// Empty message
-    None,
-};
+    Empty,
+});
 
 /// Message that can be sent to a client
-pub const ServerMsg = union(enum) {
+pub const ServerMsg = message(union(enum) {
     /// Spawn a shell prompt, even if the user is not present
     ForceShell,
-};
+});
 
-pub fn read_message(comptime T: type, r: std.net.Stream.Reader) !T {
-    var buf: [1024]u8 = undefined;
+// This number is arbitrary, we may need to increase it at some point.
+const MAX_BUF_SIZE = 1 << 10;
+
+/// Caller is responsible for return value's memory.
+pub fn readMessage(comptime T: type, allocator: std.mem.Allocator, r: std.net.Stream.Reader) !json.Parsed(T) {
+    var buf: [MAX_BUF_SIZE]u8 = undefined;
+
     const n_bytes = try r.read(&buf);
+
     // If we end up here, this means our connection was dropped on the other
     // side. This should only happen if the server has completed successfully
     // or if I wrote a bug :).
@@ -29,11 +41,17 @@ pub fn read_message(comptime T: type, r: std.net.Stream.Reader) !T {
         return error.EOF;
     }
 
-    var jbuf: [1024]u8 = undefined;
-    var fba = std.heap.FixedBufferAllocator.init(&jbuf);
-    return try json.parseFromSliceLeaky(T, fba.allocator(), buf[0..n_bytes], .{});
+    return try json.parseFromSlice(T, allocator, buf[0..n_bytes], .{});
 }
 
-pub fn write_message(value: anytype, w: std.net.Stream.Writer) !void {
-    try json.stringify(value, .{}, w);
+pub fn writeMessage(value: anytype, w: std.net.Stream.Writer) !void {
+    // Write to fixed buffer first prior to doing write to socket, since the
+    // json writer will perform many writes for each character needed to write
+    // valid json.
+    var buf: [MAX_BUF_SIZE]u8 = undefined;
+    var wbuf = std.io.fixedBufferStream(&buf);
+
+    try json.stringify(value, .{}, wbuf.writer());
+
+    try w.writeAll(wbuf.buffer[0..(try wbuf.getPos())]);
 }

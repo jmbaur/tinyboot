@@ -7,8 +7,8 @@ const linux_headers = @import("linux_headers");
 
 const ClientMsg = @import("./message.zig").ClientMsg;
 const ServerMsg = @import("./message.zig").ServerMsg;
-const read_message = @import("./message.zig").read_message;
-const write_message = @import("./message.zig").write_message;
+const readMessage = @import("./message.zig").readMessage;
+const writeMessage = @import("./message.zig").writeMessage;
 const system = @import("./system.zig");
 const xmodem_recv = @import("./xmodem.zig").xmodem_recv;
 
@@ -94,8 +94,6 @@ pub const Client = struct {
         };
         try posix.epoll_ctl(epoll_fd, os.linux.EPOLL.CTL_ADD, inotify_fd, &inotify_event);
 
-        defer self.writeAllAndFlush("\ngoodbye!\n\n") catch {};
-
         // main event loop
         while (true) {
             const max_events = 8; // arbitrary
@@ -119,6 +117,7 @@ pub const Client = struct {
                 if (event.data.fd == self.stream.handle) {
                     const should_quit = try self.handleMsg();
                     if (should_quit) {
+                        self.writeAllAndFlush("\ngoodbye!\n\n") catch {};
                         return;
                     }
 
@@ -142,19 +141,24 @@ pub const Client = struct {
     }
 
     fn notifyUserPresence(self: *@This()) !void {
-        try write_message(ClientMsg.None, self.stream.writer());
+        writeMessage(ClientMsg{ .msg = .Empty }, self.stream.writer()) catch {
+            std.log.err("failed to notify user presence", .{});
+        };
     }
 
     /// Returns true if the remote side shutdown, indicating we are done.
     fn handleMsg(self: *@This()) !bool {
-        const msg = read_message(ServerMsg, self.stream.reader()) catch |err| {
+        const allocator = self.arena.allocator();
+
+        const msg = readMessage(ServerMsg, allocator, self.stream.reader()) catch |err| {
             if (err == error.EOF) {
                 return true;
             }
-            return false;
+            return err;
         };
+        defer msg.deinit();
 
-        switch (msg) {
+        switch (msg.value.msg) {
             .ForceShell => {
                 std.log.debug("shell forced from server", .{});
                 try self.prompt();
@@ -419,7 +423,7 @@ pub const Client = struct {
             };
 
             if (maybe_msg) |msg| {
-                try self.stream.writeAll(std.mem.asBytes(&msg));
+                try writeMessage(msg, self.stream.writer());
                 self.waiting_for_response = true;
             } else {
                 // Write the next prompt
@@ -435,6 +439,7 @@ pub const Command = struct {
     const argv0 = enum {
         help, // NOTE: keep "help" at the top
         boot_xmodem,
+        clear,
         dmesg,
         logs,
         poweroff,
@@ -525,7 +530,7 @@ pub const Command = struct {
             _ = args;
             _ = a;
 
-            return .Poweroff;
+            return .{ .msg = .Poweroff };
         }
     };
 
@@ -543,7 +548,7 @@ pub const Command = struct {
             _ = args;
             _ = a;
 
-            return .Reboot;
+            return .{ .msg = .Reboot };
         }
     };
 
@@ -579,6 +584,25 @@ pub const Command = struct {
             const kernel_logs = try system.kernelLogs(a);
             defer a.free(kernel_logs);
             try shell_instance.writeAllAndFlush(kernel_logs);
+
+            return null;
+        }
+    };
+
+    const clear = struct {
+        const short_help = "clear the screen";
+        const long_help =
+            \\Clear the screen.
+            \\
+            \\Usage:
+            \\clear
+        ;
+
+        fn run(a: std.mem.Allocator, args: *ArgsIterator, shell_instance: *Client) !?ClientMsg {
+            _ = a;
+            _ = args;
+
+            shell_instance.clearScreen();
 
             return null;
         }
