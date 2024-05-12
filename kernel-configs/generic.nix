@@ -77,7 +77,6 @@ in
     NLS = yes;
     NLS_CODEPAGE_437 = yes;
     NLS_ISO8859_1 = yes;
-    NULL_TTY = yes;
     PCI = yes;
     PINCTRL = yes;
     PRINTK = yes;

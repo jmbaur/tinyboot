@@ -5,9 +5,9 @@
   ...
 }:
 {
-  linux.kconfig = lib.mkIf config.video (
-    with lib.kernel;
-    {
+  linux = lib.mkIf config.video {
+    consoles = [ "tty0" ];
+    kconfig = with lib.kernel; {
       BACKLIGHT_CLASS_DEVICE = yes;
       DRM = yes;
       DRM_SIMPLEDRM = yes;
@@ -22,6 +22,6 @@
       GOOGLE_FRAMEBUFFER_COREBOOT = yes;
       LOGO = yes;
       LOGO_LINUX_VGA16 = yes;
-    }
-  );
+    };
+  };
 }

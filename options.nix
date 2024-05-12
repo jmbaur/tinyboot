@@ -144,6 +144,10 @@ in
         type = types.package;
         default = pkgs.linux_latest;
       };
+      consoles = mkOption {
+        type = types.listOf types.str;
+        default = [ ];
+      };
       kconfig = kconfigOption;
       dtb = mkOption {
         type = types.nullOr types.path;
@@ -217,10 +221,8 @@ in
     linux.kconfig.CMDLINE = lib.kernel.freeform (
       toString (
         lib.optionals config.video [ "fbcon=logo-count:1" ]
-        ++ [
-          "console=ttynull"
-          "loglevel=${if config.debug then "7" else "6"}"
-        ]
+        ++ [ (if config.debug then "debug" else "quiet") ]
+        ++ map (c: "console=${c}") config.linux.consoles
       )
     );
     extraInitrdContents = lib.optional (config.linux.firmware != [ ]) {
