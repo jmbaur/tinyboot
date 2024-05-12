@@ -12,9 +12,6 @@
       (
         {
           tinyboot = prev.callPackage ./pkgs/tinyboot.nix { };
-          tinybootKernelConfigs = prev.lib.mapAttrs (config: _: ./kernel-configs/${config}) (
-            builtins.readDir ./kernel-configs
-          );
           armTrustedFirmwareMT8183 = prev.callPackage ./pkgs/arm-trusted-firmware-cros.nix {
             platform = "mt8183";
           };
