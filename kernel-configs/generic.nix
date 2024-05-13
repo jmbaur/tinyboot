@@ -82,6 +82,7 @@ in
     PRINTK = yes;
     PROC_FS = yes;
     RD_XZ = yes;
+    RELOCATABLE = yes; # allows for this kernel itself to be kexec'ed
     RTC_CLASS = yes;
     SCSI = yes;
     SCSI_LOWLEVEL = yes;
