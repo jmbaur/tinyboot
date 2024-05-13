@@ -1,11 +1,11 @@
 {
   corebootSupport ? true,
   debug ? false,
-  zigSrc,
   lib,
+  pkgsBuildBuild,
   stdenv,
   xz,
-  zig_0_12,
+  zigSrc,
 }:
 let
   zigArgs = [
@@ -28,10 +28,12 @@ stdenv.mkDerivation {
     ];
   };
 
-  nativeBuildInputs = [
-    (zig_0_12.overrideAttrs (old: { src = zigSrc; }))
-    xz
+  depsBuildBuild = [
+    (pkgsBuildBuild.zig_0_12.overrideAttrs (old: {
+      src = zigSrc;
+    }))
   ];
+  nativeBuildInputs = [ xz ];
 
   doCheck = true;
 
