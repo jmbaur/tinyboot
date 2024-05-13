@@ -1,11 +1,11 @@
 const std = @import("std");
-const os = std.os;
+const system = std.posix.system;
 const posix = std.posix;
 const Crc16Xmodem = std.hash.crc.Crc16Xmodem;
 
 const linux_headers = @import("linux_headers");
 
-const system = @import("./system.zig");
+const setupTty = @import("./system.zig").setupTty;
 
 const Error = error{
     InvalidReceiveLength,
@@ -55,16 +55,16 @@ pub fn xmodem_send(fd: posix.fd_t, filename: []const u8) !void {
     const epoll_fd = try posix.epoll_create1(linux_headers.EPOLL_CLOEXEC);
     defer posix.close(epoll_fd);
 
-    var read_ready_event = os.linux.epoll_event{
+    var read_ready_event = system.epoll_event{
         .data = .{ .fd = fd },
-        .events = os.linux.EPOLL.IN,
+        .events = system.EPOLL.IN,
     };
-    try posix.epoll_ctl(epoll_fd, os.linux.EPOLL.CTL_ADD, fd, &read_ready_event);
+    try posix.epoll_ctl(epoll_fd, system.EPOLL.CTL_ADD, fd, &read_ready_event);
 
     var num_timeouts: u8 = 0;
 
     while (true) {
-        var events: [1]os.linux.epoll_event = undefined;
+        var events: [1]system.epoll_event = undefined;
         const n_events = posix.epoll_wait(epoll_fd, &events, 10 * std.time.ms_per_s);
         if (n_events == 0) {
             // timeout
@@ -181,11 +181,11 @@ pub fn xmodem_recv(
     const epoll_fd = try posix.epoll_create1(linux_headers.EPOLL_CLOEXEC);
     defer posix.close(epoll_fd);
 
-    var read_ready_event = os.linux.epoll_event{
+    var read_ready_event = system.epoll_event{
         .data = .{ .fd = fd },
-        .events = os.linux.EPOLL.IN | os.linux.EPOLL.ONESHOT,
+        .events = system.EPOLL.IN | system.EPOLL.ONESHOT,
     };
-    try posix.epoll_ctl(epoll_fd, os.linux.EPOLL.CTL_ADD, fd, &read_ready_event);
+    try posix.epoll_ctl(epoll_fd, system.EPOLL.CTL_ADD, fd, &read_ready_event);
 
     var started = false;
 
@@ -199,7 +199,7 @@ pub fn xmodem_recv(
             return Error.InvalidSendLength;
         }
 
-        var events: [1]os.linux.epoll_event = undefined;
+        var events: [1]system.epoll_event = undefined;
         const n_events = posix.epoll_wait(epoll_fd, &events, 5 * std.time.ms_per_s);
         if (n_events == 0) {
             if (ms_without_bytes / std.time.ms_per_s > 25) {
@@ -331,11 +331,11 @@ pub fn main() !void {
     const filepath = args.next() orelse usage(prog_name);
 
     if (std.mem.eql(u8, action, "send")) {
-        try system.setupTty(serial.handle, .file_transfer_send);
+        try setupTty(serial.handle, .file_transfer_send);
 
         try xmodem_send(serial.handle, filepath);
     } else if (std.mem.eql(u8, action, "recv")) {
-        try system.setupTty(serial.handle, .file_transfer_recv);
+        try setupTty(serial.handle, .file_transfer_recv);
 
         var gpa = std.heap.GeneralPurposeAllocator(.{ .safety = true }){};
         defer _ = gpa.deinit();

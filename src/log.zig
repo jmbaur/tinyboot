@@ -1,8 +1,4 @@
 const std = @import("std");
-const os = std.os;
-const posix = std.posix;
-const O = std.os.O;
-const S = std.os.S;
 
 var log_file: ?std.fs.File = null;
 

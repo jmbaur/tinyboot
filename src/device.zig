@@ -1,8 +1,6 @@
 const std = @import("std");
-const os = std.os;
 const posix = std.posix;
 const path = std.fs.path;
-const linux = os.linux;
 const system = posix.system;
 
 const linux_headers = @import("linux_headers");
@@ -167,21 +165,21 @@ pub const DeviceWatcher = struct {
     }
 
     pub fn register(self: *@This(), epoll_fd: posix.fd_t) !void {
-        var device_event = os.linux.epoll_event{
+        var device_event = system.epoll_event{
             .data = .{ .fd = self.nl_fd },
-            .events = os.linux.EPOLL.IN,
+            .events = system.EPOLL.IN,
         };
-        try posix.epoll_ctl(epoll_fd, os.linux.EPOLL.CTL_ADD, self.nl_fd, &device_event);
+        try posix.epoll_ctl(epoll_fd, system.EPOLL.CTL_ADD, self.nl_fd, &device_event);
 
-        var timer_event = os.linux.epoll_event{
+        var timer_event = system.epoll_event{
             .data = .{ .fd = self.settle_fd },
-            .events = os.linux.EPOLL.IN | os.linux.EPOLL.ONESHOT,
+            .events = system.EPOLL.IN | system.EPOLL.ONESHOT,
         };
-        try posix.epoll_ctl(epoll_fd, os.linux.EPOLL.CTL_ADD, self.settle_fd, &timer_event);
+        try posix.epoll_ctl(epoll_fd, system.EPOLL.CTL_ADD, self.settle_fd, &timer_event);
     }
 
     pub fn start_settle_timer(self: *@This()) !void {
-        const timerspec = os.linux.itimerspec{
+        const timerspec = system.itimerspec{
             // oneshot
             .it_interval = .{ .tv_sec = 0, .tv_nsec = 0 },
             // consider settled after 2 seconds without any new events
@@ -448,10 +446,10 @@ pub const DeviceWatcher = struct {
 };
 
 test "device mode" {
-    try std.testing.expectEqual(@as(u32, linux.S.IFCHR), special(null));
-    try std.testing.expectEqual(@as(u32, linux.S.IFCHR), special("foo"));
-    try std.testing.expectEqual(@as(u32, linux.S.IFBLK), special("disk"));
-    try std.testing.expectEqual(@as(u32, linux.S.IFBLK), special("partition"));
+    try std.testing.expectEqual(@as(u32, system.S.IFCHR), special(null));
+    try std.testing.expectEqual(@as(u32, system.S.IFCHR), special("foo"));
+    try std.testing.expectEqual(@as(u32, system.S.IFBLK), special("disk"));
+    try std.testing.expectEqual(@as(u32, system.S.IFBLK), special("partition"));
 }
 
 test "uevent file content parsing" {
@@ -610,7 +608,7 @@ pub fn findActiveConsoles(allocator: std.mem.Allocator) ![]posix.fd_t {
 fn serialDeviceIsConnected(fd: posix.fd_t) bool {
     var serial: c_int = 0;
 
-    if (os.linux.ioctl(fd, linux_headers.TIOCMGET, @intFromPtr(&serial)) != 0) {
+    if (system.ioctl(fd, linux_headers.TIOCMGET, @intFromPtr(&serial)) != 0) {
         return false;
     }
 

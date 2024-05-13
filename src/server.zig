@@ -1,14 +1,12 @@
 const std = @import("std");
-const builtin = @import("builtin");
-const os = std.os;
 const posix = std.posix;
+const system = std.posix.system;
 
-const system = @import("./system.zig");
 const BootEntry = @import("./boot.zig").BootEntry;
-const kexecLoad = @import("./boot.zig").kexecLoad;
-const kexecLoadFromDir = @import("./boot.zig").kexecLoadFromDir;
 const ClientMsg = @import("./message.zig").ClientMsg;
 const ServerMsg = @import("./message.zig").ServerMsg;
+const kexecLoad = @import("./boot.zig").kexecLoad;
+const kexecLoadFromDir = @import("./boot.zig").kexecLoadFromDir;
 const readMessage = @import("./message.zig").readMessage;
 const writeMessage = @import("./message.zig").writeMessage;
 
@@ -34,10 +32,10 @@ pub const Server = struct {
     pub fn register_self(self: *@This(), epoll_fd: posix.fd_t) !void {
         try posix.epoll_ctl(
             epoll_fd,
-            os.linux.EPOLL.CTL_ADD,
+            system.EPOLL.CTL_ADD,
             self.inner.stream.handle,
             @constCast(&.{
-                .events = os.linux.EPOLL.IN,
+                .events = system.EPOLL.IN,
                 .data = .{ .fd = self.inner.stream.handle },
             }),
         );
@@ -48,10 +46,10 @@ pub const Server = struct {
 
         try posix.epoll_ctl(
             epoll_fd,
-            os.linux.EPOLL.CTL_ADD,
+            system.EPOLL.CTL_ADD,
             client_stream.handle,
             @constCast(&.{
-                .events = os.linux.EPOLL.IN,
+                .events = system.EPOLL.IN,
                 .data = .{ .fd = client_stream.handle },
             }),
         );
@@ -63,7 +61,7 @@ pub const Server = struct {
         }
     }
 
-    pub fn handle_new_event(self: *@This(), event: os.linux.epoll_event) !?posix.RebootCommand {
+    pub fn handle_new_event(self: *@This(), event: system.epoll_event) !?posix.RebootCommand {
         const client = b: {
             for (self.clients.items) |client| {
                 if (event.data.fd == client.handle) {

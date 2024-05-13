@@ -1,17 +1,18 @@
 const std = @import("std");
-const os = std.os;
 const posix = std.posix;
 const process = std.process;
+const system = std.posix.system;
 
 const linux_headers = @import("linux_headers");
 
 const ClientMsg = @import("./message.zig").ClientMsg;
 const ServerMsg = @import("./message.zig").ServerMsg;
+const kernelLogs = @import("./system.zig").kernelLogs;
 const readMessage = @import("./message.zig").readMessage;
-const writeMessage = @import("./message.zig").writeMessage;
-const system = @import("./system.zig");
-const xmodem_recv = @import("./xmodem.zig").xmodem_recv;
+const setupTty = @import("./system.zig").setupTty;
 const tmp = @import("./tmp.zig");
+const writeMessage = @import("./message.zig").writeMessage;
+const xmodem_recv = @import("./xmodem.zig").xmodem_recv;
 
 pub const Client = struct {
     waiting_for_response: bool = false,
@@ -77,31 +78,31 @@ pub const Client = struct {
         const epoll_fd = try posix.epoll_create1(linux_headers.EPOLL_CLOEXEC);
         defer posix.close(epoll_fd);
 
-        var stdin_event = os.linux.epoll_event{
+        var stdin_event = system.epoll_event{
             .data = .{ .fd = posix.STDIN_FILENO },
-            .events = os.linux.EPOLL.IN,
+            .events = system.EPOLL.IN,
         };
-        try posix.epoll_ctl(epoll_fd, os.linux.EPOLL.CTL_ADD, posix.STDIN_FILENO, &stdin_event);
+        try posix.epoll_ctl(epoll_fd, system.EPOLL.CTL_ADD, posix.STDIN_FILENO, &stdin_event);
 
-        var server_event = os.linux.epoll_event{
+        var server_event = system.epoll_event{
             .data = .{ .fd = self.stream.handle },
-            .events = os.linux.EPOLL.IN,
+            .events = system.EPOLL.IN,
         };
-        try posix.epoll_ctl(epoll_fd, os.linux.EPOLL.CTL_ADD, self.stream.handle, &server_event);
+        try posix.epoll_ctl(epoll_fd, system.EPOLL.CTL_ADD, self.stream.handle, &server_event);
 
         const inotify_fd = try posix.inotify_init1(0);
-        const logs_watch_fd = try posix.inotify_add_watch(inotify_fd, "/run/log", os.linux.IN.MODIFY);
+        const logs_watch_fd = try posix.inotify_add_watch(inotify_fd, "/run/log", system.IN.MODIFY);
         defer posix.close(inotify_fd);
-        var inotify_event = os.linux.epoll_event{
+        var inotify_event = system.epoll_event{
             .data = .{ .fd = inotify_fd },
-            .events = os.linux.EPOLL.IN,
+            .events = system.EPOLL.IN,
         };
-        try posix.epoll_ctl(epoll_fd, os.linux.EPOLL.CTL_ADD, inotify_fd, &inotify_event);
+        try posix.epoll_ctl(epoll_fd, system.EPOLL.CTL_ADD, inotify_fd, &inotify_event);
 
         // main event loop
         while (true) {
             const max_events = 8; // arbitrary
-            var events = [_]os.linux.epoll_event{undefined} ** max_events;
+            var events = [_]system.epoll_event{undefined} ** max_events;
 
             const n_events = posix.epoll_wait(epoll_fd, &events, -1);
 
@@ -113,7 +114,7 @@ pub const Client = struct {
                 // the client will no longer need to passively watch logs, so
                 // we remove the inotify watcher.
                 if (event.data.fd != inotify_fd and self.watching_logs) {
-                    try posix.epoll_ctl(epoll_fd, os.linux.EPOLL.CTL_DEL, inotify_fd, null);
+                    try posix.epoll_ctl(epoll_fd, system.EPOLL.CTL_DEL, inotify_fd, null);
                     posix.inotify_rm_watch(inotify_fd, logs_watch_fd);
                     self.watching_logs = false;
                 }
@@ -136,7 +137,7 @@ pub const Client = struct {
                     // actually use the data since we only have one file
                     // registered. If we don't do this, we will continue to
                     // get epoll notifications for this fd.
-                    var buf: [@sizeOf(os.linux.inotify_event)]u8 = undefined;
+                    var buf: [@sizeOf(system.inotify_event)]u8 = undefined;
                     _ = posix.read(inotify_fd, &buf) catch {};
                     try self.printLogs(.{ .from_start = false });
                 }
@@ -593,7 +594,7 @@ pub const Command = struct {
 
         fn run(c: *Command, args: *ArgsIterator) !?ClientMsg {
             const filter = if (args.next()) |filter_str| try std.fmt.parseInt(u8, filter_str, 10) else 6;
-            const kernel_logs = try system.kernelLogs(c.allocator, filter);
+            const kernel_logs = try kernelLogs(c.allocator, filter);
             defer c.allocator.free(kernel_logs);
             try c.shell_instance.writeAllAndFlush(kernel_logs);
 
@@ -639,9 +640,9 @@ pub const Command = struct {
         fn run(c: *Command, args: *ArgsIterator) !?ClientMsg {
             var tmp_dir = try tmp.tmpDir(.{});
 
-            errdefer system.setupTty(posix.STDIN_FILENO, .user_input) catch {};
+            errdefer setupTty(posix.STDIN_FILENO, .user_input) catch {};
 
-            try system.setupTty(posix.STDIN_FILENO, .file_transfer_recv);
+            try setupTty(posix.STDIN_FILENO, .file_transfer_recv);
 
             const kernel_bytes = try xmodem_recv(c.allocator, posix.STDIN_FILENO);
             // Free up the kernel bytes since this is large.
@@ -679,7 +680,7 @@ pub const Command = struct {
             defer params_file.close();
             try params_file.writeAll(kernel_params);
 
-            system.setupTty(posix.STDIN_FILENO, .user_input) catch {};
+            setupTty(posix.STDIN_FILENO, .user_input) catch {};
 
             return .{ .data = .{ .Boot = .{
                 .Dir = try tmp_dir.dir.realpathAlloc(c.allocator, "."),

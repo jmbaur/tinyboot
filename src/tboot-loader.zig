@@ -1,7 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const posix = std.posix;
-const linux = std.os.linux;
+const system = std.posix.system;
 
 const linux_headers = @import("linux_headers");
 const coreboot_support = @import("build_options").coreboot_support;
@@ -13,7 +13,8 @@ const Server = @import("./server.zig").Server;
 const device = @import("./device.zig");
 const log = @import("./log.zig");
 const security = @import("./security.zig");
-const system = @import("./system.zig");
+const setupSystem = @import("./system.zig").setupSystem;
+const setupTty = @import("./system.zig").setupTty;
 
 pub const std_options = .{
     .logFn = log.logFn,
@@ -105,7 +106,7 @@ fn run_event_loop(allocator: std.mem.Allocator) !?posix.RebootCommand {
     // main event loop
     while (true) {
         const max_events = 8;
-        var events = [_]std.os.linux.epoll_event{undefined} ** max_events;
+        var events = [_]system.epoll_event{undefined} ** max_events;
 
         const n_events = posix.epoll_wait(state.epoll_fd, &events, -1);
 
@@ -150,7 +151,7 @@ fn run_event_loop(allocator: std.mem.Allocator) !?posix.RebootCommand {
 }
 
 fn console_client() !void {
-    try system.setupTty(posix.STDIN_FILENO, .user_input);
+    try setupTty(posix.STDIN_FILENO, .user_input);
 
     try log.initLogger(.Client);
     defer log.deinitLogger();
@@ -166,7 +167,7 @@ fn pid1() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    try system.setupSystem();
+    try setupSystem();
 
     try log.initLogger(.Server);
     defer log.deinitLogger();
@@ -212,7 +213,7 @@ pub fn main() !void {
         return;
     }
 
-    switch (std.os.linux.getpid()) {
+    switch (system.getpid()) {
         1 => {
             pid1() catch |err| {
                 std.log.err("failed to boot: {any}\n", .{err});

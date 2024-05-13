@@ -1,7 +1,6 @@
 const std = @import("std");
-const os = std.os;
 const posix = std.posix;
-const E = std.os.linux.E;
+const system = std.posix.system;
 
 const linux_headers = @import("linux_headers");
 
@@ -146,7 +145,7 @@ pub fn kexecLoad(
     defer allocator.free(cmdline);
     const cmdline_len = cmdline.len + 1;
 
-    const rc = os.linux.syscall5(
+    const rc = system.syscall5(
         .kexec_file_load,
         linux_fd,
         @as(usize, @bitCast(@as(isize, initrd_fd))),
@@ -325,12 +324,12 @@ pub const Autoboot = struct {
     }
 
     pub fn register(self: *@This(), epoll_fd: posix.fd_t) !void {
-        var ready_event = os.linux.epoll_event{
+        var ready_event = system.epoll_event{
             .data = .{ .fd = self.ready_fd },
             // we will only be ready to boot once
-            .events = os.linux.EPOLL.IN | os.linux.EPOLL.ONESHOT,
+            .events = system.EPOLL.IN | system.EPOLL.ONESHOT,
         };
-        try posix.epoll_ctl(epoll_fd, os.linux.EPOLL.CTL_ADD, self.ready_fd, &ready_event);
+        try posix.epoll_ctl(epoll_fd, system.EPOLL.CTL_ADD, self.ready_fd, &ready_event);
     }
 
     pub fn start(self: *@This()) !void {

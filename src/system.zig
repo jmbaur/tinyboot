@@ -1,10 +1,7 @@
 const std = @import("std");
-const builtin = @import("builtin");
 const fs = std.fs;
-const os = std.os;
 const posix = std.posix;
 const system = std.posix.system;
-const linux = std.os.linux;
 
 const linux_headers = @import("linux_headers");
 
@@ -17,7 +14,7 @@ fn mountPseudoFs(
     fstype: [*:0]const u8,
     flags: u32,
 ) MountError!void {
-    const rc = linux.mount("", path, fstype, flags, 0);
+    const rc = system.mount("", path, fstype, flags, 0);
 
     switch (posix.errno(rc)) {
         .SUCCESS => {},
@@ -29,18 +26,18 @@ fn mountPseudoFs(
 /// Does initial system setup and mounts basic psuedo-filesystems.
 pub fn setupSystem() !void {
     try fs.makeDirAbsolute("/proc");
-    try mountPseudoFs("/proc", "proc", linux.MS.NOSUID | linux.MS.NODEV | linux.MS.NOEXEC);
+    try mountPseudoFs("/proc", "proc", system.MS.NOSUID | system.MS.NODEV | system.MS.NOEXEC);
 
     try fs.makeDirAbsolute("/sys");
-    try mountPseudoFs("/sys", "sysfs", linux.MS.NOSUID | linux.MS.NODEV | linux.MS.NOEXEC | linux.MS.RELATIME);
-    try mountPseudoFs("/sys/kernel/security", "securityfs", linux.MS.NOSUID | linux.MS.NODEV | linux.MS.NOEXEC | linux.MS.RELATIME);
-    try mountPseudoFs("/sys/kernel/debug", "debugfs", linux.MS.NOSUID | linux.MS.NODEV | linux.MS.NOEXEC | linux.MS.RELATIME);
+    try mountPseudoFs("/sys", "sysfs", system.MS.NOSUID | system.MS.NODEV | system.MS.NOEXEC | system.MS.RELATIME);
+    try mountPseudoFs("/sys/kernel/security", "securityfs", system.MS.NOSUID | system.MS.NODEV | system.MS.NOEXEC | system.MS.RELATIME);
+    try mountPseudoFs("/sys/kernel/debug", "debugfs", system.MS.NOSUID | system.MS.NODEV | system.MS.NOEXEC | system.MS.RELATIME);
 
     // we use CONFIG_DEVTMPFS, so we don't need to create /dev
-    try mountPseudoFs("/dev", "devtmpfs", linux.MS.SILENT | linux.MS.NOSUID | linux.MS.NOEXEC);
+    try mountPseudoFs("/dev", "devtmpfs", system.MS.SILENT | system.MS.NOSUID | system.MS.NOEXEC);
 
     try fs.makeDirAbsolute("/run");
-    try mountPseudoFs("/run", "tmpfs", linux.MS.NOSUID | linux.MS.NODEV);
+    try mountPseudoFs("/run", "tmpfs", system.MS.NOSUID | system.MS.NODEV);
 
     try fs.makeDirAbsolute("/mnt");
 
@@ -182,12 +179,12 @@ const SYSLOG_ACTION_UNREAD = 9;
 /// Read kernel logs (AKA syslog/dmesg). Caller is responsible for returned
 /// slice.
 pub fn kernelLogs(allocator: std.mem.Allocator, filter: u8) ![]const u8 {
-    const bytes_available = linux.syscall3(linux.SYS.syslog, SYSLOG_ACTION_UNREAD, 0, 0);
+    const bytes_available = system.syscall3(system.SYS.syslog, SYSLOG_ACTION_UNREAD, 0, 0);
     const buf = try allocator.alloc(u8, bytes_available);
     defer allocator.free(buf);
 
-    switch (posix.errno(linux.syscall3(
-        linux.SYS.syslog,
+    switch (posix.errno(system.syscall3(
+        system.SYS.syslog,
         SYSLOG_ACTION_READ_ALL,
         @intFromPtr(buf.ptr),
         buf.len,

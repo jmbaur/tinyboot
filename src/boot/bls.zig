@@ -1,6 +1,6 @@
 const std = @import("std");
-const os = std.os;
 const posix = std.posix;
+const system = std.posix.system;
 
 const BootDevice = @import("../boot.zig").BootDevice;
 const BootEntry = @import("../boot.zig").BootEntry;
@@ -248,13 +248,13 @@ pub const BootLoaderSpec = struct {
 
             const mountpoint = try mountpoint_dir.realpathAlloc(allocator, partition_filename);
 
-            switch (posix.errno(os.linux.mount(
+            switch (posix.errno(system.mount(
                 try allocator.dupeZ(u8, try dev_disk_alias.realpathAlloc(allocator, partition_filename)),
                 try allocator.dupeZ(u8, mountpoint),
                 switch (fstype) {
                     .Vfat => "vfat",
                 },
-                os.linux.MS.NOSUID | os.linux.MS.NODEV | os.linux.MS.NOEXEC,
+                system.MS.NOSUID | system.MS.NODEV | system.MS.NOEXEC,
                 0,
             ))) {
                 .SUCCESS => {},
@@ -418,18 +418,18 @@ pub const BootLoaderSpec = struct {
 
         for (self.external_mounts) |mount| {
             std.log.info("unmounted disk \"{s}\"", .{mount.disk_name});
-            _ = os.linux.umount2(
+            _ = system.umount2(
                 try self.arena.allocator().dupeZ(u8, try mount.dir.realpath(".", &buf)),
-                os.linux.MNT.DETACH,
+                system.MNT.DETACH,
             );
             mount.dir.close();
         }
 
         for (self.internal_mounts) |mount| {
             std.log.info("unmounted disk \"{s}\"", .{mount.disk_name});
-            _ = os.linux.umount2(
+            _ = system.umount2(
                 try self.arena.allocator().dupeZ(u8, try mount.dir.realpath(".", &buf)),
-                os.linux.MNT.DETACH,
+                system.MNT.DETACH,
             );
             mount.dir.close();
         }
