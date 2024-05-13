@@ -1,12 +1,12 @@
 { pkgs, lib }:
 lib.mapAttrs' (
   board: _:
-  lib.nameValuePair "coreboot-${board}" (
+  lib.nameValuePair "tinyboot-${board}" (
     lib.makeOverridable (
       {
         config ? { },
       }:
-      lib.evalModules {
+      (lib.evalModules {
         modules = [
           ({
             _module.args = {
@@ -17,7 +17,7 @@ lib.mapAttrs' (
           ./boards/${board}/config.nix
           config
         ];
-      }
+      }).config.build.firmware
     ) { }
   )
 ) (builtins.readDir ./boards)

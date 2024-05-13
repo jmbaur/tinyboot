@@ -573,7 +573,7 @@ pub fn findActiveConsoles(allocator: std.mem.Allocator) ![]posix.fd_t {
             continue;
         }
 
-        var split = std.mem.split(u8, entry.basename, ":");
+        var split = std.mem.splitScalar(u8, entry.basename, ':');
         const major_str = split.next() orelse continue;
         const minor_str = split.next() orelse continue;
         if (split.next() != null) {

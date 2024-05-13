@@ -13,8 +13,9 @@ more configs are welcome!
 
 ## Usage
 
-```
-nix run github:jmbaur/tinyboot#coreboot-<your_board>.config.build.installScript
+```bash
+nix build github:jmbaur/tinyboot#tinyboot-<your_board>
+# write ./result to your board (e.g. with flashrom)
 ```
 
 ## Hacking

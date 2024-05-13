@@ -63,7 +63,7 @@ pub const Client = struct {
     }
 
     fn prompt(self: *@This()) !void {
-        try self.writeAllAndFlush(">> ");
+        try self.writeAllAndFlush(&.{ 0xc2, 0xbb, 0x20 });
     }
 
     pub fn run(self: *@This()) !void {
@@ -576,9 +576,9 @@ pub const Command = struct {
     };
 
     const logs = struct {
-        const short_help = "view logs";
+        const short_help = "view tinyboot logs";
         const long_help =
-            \\View logs of the current boot.
+            \\View tinyboot logs.
             \\
             \\Usage:
             \\logs
@@ -595,16 +595,18 @@ pub const Command = struct {
     const dmesg = struct {
         const short_help = "view kernel logs";
         const long_help =
-            \\View logs from the kernel.
+            \\View kernel logs.
             \\
             \\Usage:
-            \\dmesg
+            \\dmesg [filter log level]              Default filter is log level 6
+            \\
+            \\Example:
+            \\dmesg 7
         ;
 
         fn run(c: *Command, args: *ArgsIterator) !?ClientMsg {
-            _ = args;
-
-            const kernel_logs = try system.kernelLogs(c.allocator);
+            const filter = if (args.next()) |filter_str| try std.fmt.parseInt(u8, filter_str, 10) else 6;
+            const kernel_logs = try system.kernelLogs(c.allocator, filter);
             defer c.allocator.free(kernel_logs);
             try c.shell_instance.writeAllAndFlush(kernel_logs);
 
@@ -641,10 +643,10 @@ pub const Command = struct {
             \\ - kernel params
             \\
             \\Usage:
-            \\boot_xmodem [-n]
+            \\boot_xmodem [options]
             \\
             \\Options:
-            \\  -n    no initrd
+            \\  -n              No initrd
         ;
 
         fn run(c: *Command, args: *ArgsIterator) !?ClientMsg {

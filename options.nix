@@ -259,7 +259,7 @@ in
         VPD = yes;
       }
       // lib.optionalAttrs pkgs.hostPlatform.isx86_64 {
-        LINUX_INITRD = freeform "${config.build.initrd}";
+        LINUX_INITRD = freeform "${config.build.initrd}/initrd";
         PAYLOAD_FILE = freeform "${config.build.linux}/${pkgs.stdenv.hostPlatform.linux-kernel.target}";
         PAYLOAD_LINUX = yes;
         VBOOT_SLOTS_RW_AB = lib.mkDefault yes; # x86_64 spi flash is usually large enough for 3 vboot slots
@@ -275,18 +275,16 @@ in
 
     build = {
       inherit testInitrd;
-      initrd =
-        if config.extraInitrdContents != [ ] then
-          (
-            (pkgs.makeInitrdNG {
-              prepend = [ "${tinyboot}/tboot-loader.cpio.xz" ];
-              compressor = "xz";
-              contents = config.extraInitrdContents;
-            })
-            + "/initrd"
-          )
-        else
-          "${tinyboot}/tboot-loader.cpio.xz";
+      initrd = pkgs.makeInitrdNG {
+        prepend = [ "${tinyboot}/tboot-loader.cpio.xz" ];
+        compressor = "xz";
+        contents = config.extraInitrdContents ++ [
+          {
+            symlink = "/empty";
+            object = pkgs.emptyFile;
+          }
+        ];
+      };
       linux = (
         pkgs.callPackage ./pkgs/linux {
           linux = config.linux.package;
@@ -311,7 +309,12 @@ in
               vboot_reference # vpd
             ];
             passthru = {
-              inherit (config.build) linux initrd coreboot;
+              inherit (config.build)
+                linux
+                initrd
+                testInitrd
+                coreboot
+                ;
             };
             env.CBFSTOOL = "${pkgs.buildPackages.cbfstool}/bin/cbfstool"; # needed by futility
           }

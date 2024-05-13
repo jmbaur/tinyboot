@@ -59,7 +59,7 @@
           qemu
         ];
         env.TINYBOOT_KERNEL = ''${
-          pkgs."coreboot-qemu-${pkgs.stdenv.hostPlatform.qemuArch}".config.build.linux
+          pkgs."tinyboot-qemu-${pkgs.stdenv.hostPlatform.qemuArch}".linux
         }/kernel'';
       };
     }) inputs.self.legacyPackages;

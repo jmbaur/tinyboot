@@ -30,7 +30,7 @@ pub const Iterator = struct {
         };
         errdefer ret.deinit();
 
-        var it = mem.split(u8, pattern, "/");
+        var it = mem.splitScalar(u8, pattern, '/');
         while (it.next()) |seg| {
             if (mem.indexOf(u8, seg, "**") != null)
                 return error.NotSupported;

@@ -21,9 +21,7 @@ stdenv.mkDerivation {
     cp ${./boots_ascii_16.ppm} drivers/video/logo/logo_linux_vga16.ppm
   '';
   inherit kconfig;
-  passAsFile = [
-    "kconfig"
-  ];
+  passAsFile = [ "kconfig" ];
   configurePhase = ''
     runHook preConfigure
     cat $kconfigPath $extraConfigPath > all.config

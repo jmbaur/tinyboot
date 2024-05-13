@@ -181,9 +181,11 @@ const SYSLOG_ACTION_UNREAD = 9;
 
 /// Read kernel logs (AKA syslog/dmesg). Caller is responsible for returned
 /// slice.
-pub fn kernelLogs(allocator: std.mem.Allocator) ![]const u8 {
+pub fn kernelLogs(allocator: std.mem.Allocator, filter: u8) ![]const u8 {
     const bytes_available = linux.syscall3(linux.SYS.syslog, SYSLOG_ACTION_UNREAD, 0, 0);
     const buf = try allocator.alloc(u8, bytes_available);
+    defer allocator.free(buf);
+
     switch (linux.E.init(linux.syscall3(linux.SYS.syslog, SYSLOG_ACTION_READ_ALL, @intFromPtr(buf.ptr), buf.len))) {
         linux.E.INVAL => unreachable, // we provided bad parameters
         // TODO(jared): make use of these possible outcomes
@@ -195,5 +197,19 @@ pub fn kernelLogs(allocator: std.mem.Allocator) ![]const u8 {
         },
     }
 
-    return buf;
+    var logs = std.ArrayList(u8).init(allocator);
+    var split = std.mem.splitScalar(u8, buf, '\n');
+    while (split.next()) |line| {
+        if (line.len <= 2) {
+            break;
+        }
+
+        const log_level = try std.fmt.parseInt(u8, line[1..2], 10);
+        if (log_level <= filter) {
+            try logs.appendSlice(line[3..]);
+            try logs.append('\n');
+        }
+    }
+
+    return logs.toOwnedSlice();
 }

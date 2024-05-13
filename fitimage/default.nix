@@ -31,6 +31,6 @@ buildPackages.runCommand "fitimage-${if (board != null) then board else "unknown
     mkdir -p dtbs $out
     lzma --threads 0 <${linux}/Image >Image.lzma
     ${copyDtbs}
-    bash ${./make-image-its.bash} Image.lzma ${initrd} > image.its
+    bash ${./make-image-its.bash} Image.lzma ${initrd}/initrd > image.its
     mkimage -f image.its $out/uImage
   ''

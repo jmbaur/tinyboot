@@ -32,15 +32,23 @@ pub fn xmodem_send(fd: posix.fd_t, filename: []const u8) !void {
     defer file.close();
 
     const stat = try file.stat();
-    var buf = try posix.mmap(
-        null,
-        stat.size,
-        posix.PROT.READ,
-        .{ .TYPE = .PRIVATE },
-        file.handle,
-        0,
-    );
-    defer posix.munmap(buf);
+    var buf: []align(std.mem.page_size) u8 = if (stat.size > 0)
+        try posix.mmap(
+            null,
+            stat.size,
+            posix.PROT.READ,
+            .{ .TYPE = .PRIVATE },
+            file.handle,
+            0,
+        )
+    else
+        &.{};
+
+    defer {
+        if (stat.size > 0) {
+            defer posix.munmap(buf);
+        }
+    }
 
     std.debug.print("waiting for receiver ping\n", .{});
 
@@ -91,8 +99,9 @@ pub fn xmodem_send(fd: posix.fd_t, filename: []const u8) !void {
     var buf_index: usize = 0;
 
     var num_errors: u8 = 0;
+    var first_chunk_sent = false; // allows for us to send empty file
 
-    while (len > 0 and num_errors < 10) {
+    while ((len > 0 and num_errors < 10) or !first_chunk_sent) {
         var chunk_len: usize = 0;
 
         chunk_len = std.mem.min(usize, &.{ len, chunk.payload.len });
@@ -140,6 +149,10 @@ pub fn xmodem_send(fd: posix.fd_t, filename: []const u8) !void {
                 },
             }
         };
+
+        if (!first_chunk_sent) {
+            first_chunk_sent = true;
+        }
 
         std.debug.print("{s}", .{status_char});
     }
@@ -311,7 +324,7 @@ pub fn main() !void {
 
     var serial = try std.fs.cwd().openFile(
         args.next() orelse usage(prog_name),
-        .{ .mode = .read_write, .lock = .exclusive },
+        .{ .mode = .read_write, .lock = .none },
     );
     defer serial.close();
 
@@ -329,7 +342,7 @@ pub fn main() !void {
 
         const allocator = gpa.allocator();
 
-        var file = try std.fs.createFileAbsolute(filepath, .{});
+        var file = try std.fs.cwd().createFile(filepath, .{});
         defer file.close();
 
         const file_bytes = try xmodem_recv(allocator, serial.handle);

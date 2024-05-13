@@ -176,11 +176,11 @@ pub fn main() !void {
 
     const kernel_cmdline = try kernel_cmdline_file.readToEndAlloc(allocator, 1024);
 
-    var split = std.mem.split(u8, kernel_cmdline, " ");
+    var split = std.mem.splitScalar(u8, kernel_cmdline, ' ');
     const tboot_bls_entry = b: {
         while (split.next()) |kernel_param| {
             if (std.mem.startsWith(u8, kernel_param, "tboot.bls-entry=")) {
-                var param_split = std.mem.split(u8, kernel_param, "=");
+                var param_split = std.mem.splitScalar(u8, kernel_param, '=');
                 _ = param_split.next().?;
                 break :b param_split.next() orelse return Error.MissingBlsEntry;
             }

@@ -8,7 +8,7 @@ const GuidError = error{
 
 /// expects a guid string formatted like so: 00000000-0000-0000-0000-000000000000
 fn guid_from_string(str: []const u8) !std.os.uefi.Guid {
-    var split = std.mem.split(u8, str, "-");
+    var split = std.mem.splitScalar(u8, str, '-');
 
     const first_section = split.next().?;
     if (first_section.len != 8) {
