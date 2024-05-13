@@ -47,112 +47,69 @@ pub const BootEntry = struct {
     cmdline: ?[]const u8 = null,
 };
 
-pub const Entry = struct {
-    allocator: std.mem.Allocator,
+pub fn kexec_load(allocator: std.mem.Allocator, entry: *const BootEntry) !void {
+    std.log.info("preparing kexec", .{});
 
-    inner: BootEntry,
+    std.log.debug("loading kernel {s}", .{entry.linux});
+    const linux = try std.fs.cwd().openFile(entry.linux, .{});
+    defer linux.close();
 
-    // TODO(jared): This is bad that we end up allocating these things twice,
-    // it is most definitely unecessary.
-    pub fn init(
-        allocator: std.mem.Allocator,
-        entry: BootEntry,
-    ) !@This() {
-        return .{
-            .allocator = allocator,
-            .inner = .{
-                .linux = try allocator.dupe(u8, entry.linux),
-                .initrd = if (entry.initrd) |initrd|
-                    try allocator.dupe(u8, initrd)
-                else
-                    null,
-                .cmdline = if (entry.cmdline) |cmdline|
-                    try allocator.dupe(u8, cmdline)
-                else
-                    null,
-            },
-        };
-    }
+    const linux_fd = @as(usize, @bitCast(@as(isize, linux.handle)));
 
-    const LoadError = error{
-        PermissionDenied,
-        UnknownError,
+    const initrd_fd = b: {
+        if (entry.initrd) |initrd| {
+            std.log.debug("loading initrd {s}", .{initrd});
+            const file = try std.fs.cwd().openFile(initrd, .{});
+            break :b file.handle;
+        } else {
+            break :b 0;
+        }
     };
 
-    pub fn load(self: *const @This()) !void {
-        std.log.info("preparing kexec", .{});
-
-        std.log.debug("loading kernel {s}", .{self.inner.linux});
-        const linux = try std.fs.cwd().openFile(self.inner.linux, .{});
-        defer linux.close();
-
-        const linux_fd = @as(usize, @bitCast(@as(isize, linux.handle)));
-
-        const initrd_fd = b: {
-            if (self.inner.initrd) |initrd| {
-                std.log.debug("loading initrd {s}", .{initrd});
-                const file = try std.fs.cwd().openFile(initrd, .{});
-                break :b file.handle;
-            } else {
-                break :b 0;
-            }
-        };
-
-        defer {
-            if (initrd_fd != 0) {
-                posix.close(initrd_fd);
-            }
-        }
-
-        // dupeZ() returns a null-terminated slice, however the null-terminator
-        // is not included in the length of the slice, so we must add 1.
-        std.log.debug("loading kernel params '{s}'", .{self.inner.cmdline orelse ""});
-        const cmdline = try self.allocator.dupeZ(u8, self.inner.cmdline orelse "");
-        defer self.allocator.free(cmdline);
-        const cmdline_len = cmdline.len + 1;
-
-        const rc = os.linux.syscall5(
-            .kexec_file_load,
-            linux_fd,
-            @as(usize, @bitCast(@as(isize, initrd_fd))),
-            cmdline_len,
-            @intFromPtr(cmdline.ptr),
-            if (initrd_fd == 0) linux_headers.KEXEC_FILE_NO_INITRAMFS else 0,
-        );
-
-        switch (os.linux.E.init(rc)) {
-            E.SUCCESS => {
-                // Wait for up to a second for kernel to report for kexec to be
-                // loaded.
-                var i: u8 = 10;
-                var f = try std.fs.cwd().openFile(KEXEC_LOADED, .{});
-                defer f.close();
-                while (!kexec_is_loaded(f) and i > 0) : (i -= 1) {
-                    std.time.sleep(100 * std.time.ns_per_ms);
-                }
-
-                std.log.info("kexec loaded", .{});
-                return;
-            },
-            // IMA appraisal failed
-            E.PERM => return LoadError.PermissionDenied,
-            else => {
-                std.log.err("kexec load failed: {}", .{os.linux.E.init(rc)});
-                return LoadError.UnknownError;
-            },
+    defer {
+        if (initrd_fd != 0) {
+            posix.close(initrd_fd);
         }
     }
 
-    pub fn deinit(self: *@This()) void {
-        self.allocator.free(self.inner.linux);
-        if (self.inner.initrd) |initrd| {
-            self.allocator.free(initrd);
-        }
-        if (self.inner.cmdline) |cmdline| {
-            self.allocator.free(cmdline);
-        }
+    // dupeZ() returns a null-terminated slice, however the null-terminator
+    // is not included in the length of the slice, so we must add 1.
+    std.log.debug("loading kernel params '{s}'", .{entry.cmdline orelse ""});
+    const cmdline = try allocator.dupeZ(u8, entry.cmdline orelse "");
+    defer allocator.free(cmdline);
+    const cmdline_len = cmdline.len + 1;
+
+    const rc = os.linux.syscall5(
+        .kexec_file_load,
+        linux_fd,
+        @as(usize, @bitCast(@as(isize, initrd_fd))),
+        cmdline_len,
+        @intFromPtr(cmdline.ptr),
+        if (initrd_fd == 0) linux_headers.KEXEC_FILE_NO_INITRAMFS else 0,
+    );
+
+    switch (posix.errno(rc)) {
+        E.SUCCESS => {
+            // Wait for up to a second for kernel to report for kexec to be
+            // loaded.
+            var i: u8 = 10;
+            var f = try std.fs.cwd().openFile(KEXEC_LOADED, .{});
+            defer f.close();
+            while (!kexec_is_loaded(f) and i > 0) : (i -= 1) {
+                std.time.sleep(100 * std.time.ns_per_ms);
+            }
+
+            std.log.info("kexec loaded", .{});
+            return;
+        },
+        // IMA appraisal failed
+        E.PERM => return error.PermissionDenied,
+        else => |err| {
+            std.log.err("kexec load failed for unknown reason: {}", .{err});
+            return posix.unexpectedErrno(err);
+        },
     }
-};
+}
 
 pub const BootDevice = struct {
     name: []const u8,
@@ -161,7 +118,7 @@ pub const BootDevice = struct {
     timeout: u8,
     /// Boot entries found on this device. The entry at the first index will
     /// serve as the default entry.
-    entries: []const Entry,
+    entries: []const BootEntry,
 };
 
 pub const BootLoader = union(enum) {
@@ -175,19 +132,20 @@ pub const BootLoader = union(enum) {
         }
     }
 
+    /// Caller is responsible for all memory corresponding to return value.
     pub fn probe(self: @This(), allocator: std.mem.Allocator) ![]const BootDevice {
         std.log.debug("boot loader probe", .{});
 
         return switch (self) {
-            inline else => |boot_loader| boot_loader.probe(allocator),
+            inline else => |boot_loader| try boot_loader.probe(allocator),
         };
     }
 
-    pub fn teardown(self: @This()) void {
+    pub fn teardown(self: @This()) !void {
         std.log.debug("boot loader teardown", .{});
 
         switch (self) {
-            inline else => |boot_loader| boot_loader.teardown(),
+            inline else => |boot_loader| try boot_loader.teardown(),
         }
     }
 };
@@ -223,7 +181,9 @@ fn autoboot(stop_fd: posix.fd_t) !bool {
     var bls = BootLoaderSpec.init();
     var boot_loader: BootLoader = .{ .bls = &bls };
     defer {
-        boot_loader.teardown();
+        boot_loader.teardown() catch |err| {
+            std.log.err("failed to teardown bootloader: {}", .{err});
+        };
         std.log.debug("autoboot stopped", .{});
     }
 
@@ -249,12 +209,11 @@ fn autoboot(stop_fd: posix.fd_t) !bool {
         }
 
         for (dev.entries) |entry| {
-            entry.load() catch |err| {
+            if (kexec_load(arena.allocator(), &entry)) {
+                return true;
+            } else |err| {
                 std.log.err("failed to load boot entry: {}", .{err});
-                continue;
-            };
-
-            return true;
+            }
         }
     }
 

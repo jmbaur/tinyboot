@@ -1,8 +1,9 @@
 const std = @import("std");
 const os = std.os;
+const posix = std.posix;
 
 const BootDevice = @import("../boot.zig").BootDevice;
-const Entry = @import("../boot.zig").Entry;
+const BootEntry = @import("../boot.zig").BootEntry;
 const FsType = @import("../disk/filesystem.zig").FsType;
 const Gpt = @import("../disk/partition_table.zig").Gpt;
 const GptPartitionType = @import("../disk/partition_table.zig").GptPartitionType;
@@ -11,7 +12,7 @@ const MbrPartitionType = @import("../disk/partition_table.zig").MbrPartitionType
 const device = @import("../device.zig");
 
 const Mount = struct {
-    mountpoint: [:0]const u8,
+    dir: *std.fs.Dir,
     disk_name: []const u8,
 };
 
@@ -112,7 +113,19 @@ pub const BootLoaderSpec = struct {
         var internal_mounts = std.ArrayList(Mount).init(allocator);
         var external_mounts = std.ArrayList(Mount).init(allocator);
 
-        var sysfs_block = try std.fs.openDirAbsolute(
+        var dev_disk_alias = try std.fs.cwd().openDir(
+            "/sys/class/block",
+            .{},
+        );
+        defer dev_disk_alias.close();
+
+        var mountpoint_dir = try std.fs.cwd().openDir(
+            "/mnt",
+            .{},
+        );
+        defer mountpoint_dir.close();
+
+        var sysfs_block = try std.fs.cwd().openDir(
             "/sys/class/block",
             .{ .iterate = true },
         );
@@ -124,19 +137,12 @@ pub const BootLoaderSpec = struct {
                 continue;
             }
 
-            const full_path = try std.fs.path.join(allocator, &.{
-                std.fs.path.sep_str,
-                "sys",
-                "class",
-                "block",
-                entry.name,
-                "uevent",
-            });
-            var uevent_path = try std.fs.openFileAbsolute(full_path, .{});
-            defer uevent_path.close();
+            const uevent_path = try std.fs.path.join(allocator, &.{ entry.name, "uevent" });
+            var uevent_file = try sysfs_block.openFile(uevent_path, .{});
+            defer uevent_file.close();
 
             const max_bytes = 10 * 1024 * 1024;
-            const uevent_contents = try uevent_path.readToEndAlloc(allocator, max_bytes);
+            const uevent_contents = try uevent_file.readToEndAlloc(allocator, max_bytes);
 
             var uevent = try device.parseUeventFileContents(allocator, uevent_contents);
 
@@ -149,23 +155,16 @@ pub const BootLoaderSpec = struct {
             const diskseq = uevent.get("DISKSEQ") orelse continue;
             const devname = uevent.get("DEVNAME") orelse continue;
 
-            const disk_alias_path = try std.fs.path.join(
-                allocator,
-                &.{
-                    std.fs.path.sep_str,
-                    "dev",
-                    "disk",
-                    try std.fmt.allocPrint(allocator, "disk{s}", .{diskseq}),
-                },
-            );
-
-            const disk_handle = std.fs.openFileAbsolute(disk_alias_path, .{}) catch continue;
+            const disk_handle = dev_disk_alias.openFile(
+                try std.fmt.allocPrint(allocator, "disk{s}", .{diskseq}),
+                .{},
+            ) catch continue;
             var disk_source = std.io.StreamSource{ .file = disk_handle };
 
             // All GPTs also have an MBR, so we can invalidate the disk
             // entirely if it does not have an MBR.
             var mbr = Mbr.init(&disk_source) catch |err| {
-                std.log.err("no MBR found on disk {s}: {}", .{ disk_alias_path, err });
+                std.log.err("no MBR found on disk {s}: {}", .{ devname, err });
                 continue;
             };
 
@@ -188,15 +187,15 @@ pub const BootLoaderSpec = struct {
                     if (!part.is_bootable() and part_type == .ProtectedMbr) {
                         var gpt = Gpt.init(&disk_source) catch |err| switch (err) {
                             Gpt.Error.MissingMagicNumber => {
-                                std.log.debug("disk {s} does not contain a GUID partition table", .{disk_alias_path});
+                                std.log.debug("disk {s} does not contain a GUID partition table", .{devname});
                                 continue;
                             },
                             Gpt.Error.HeaderCrcFail => {
-                                std.log.err("disk {s} CRC integrity check failed", .{disk_alias_path});
+                                std.log.err("disk {s} CRC integrity check failed", .{devname});
                                 continue;
                             },
                             else => {
-                                std.log.err("failed to read disk {s}: {}", .{ disk_alias_path, err });
+                                std.log.err("failed to read disk {s}: {}", .{ devname, err });
                                 continue;
                             },
                         };
@@ -218,19 +217,10 @@ pub const BootLoaderSpec = struct {
                 "disk{s}_part{d}",
                 .{ diskseq, boot_partn },
             );
-            const esp_alias_path = try std.fs.path.joinZ(
-                allocator,
-                &.{
-                    std.fs.path.sep_str,
-                    "dev",
-                    "disk",
-                    partition_filename,
-                },
-            );
 
-            std.log.debug("found boot partition {s}", .{esp_alias_path});
+            std.log.info("found boot partition on disk {s} partition {d}", .{ devname, boot_partn });
 
-            var esp_handle = try std.fs.openFileAbsoluteZ(esp_alias_path, .{});
+            var esp_handle = try dev_disk_alias.openFile(partition_filename, .{});
             defer esp_handle.close();
 
             var esp_file_source = std.io.StreamSource{ .file = esp_handle };
@@ -239,38 +229,34 @@ pub const BootLoaderSpec = struct {
                 continue;
             };
 
-            const mountpoint = try std.fs.path.joinZ(
-                allocator,
-                &.{ std.fs.path.sep_str, "mnt", partition_filename },
-            );
-            std.fs.makeDirAbsoluteZ(mountpoint) catch |err| switch (err) {
-                error.PathAlreadyExists => {},
-                else => {
-                    std.log.err("failed to create mountpoint: {}", .{err});
-                    continue;
-                },
+            mountpoint_dir.makePath(partition_filename) catch |err| {
+                std.log.err("failed to create mountpoint: {}", .{err});
+                continue;
             };
 
-            const rc = os.linux.mount(
-                esp_alias_path,
-                mountpoint,
+            const mountpoint = try mountpoint_dir.realpathAlloc(allocator, partition_filename);
+
+            switch (posix.errno(os.linux.mount(
+                try allocator.dupeZ(u8, try dev_disk_alias.realpathAlloc(allocator, partition_filename)),
+                try allocator.dupeZ(u8, mountpoint),
                 switch (fstype) {
                     .Vfat => "vfat",
                 },
                 os.linux.MS.NOSUID | os.linux.MS.NODEV | os.linux.MS.NOEXEC,
                 0,
-            );
-            switch (os.linux.E.init(rc)) {
+            ))) {
                 .SUCCESS => {},
                 else => |err| {
-                    std.log.err("failed to mount {s}: {}", .{ esp_alias_path, err });
+                    std.log.err("failed to mount disk {s} partition {d}: {}", .{ devname, boot_partn, err });
                     continue;
                 },
             }
 
+            var dir = try std.fs.cwd().openDir(mountpoint, .{});
+
             const mount = Mount{
                 .disk_name = try disk_name(allocator, devname),
-                .mountpoint = mountpoint,
+                .dir = &dir,
             };
 
             std.log.info("mounted disk '{s}'", .{mount.disk_name});
@@ -290,21 +276,18 @@ pub const BootLoaderSpec = struct {
     fn search_for_entries(self: *@This(), mount: Mount, allocator: std.mem.Allocator) !BootDevice {
         const internal_allocator = self.arena.allocator();
 
-        var entries = std.ArrayList(Entry).init(allocator);
+        var entries = std.ArrayList(BootEntry).init(allocator);
         errdefer entries.deinit();
 
-        var mountpoint_dir = try std.fs.openDirAbsoluteZ(mount.mountpoint, .{});
-        defer mountpoint_dir.close();
-
         const loader_conf: LoaderConf = b: {
-            var file = mountpoint_dir.openFile("loader/loader.conf", .{}) catch break :b .{};
+            var file = mount.dir.openFile("loader/loader.conf", .{}) catch break :b .{};
             defer file.close();
             const contents = try file.readToEndAlloc(internal_allocator, 4096);
             defer internal_allocator.free(contents);
             break :b LoaderConf.parse(contents);
         };
 
-        var entries_dir = try mountpoint_dir.openDir(
+        var entries_dir = try mount.dir.openDir(
             "loader/entries",
             .{ .iterate = true },
         );
@@ -322,11 +305,11 @@ pub const BootLoaderSpec = struct {
             var type1_entry = Type1Entry.parse(internal_allocator, entry_contents) catch continue;
             defer type1_entry.deinit();
 
-            const linux = try mountpoint_dir.realpathAlloc(internal_allocator, type1_entry.linux orelse {
+            const linux = try mount.dir.realpathAlloc(allocator, type1_entry.linux orelse {
                 std.log.err("missing linux kernel in {s}", .{dir_entry.name});
                 continue;
             });
-            defer internal_allocator.free(linux);
+            errdefer allocator.free(linux);
 
             // NOTE: Multiple initrds won't work if we have IMA appraisal
             // of signed initrds, so we can only load one.
@@ -336,41 +319,40 @@ pub const BootLoaderSpec = struct {
             var initrd: ?[]const u8 = null;
             if (type1_entry.initrd) |_initrd| {
                 if (_initrd.len > 0) {
-                    initrd = try mountpoint_dir.realpathAlloc(internal_allocator, _initrd[0]);
+                    initrd = try mount.dir.realpathAlloc(allocator, _initrd[0]);
                 }
 
                 if (_initrd.len > 1) {
                     std.log.warn("cannot verify more than 1 initrd, using first initrd", .{});
                 }
             }
-            defer {
+            errdefer {
                 if (initrd) |_initrd| {
-                    internal_allocator.free(_initrd);
+                    allocator.free(_initrd);
                 }
             }
 
             const options = if (type1_entry.options) |opts|
-                try std.mem.join(internal_allocator, " ", opts)
+                try std.mem.join(allocator, " ", opts)
             else
                 null;
-            defer {
+            errdefer {
                 if (options) |_options| {
-                    internal_allocator.free(_options);
+                    allocator.free(_options);
                 }
             }
 
-            try entries.append(try Entry.init(
-                allocator,
+            try entries.append(
                 .{
                     .cmdline = options,
                     .initrd = initrd,
                     .linux = linux,
                 },
-            ));
+            );
         }
 
         return .{
-            .name = mount.disk_name,
+            .name = try allocator.dupe(u8, mount.disk_name),
             .timeout = loader_conf.timeout,
             .entries = try entries.toOwnedSlice(),
         };
@@ -397,20 +379,30 @@ pub const BootLoaderSpec = struct {
         return try devices.toOwnedSlice();
     }
 
-    pub fn teardown(self: *@This()) void {
+    pub fn teardown(self: *@This()) !void {
         std.log.debug("BLS teardown", .{});
+
+        defer self.arena.deinit();
+
+        var buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
 
         for (self.external_mounts) |mount| {
             std.log.info("unmounted disk '{s}'", .{mount.disk_name});
-            _ = os.linux.umount2(mount.mountpoint, os.linux.MNT.DETACH);
+            _ = os.linux.umount2(
+                try self.arena.allocator().dupeZ(u8, try mount.dir.realpath(".", &buf)),
+                os.linux.MNT.DETACH,
+            );
+            mount.dir.close();
         }
 
         for (self.internal_mounts) |mount| {
             std.log.info("unmounted disk '{s}'", .{mount.disk_name});
-            _ = os.linux.umount2(mount.mountpoint, os.linux.MNT.DETACH);
+            _ = os.linux.umount2(
+                try self.arena.allocator().dupeZ(u8, try mount.dir.realpath(".", &buf)),
+                os.linux.MNT.DETACH,
+            );
+            mount.dir.close();
         }
-
-        self.arena.deinit();
     }
 };
 
