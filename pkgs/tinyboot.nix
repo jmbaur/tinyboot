@@ -28,12 +28,12 @@ stdenv.mkDerivation {
     ];
   };
 
-  depsBuildBuild = [
+  nativeBuildInputs = [
     (pkgsBuildBuild.zig_0_12.overrideAttrs (old: {
       src = zigSrc;
     }))
+    xz
   ];
-  nativeBuildInputs = [ xz ];
 
   doCheck = true;
 
