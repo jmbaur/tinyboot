@@ -19,7 +19,7 @@ fn mountPseudoFs(
 ) MountError!void {
     const rc = linux.mount("", path, fstype, flags, 0);
 
-    switch (linux.E.init(rc)) {
+    switch (posix.errno(rc)) {
         .SUCCESS => {},
         // TODO(jared): parse errno
         else => return MountError.Todo,
@@ -186,15 +186,14 @@ pub fn kernelLogs(allocator: std.mem.Allocator, filter: u8) ![]const u8 {
     const buf = try allocator.alloc(u8, bytes_available);
     defer allocator.free(buf);
 
-    switch (linux.E.init(linux.syscall3(linux.SYS.syslog, SYSLOG_ACTION_READ_ALL, @intFromPtr(buf.ptr), buf.len))) {
-        linux.E.INVAL => unreachable, // we provided bad parameters
-        // TODO(jared): make use of these possible outcomes
-        linux.E.NOSYS => {},
-        linux.E.PERM => {},
-        else => {
-            // We don't need to capture the bytes read since we only request
-            // for the exact number of bytes available.
-        },
+    switch (posix.errno(linux.syscall3(
+        linux.SYS.syslog,
+        SYSLOG_ACTION_READ_ALL,
+        @intFromPtr(buf.ptr),
+        buf.len,
+    ))) {
+        .PERM => return error.PermissionDenied,
+        else => unreachable,
     }
 
     var logs = std.ArrayList(u8).init(allocator);

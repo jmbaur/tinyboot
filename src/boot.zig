@@ -89,26 +89,30 @@ pub fn kexec_load(allocator: std.mem.Allocator, entry: *const BootEntry) !void {
     );
 
     switch (posix.errno(rc)) {
-        E.SUCCESS => {
-            // Wait for up to a second for kernel to report for kexec to be
-            // loaded.
-            var i: u8 = 10;
-            var f = try std.fs.cwd().openFile(KEXEC_LOADED, .{});
-            defer f.close();
-            while (!kexec_is_loaded(f) and i > 0) : (i -= 1) {
-                std.time.sleep(100 * std.time.ns_per_ms);
-            }
-
-            std.log.info("kexec loaded", .{});
-            return;
-        },
+        .SUCCESS => {},
         // IMA appraisal failed
-        E.PERM => return error.PermissionDenied,
+        .PERM => return error.PermissionDenied,
+        // Invalid kernel image (CONFIG_RELOCATABLE not enabled?)
+        .NOEXEC => return error.InvalidExe,
+        // Another image is already loaded
+        .BUSY => return error.FilesAlreadyRegistered,
+        .NOMEM => return error.SystemResources,
+        .BADF => return error.InvalidFileDescriptor,
         else => |err| {
             std.log.err("kexec load failed for unknown reason: {}", .{err});
             return posix.unexpectedErrno(err);
         },
     }
+
+    // Wait for up to a second for kernel to report for kexec to be loaded.
+    var i: u8 = 10;
+    var f = try std.fs.cwd().openFile(KEXEC_LOADED, .{});
+    defer f.close();
+    while (!kexec_is_loaded(f) and i > 0) : (i -= 1) {
+        std.time.sleep(100 * std.time.ns_per_ms);
+    }
+
+    std.log.info("kexec loaded", .{});
 }
 
 pub const BootDevice = struct {

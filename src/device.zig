@@ -3,6 +3,7 @@ const os = std.os;
 const posix = std.posix;
 const path = std.fs.path;
 const linux = os.linux;
+const system = posix.system;
 
 const linux_headers = @import("linux_headers");
 
@@ -93,11 +94,11 @@ fn makedev(major: u32, minor: u32) u32 {
 fn special(devtype: ?[]const u8) u32 {
     if (devtype) |dtype| {
         if (std.mem.eql(u8, dtype, "disk") or std.mem.eql(u8, dtype, "partition")) {
-            return linux.S.IFBLK;
+            return system.S.IFBLK;
         }
     }
 
-    return linux.S.IFCHR;
+    return system.S.IFCHR;
 }
 
 fn diskAliasPath(allocator: std.mem.Allocator, uevent: Uevent) ![]const u8 {
@@ -233,16 +234,16 @@ fn createDevice(allocator: std.mem.Allocator, uevent: Uevent) !void {
     const dev_path_cstr = try allocator.dupeZ(u8, dev_path);
     defer allocator.free(dev_path_cstr);
 
-    const rc = linux.mknod(dev_path_cstr, mode, makedev(major, minor));
-    switch (linux.E.init(rc)) {
+    const rc = system.mknod(dev_path_cstr, mode, makedev(major, minor));
+    switch (posix.errno(rc)) {
         .SUCCESS => std.log.debug("created device {s}", .{dev_path}),
         .EXIST => {}, // device already exists
         else => return DeviceError.CreateFailed,
     }
 
     switch (mode) {
-        linux.S.IFBLK => try createBlkAlias(allocator, dev_path, major, minor, uevent),
-        linux.S.IFCHR => try createCharAlias(allocator, dev_path, major, minor),
+        system.S.IFBLK => try createBlkAlias(allocator, dev_path, major, minor, uevent),
+        system.S.IFCHR => try createCharAlias(allocator, dev_path, major, minor),
         else => {},
     }
 }
@@ -265,8 +266,8 @@ fn removeDevice(allocator: std.mem.Allocator, uevent: Uevent) !void {
     };
 
     switch (mode) {
-        linux.S.IFBLK => try removeBlkAlias(allocator, dev_path, major, minor, uevent),
-        linux.S.IFCHR => try removeCharAlias(allocator, major, minor),
+        system.S.IFBLK => try removeBlkAlias(allocator, dev_path, major, minor, uevent),
+        system.S.IFCHR => try removeCharAlias(allocator, major, minor),
         else => {},
     }
 }
@@ -380,9 +381,9 @@ pub const DeviceWatcher = struct {
         var self = @This(){
             .arena = arena,
             .nl_fd = try posix.socket(
-                linux.AF.NETLINK,
-                linux.SOCK.DGRAM,
-                linux.NETLINK.KOBJECT_UEVENT,
+                system.AF.NETLINK,
+                system.SOCK.DGRAM,
+                system.NETLINK.KOBJECT_UEVENT,
             ),
             .settle_fd = try posix.timerfd_create(posix.CLOCK.REALTIME, .{}),
         };
@@ -393,7 +394,7 @@ pub const DeviceWatcher = struct {
 
         const nls = posix.sockaddr.nl{
             .groups = 1, // KOBJECT_UEVENT groups bitmask must be 1
-            .pid = @bitCast(os.linux.getpid()),
+            .pid = @bitCast(system.getpid()),
         };
         try posix.bind(self.nl_fd, @ptrCast(&nls), @sizeOf(posix.sockaddr.nl));
 
