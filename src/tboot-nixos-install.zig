@@ -41,12 +41,12 @@ const Args = struct {
                     self.efi_sys_mount_point = value;
                 } else if (std.mem.eql(u8, key, "max-tries")) {
                     self.max_tries = std.fmt.parseInt(u8, value, 10) catch {
-                        std.log.err("invalid max-tries '{s}', using default of {d}", .{ value, self.max_tries });
+                        std.log.err("invalid max-tries \"{s}\", using default of {d}", .{ value, self.max_tries });
                         continue;
                     };
                 } else if (std.mem.eql(u8, key, "timeout")) {
                     self.timeout = std.fmt.parseInt(u8, value, 10) catch {
-                        std.log.err("invalid timeout '{s}', using default of {d}", .{ value, self.timeout });
+                        std.log.err("invalid timeout \"{s}\", using default of {d}", .{ value, self.timeout });
                         continue;
                     };
                 }

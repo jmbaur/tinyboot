@@ -354,7 +354,9 @@ const known_partition_guids = b: {
 
     var result: []const PairMachine = &.{};
     for (known) |part| {
-        const guid = guid_from_string(part.guid) catch @compileError(std.fmt.comptimePrint("invalid guid '{s}'", .{part.guid}));
+        const guid = guid_from_string(part.guid) catch @compileError(
+            std.fmt.comptimePrint("invalid guid \"{s}\"", .{part.guid}),
+        );
         result = result ++ [_]PairMachine{.{ .type = part.type, .guid = guid }};
     }
 

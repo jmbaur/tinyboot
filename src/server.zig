@@ -5,7 +5,8 @@ const posix = std.posix;
 
 const system = @import("./system.zig");
 const BootEntry = @import("./boot.zig").BootEntry;
-const kexec_load = @import("./boot.zig").kexec_load;
+const kexecLoad = @import("./boot.zig").kexecLoad;
+const kexecLoadFromDir = @import("./boot.zig").kexecLoadFromDir;
 const ClientMsg = @import("./message.zig").ClientMsg;
 const ServerMsg = @import("./message.zig").ServerMsg;
 const readMessage = @import("./message.zig").readMessage;
@@ -58,7 +59,7 @@ pub const Server = struct {
 
     pub fn force_shell(self: *@This()) void {
         for (self.clients.items) |client| {
-            writeMessage(ServerMsg{ .msg = .ForceShell }, client.writer()) catch {};
+            writeMessage(ServerMsg{ .data = .ForceShell }, client.writer()) catch {};
         }
     }
 
@@ -79,20 +80,20 @@ pub const Server = struct {
         };
         defer msg.deinit();
 
-        switch (msg.value.msg) {
+        switch (msg.value.data) {
             .Empty => return null,
             .Reboot => return posix.RebootCommand.RESTART,
             .Poweroff => return posix.RebootCommand.POWER_OFF,
             .Boot => |boot_entry| {
-                std.log.info("got boot entry: {s} {s}", .{ boot_entry.linux, boot_entry.cmdline orelse "no params" });
+                const ret = switch (boot_entry) {
+                    .Disk => |entry| kexecLoad(self.allocator, entry.linux, entry.initrd, entry.cmdline),
+                    .Dir => |dir| kexecLoadFromDir(self.allocator, dir),
+                };
 
-                if (kexec_load(self.allocator, &boot_entry)) {
+                if (ret) {
                     return posix.RebootCommand.KEXEC;
                 } else |err| {
-                    std.log.err(
-                        "failed to boot entry {s}: {}",
-                        .{ boot_entry.linux, err },
-                    );
+                    std.log.err("failed to load image: {}", .{err});
                     return null;
                 }
 

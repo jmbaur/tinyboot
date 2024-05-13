@@ -38,8 +38,8 @@ fn disk_is_removable(allocator: std.mem.Allocator, devname: []const u8) bool {
     return std.mem.eql(u8, &buf, "1");
 }
 
-const fallback_vendor = "unknown vendor";
-const fallback_model = "unknown model";
+const FALLBACK_VENDOR = "unknown vendor";
+const FALLBACK_MODEL = "unknown model";
 
 /// Caller is responsible for the returned value.
 fn disk_name(allocator: std.mem.Allocator, devname: []const u8) ![]const u8 {
@@ -52,14 +52,14 @@ fn disk_name(allocator: std.mem.Allocator, devname: []const u8) ![]const u8 {
             devname,
             "device",
             "vendor",
-        }) catch break :b fallback_vendor;
+        }) catch break :b FALLBACK_VENDOR;
         defer allocator.free(path);
 
-        const file = std.fs.openFileAbsolute(path, .{}) catch break :b fallback_vendor;
+        const file = std.fs.openFileAbsolute(path, .{}) catch break :b FALLBACK_VENDOR;
         defer file.close();
 
         var buf: [1024]u8 = undefined;
-        const bytes_read = file.readAll(&buf) catch break :b fallback_vendor;
+        const bytes_read = file.readAll(&buf) catch break :b FALLBACK_VENDOR;
         break :b std.mem.trim(u8, buf[0..bytes_read], "\n");
     };
 
@@ -72,14 +72,14 @@ fn disk_name(allocator: std.mem.Allocator, devname: []const u8) ![]const u8 {
             devname,
             "device",
             "model",
-        }) catch break :b fallback_model;
+        }) catch break :b FALLBACK_MODEL;
         defer allocator.free(path);
 
-        const file = std.fs.openFileAbsolute(path, .{}) catch break :b fallback_model;
+        const file = std.fs.openFileAbsolute(path, .{}) catch break :b FALLBACK_MODEL;
         defer file.close();
 
         var buf: [1024]u8 = undefined;
-        const bytes_read = file.readAll(&buf) catch break :b fallback_model;
+        const bytes_read = file.readAll(&buf) catch break :b FALLBACK_MODEL;
         break :b std.mem.trim(u8, buf[0..bytes_read], "\n");
     };
 
@@ -114,7 +114,7 @@ pub const BootLoaderSpec = struct {
         var external_mounts = std.ArrayList(Mount).init(allocator);
 
         var dev_disk_alias = try std.fs.cwd().openDir(
-            "/sys/class/block",
+            "/dev/disk",
             .{},
         );
         defer dev_disk_alias.close();
@@ -148,6 +148,11 @@ pub const BootLoaderSpec = struct {
 
             const devtype = uevent.get("DEVTYPE") orelse continue;
 
+            std.log.debug(
+                "inspecting block device {s} ({s})",
+                .{ entry.name, devtype },
+            );
+
             if (!std.mem.eql(u8, devtype, "disk")) {
                 continue;
             }
@@ -158,7 +163,14 @@ pub const BootLoaderSpec = struct {
             const disk_handle = dev_disk_alias.openFile(
                 try std.fmt.allocPrint(allocator, "disk{s}", .{diskseq}),
                 .{},
-            ) catch continue;
+            ) catch |err| {
+                std.log.err(
+                    "failed to open disk alias for {s}: {}",
+                    .{ entry.name, err },
+                );
+                continue;
+            };
+
             var disk_source = std.io.StreamSource{ .file = disk_handle };
 
             // All GPTs also have an MBR, so we can invalidate the disk
@@ -252,14 +264,15 @@ pub const BootLoaderSpec = struct {
                 },
             }
 
-            var dir = try std.fs.cwd().openDir(mountpoint, .{});
+            std.log.info("mounted disk \"{s}\"", .{devname});
+
+            const dir = try allocator.create(std.fs.Dir);
+            dir.* = try mountpoint_dir.openDir(partition_filename, .{});
 
             const mount = Mount{
                 .disk_name = try disk_name(allocator, devname),
-                .dir = &dir,
+                .dir = dir,
             };
-
-            std.log.info("mounted disk '{s}'", .{mount.disk_name});
 
             if (disk_is_removable(allocator, devname)) {
                 try external_mounts.append(mount);
@@ -272,18 +285,21 @@ pub const BootLoaderSpec = struct {
         self.external_mounts = try external_mounts.toOwnedSlice();
     }
 
-    /// Caller is responsible for the returned value.
-    fn search_for_entries(self: *@This(), mount: Mount, allocator: std.mem.Allocator) !BootDevice {
-        const internal_allocator = self.arena.allocator();
+    fn search_for_entries(
+        self: *@This(),
+        mount: Mount,
+        tmp_allocator: std.mem.Allocator,
+        final_allocator: std.mem.Allocator,
+    ) !BootDevice {
+        _ = self;
 
-        var entries = std.ArrayList(BootEntry).init(allocator);
+        var entries = std.ArrayList(BootEntry).init(final_allocator);
         errdefer entries.deinit();
 
         const loader_conf: LoaderConf = b: {
             var file = mount.dir.openFile("loader/loader.conf", .{}) catch break :b .{};
             defer file.close();
-            const contents = try file.readToEndAlloc(internal_allocator, 4096);
-            defer internal_allocator.free(contents);
+            const contents = try file.readToEndAlloc(tmp_allocator, 4096);
             break :b LoaderConf.parse(contents);
         };
 
@@ -300,16 +316,15 @@ pub const BootLoaderSpec = struct {
             }
 
             var entry_file = entries_dir.openFile(dir_entry.name, .{}) catch continue;
-            const entry_contents = try entry_file.readToEndAlloc(internal_allocator, 4096);
-            defer internal_allocator.free(entry_contents);
-            var type1_entry = Type1Entry.parse(internal_allocator, entry_contents) catch continue;
+            const entry_contents = try entry_file.readToEndAlloc(tmp_allocator, 4096);
+            var type1_entry = Type1Entry.parse(tmp_allocator, entry_contents) catch continue;
             defer type1_entry.deinit();
 
-            const linux = try mount.dir.realpathAlloc(allocator, type1_entry.linux orelse {
+            const linux = try mount.dir.realpathAlloc(final_allocator, type1_entry.linux orelse {
                 std.log.err("missing linux kernel in {s}", .{dir_entry.name});
                 continue;
             });
-            errdefer allocator.free(linux);
+            errdefer final_allocator.free(linux);
 
             // NOTE: Multiple initrds won't work if we have IMA appraisal
             // of signed initrds, so we can only load one.
@@ -319,7 +334,7 @@ pub const BootLoaderSpec = struct {
             var initrd: ?[]const u8 = null;
             if (type1_entry.initrd) |_initrd| {
                 if (_initrd.len > 0) {
-                    initrd = try mount.dir.realpathAlloc(allocator, _initrd[0]);
+                    initrd = try mount.dir.realpathAlloc(final_allocator, _initrd[0]);
                 }
 
                 if (_initrd.len > 1) {
@@ -328,31 +343,33 @@ pub const BootLoaderSpec = struct {
             }
             errdefer {
                 if (initrd) |_initrd| {
-                    allocator.free(_initrd);
+                    final_allocator.free(_initrd);
                 }
             }
 
             const options = if (type1_entry.options) |opts|
-                try std.mem.join(allocator, " ", opts)
+                try std.mem.join(final_allocator, " ", opts)
             else
                 null;
             errdefer {
                 if (options) |_options| {
-                    allocator.free(_options);
+                    final_allocator.free(_options);
                 }
             }
 
             try entries.append(
                 .{
-                    .cmdline = options,
-                    .initrd = initrd,
-                    .linux = linux,
+                    .Disk = .{
+                        .cmdline = options,
+                        .initrd = initrd,
+                        .linux = linux,
+                    },
                 },
             );
         }
 
         return .{
-            .name = try allocator.dupe(u8, mount.disk_name),
+            .name = try final_allocator.dupe(u8, mount.disk_name),
             .timeout = loader_conf.timeout,
             .entries = try entries.toOwnedSlice(),
         };
@@ -360,6 +377,11 @@ pub const BootLoaderSpec = struct {
 
     /// Caller is responsible for the returned slice.
     pub fn probe(self: *@This(), allocator: std.mem.Allocator) ![]const BootDevice {
+        // A temporary allocator for stuff not saved after the probe and not
+        // included in the return value.
+        var tmp_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        defer tmp_arena.deinit();
+
         std.log.debug("BLS probe", .{});
         var devices = std.ArrayList(BootDevice).init(allocator);
 
@@ -367,12 +389,20 @@ pub const BootLoaderSpec = struct {
         // prioritized in the boot process.
         std.log.debug("BLS probe found {} internal devices", .{self.internal_mounts.len});
         for (self.internal_mounts) |mount| {
-            try devices.append(self.search_for_entries(mount, allocator) catch continue);
+            try devices.append(self.search_for_entries(
+                mount,
+                tmp_arena.allocator(),
+                allocator,
+            ) catch continue);
         }
 
         std.log.debug("BLS probe found {} external devices", .{self.internal_mounts.len});
         for (self.external_mounts) |mount| {
-            try devices.append(self.search_for_entries(mount, allocator) catch continue);
+            try devices.append(self.search_for_entries(
+                mount,
+                tmp_arena.allocator(),
+                allocator,
+            ) catch continue);
         }
 
         std.log.debug("BLS probe found {} devices", .{devices.items.len});
@@ -387,7 +417,7 @@ pub const BootLoaderSpec = struct {
         var buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
 
         for (self.external_mounts) |mount| {
-            std.log.info("unmounted disk '{s}'", .{mount.disk_name});
+            std.log.info("unmounted disk \"{s}\"", .{mount.disk_name});
             _ = os.linux.umount2(
                 try self.arena.allocator().dupeZ(u8, try mount.dir.realpath(".", &buf)),
                 os.linux.MNT.DETACH,
@@ -396,7 +426,7 @@ pub const BootLoaderSpec = struct {
         }
 
         for (self.internal_mounts) |mount| {
-            std.log.info("unmounted disk '{s}'", .{mount.disk_name});
+            std.log.info("unmounted disk \"{s}\"", .{mount.disk_name});
             _ = os.linux.umount2(
                 try self.arena.allocator().dupeZ(u8, try mount.dir.realpath(".", &buf)),
                 os.linux.MNT.DETACH,
@@ -646,7 +676,7 @@ const LoaderConf = struct {
                 self.default_entry = value;
             } else if (std.mem.eql(u8, key, "timeout")) {
                 self.timeout = std.fmt.parseInt(u8, value, 10) catch {
-                    std.log.err("invalid timeout value '{s}'", .{value});
+                    std.log.err("invalid timeout value \"{s}\"", .{value});
                     continue;
                 };
             } else if (std.mem.eql(u8, key, "console-mode")) {

@@ -192,8 +192,11 @@ pub fn kernelLogs(allocator: std.mem.Allocator, filter: u8) ![]const u8 {
         @intFromPtr(buf.ptr),
         buf.len,
     ))) {
+        .SUCCESS => {},
         .PERM => return error.PermissionDenied,
-        else => unreachable,
+        // We don't need to capture the bytes read since we only request for the
+        // exact number of bytes available.
+        else => |err| return posix.unexpectedErrno(err),
     }
 
     var logs = std.ArrayList(u8).init(allocator);

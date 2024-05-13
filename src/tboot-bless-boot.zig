@@ -167,7 +167,9 @@ pub fn main() !void {
 
     var args = std.process.args();
 
-    _ = args.next().?; // skip argv[0]
+    const argv0 = args.next().?;
+    _ = argv0;
+
     const efi_sys_mount_point = args.next() orelse return Error.MissingEfiSysMountPoint;
     const action = try Action.from_str(args.next() orelse return Error.MissingAction);
 

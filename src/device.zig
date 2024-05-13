@@ -101,261 +101,14 @@ fn special(devtype: ?[]const u8) u32 {
     return system.S.IFCHR;
 }
 
-fn diskAliasPath(allocator: std.mem.Allocator, uevent: Uevent) ![]const u8 {
+/// Caller owns return value
+fn diskAliasFilename(allocator: std.mem.Allocator, uevent: Uevent) ![]const u8 {
     const diskseq = uevent.get("DISKSEQ") orelse return DeviceError.IncompleteDevice;
 
-    var buf: [32]u8 = undefined;
-    const diskseq_partn_filename = name: {
-        if (uevent.get("PARTN")) |partn| {
-            break :name try std.fmt.bufPrint(&buf, "disk{d}_part{d}", .{ diskseq, partn });
-        } else {
-            break :name try std.fmt.bufPrint(&buf, "disk{d}", .{diskseq});
-        }
-    };
-
-    return try path.join(allocator, &.{ path.sep_str, "dev", "disk", diskseq_partn_filename });
-}
-
-fn createBlkAlias(
-    allocator: std.mem.Allocator,
-    dev_path: []const u8,
-    major: u32,
-    minor: u32,
-    uevent: Uevent,
-) !void {
-    const alias_path = try diskAliasPath(allocator, uevent);
-    defer allocator.free(alias_path);
-
-    std.fs.symLinkAbsolute(dev_path, alias_path, .{}) catch |err| switch (err) {
-        error.PathAlreadyExists => {},
-        else => return err,
-    };
-
-    var buf: [32]u8 = undefined;
-    const major_minor_filename = try std.fmt.bufPrint(&buf, "{d}:{d}", .{ major, minor });
-
-    const major_minor_alias_path = try path.join(allocator, &.{ path.sep_str, "dev", "block", major_minor_filename });
-    defer allocator.free(major_minor_alias_path);
-
-    std.fs.symLinkAbsolute(dev_path, major_minor_alias_path, .{}) catch |err| switch (err) {
-        error.PathAlreadyExists => {},
-        else => return err,
-    };
-
-    std.log.info("created block device aliases for {s}", .{dev_path});
-}
-
-fn removeBlkAlias(
-    allocator: std.mem.Allocator,
-    dev_path: []const u8,
-    major: u32,
-    minor: u32,
-    uevent: Uevent,
-) !void {
-    const alias_path = try diskAliasPath(allocator, uevent);
-    defer allocator.free(alias_path);
-
-    std.fs.symLinkAbsolute(dev_path, alias_path, .{}) catch |err| switch (err) {
-        error.PathAlreadyExists => {},
-        else => return err,
-    };
-
-    var buf: [32]u8 = undefined;
-    const major_minor_filename = try std.fmt.bufPrint(&buf, "{d}:{d}", .{ major, minor });
-
-    const major_minor_alias_path = try path.join(allocator, &.{ path.sep_str, "dev", "block", major_minor_filename });
-    defer allocator.free(major_minor_alias_path);
-
-    std.fs.deleteFileAbsolute(major_minor_alias_path) catch |err| switch (err) {
-        error.FileNotFound => {},
-        else => return err,
-    };
-
-    std.log.info("removed block device aliases for {s}", .{dev_path});
-}
-
-fn createCharAlias(
-    allocator: std.mem.Allocator,
-    dev_path: []const u8,
-    major: u32,
-    minor: u32,
-) !void {
-    var buf: [32]u8 = undefined;
-    const filename = try std.fmt.bufPrint(&buf, "{d}:{d}", .{ major, minor });
-
-    const alias_path = try path.join(allocator, &.{ path.sep_str, "dev", "char", filename });
-    defer allocator.free(alias_path);
-
-    std.fs.symLinkAbsolute(dev_path, alias_path, .{}) catch |err| switch (err) {
-        error.PathAlreadyExists => {},
-        else => return err,
-    };
-}
-
-fn removeCharAlias(
-    allocator: std.mem.Allocator,
-    major: u32,
-    minor: u32,
-) !void {
-    var buf: [32]u8 = undefined;
-    const filename = try std.fmt.bufPrint(&buf, "{d}:{d}", .{ major, minor });
-
-    const alias_path = try path.join(allocator, &.{ path.sep_str, "dev", "char", filename });
-    defer allocator.free(alias_path);
-
-    std.fs.deleteFileAbsolute(alias_path) catch |err| switch (err) {
-        error.FileNotFound => {},
-        else => return err,
-    };
-}
-
-fn createDevice(allocator: std.mem.Allocator, uevent: Uevent) !void {
-    // Nothing to do if we don't have major or minor.
-    const major_str = uevent.get("MAJOR") orelse return;
-    const minor_str = uevent.get("MINOR") orelse return;
-
-    const major = try std.fmt.parseInt(u32, major_str, 10);
-    const minor = try std.fmt.parseInt(u32, minor_str, 10);
-
-    const mode = special(uevent.get("DEVTYPE"));
-
-    const devname = uevent.get("DEVNAME") orelse return DeviceError.IncompleteDevice;
-
-    const dev_path = path.join(allocator, &.{ path.sep_str, "dev", devname }) catch return;
-    defer allocator.free(dev_path);
-
-    if (path.dirname(dev_path)) |parent| {
-        std.fs.makeDirAbsolute(parent) catch |err| switch (err) {
-            error.PathAlreadyExists => {},
-            else => return err,
-        };
-    }
-
-    const dev_path_cstr = try allocator.dupeZ(u8, dev_path);
-    defer allocator.free(dev_path_cstr);
-
-    const rc = system.mknod(dev_path_cstr, mode, makedev(major, minor));
-    switch (posix.errno(rc)) {
-        .SUCCESS => std.log.debug("created device {s}", .{dev_path}),
-        .EXIST => {}, // device already exists
-        else => return DeviceError.CreateFailed,
-    }
-
-    switch (mode) {
-        system.S.IFBLK => try createBlkAlias(allocator, dev_path, major, minor, uevent),
-        system.S.IFCHR => try createCharAlias(allocator, dev_path, major, minor),
-        else => {},
-    }
-}
-
-fn removeDevice(allocator: std.mem.Allocator, uevent: Uevent) !void {
-    // Nothing to do if we don't have major or minor.
-    const major_str = uevent.get("MAJOR") orelse return;
-    const minor_str = uevent.get("MINOR") orelse return;
-    const major = try std.fmt.parseInt(u32, major_str, 10);
-    const minor = try std.fmt.parseInt(u32, minor_str, 10);
-    const mode = special(uevent.get("DEVTYPE"));
-
-    const devname = uevent.get("DEVNAME") orelse return DeviceError.IncompleteDevice;
-    const dev_path = path.join(allocator, &.{ path.sep_str, "dev", devname }) catch return;
-    defer allocator.free(dev_path);
-
-    std.fs.deleteFileAbsolute(dev_path) catch |err| switch (err) {
-        error.FileNotFound => {},
-        else => return err,
-    };
-
-    switch (mode) {
-        system.S.IFBLK => try removeBlkAlias(allocator, dev_path, major, minor, uevent),
-        system.S.IFCHR => try removeCharAlias(allocator, major, minor),
-        else => {},
-    }
-}
-
-fn scanAndCreateDevices(arena: *std.heap.ArenaAllocator) !void {
-    const allocator = arena.allocator();
-
-    {
-        try std.fs.makeDirAbsolute("/dev/disk"); // prepare disk alias directory
-        try std.fs.makeDirAbsolute("/dev/block"); // prepare block alias directory
-
-        var sys_class_block = try std.fs.openDirAbsolute(
-            "/sys/class/block",
-            .{ .iterate = true },
-        );
-        defer sys_class_block.close();
-
-        var it = sys_class_block.iterate();
-        while (try it.next()) |entry| {
-            if (entry.kind != .sym_link) {
-                continue;
-            }
-
-            const uevent_path = try path.join(allocator, &.{
-                entry.name,
-                "uevent",
-            });
-
-            var uevent_file = try sys_class_block.openFile(uevent_path, .{});
-            defer uevent_file.close();
-
-            const max_bytes = 10 * 1024 * 1024;
-            const uevent_contents = try uevent_file.readToEndAlloc(
-                allocator,
-                max_bytes,
-            );
-
-            const uevent = try parseUeventFileContents(allocator, uevent_contents);
-
-            createDevice(allocator, uevent) catch |err| {
-                std.log.err("failed to create device: {any}", .{err});
-                continue;
-            };
-        }
-    }
-
-    {
-        try std.fs.makeDirAbsolute("/dev/char"); // prepare char alias directory
-
-        var sys_class_tty = try std.fs.openDirAbsolute(
-            "/sys/class/tty",
-            .{ .iterate = true },
-        );
-        defer sys_class_tty.close();
-
-        var it = sys_class_tty.iterate();
-        while (try it.next()) |entry| {
-            if (entry.kind != .sym_link) {
-                continue;
-            }
-
-            // skip known non-serial devices
-            if (std.mem.eql(u8, entry.name, "tty") or
-                std.mem.eql(u8, entry.name, "console") or
-                std.mem.eql(u8, entry.name, "ptmx") or
-                std.mem.eql(u8, entry.name, "ttynull"))
-            {
-                continue;
-            }
-
-            const tty_uevent_path = try path.join(allocator, &.{
-                entry.name,
-                "uevent",
-            });
-
-            var uevent_file = try sys_class_tty.openFile(tty_uevent_path, .{});
-            defer uevent_file.close();
-
-            const max_bytes = 10 * 1024 * 1024;
-            const uevent_contents = try uevent_file.readToEndAlloc(allocator, max_bytes);
-
-            const uevent = try parseUeventFileContents(allocator, uevent_contents);
-
-            createDevice(allocator, uevent) catch |err| {
-                std.log.err("failed to create device: {any}", .{err});
-                continue;
-            };
-        }
+    if (uevent.get("PARTN")) |partn| {
+        return try std.fmt.allocPrint(allocator, "disk{s}_part{s}", .{ diskseq, partn });
+    } else {
+        return try std.fmt.allocPrint(allocator, "disk{s}", .{diskseq});
     }
 }
 
@@ -365,6 +118,10 @@ pub const DeviceWatcher = struct {
     const KERN_RCVBUF = 128 * 1024 * 1024;
 
     arena: std.heap.ArenaAllocator,
+
+    disk_dir: std.fs.Dir,
+    block_dir: std.fs.Dir,
+    char_dir: std.fs.Dir,
 
     /// Netlink socket fd for subscribing to new device events.
     nl_fd: posix.fd_t,
@@ -376,10 +133,15 @@ pub const DeviceWatcher = struct {
         var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
         errdefer arena.deinit();
 
-        try scanAndCreateDevices(&arena);
+        try std.fs.cwd().makePath("/dev/disk");
+        try std.fs.cwd().makePath("/dev/block");
+        try std.fs.cwd().makePath("/dev/char");
 
         var self = @This(){
             .arena = arena,
+            .disk_dir = try std.fs.cwd().openDir("/dev/disk", .{}),
+            .block_dir = try std.fs.cwd().openDir("/dev/block", .{}),
+            .char_dir = try std.fs.cwd().openDir("/dev/char", .{}),
             .nl_fd = try posix.socket(
                 system.AF.NETLINK,
                 system.SOCK.DGRAM,
@@ -388,6 +150,9 @@ pub const DeviceWatcher = struct {
             .settle_fd = try posix.timerfd_create(posix.CLOCK.REALTIME, .{}),
         };
         errdefer self.deinit();
+
+        try self.scanAndCreateDevices();
+        _ = self.arena.reset(.retain_capacity);
 
         try posix.setsockopt(self.nl_fd, posix.SOL.SOCKET, posix.SO.RCVBUF, &std.mem.toBytes(@as(c_int, KERN_RCVBUF)));
         try posix.setsockopt(self.nl_fd, posix.SOL.SOCKET, posix.SO.RCVBUFFORCE, &std.mem.toBytes(@as(c_int, KERN_RCVBUF)));
@@ -426,6 +191,8 @@ pub const DeviceWatcher = struct {
     }
 
     pub fn handle_new_event(self: *@This()) !void {
+        defer _ = self.arena.reset(.retain_capacity);
+
         // reset the timer
         try self.start_settle_timer();
 
@@ -433,22 +200,250 @@ pub const DeviceWatcher = struct {
 
         const bytes_read = try posix.read(self.nl_fd, &recv_bytes);
 
-        const allocator = self.arena.allocator();
-
-        var kobject = try parseUeventKobjectContents(allocator, recv_bytes[0..bytes_read]) orelse return;
-        defer kobject.deinit();
+        const kobject = try parseUeventKobjectContents(
+            self.arena.allocator(),
+            recv_bytes[0..bytes_read],
+        ) orelse return;
 
         switch (kobject.action) {
-            .add => try createDevice(allocator, kobject.uevent),
-            .remove => try removeDevice(allocator, kobject.uevent),
+            .add => try self.createDevice(kobject.uevent),
+            .remove => try self.removeDevice(kobject.uevent),
             else => {},
         }
     }
 
     pub fn deinit(self: *@This()) void {
         self.arena.deinit();
+        self.disk_dir.close();
+        self.block_dir.close();
+        self.char_dir.close();
         posix.close(self.nl_fd);
         posix.close(self.settle_fd);
+    }
+
+    fn scanAndCreateDevices(self: *@This()) !void {
+        const allocator = self.arena.allocator();
+
+        {
+            var sys_class_block = try std.fs.cwd().openDir(
+                "/sys/class/block",
+                .{ .iterate = true },
+            );
+            defer sys_class_block.close();
+
+            var it = sys_class_block.iterate();
+            while (try it.next()) |entry| {
+                if (entry.kind != .sym_link) {
+                    continue;
+                }
+
+                const uevent_path = try path.join(allocator, &.{
+                    entry.name,
+                    "uevent",
+                });
+
+                var uevent_file = try sys_class_block.openFile(uevent_path, .{});
+                defer uevent_file.close();
+
+                const max_bytes = 10 * 1024 * 1024;
+                const uevent_contents = try uevent_file.readToEndAlloc(
+                    allocator,
+                    max_bytes,
+                );
+
+                const uevent = try parseUeventFileContents(allocator, uevent_contents);
+
+                self.createDevice(uevent) catch |err| {
+                    std.log.err("failed to create device: {any}", .{err});
+                    continue;
+                };
+            }
+        }
+
+        {
+            var sys_class_tty = try std.fs.cwd().openDir(
+                "/sys/class/tty",
+                .{ .iterate = true },
+            );
+            defer sys_class_tty.close();
+
+            var it = sys_class_tty.iterate();
+            while (try it.next()) |entry| {
+                if (entry.kind != .sym_link) {
+                    continue;
+                }
+
+                // skip known non-serial devices
+                if (std.mem.eql(u8, entry.name, "tty") or
+                    std.mem.eql(u8, entry.name, "console") or
+                    std.mem.eql(u8, entry.name, "ptmx") or
+                    std.mem.eql(u8, entry.name, "ttynull"))
+                {
+                    continue;
+                }
+
+                const tty_uevent_path = try path.join(allocator, &.{
+                    entry.name,
+                    "uevent",
+                });
+
+                var uevent_file = try sys_class_tty.openFile(tty_uevent_path, .{});
+                defer uevent_file.close();
+
+                const max_bytes = 10 * 1024 * 1024;
+                const uevent_contents = try uevent_file.readToEndAlloc(allocator, max_bytes);
+
+                const uevent = try parseUeventFileContents(allocator, uevent_contents);
+
+                self.createDevice(uevent) catch |err| {
+                    std.log.err("failed to create device: {any}", .{err});
+                    continue;
+                };
+            }
+        }
+    }
+
+    fn createDevice(self: *@This(), uevent: Uevent) !void {
+        // Nothing to do if we don't have major or minor.
+        const major_str = uevent.get("MAJOR") orelse return;
+        const minor_str = uevent.get("MINOR") orelse return;
+
+        const major = try std.fmt.parseInt(u32, major_str, 10);
+        const minor = try std.fmt.parseInt(u32, minor_str, 10);
+
+        const mode = special(uevent.get("DEVTYPE"));
+
+        const devname = uevent.get("DEVNAME") orelse return DeviceError.IncompleteDevice;
+
+        const dev_path = path.join(self.arena.allocator(), &.{ path.sep_str, "dev", devname }) catch return;
+
+        if (path.dirname(dev_path)) |parent| {
+            try std.fs.cwd().makePath(parent);
+        }
+
+        const dev_path_cstr = try self.arena.allocator().dupeZ(u8, dev_path);
+
+        const rc = system.mknod(dev_path_cstr, mode, makedev(major, minor));
+        switch (posix.errno(rc)) {
+            .SUCCESS => std.log.debug("created device {s}", .{dev_path}),
+            .EXIST => {}, // device already exists
+            else => return DeviceError.CreateFailed,
+        }
+
+        switch (mode) {
+            system.S.IFBLK => try self.createBlkAlias(dev_path, major, minor, uevent),
+            system.S.IFCHR => try self.createCharAlias(dev_path, major, minor),
+            else => {},
+        }
+    }
+
+    fn createBlkAlias(
+        self: *@This(),
+        dev_path: []const u8,
+        major: u32,
+        minor: u32,
+        uevent: Uevent,
+    ) !void {
+        const alias_filename = try diskAliasFilename(self.arena.allocator(), uevent);
+
+        self.disk_dir.symLink(dev_path, alias_filename, .{}) catch |err| switch (err) {
+            error.PathAlreadyExists => {},
+            else => return err,
+        };
+
+        const major_minor_filename = try std.fmt.allocPrint(
+            self.arena.allocator(),
+            "{d}:{d}",
+            .{ major, minor },
+        );
+
+        self.block_dir.symLink(dev_path, major_minor_filename, .{}) catch |err| switch (err) {
+            error.PathAlreadyExists => {},
+            else => return err,
+        };
+
+        std.log.info("created block device alias for block device {s}", .{dev_path});
+    }
+
+    fn createCharAlias(
+        self: *@This(),
+        dev_path: []const u8,
+        major: u32,
+        minor: u32,
+    ) !void {
+        const filename = try std.fmt.allocPrint(
+            self.arena.allocator(),
+            "{d}:{d}",
+            .{ major, minor },
+        );
+
+        self.char_dir.symLink(dev_path, filename, .{}) catch |err| switch (err) {
+            error.PathAlreadyExists => {},
+            else => return err,
+        };
+    }
+
+    fn removeDevice(self: *@This(), uevent: Uevent) !void {
+        // Nothing to do if we don't have major or minor.
+        const major_str = uevent.get("MAJOR") orelse return;
+        const minor_str = uevent.get("MINOR") orelse return;
+        const major = try std.fmt.parseInt(u32, major_str, 10);
+        const minor = try std.fmt.parseInt(u32, minor_str, 10);
+        const mode = special(uevent.get("DEVTYPE"));
+
+        const devname = uevent.get("DEVNAME") orelse return DeviceError.IncompleteDevice;
+        const dev_path = path.join(self.arena.allocator(), &.{ path.sep_str, "dev", devname }) catch return;
+
+        std.fs.cwd().deleteFile(dev_path) catch |err| switch (err) {
+            error.FileNotFound => {},
+            else => return err,
+        };
+
+        switch (mode) {
+            system.S.IFBLK => try self.removeBlkAlias(dev_path, major, minor, uevent),
+            system.S.IFCHR => try self.removeCharAlias(major, minor),
+            else => {},
+        }
+    }
+
+    fn removeBlkAlias(
+        self: *@This(),
+        dev_path: []const u8,
+        major: u32,
+        minor: u32,
+        uevent: Uevent,
+    ) !void {
+        const alias_filename = try diskAliasFilename(self.arena.allocator(), uevent);
+
+        self.disk_dir.deleteFile(alias_filename) catch |err| switch (err) {
+            error.FileNotFound => {},
+            else => return err,
+        };
+
+        const major_minor_filename = try std.fmt.allocPrint(self.arena.allocator(), "{d}:{d}", .{ major, minor });
+
+        self.block_dir.deleteFile(major_minor_filename) catch |err| switch (err) {
+            error.FileNotFound => {},
+            else => return err,
+        };
+
+        std.log.info("removed block device aliases for block device {s}", .{dev_path});
+    }
+
+    fn removeCharAlias(
+        self: *@This(),
+        major: u32,
+        minor: u32,
+    ) !void {
+        var buf: [32]u8 = undefined;
+        const filename = try std.fmt.bufPrint(&buf, "{d}:{d}", .{ major, minor });
+
+        const alias_path = try path.join(self.arena.allocator(), &.{ path.sep_str, "dev", "char", filename });
+
+        std.fs.cwd().deleteFile(alias_path) catch |err| switch (err) {
+            error.FileNotFound => {},
+            else => return err,
+        };
     }
 };
 
@@ -560,7 +555,7 @@ pub fn findActiveConsoles(allocator: std.mem.Allocator) ![]posix.fd_t {
     const tty0_fd = try posix.open("/dev/tty0", .{ .ACCMODE = .RDWR, .NOCTTY = true }, 0);
     try devs.append(tty0_fd);
 
-    var char_devices_dir = try std.fs.openDirAbsolute(
+    var char_devices_dir = try std.fs.cwd().openDir(
         "/dev/char",
         .{ .iterate = true },
     );

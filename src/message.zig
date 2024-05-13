@@ -4,7 +4,7 @@ const BootEntry = @import("./boot.zig").BootEntry;
 
 fn message(comptime T: type) type {
     return struct {
-        msg: T,
+        data: T,
     };
 }
 

@@ -38,28 +38,96 @@ fn kexec_is_loaded(f: std.fs.File) bool {
     return is_loaded == '1';
 }
 
-pub const BootEntry = struct {
-    /// Path to the linux kernel image.
-    linux: []const u8,
-    /// Optional path to the initrd.
-    initrd: ?[]const u8 = null,
-    /// Optional kernel parameters.
-    cmdline: ?[]const u8 = null,
+pub const BootEntry = union(enum) {
+    /// A directory that contains up to three files:
+    /// - <dir>/linux
+    /// - <dir>/initrd        (optional)
+    /// - <dir>/kernel_params (optional)
+    ///
+    /// The directory will be cleaned up after usage. This is helpful to use
+    /// when the boot files are created dynamically during boot. Do _not_ use
+    /// this if boot files are coming from disk, use `BootEntry.Disk` instead.
+    Dir: []const u8,
+
+    /// A set of boot files. If these files are created dynamically during boot
+    /// (e.g. loading over xmodem/network), use `BootEntry.Dir` instead.
+    Disk: struct {
+        /// Path to the linux kernel image.
+        linux: []const u8,
+        /// Optional path to the initrd.
+        initrd: ?[]const u8 = null,
+        /// Optional kernel parameters.
+        cmdline: ?[]const u8 = null,
+    },
 };
 
-pub fn kexec_load(allocator: std.mem.Allocator, entry: *const BootEntry) !void {
+pub fn kexecLoadFromDir(allocator: std.mem.Allocator, dir: []const u8) !void {
+    var d = try std.fs.cwd().openDir(dir, .{});
+    defer d.close();
+    defer std.fs.cwd().deleteTree(dir) catch {};
+
+    const linux = try d.realpathAlloc(allocator, "linux");
+    defer allocator.free(linux);
+
+    const initrd: ?[]const u8 = if (d.realpathAlloc(
+        allocator,
+        "initrd",
+    )) |initrd| initrd else |err| switch (err) {
+        error.FileNotFound => null,
+        else => return err,
+    };
+
+    defer {
+        if (initrd) |_initrd| {
+            allocator.free(_initrd);
+        }
+    }
+
+    const cmdline: ?[]const u8 = b: {
+        if (d.realpathAlloc(
+            allocator,
+            "kernel_params",
+        )) |params_file| {
+            defer allocator.free(params_file);
+            break :b try std.fs.cwd().readFileAlloc(
+                allocator,
+                params_file,
+                linux_headers.COMMAND_LINE_SIZE,
+            );
+        } else |err| switch (err) {
+            error.FileNotFound => break :b null,
+            else => return err,
+        }
+    };
+
+    defer {
+        if (cmdline) |_cmdline| {
+            allocator.free(_cmdline);
+        }
+    }
+
+    return kexecLoad(allocator, linux, initrd, cmdline);
+}
+
+pub fn kexecLoad(
+    allocator: std.mem.Allocator,
+    linux: []const u8,
+    initrd: ?[]const u8,
+    params: ?[]const u8,
+) !void {
     std.log.info("preparing kexec", .{});
+    std.log.info("loading linux {s}", .{linux});
+    std.log.info("loading initrd {s}", .{initrd orelse "<none>"});
+    std.log.info("loading params {s}", .{params orelse "<none>"});
 
-    std.log.debug("loading kernel {s}", .{entry.linux});
-    const linux = try std.fs.cwd().openFile(entry.linux, .{});
-    defer linux.close();
+    const _linux = try std.fs.cwd().openFile(linux, .{});
+    defer _linux.close();
 
-    const linux_fd = @as(usize, @bitCast(@as(isize, linux.handle)));
+    const linux_fd = @as(usize, @bitCast(@as(isize, _linux.handle)));
 
     const initrd_fd = b: {
-        if (entry.initrd) |initrd| {
-            std.log.debug("loading initrd {s}", .{initrd});
-            const file = try std.fs.cwd().openFile(initrd, .{});
+        if (initrd) |_initrd| {
+            const file = try std.fs.cwd().openFile(_initrd, .{});
             break :b file.handle;
         } else {
             break :b 0;
@@ -74,8 +142,7 @@ pub fn kexec_load(allocator: std.mem.Allocator, entry: *const BootEntry) !void {
 
     // dupeZ() returns a null-terminated slice, however the null-terminator
     // is not included in the length of the slice, so we must add 1.
-    std.log.debug("loading kernel params '{s}'", .{entry.cmdline orelse ""});
-    const cmdline = try allocator.dupeZ(u8, entry.cmdline orelse "");
+    const cmdline = try allocator.dupeZ(u8, params orelse "");
     defer allocator.free(cmdline);
     const cmdline_len = cmdline.len + 1;
 
@@ -202,7 +269,7 @@ fn autoboot(stop_fd: posix.fd_t) !bool {
     }
 
     for (boot_devices) |dev| {
-        std.log.info("using device '{s}'", .{dev.name});
+        std.log.info("using device \"{s}\"", .{dev.name});
         var countdown = dev.timeout;
         while (countdown > 0) : (countdown -= 1) {
             std.log.info("booting in {} seconds", .{countdown});
@@ -212,8 +279,16 @@ fn autoboot(stop_fd: posix.fd_t) !bool {
             }
         }
 
-        for (dev.entries) |entry| {
-            if (kexec_load(arena.allocator(), &entry)) {
+        for (dev.entries) |boot_entry| {
+            if (switch (boot_entry) {
+                .Dir => |dir| kexecLoadFromDir(arena.allocator(), dir),
+                .Disk => |entry| kexecLoad(
+                    arena.allocator(),
+                    entry.linux,
+                    entry.initrd,
+                    entry.cmdline,
+                ),
+            }) {
                 return true;
             } else |err| {
                 std.log.err("failed to load boot entry: {}", .{err});

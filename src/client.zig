@@ -22,8 +22,11 @@ pub const Client = struct {
     stream: std.net.Stream,
     input_buffer: [buffer_size]u8 = undefined,
     log_file: std.fs.File,
-    arena: std.heap.ArenaAllocator,
     writer: BufferedWriter,
+
+    /// Used for dynamically allocating memory when running commands. This is
+    /// reset after every command run.
+    arena: std.heap.ArenaAllocator,
 
     const buffer_size = 4096;
     const BufferedWriter = std.io.BufferedWriter(buffer_size, std.fs.File.Writer);
@@ -142,16 +145,18 @@ pub const Client = struct {
     }
 
     fn notifyUserPresence(self: *@This()) !void {
-        writeMessage(ClientMsg{ .msg = .Empty }, self.stream.writer()) catch {
+        writeMessage(ClientMsg{ .data = .Empty }, self.stream.writer()) catch {
             std.log.err("failed to notify user presence", .{});
         };
     }
 
     /// Returns true if the remote side shutdown, indicating we are done.
     fn handleMsg(self: *@This()) !bool {
-        const allocator = self.arena.allocator();
-
-        const msg = readMessage(ServerMsg, allocator, self.stream.reader()) catch |err| {
+        const msg = readMessage(
+            ServerMsg,
+            self.arena.allocator(),
+            self.stream.reader(),
+        ) catch |err| {
             if (err == error.EOF) {
                 return true;
             }
@@ -159,7 +164,7 @@ pub const Client = struct {
         };
         defer msg.deinit();
 
-        switch (msg.value.msg) {
+        switch (msg.value.data) {
             .ForceShell => {
                 std.log.debug("shell forced from server", .{});
                 try self.prompt();
@@ -413,6 +418,8 @@ pub const Client = struct {
         }
 
         if (done and self.input_end > 0) {
+            _ = self.arena.reset(.retain_capacity);
+
             const end = self.input_end;
             self.input_cursor = 0;
             self.input_end = 0;
@@ -430,8 +437,6 @@ pub const Client = struct {
             };
 
             if (maybe_msg) |msg| {
-                defer free_msg(self.arena.allocator(), msg);
-
                 if (writeMessage(msg, self.stream.writer())) {
                     self.waiting_for_response = true;
                 } else |err| {
@@ -444,24 +449,6 @@ pub const Client = struct {
         }
     }
 };
-
-fn free_msg(a: std.mem.Allocator, m: ClientMsg) void {
-    switch (m.msg) {
-        .Boot => |entry| {
-            if (entry.cmdline) |cmdline| {
-                a.free(cmdline);
-            }
-
-            if (entry.initrd) |initrd| {
-                a.free(initrd);
-            }
-
-            a.free(entry.linux);
-        },
-
-        else => {},
-    }
-}
 
 pub const Command = struct {
     allocator: std.mem.Allocator,
@@ -495,7 +482,7 @@ pub const Command = struct {
             }
 
             if (!found) {
-                std.debug.print("unknown command '{s}'\n", .{cmd});
+                std.debug.print("unknown command \"{s}\"\n", .{cmd});
             }
         }
 
@@ -525,7 +512,7 @@ pub const Command = struct {
                 }
 
                 if (!found) {
-                    std.debug.print("unknown command '{s}'\n", .{next});
+                    std.debug.print("unknown command \"{s}\"\n", .{next});
                 }
             } else {
                 std.debug.print("\n", .{});
@@ -554,7 +541,7 @@ pub const Command = struct {
             _ = args;
             _ = c;
 
-            return .{ .msg = .Poweroff };
+            return .{ .data = .Poweroff };
         }
     };
 
@@ -571,7 +558,7 @@ pub const Command = struct {
             _ = c;
             _ = args;
 
-            return .{ .msg = .Reboot };
+            return .{ .data = .Reboot };
         }
     };
 
@@ -651,15 +638,17 @@ pub const Command = struct {
 
         fn run(c: *Command, args: *ArgsIterator) !?ClientMsg {
             var tmp_dir = try tmp.tmpDir(.{});
-            // defer tmp_dir.cleanup(); // TODO(jared): we need to clean these up
 
             errdefer system.setupTty(posix.STDIN_FILENO, .user_input) catch {};
 
             try system.setupTty(posix.STDIN_FILENO, .file_transfer_recv);
 
             const kernel_bytes = try xmodem_recv(c.allocator, posix.STDIN_FILENO);
+            // Free up the kernel bytes since this is large.
+            // TODO(jared): Make xmodem_recv accept a std.io.Writer.
             defer c.allocator.free(kernel_bytes);
-            var kernel = try tmp_dir.dir.createFile("kernel", .{ .read = true });
+
+            var kernel = try tmp_dir.dir.createFile("linux", .{});
             defer kernel.close();
             try kernel.writeAll(kernel_bytes);
 
@@ -667,8 +656,11 @@ pub const Command = struct {
 
             if (!skip_initrd) {
                 const initrd_bytes = try xmodem_recv(c.allocator, posix.STDIN_FILENO);
+                // Free up the initrd bytes since this is large.
+                // TODO(jared): Make xmodem_recv accept a std.io.Writer.
                 defer c.allocator.free(initrd_bytes);
-                var initrd = try tmp_dir.dir.createFile("initrd", .{ .read = true });
+
+                var initrd = try tmp_dir.dir.createFile("initrd", .{});
                 defer initrd.close();
                 try initrd.writeAll(initrd_bytes);
             }
@@ -677,23 +669,21 @@ pub const Command = struct {
             defer c.allocator.free(kernel_params_bytes);
 
             // trim out the xmodem filler character (0xff) and newlines (0x0a)
-            const kernel_params_ = std.mem.trimRight(u8, kernel_params_bytes, &.{ 0xff, 0x0a });
-            const kernel_params = try c.allocator.dupe(u8, kernel_params_);
+            const kernel_params = std.mem.trimRight(
+                u8,
+                kernel_params_bytes,
+                &.{ 0xff, 0x0a },
+            );
 
-            const linux = try tmp_dir.dir.realpathAlloc(c.allocator, "kernel");
-            const initrd = if (!skip_initrd) try tmp_dir.dir.realpathAlloc(c.allocator, "initrd") else null;
+            var params_file = try tmp_dir.dir.createFile("kernel_params", .{});
+            defer params_file.close();
+            try params_file.writeAll(kernel_params);
 
             system.setupTty(posix.STDIN_FILENO, .user_input) catch {};
 
-            return .{
-                .msg = .{
-                    .Boot = .{
-                        .linux = linux,
-                        .initrd = initrd,
-                        .cmdline = if (kernel_params.len > 0) kernel_params else null,
-                    },
-                },
-            };
+            return .{ .data = .{ .Boot = .{
+                .Dir = try tmp_dir.dir.realpathAlloc(c.allocator, "."),
+            } } };
         }
     };
 };
