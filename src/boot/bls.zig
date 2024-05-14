@@ -396,7 +396,7 @@ pub const BootLoaderSpec = struct {
             ) catch continue);
         }
 
-        std.log.debug("BLS probe found {} external devices", .{self.internal_mounts.len});
+        std.log.debug("BLS probe found {} external devices", .{self.external_mounts.len});
         for (self.external_mounts) |mount| {
             try devices.append(self.search_for_entries(
                 mount,
@@ -405,7 +405,6 @@ pub const BootLoaderSpec = struct {
             ) catch continue);
         }
 
-        std.log.debug("BLS probe found {} devices", .{devices.items.len});
         return try devices.toOwnedSlice();
     }
 

@@ -14,6 +14,138 @@ const tmp = @import("./tmp.zig");
 const writeMessage = @import("./message.zig").writeMessage;
 const xmodem_recv = @import("./xmodem.zig").xmodem_recv;
 
+const ArgsIterator = process.ArgIteratorGeneral(.{});
+
+const DiskContext = struct {};
+
+const XmodemContext = struct {};
+
+const NoneContext = struct {
+    arena: std.heap.ArenaAllocator,
+
+    pub fn init() @This() {
+        return .{
+            .arena = std.heap.ArenaAllocator.init(std.heap.page_allocator),
+        };
+    }
+
+    pub fn allocator(self: *const @This()) std.mem.Allocator {
+        return self.arena.allocator();
+    }
+
+    const commands = enum {
+        dmesg,
+        logs,
+        poweroff,
+        reboot,
+    };
+
+    const poweroff = struct {
+        const short_help = "poweroff the machine";
+        const long_help =
+            \\Immediately poweroff the machine.
+            \\
+            \\Usage:
+            \\poweroff
+        ;
+
+        fn run(ctx: *NoneContext, args: *ArgsIterator) !?ClientMsg {
+            _ = ctx;
+            _ = args;
+
+            return .{ .data = .Poweroff };
+        }
+    };
+
+    const reboot = struct {
+        const short_help = "reboot the machine";
+        const long_help =
+            \\Immediately reboot the machine.
+            \\
+            \\Usage:
+            \\reboot
+        ;
+
+        fn run(ctx: *NoneContext, args: *ArgsIterator) !?ClientMsg {
+            _ = ctx;
+            _ = args;
+
+            return .{ .data = .Reboot };
+        }
+    };
+
+    const logs = struct {
+        const short_help = "view tinyboot logs";
+        const long_help =
+            \\View tinyboot logs.
+            \\
+            \\Usage:
+            \\logs
+        ;
+
+        fn run(ctx: *NoneContext, args: *ArgsIterator) !?ClientMsg {
+            _ = args;
+
+            try ctx.shell_instance.printLogs(.{});
+            return null;
+        }
+    };
+
+    const dmesg = struct {
+        const short_help = "view kernel logs";
+        const long_help =
+            \\View kernel logs.
+            \\
+            \\Usage:
+            \\dmesg [filter log level]              Default filter is log level 6
+            \\
+            \\Example:
+            \\dmesg 7
+        ;
+
+        fn run(ctx: *NoneContext, args: *ArgsIterator) !?ClientMsg {
+            const filter = if (args.next()) |filter_str| try std.fmt.parseInt(u8, filter_str, 10) else 6;
+            const kernel_logs = try kernelLogs(ctx.allocator(), filter);
+            defer ctx.allocator().free(kernel_logs);
+            try ctx.shell_instance.writeAllAndFlush(kernel_logs);
+
+            return null;
+        }
+    };
+};
+
+const Context = union(enum) {
+    None: NoneContext,
+    // Xmodem: XmodemContext,
+    // Disk: DiskContext,
+
+    pub fn run(self: @This(), input: []const u8) !?ClientMsg {
+        switch (self) {
+            inline else => |ctx| {
+                var args = try ArgsIterator.init(ctx.allocator(), input);
+                defer args.deinit();
+
+                if (args.next()) |cmd| {
+                    var found = false;
+
+                    inline for (std.meta.fields(@field(@TypeOf(ctx), "commands"))) |field| {
+                        if (std.mem.eql(u8, field.name, cmd)) {
+                            found = true;
+                            return @field(ctx, field.name).run(&ctx, &args);
+                        }
+                    }
+
+                    if (!found) {
+                        std.debug.print("unknown command \"{s}\"\n", .{cmd});
+                    }
+                }
+
+                return null;
+            },
+        }
+    }
+};
+
 pub const Client = struct {
     waiting_for_response: bool = false,
     has_prompt: bool = false,
@@ -24,6 +156,7 @@ pub const Client = struct {
     input_buffer: [buffer_size]u8 = undefined,
     log_file: std.fs.File,
     writer: BufferedWriter,
+    context: Context,
 
     /// Used for dynamically allocating memory when running commands. This is
     /// reset after every command run.
@@ -41,6 +174,7 @@ pub const Client = struct {
             .arena = arena,
             .writer = std.io.bufferedWriter(std.io.getStdOut().writer()),
             .log_file = try std.fs.openFileAbsolute("/run/log", .{}),
+            .context = .{ .None = NoneContext.init() },
         };
     }
 
@@ -67,6 +201,12 @@ pub const Client = struct {
     }
 
     fn prompt(self: *@This()) !void {
+        const name = switch (self.context) {
+            .None => "",
+            // .Xmodem => "xmodem",
+            // .Disk => "disk",
+        };
+        try self.writeAll(name);
         try self.writeAllAndFlush(&.{ 0xc2, 0xbb, 0x20 });
     }
 
@@ -425,27 +565,25 @@ pub const Client = struct {
             self.input_cursor = 0;
             self.input_end = 0;
 
-            var cmd = Command{
-                .allocator = self.arena.allocator(),
-                .user_input = self.input_buffer[0..end],
-                .shell_instance = self,
-            };
-
-            const maybe_msg = cmd.run() catch |err| {
+            const msg = self.context.run(self.input_buffer[0..end]) catch |err| {
                 std.debug.print("\nerror running command: {any}\n", .{err});
+                try self.prompt();
+                return;
+            } orelse {
                 try self.prompt();
                 return;
             };
 
-            if (maybe_msg) |msg| {
-                if (writeMessage(msg, self.stream.writer())) {
-                    self.waiting_for_response = true;
-                } else |err| {
-                    std.log.err("failed to send message to server: {}", .{err});
-                }
-            } else {
-                // Write the next prompt
-                try self.prompt();
+            // var cmd = Command{
+            //     .allocator = self.arena.allocator(),
+            //     .user_input = self.input_buffer[0..end],
+            //     .shell_instance = self,
+            // };
+
+            if (writeMessage(msg, self.stream.writer())) {
+                self.waiting_for_response = true;
+            } else |err| {
+                std.log.err("failed to send message to server: {}", .{err});
             }
         }
     }
@@ -455,8 +593,6 @@ pub const Command = struct {
     allocator: std.mem.Allocator,
     user_input: []const u8,
     shell_instance: *Client,
-
-    const ArgsIterator = process.ArgIteratorGeneral(.{});
 
     const argv0 = enum {
         help, // NOTE: keep "help" at the top
@@ -524,79 +660,6 @@ pub const Command = struct {
                     std.debug.print("{s}{s}{s}\n", .{ field.name, " " ** space, cmd_short_help });
                 }
             }
-
-            return null;
-        }
-    };
-
-    const poweroff = struct {
-        const short_help = "poweroff the machine";
-        const long_help =
-            \\Immediately poweroff the machine.
-            \\
-            \\Usage:
-            \\poweroff
-        ;
-
-        fn run(c: *Command, args: *ArgsIterator) !?ClientMsg {
-            _ = args;
-            _ = c;
-
-            return .{ .data = .Poweroff };
-        }
-    };
-
-    const reboot = struct {
-        const short_help = "reboot the machine";
-        const long_help =
-            \\Immediately reboot the machine.
-            \\
-            \\Usage:
-            \\reboot
-        ;
-
-        fn run(c: *Command, args: *ArgsIterator) !?ClientMsg {
-            _ = c;
-            _ = args;
-
-            return .{ .data = .Reboot };
-        }
-    };
-
-    const logs = struct {
-        const short_help = "view tinyboot logs";
-        const long_help =
-            \\View tinyboot logs.
-            \\
-            \\Usage:
-            \\logs
-        ;
-
-        fn run(c: *Command, args: *ArgsIterator) !?ClientMsg {
-            _ = args;
-
-            try c.shell_instance.printLogs(.{});
-            return null;
-        }
-    };
-
-    const dmesg = struct {
-        const short_help = "view kernel logs";
-        const long_help =
-            \\View kernel logs.
-            \\
-            \\Usage:
-            \\dmesg [filter log level]              Default filter is log level 6
-            \\
-            \\Example:
-            \\dmesg 7
-        ;
-
-        fn run(c: *Command, args: *ArgsIterator) !?ClientMsg {
-            const filter = if (args.next()) |filter_str| try std.fmt.parseInt(u8, filter_str, 10) else 6;
-            const kernel_logs = try kernelLogs(c.allocator, filter);
-            defer c.allocator.free(kernel_logs);
-            try c.shell_instance.writeAllAndFlush(kernel_logs);
 
             return null;
         }
