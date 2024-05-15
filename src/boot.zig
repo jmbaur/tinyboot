@@ -274,7 +274,7 @@ fn autoboot(stop_fd: posix.fd_t) !bool {
         std.log.info("using device \"{s}\"", .{dev.name});
         var countdown = dev.timeout;
         while (countdown > 0) : (countdown -= 1) {
-            std.log.info("booting in {} seconds", .{countdown});
+            std.log.info("booting in {} second(s)", .{countdown});
             std.time.sleep(std.time.ns_per_s);
             if (try need_to_stop(stop_fd)) {
                 return false;
