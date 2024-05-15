@@ -38,11 +38,10 @@ fn disk_is_removable(allocator: std.mem.Allocator, devname: []const u8) bool {
     return std.mem.eql(u8, &buf, "1");
 }
 
-const FALLBACK_VENDOR = "unknown vendor";
-const FALLBACK_MODEL = "unknown model";
-
 /// Caller is responsible for the returned value.
 fn disk_name(allocator: std.mem.Allocator, devname: []const u8) ![]const u8 {
+    var name = std.ArrayList(u8).init(allocator);
+
     const vendor = b: {
         const path = std.fs.path.join(allocator, &.{
             std.fs.path.sep_str,
@@ -52,15 +51,15 @@ fn disk_name(allocator: std.mem.Allocator, devname: []const u8) ![]const u8 {
             devname,
             "device",
             "vendor",
-        }) catch break :b FALLBACK_VENDOR;
+        }) catch break :b null;
         defer allocator.free(path);
 
-        const file = std.fs.openFileAbsolute(path, .{}) catch break :b FALLBACK_VENDOR;
+        const file = std.fs.openFileAbsolute(path, .{}) catch break :b null;
         defer file.close();
 
         var buf: [1024]u8 = undefined;
-        const bytes_read = file.readAll(&buf) catch break :b FALLBACK_VENDOR;
-        break :b std.mem.trim(u8, buf[0..bytes_read], "\n");
+        const bytes_read = file.readAll(&buf) catch break :b null;
+        break :b std.mem.trim(u8, buf[0..bytes_read], "\n ");
     };
 
     const model = b: {
@@ -72,18 +71,29 @@ fn disk_name(allocator: std.mem.Allocator, devname: []const u8) ![]const u8 {
             devname,
             "device",
             "model",
-        }) catch break :b FALLBACK_MODEL;
+        }) catch break :b null;
         defer allocator.free(path);
 
-        const file = std.fs.openFileAbsolute(path, .{}) catch break :b FALLBACK_MODEL;
+        const file = std.fs.openFileAbsolute(path, .{}) catch break :b null;
         defer file.close();
 
         var buf: [1024]u8 = undefined;
-        const bytes_read = file.readAll(&buf) catch break :b FALLBACK_MODEL;
-        break :b std.mem.trim(u8, buf[0..bytes_read], "\n");
+        const bytes_read = file.readAll(&buf) catch break :b null;
+        break :b std.mem.trim(u8, buf[0..bytes_read], "\n ");
     };
 
-    return std.fmt.allocPrint(allocator, "{s} {s} {s}", .{ devname, vendor, model });
+    if (vendor) |_vendor| {
+        try name.appendSlice(_vendor);
+    }
+
+    if (model) |_model| {
+        if (vendor != null) {
+            try name.append(' ');
+        }
+        try name.appendSlice(_model);
+    }
+
+    return name.toOwnedSlice();
 }
 
 pub const BootLoaderSpec = struct {
@@ -297,8 +307,12 @@ pub const BootLoaderSpec = struct {
         errdefer entries.deinit();
 
         const loader_conf: LoaderConf = b: {
-            var file = mount.dir.openFile("loader/loader.conf", .{}) catch break :b .{};
+            var file = mount.dir.openFile("loader/loader.conf", .{}) catch {
+                std.log.debug("no loader.conf found on {s}, using defaults", .{mount.disk_name});
+                break :b .{};
+            };
             defer file.close();
+            std.log.debug("found loader.conf on \"{s}\"", .{mount.disk_name});
             const contents = try file.readToEndAlloc(tmp_allocator, 4096);
             break :b LoaderConf.parse(contents);
         };
@@ -316,8 +330,15 @@ pub const BootLoaderSpec = struct {
             }
 
             var entry_file = entries_dir.openFile(dir_entry.name, .{}) catch continue;
-            const entry_contents = try entry_file.readToEndAlloc(tmp_allocator, 4096);
-            var type1_entry = Type1Entry.parse(tmp_allocator, entry_contents) catch continue;
+
+            std.log.debug("inspecting BLS entry {s} on \"{s}\"", .{ dir_entry.name, mount.disk_name });
+
+            // We should definitely not get any boot entry files larger than this.
+            const entry_contents = try entry_file.readToEndAlloc(tmp_allocator, 1 << 16);
+            var type1_entry = Type1Entry.parse(tmp_allocator, entry_contents) catch |err| {
+                std.log.err("failed to parse {s} as BLS type 1 entry: {}", .{ dir_entry.name, err });
+                continue;
+            };
             defer type1_entry.deinit();
 
             const linux = try mount.dir.realpathAlloc(final_allocator, type1_entry.linux orelse {
@@ -382,30 +403,45 @@ pub const BootLoaderSpec = struct {
         var tmp_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
         defer tmp_arena.deinit();
 
-        std.log.debug("BLS probe", .{});
+        std.log.debug("BLS probe start", .{});
         var devices = std.ArrayList(BootDevice).init(allocator);
 
         // Internal mounts are ordered before external mounts so they are
         // prioritized in the boot process.
-        std.log.debug("BLS probe found {} internal devices", .{self.internal_mounts.len});
+        std.log.debug("BLS probe found {} internal device(s)", .{self.internal_mounts.len});
         for (self.internal_mounts) |mount| {
             try devices.append(self.search_for_entries(
                 mount,
                 tmp_arena.allocator(),
                 allocator,
-            ) catch continue);
+            ) catch |err| {
+                std.log.err(
+                    "failed to search for entries on \"{s}\": {}",
+                    .{ mount.disk_name, err },
+                );
+                continue;
+            });
         }
 
-        std.log.debug("BLS probe found {} external devices", .{self.internal_mounts.len});
+        std.log.debug("BLS probe found {} external device(s)", .{self.external_mounts.len});
         for (self.external_mounts) |mount| {
             try devices.append(self.search_for_entries(
                 mount,
                 tmp_arena.allocator(),
                 allocator,
-            ) catch continue);
+            ) catch |err| {
+                std.log.err(
+                    "failed to search for entries on \"{s}\": {}",
+                    .{ mount.disk_name, err },
+                );
+                continue;
+            });
         }
 
-        std.log.debug("BLS probe found {} devices", .{devices.items.len});
+        std.log.debug(
+            "BLS probe found {} device(s) with BLS entries",
+            .{devices.items.len},
+        );
         return try devices.toOwnedSlice();
     }
 
@@ -790,6 +826,9 @@ const Type1Entry = struct {
     devicetree_overlay: ?[]const []const u8 = null,
     architecture: ?Architecture = null,
 
+    // Ensures all path options have their leading forward-slash trimmed so
+    // that the paths can be used directly with the ESP mountpoint's std.fs.Dir
+    // instance.
     pub fn parse(allocator: std.mem.Allocator, contents: []const u8) !@This() {
         var self = @This(){
             .allocator = allocator,
@@ -821,22 +860,22 @@ const Type1Entry = struct {
             } else if (std.mem.eql(u8, key, "sort_key")) {
                 self.sort_key = line_split.rest();
             } else if (std.mem.eql(u8, key, "linux")) {
-                self.linux = line_split.rest();
+                self.linux = std.mem.trimLeft(u8, line_split.rest(), "/");
             } else if (std.mem.eql(u8, key, "initrd")) {
-                try initrd.append(line_split.rest());
+                try initrd.append(std.mem.trimLeft(u8, line_split.rest(), "/"));
             } else if (std.mem.eql(u8, key, "efi")) {
-                self.efi = line_split.rest();
+                self.efi = std.mem.trimLeft(u8, line_split.rest(), "/");
             } else if (std.mem.eql(u8, key, "options")) {
                 while (line_split.next()) |next| {
                     try options.append(next);
                 }
             } else if (std.mem.eql(u8, key, "devicetree")) {
-                self.devicetree = line_split.rest();
+                self.devicetree = std.mem.trimLeft(u8, line_split.rest(), "/");
             } else if (std.mem.eql(u8, key, "devicetree-overlay")) {
                 var devicetree_overlay = std.ArrayList([]const u8).init(allocator);
                 errdefer devicetree_overlay.deinit();
                 while (line_split.next()) |next| {
-                    try devicetree_overlay.append(next);
+                    try devicetree_overlay.append(std.mem.trimLeft(u8, next, "/"));
                 }
                 self.devicetree_overlay = try devicetree_overlay.toOwnedSlice();
             } else if (std.mem.eql(u8, key, "architecture")) {
@@ -879,7 +918,7 @@ test "type 1 boot entry parsing" {
     var type1_entry = try Type1Entry.parse(std.testing.allocator, simple);
     defer type1_entry.deinit();
 
-    try std.testing.expectEqualStrings("/EFI/foo/Image", type1_entry.linux.?);
+    try std.testing.expectEqualStrings("EFI/foo/Image", type1_entry.linux.?);
     try std.testing.expect(type1_entry.options.?.len == 2);
     try std.testing.expectEqualStrings("console=ttyAMA0", type1_entry.options.?[0]);
     try std.testing.expectEqualStrings("loglevel=7", type1_entry.options.?[1]);

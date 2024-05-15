@@ -62,8 +62,11 @@ pub const BootEntry = union(enum) {
 
 pub fn kexecLoadFromDir(allocator: std.mem.Allocator, dir: []const u8) !void {
     var d = try std.fs.cwd().openDir(dir, .{});
-    defer d.close();
-    defer std.fs.cwd().deleteTree(dir) catch {};
+    defer {
+        std.log.info("cleaning up {s}", .{dir});
+        std.fs.cwd().deleteTree(dir) catch {};
+        d.close();
+    }
 
     const linux = try d.realpathAlloc(allocator, "linux");
     defer allocator.free(linux);

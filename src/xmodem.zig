@@ -1,3 +1,5 @@
+// An implementation of XMODEM-1K (see https://en.wikipedia.org/wiki/XMODEM#XMODEM-1K).
+
 const std = @import("std");
 const system = std.posix.system;
 const posix = std.posix;
