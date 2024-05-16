@@ -46,7 +46,7 @@ const State = struct {
     }
 };
 
-fn run_event_loop(allocator: std.mem.Allocator) !?posix.RebootCommand {
+fn runEventLoop(allocator: std.mem.Allocator) !?posix.RebootCommand {
     var state = try State.init(allocator);
     defer state.deinit();
 
@@ -55,7 +55,7 @@ fn run_event_loop(allocator: std.mem.Allocator) !?posix.RebootCommand {
     defer device_watcher.deinit();
 
     var server = try Server.init(allocator);
-    try server.register_self(state.epoll_fd);
+    try server.registerSelf(state.epoll_fd);
     // NOTE: This must be _after_ state.deinit() so that we are ensured that
     // the server is deinitialized _before_ state deinit is called, since state
     // deinit waits for all children to exit, which will only succeed after the
@@ -99,7 +99,7 @@ fn run_event_loop(allocator: std.mem.Allocator) !?posix.RebootCommand {
     try autoboot.register(state.epoll_fd);
     defer autoboot.deinit();
 
-    try device_watcher.start_settle_timer();
+    try device_watcher.startSettleTimer();
 
     var user_presence = false;
 
@@ -124,16 +124,16 @@ fn run_event_loop(allocator: std.mem.Allocator) !?posix.RebootCommand {
                     return outcome;
                 } else {
                     std.log.info("nothing to boot", .{});
-                    server.force_shell();
+                    server.forceShell();
                 }
             } else if (event.data.fd == device_watcher.nl_fd) {
-                device_watcher.handle_new_event() catch |err| {
+                device_watcher.handleNewEvent() catch |err| {
                     std.log.err("failed to handle new device: {}", .{err});
                 };
             } else if (event.data.fd == server.inner.stream.handle) {
                 const conn = try server.inner.accept();
                 std.log.debug("new client connected", .{});
-                try server.register_client(state.epoll_fd, conn.stream);
+                try server.registerClient(state.epoll_fd, conn.stream);
             } else {
                 if (!user_presence) {
                     try autoboot.stop();
@@ -141,7 +141,7 @@ fn run_event_loop(allocator: std.mem.Allocator) !?posix.RebootCommand {
                     std.log.info("user presence detected", .{});
                 }
 
-                if (try server.handle_new_event(event)) |outcome| {
+                if (try server.handleNewEvent(event)) |outcome| {
                     std.log.debug("got outcome {}", .{outcome});
                     return outcome;
                 }
@@ -150,8 +150,9 @@ fn run_event_loop(allocator: std.mem.Allocator) !?posix.RebootCommand {
     }
 }
 
-fn console_client() !void {
-    try setupTty(posix.STDIN_FILENO, .user_input);
+fn consoleClient() !void {
+    var tty = try setupTty(posix.STDIN_FILENO, .user_input);
+    defer tty.reset();
 
     try log.initLogger(.Client);
     defer log.deinitLogger();
@@ -190,11 +191,11 @@ fn pid1() !void {
         std.log.info("built with coreboot support", .{});
     }
 
-    security.initialize_security(allocator) catch |err| {
+    security.initializeSecurity(allocator) catch |err| {
         std.log.warn("failed to initialize secure boot: {}", .{err});
     };
 
-    const reboot_cmd = try run_event_loop(allocator) orelse posix.RebootCommand.POWER_OFF;
+    const reboot_cmd = try runEventLoop(allocator) orelse posix.RebootCommand.POWER_OFF;
 
     try posix.reboot(reboot_cmd);
 }
@@ -221,6 +222,6 @@ pub fn main() !void {
 
             std.debug.panic("epic failure :/", .{});
         },
-        else => try console_client(),
+        else => try consoleClient(),
     }
 }

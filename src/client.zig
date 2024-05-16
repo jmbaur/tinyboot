@@ -5,14 +5,16 @@ const system = std.posix.system;
 
 const linux_headers = @import("linux_headers");
 
+const BootEntry = @import("./boot.zig").BootEntry;
 const ClientMsg = @import("./message.zig").ClientMsg;
 const ServerMsg = @import("./message.zig").ServerMsg;
 const kernelLogs = @import("./system.zig").kernelLogs;
+const kexecLoad = @import("./boot.zig").kexecLoad;
 const readMessage = @import("./message.zig").readMessage;
 const setupTty = @import("./system.zig").setupTty;
 const tmp = @import("./tmp.zig");
 const writeMessage = @import("./message.zig").writeMessage;
-const xmodem_recv = @import("./xmodem.zig").xmodem_recv;
+const xmodemRecv = @import("./xmodem.zig").xmodemRecv;
 
 pub const Client = struct {
     waiting_for_response: bool = false,
@@ -167,9 +169,11 @@ pub const Client = struct {
 
         switch (msg.value.data) {
             .ForceShell => {
-                std.log.debug("shell forced from server", .{});
-                try self.prompt();
-                self.has_prompt = true;
+                if (!self.has_prompt) {
+                    std.log.debug("shell forced from server", .{});
+                    try self.prompt();
+                    self.has_prompt = true;
+                }
             },
         }
 
@@ -639,14 +643,14 @@ pub const Command = struct {
 
         fn run(c: *Command, args: *ArgsIterator) !?ClientMsg {
             var tmp_dir = try tmp.tmpDir(.{});
+            defer tmp_dir.cleanup();
 
-            errdefer setupTty(posix.STDIN_FILENO, .user_input) catch {};
+            var tty = try setupTty(posix.STDIN_FILENO, .file_transfer_recv);
+            defer tty.reset();
 
-            try setupTty(posix.STDIN_FILENO, .file_transfer_recv);
-
-            const kernel_bytes = try xmodem_recv(c.allocator, posix.STDIN_FILENO);
+            const kernel_bytes = try xmodemRecv(c.allocator, posix.STDIN_FILENO);
             // Free up the kernel bytes since this is large.
-            // TODO(jared): Make xmodem_recv accept a std.io.Writer.
+            // TODO(jared): Make xmodemRecv accept a std.io.Writer.
             defer c.allocator.free(kernel_bytes);
 
             var kernel = try tmp_dir.dir.createFile("linux", .{});
@@ -656,9 +660,9 @@ pub const Command = struct {
             const skip_initrd = if (args.next()) |next| std.mem.eql(u8, next, "-n") else false;
 
             if (!skip_initrd) {
-                const initrd_bytes = try xmodem_recv(c.allocator, posix.STDIN_FILENO);
+                const initrd_bytes = try xmodemRecv(c.allocator, posix.STDIN_FILENO);
                 // Free up the initrd bytes since this is large.
-                // TODO(jared): Make xmodem_recv accept a std.io.Writer.
+                // TODO(jared): Make xmodemRecv accept a std.io.Writer.
                 defer c.allocator.free(initrd_bytes);
 
                 var initrd = try tmp_dir.dir.createFile("initrd", .{});
@@ -666,7 +670,7 @@ pub const Command = struct {
                 try initrd.writeAll(initrd_bytes);
             }
 
-            const kernel_params_bytes = try xmodem_recv(c.allocator, posix.STDIN_FILENO);
+            const kernel_params_bytes = try xmodemRecv(c.allocator, posix.STDIN_FILENO);
             defer c.allocator.free(kernel_params_bytes);
 
             // trim out the xmodem filler character (0xff) and newlines (0x0a)
@@ -676,15 +680,27 @@ pub const Command = struct {
                 &.{ 0xff, 0x0a },
             );
 
-            var params_file = try tmp_dir.dir.createFile("kernel_params", .{});
-            defer params_file.close();
-            try params_file.writeAll(kernel_params);
+            const linux = try tmp_dir.dir.realpathAlloc(c.allocator, "linux");
+            defer c.allocator.free(linux);
 
-            setupTty(posix.STDIN_FILENO, .user_input) catch {};
+            const initrd = if (!skip_initrd) try tmp_dir.dir.realpathAlloc(c.allocator, "initrd") else null;
+            defer {
+                if (initrd) |_initrd| {
+                    c.allocator.free(_initrd);
+                }
+            }
 
-            return .{ .data = .{ .Boot = .{
-                .Dir = try tmp_dir.dir.realpathAlloc(c.allocator, "."),
-            } } };
+            if (kexecLoad(
+                c.allocator,
+                linux,
+                initrd,
+                if (kernel_params.len == 0) null else kernel_params,
+            )) {
+                return .{ .data = .Kexec };
+            } else |err| {
+                std.log.err("failed to load boot entry: {}", .{err});
+                return null;
+            }
         }
     };
 };

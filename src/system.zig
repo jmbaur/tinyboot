@@ -93,8 +93,31 @@ pub const TtyMode = enum {
     file_transfer_send,
 };
 
-pub fn setupTty(fd: posix.fd_t, mode: TtyMode) !void {
-    var termios = try posix.tcgetattr(fd);
+pub const Tty = struct {
+    fd: posix.fd_t,
+    original: posix.termios,
+
+    pub fn reset(self: *@This()) void {
+        // wait until everything is sent
+        _ = system.tcdrain(self.fd);
+
+        // flush input queue
+        _ = system.ioctl(self.fd, TCFLSH, TCIOFLUSH);
+
+        posix.tcsetattr(self.fd, posix.TCSA.DRAIN, self.original) catch {};
+
+        // restart output
+        _ = system.ioctl(self.fd, TCXONC, TCOON);
+    }
+};
+
+pub fn setupTty(fd: posix.fd_t, mode: TtyMode) !Tty {
+    const orig = Tty{
+        .fd = fd,
+        .original = try posix.tcgetattr(fd),
+    };
+
+    var termios = orig.original;
 
     switch (mode) {
         .user_input => {
@@ -170,6 +193,8 @@ pub fn setupTty(fd: posix.fd_t, mode: TtyMode) !void {
 
     // restart output
     _ = system.ioctl(fd, TCXONC, TCOON);
+
+    return orig;
 }
 
 // These aren't defined in the UAPI linux headers for some odd reason.

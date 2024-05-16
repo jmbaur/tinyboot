@@ -16,7 +16,7 @@ const Mount = struct {
     disk_name: []const u8,
 };
 
-fn disk_is_removable(allocator: std.mem.Allocator, devname: []const u8) bool {
+fn diskIsRemovable(allocator: std.mem.Allocator, devname: []const u8) bool {
     const removable_path = std.fs.path.join(allocator, &.{
         std.fs.path.sep_str,
         "sys",
@@ -39,7 +39,7 @@ fn disk_is_removable(allocator: std.mem.Allocator, devname: []const u8) bool {
 }
 
 /// Caller is responsible for the returned value.
-fn disk_name(allocator: std.mem.Allocator, devname: []const u8) ![]const u8 {
+fn diskName(allocator: std.mem.Allocator, devname: []const u8) ![]const u8 {
     var name = std.ArrayList(u8).init(allocator);
 
     const vendor = b: {
@@ -97,6 +97,10 @@ fn disk_name(allocator: std.mem.Allocator, devname: []const u8) ![]const u8 {
 }
 
 pub const BootLoaderSpec = struct {
+    const EntryContext = struct {
+        full_path: []const u8,
+    };
+
     arena: std.heap.ArenaAllocator,
 
     /// Mounts to block devices that are non-removable (i.e. "internal" to the
@@ -192,9 +196,9 @@ pub const BootLoaderSpec = struct {
 
             const boot_partn = b: {
                 for (mbr.partitions(), 1..) |part, mbr_partn| {
-                    const part_type = MbrPartitionType.from_value(part.part_type()) orelse continue;
+                    const part_type = MbrPartitionType.fromValue(part.partType()) orelse continue;
 
-                    if (part.is_bootable() and
+                    if (part.isBootable() and
                         // BootLoaderSpec uses this partition type for MBR, see
                         // https://uapi-group.org/specifications/specs/boot_loader_specification/#the-partitionsl.
                         (part_type == .LinuxExtendedBoot or
@@ -206,7 +210,7 @@ pub const BootLoaderSpec = struct {
                     }
 
                     // disk is GPT partitioned
-                    if (!part.is_bootable() and part_type == .ProtectedMbr) {
+                    if (!part.isBootable() and part_type == .ProtectedMbr) {
                         var gpt = Gpt.init(&disk_source) catch |err| switch (err) {
                             Gpt.Error.MissingMagicNumber => {
                                 std.log.debug("disk {s} does not contain a GUID partition table", .{devname});
@@ -224,7 +228,7 @@ pub const BootLoaderSpec = struct {
 
                         const partitions = try gpt.partitions(allocator);
                         for (partitions, 1..) |partition, gpt_partn| {
-                            if (partition.part_type() orelse continue == .EfiSystem) {
+                            if (partition.partType() orelse continue == .EfiSystem) {
                                 break :b gpt_partn;
                             }
                         }
@@ -280,11 +284,11 @@ pub const BootLoaderSpec = struct {
             dir.* = try mountpoint_dir.openDir(partition_filename, .{});
 
             const mount = Mount{
-                .disk_name = try disk_name(allocator, devname),
+                .disk_name = try diskName(allocator, devname),
                 .dir = dir,
             };
 
-            if (disk_is_removable(allocator, devname)) {
+            if (diskIsRemovable(allocator, devname)) {
                 try external_mounts.append(mount);
             } else {
                 try internal_mounts.append(mount);
@@ -295,7 +299,7 @@ pub const BootLoaderSpec = struct {
         self.external_mounts = try external_mounts.toOwnedSlice();
     }
 
-    fn search_for_entries(
+    fn searchForEntries(
         self: *@This(),
         mount: Mount,
         tmp_allocator: std.mem.Allocator,
@@ -327,6 +331,21 @@ pub const BootLoaderSpec = struct {
         while (try it.next()) |dir_entry| {
             if (dir_entry.kind != .file) {
                 continue;
+            }
+
+            const entry_filename = EntryFilename.parse(dir_entry.name) catch |err| {
+                std.log.err("invalid entry filename for {s}: {}", .{ dir_entry.name, err });
+                continue;
+            };
+
+            if (entry_filename.tries_left) |tries_left| {
+                if (tries_left == 0) {
+                    std.log.warn(
+                        "skipping entry {s} because all tries have been exhausted",
+                        .{dir_entry.name},
+                    );
+                    continue;
+                }
             }
 
             var entry_file = entries_dir.openFile(dir_entry.name, .{}) catch continue;
@@ -378,13 +397,20 @@ pub const BootLoaderSpec = struct {
                 }
             }
 
+            std.log.debug("HERE {}", .{mount.dir.fd});
+            const context = try final_allocator.create(EntryContext);
+            context.* = .{
+                .full_path = try entries_dir.realpathAlloc(final_allocator, dir_entry.name),
+            };
+
+            errdefer final_allocator.destroy(context);
+
             try entries.append(
                 .{
-                    .Disk = .{
-                        .cmdline = options,
-                        .initrd = initrd,
-                        .linux = linux,
-                    },
+                    .context = context,
+                    .cmdline = options,
+                    .initrd = initrd,
+                    .linux = linux,
                 },
             );
         }
@@ -410,7 +436,7 @@ pub const BootLoaderSpec = struct {
         // prioritized in the boot process.
         std.log.debug("BLS probe found {} internal device(s)", .{self.internal_mounts.len});
         for (self.internal_mounts) |mount| {
-            try devices.append(self.search_for_entries(
+            try devices.append(self.searchForEntries(
                 mount,
                 tmp_arena.allocator(),
                 allocator,
@@ -425,7 +451,7 @@ pub const BootLoaderSpec = struct {
 
         std.log.debug("BLS probe found {} external device(s)", .{self.external_mounts.len});
         for (self.external_mounts) |mount| {
-            try devices.append(self.search_for_entries(
+            try devices.append(self.searchForEntries(
                 mount,
                 tmp_arena.allocator(),
                 allocator,
@@ -443,6 +469,43 @@ pub const BootLoaderSpec = struct {
             .{devices.items.len},
         );
         return try devices.toOwnedSlice();
+    }
+
+    pub fn entryLoaded(self: *@This(), ctx: *anyopaque) void {
+        self._entryLoaded(ctx) catch |err| {
+            std.log.err(
+                "failed to finalize BLS boot counter for chosen entry: {}",
+                .{err},
+            );
+        };
+    }
+
+    pub fn _entryLoaded(self: *@This(), ctx: *anyopaque) !void {
+        const context: *EntryContext = @ptrCast(@alignCast(ctx));
+
+        const dirname = std.fs.path.dirname(context.full_path) orelse return;
+        const original_name = std.fs.path.basename(context.full_path);
+        var entry = try EntryFilename.parse(original_name);
+
+        if (entry.tries_done) |*done| done.* +|= 1;
+        if (entry.tries_left) |*left| left.* -|= 1;
+
+        if (entry.tries_left) |tries_left| {
+            std.log.info(
+                "{} tries remaining for entry \"{s}\"",
+                .{ tries_left, entry.name },
+            );
+        }
+
+        const new_name = try entry.toFilename(self.arena.allocator());
+
+        var dir = try std.fs.cwd().openDir(dirname, .{});
+        defer dir.close();
+
+        try dir.rename(original_name, new_name);
+        posix.sync();
+
+        std.log.debug("entry renamed to {s}", .{new_name});
     }
 
     pub fn teardown(self: *@This()) !void {
@@ -482,6 +545,30 @@ pub const EntryFilename = struct {
         InvalidTriesSyntax,
     };
 
+    pub fn toFilename(self: *@This(), allocator: std.mem.Allocator) ![]const u8 {
+        var filename = std.ArrayList(u8).init(allocator);
+
+        try filename.appendSlice(self.name);
+
+        if (self.tries_left) |tries_left| {
+            try filename.append('+');
+            try filename.append(
+                std.fmt.digitToChar(tries_left, std.fmt.Case.lower),
+            );
+        }
+
+        if (self.tries_done) |tries_done| {
+            try filename.append('-');
+            try filename.append(
+                std.fmt.digitToChar(tries_done, std.fmt.Case.lower),
+            );
+        }
+
+        try filename.appendSlice(".conf");
+
+        return filename.toOwnedSlice();
+    }
+
     pub fn parse(contents: []const u8) @This().Error!@This() {
         const filename_wo_suffix = std.mem.trimRight(u8, contents, ".conf");
         if (contents.len == filename_wo_suffix.len) {
@@ -497,17 +584,17 @@ pub const EntryFilename = struct {
             var minus_split = std.mem.splitSequence(u8, counter_info, "-");
 
             const plus_info = minus_split.next().?;
-            const tries_done = std.fmt.parseInt(u8, plus_info, 10) catch {
+            const tries_left = std.fmt.parseInt(u8, plus_info, 10) catch {
                 return Error.InvalidTriesSyntax;
             };
 
             if (minus_split.next()) |minus_info| {
-                const tries_left = std.fmt.parseInt(u8, minus_info, 10) catch {
+                const tries_done = std.fmt.parseInt(u8, minus_info, 10) catch {
                     return Error.InvalidTriesSyntax;
                 };
-                return .{ .name = name, .tries_done = tries_done, .tries_left = tries_left };
+                return .{ .name = name, .tries_left = tries_left, .tries_done = tries_done };
             } else {
-                return .{ .name = name, .tries_done = tries_done };
+                return .{ .name = name, .tries_left = tries_left };
             }
         } else {
             return .{ .name = name };
@@ -542,34 +629,75 @@ test "entry filename parsing" {
     );
 
     try std.testing.expectEqualDeep(
-        EntryFilename{ .name = "my-entry", .tries_done = 1 },
+        EntryFilename{ .name = "my-entry", .tries_left = 1 },
         EntryFilename.parse("my-entry+1.conf"),
     );
 
     try std.testing.expectEqualDeep(
-        EntryFilename{ .name = "my-entry", .tries_done = 0 },
+        EntryFilename{ .name = "my-entry", .tries_left = 0 },
         EntryFilename.parse("my-entry+0.conf"),
     );
 
     try std.testing.expectEqualDeep(
-        EntryFilename{ .name = "my-entry", .tries_done = 0, .tries_left = 3 },
+        EntryFilename{ .name = "my-entry", .tries_left = 0, .tries_done = 3 },
         EntryFilename.parse("my-entry+0-3.conf"),
     );
 
     try std.testing.expectEqualDeep(
-        EntryFilename{ .name = "my-entry-1", .tries_done = 5, .tries_left = 0 },
+        EntryFilename{ .name = "my-entry-1", .tries_left = 5, .tries_done = 0 },
         EntryFilename.parse("my-entry-1+5-0.conf"),
     );
 
     try std.testing.expectEqualDeep(
-        EntryFilename{ .name = "my-entry-2", .tries_done = 3, .tries_left = 1 },
+        EntryFilename{ .name = "my-entry-2", .tries_left = 3, .tries_done = 1 },
         EntryFilename.parse("my-entry-2+3-1.conf"),
     );
 
     try std.testing.expectEqualDeep(
-        EntryFilename{ .name = "my-entry-3", .tries_done = 2 },
+        EntryFilename{ .name = "my-entry-3", .tries_left = 2 },
         EntryFilename.parse("my-entry-3+2.conf"),
     );
+}
+
+test "entry filename marshalling" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    {
+        var entry = EntryFilename{
+            .name = "foo",
+            .tries_left = null,
+            .tries_done = null,
+        };
+        try std.testing.expectEqualStrings(
+            entry.toFilename(arena.allocator()) catch unreachable,
+            "foo.conf",
+        );
+    }
+
+    {
+        var entry = EntryFilename{
+            .name = "foo",
+            .tries_left = 1,
+            .tries_done = null,
+        };
+        try std.testing.expectEqualStrings(
+            entry.toFilename(arena.allocator()) catch unreachable,
+            "foo+1.conf",
+        );
+    }
+
+    {
+        var entry = EntryFilename{
+            .name = "foo",
+            .tries_left = 1,
+            .tries_done = 2,
+        };
+        try std.testing.expectEqualStrings(
+            entry.toFilename(arena.allocator()) catch unreachable,
+            "foo+1-2.conf",
+        );
+    }
 }
 
 const ConsoleMode = enum {

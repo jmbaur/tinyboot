@@ -14,7 +14,7 @@ const Action = enum {
     bad,
     status,
 
-    pub fn from_str(str: []const u8) !@This() {
+    pub fn fromStr(str: []const u8) !@This() {
         if (std.mem.eql(u8, str, "good")) {
             return .good;
         } else if (std.mem.eql(u8, str, "bad")) {
@@ -27,7 +27,7 @@ const Action = enum {
     }
 };
 
-fn mark_as_good(
+fn markAsGood(
     allocator: std.mem.Allocator,
     parent_path: []const u8,
     original_entry_filename: []const u8,
@@ -56,7 +56,7 @@ fn mark_as_good(
     }
 }
 
-fn mark_as_bad(
+fn markAsBad(
     allocator: std.mem.Allocator,
     parent_path: []const u8,
     original_entry_filename: []const u8,
@@ -91,7 +91,7 @@ fn mark_as_bad(
     try std.fs.renameAbsolute(orig_fullpath, new_fullpath);
 }
 
-fn print_status(
+fn printStatus(
     allocator: std.mem.Allocator,
     parent_path: []const u8,
     original_entry_filename: []const u8,
@@ -119,7 +119,7 @@ fn print_status(
     }
 }
 
-fn find_entry(
+fn findEntry(
     allocator: std.mem.Allocator,
     efi_sys_mount_point: []const u8,
     entry_name: []const u8,
@@ -152,9 +152,9 @@ fn find_entry(
 
         if (std.mem.eql(u8, bls_entry.name, entry_name)) {
             switch (action) {
-                .good => try mark_as_good(allocator, entries_path, entry.name, bls_entry),
-                .bad => try mark_as_bad(allocator, entries_path, entry.name, bls_entry),
-                .status => try print_status(allocator, entries_path, entry.name, bls_entry),
+                .good => try markAsGood(allocator, entries_path, entry.name, bls_entry),
+                .bad => try markAsBad(allocator, entries_path, entry.name, bls_entry),
+                .status => try printStatus(allocator, entries_path, entry.name, bls_entry),
             }
         }
     }
@@ -171,7 +171,7 @@ pub fn main() !void {
     _ = argv0;
 
     const efi_sys_mount_point = args.next() orelse return Error.MissingEfiSysMountPoint;
-    const action = try Action.from_str(args.next() orelse return Error.MissingAction);
+    const action = try Action.fromStr(args.next() orelse return Error.MissingAction);
 
     const kernel_cmdline_file = try std.fs.openFileAbsolute("/proc/cmdline", .{});
     defer kernel_cmdline_file.close();
@@ -191,7 +191,7 @@ pub fn main() !void {
         return Error.MissingBlsEntry;
     };
 
-    try find_entry(
+    try findEntry(
         allocator,
         efi_sys_mount_point,
         tboot_bls_entry,

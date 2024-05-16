@@ -144,19 +144,19 @@ pub fn copy(
 }
 
 test "no files" {
-    try copy_test("", &[_][]const u8{}, &[_][]const u8{});
+    try copyTest("", &[_][]const u8{}, &[_][]const u8{});
 }
 
 test "single file" {
-    try copy_test("build.zig", &[_][]const u8{"build.zig"}, &[_][]const u8{"build.zig"});
+    try copyTest("build.zig", &[_][]const u8{"build.zig"}, &[_][]const u8{"build.zig"});
 }
 
 test "single file in dir" {
-    try copy_test("src/main.zig", &[_][]const u8{"src/main.zig"}, &[_][]const u8{"src/main.zig"});
+    try copyTest("src/main.zig", &[_][]const u8{"src/main.zig"}, &[_][]const u8{"src/main.zig"});
 }
 
 test "glob all in root" {
-    try copy_test(
+    try copyTest(
         "*",
         &[_][]const u8{ "something.zig", "file", "src/main.zig" },
         &[_][]const u8{ "something.zig", "file" },
@@ -164,7 +164,7 @@ test "glob all in root" {
 }
 
 test "glob single file with extension" {
-    try copy_test(
+    try copyTest(
         "*.zig",
         &[_][]const u8{ "build.zig", "README.md", "src/main.zig" },
         &[_][]const u8{"build.zig"},
@@ -172,7 +172,7 @@ test "glob single file with extension" {
 }
 
 test "glob multiple files with extension" {
-    try copy_test(
+    try copyTest(
         "*.txt",
         &[_][]const u8{ "build.txt", "file.txt", "src/main.zig" },
         &[_][]const u8{ "build.txt", "file.txt" },
@@ -180,7 +180,7 @@ test "glob multiple files with extension" {
 }
 
 test "glob single file with prefix" {
-    try copy_test(
+    try copyTest(
         "build*",
         &[_][]const u8{ "build.zig", "file.zig", "src/main.zig" },
         &[_][]const u8{"build.zig"},
@@ -188,7 +188,7 @@ test "glob single file with prefix" {
 }
 
 test "glob multiple files with prefix" {
-    try copy_test(
+    try copyTest(
         "ha*",
         &[_][]const u8{ "haha", "hahahaha.zig", "file", "src/hain.zig" },
         &[_][]const u8{ "haha", "hahahaha.zig" },
@@ -196,7 +196,7 @@ test "glob multiple files with prefix" {
 }
 
 test "glob all files in dir" {
-    try copy_test(
+    try copyTest(
         "src/*",
         &[_][]const u8{ "src/main.zig", "src/file.txt", "README.md", "build.zig" },
         &[_][]const u8{ "src/main.zig", "src/file.txt" },
@@ -204,7 +204,7 @@ test "glob all files in dir" {
 }
 
 test "glob files with extension in dir" {
-    try copy_test(
+    try copyTest(
         "src/*.zig",
         &[_][]const u8{ "src/main.zig", "src/lib.zig", "src/file.txt", "README.md", "build.zig" },
         &[_][]const u8{ "src/main.zig", "src/lib.zig" },
@@ -212,7 +212,7 @@ test "glob files with extension in dir" {
 }
 
 test "glob single file in multiple dirs" {
-    try copy_test(
+    try copyTest(
         "*/test.zig",
         &[_][]const u8{ "src/test.zig", "something/test.zig", "README.md", "src/a_file" },
         &[_][]const u8{ "src/test.zig", "something/test.zig" },
@@ -220,7 +220,7 @@ test "glob single file in multiple dirs" {
 }
 
 test "glob beginning and end of a file" {
-    try copy_test(
+    try copyTest(
         "*hello*",
         &[_][]const u8{ "this_is_hello_file", "hello_world", "hello", "greeting_hello", "file" },
         &[_][]const u8{ "this_is_hello_file", "hello_world", "hello", "greeting_hello" },
@@ -228,7 +228,7 @@ test "glob beginning and end of a file" {
 }
 
 test "glob beginning and middle" {
-    try copy_test(
+    try copyTest(
         "*hello*file",
         &[_][]const u8{ "hellofile", "hello_world_file", "ahelloafile", "greeting_hellofile", "file" },
         &[_][]const u8{ "hellofile", "hello_world_file", "ahelloafile", "greeting_hellofile" },
@@ -236,25 +236,25 @@ test "glob beginning and middle" {
 }
 
 test "glob extension in multiple dirs" {
-    try copy_test(
+    try copyTest(
         "*/*.zig",
         &[_][]const u8{ "src/main.zig", "something/lib.zig", "README.md", "src/a_file" },
         &[_][]const u8{ "src/main.zig", "something/lib.zig" },
     );
 }
 
-fn copy_test(pattern: []const u8, fs: []const []const u8, expected: []const []const u8) !void {
-    var dir = try setup_fs(fs);
+fn copyTest(pattern: []const u8, fs: []const []const u8, expected: []const []const u8) !void {
+    var dir = try setupFs(fs);
     defer dir.cleanup();
 
     var dst = std.testing.tmpDir(open_flags);
     defer dst.cleanup();
 
     try copy(std.testing.allocator, pattern, dir.iterable_dir, dst.dir);
-    try expect_fs(dst.dir, expected);
+    try expectFs(dst.dir, expected);
 }
 
-fn setup_fs(files: []const []const u8) !std.testing.TmpIterableDir {
+fn setupFs(files: []const []const u8) !std.testing.TmpIterableDir {
     var root = std.testing.tmpIterableDir(open_flags);
     errdefer root.cleanup();
 
@@ -278,7 +278,7 @@ fn setup_fs(files: []const []const u8) !std.testing.TmpIterableDir {
     return root;
 }
 
-fn expect_fs(root: std.fs.Dir, expected: []const []const u8) !void {
+fn expectFs(root: std.fs.Dir, expected: []const []const u8) !void {
     for (expected) |subpath| try root.access(subpath, .{ .mode = .read_only });
 }
 

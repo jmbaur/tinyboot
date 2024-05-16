@@ -16,10 +16,10 @@ pub const ClientMsg = message(union(enum) {
     /// Request to the server that the system should be rebooted.
     Reboot,
 
-    /// Request to the server that this boot entry should be booted.
-    Boot: BootEntry,
+    /// Request to the server that the system should be kexec'ed.
+    Kexec,
 
-    /// Empty message
+    /// Empty message used to indicate user presence.
     Empty,
 });
 

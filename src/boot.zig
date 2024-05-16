@@ -10,21 +10,21 @@ const KEXEC_LOADED = "/sys/kernel/kexec_loaded";
 
 // In eventfd, zero has special meaning (notably it will block reads), so we
 // ensure our enum values aren't zero.
-fn enum_to_eventfd(_enum: anytype) u64 {
+fn enumToEventfd(_enum: anytype) u64 {
     return @as(u64, @intFromEnum(_enum)) + 1;
 }
 
-fn eventfd_read(fd: posix.fd_t) !u64 {
+fn eventfdRead(fd: posix.fd_t) !u64 {
     var ev: u64 = 0;
     _ = try posix.read(fd, std.mem.asBytes(&ev));
     return ev;
 }
 
-fn eventfd_write(fd: posix.fd_t, val: u64) !void {
+fn eventfdWrite(fd: posix.fd_t, val: u64) !void {
     _ = try posix.write(fd, std.mem.asBytes(&val));
 }
 
-fn kexec_is_loaded(f: std.fs.File) bool {
+fn kexecIsLoaded(f: std.fs.File) bool {
     f.seekTo(0) catch return false;
 
     var is_loaded: u8 = 0;
@@ -37,79 +37,16 @@ fn kexec_is_loaded(f: std.fs.File) bool {
     return is_loaded == '1';
 }
 
-pub const BootEntry = union(enum) {
-    /// A directory that contains up to three files:
-    /// - <dir>/linux
-    /// - <dir>/initrd        (optional)
-    /// - <dir>/kernel_params (optional)
-    ///
-    /// The directory will be cleaned up after usage. This is helpful to use
-    /// when the boot files are created dynamically during boot. Do _not_ use
-    /// this if boot files are coming from disk, use `BootEntry.Disk` instead.
-    Dir: []const u8,
-
-    /// A set of boot files. If these files are created dynamically during boot
-    /// (e.g. loading over xmodem/network), use `BootEntry.Dir` instead.
-    Disk: struct {
-        /// Path to the linux kernel image.
-        linux: []const u8,
-        /// Optional path to the initrd.
-        initrd: ?[]const u8 = null,
-        /// Optional kernel parameters.
-        cmdline: ?[]const u8 = null,
-    },
+pub const BootEntry = struct {
+    /// Will be passed to entryLoaded() after a successful kexec load.
+    context: *anyopaque,
+    /// Path to the linux kernel image.
+    linux: []const u8,
+    /// Optional path to the initrd.
+    initrd: ?[]const u8 = null,
+    /// Optional kernel parameters.
+    cmdline: ?[]const u8 = null,
 };
-
-pub fn kexecLoadFromDir(allocator: std.mem.Allocator, dir: []const u8) !void {
-    var d = try std.fs.cwd().openDir(dir, .{});
-    defer {
-        std.log.info("cleaning up {s}", .{dir});
-        std.fs.cwd().deleteTree(dir) catch {};
-        d.close();
-    }
-
-    const linux = try d.realpathAlloc(allocator, "linux");
-    defer allocator.free(linux);
-
-    const initrd: ?[]const u8 = if (d.realpathAlloc(
-        allocator,
-        "initrd",
-    )) |initrd| initrd else |err| switch (err) {
-        error.FileNotFound => null,
-        else => return err,
-    };
-
-    defer {
-        if (initrd) |_initrd| {
-            allocator.free(_initrd);
-        }
-    }
-
-    const cmdline: ?[]const u8 = b: {
-        if (d.realpathAlloc(
-            allocator,
-            "kernel_params",
-        )) |params_file| {
-            defer allocator.free(params_file);
-            break :b try std.fs.cwd().readFileAlloc(
-                allocator,
-                params_file,
-                linux_headers.COMMAND_LINE_SIZE,
-            );
-        } else |err| switch (err) {
-            error.FileNotFound => break :b null,
-            else => return err,
-        }
-    };
-
-    defer {
-        if (cmdline) |_cmdline| {
-            allocator.free(_cmdline);
-        }
-    }
-
-    return kexecLoad(allocator, linux, initrd, cmdline);
-}
 
 pub fn kexecLoad(
     allocator: std.mem.Allocator,
@@ -177,7 +114,7 @@ pub fn kexecLoad(
     var i: u8 = 10;
     var f = try std.fs.cwd().openFile(KEXEC_LOADED, .{});
     defer f.close();
-    while (!kexec_is_loaded(f) and i > 0) : (i -= 1) {
+    while (!kexecIsLoaded(f) and i > 0) : (i -= 1) {
         std.time.sleep(100 * std.time.ns_per_ms);
     }
 
@@ -214,6 +151,15 @@ pub const BootLoader = union(enum) {
         };
     }
 
+    /// An infallible function that provides a way to hook into the stage of
+    /// the boot process after a successful kexec load has been performed
+    /// and before the reboot occurs.
+    pub fn entryLoaded(self: @This(), ctx: *anyopaque) void {
+        switch (self) {
+            inline else => |boot_loader| boot_loader.entryLoaded(ctx),
+        }
+    }
+
     pub fn teardown(self: @This()) !void {
         std.log.debug("boot loader teardown", .{});
 
@@ -223,24 +169,24 @@ pub const BootLoader = union(enum) {
     }
 };
 
-fn need_to_stop(stop_fd: posix.fd_t) !bool {
+fn needToStop(stop_fd: posix.fd_t) !bool {
     defer {
-        eventfd_write(stop_fd, enum_to_eventfd(Autoboot.StopStatus.keep_going)) catch {};
+        eventfdWrite(stop_fd, enumToEventfd(Autoboot.StopStatus.keep_going)) catch {};
     }
-    return try eventfd_read(stop_fd) == enum_to_eventfd(Autoboot.StopStatus.stop);
+    return try eventfdRead(stop_fd) == enumToEventfd(Autoboot.StopStatus.stop);
 }
 
-fn autoboot_wrapper(ready_fd: posix.fd_t, stop_fd: posix.fd_t) void {
+fn autobootWrapper(ready_fd: posix.fd_t, stop_fd: posix.fd_t) void {
     const success = autoboot(stop_fd) catch |err| b: {
         std.log.err("autoboot failed: {}", .{err});
         break :b false;
     };
 
     if (success) {
-        eventfd_write(ready_fd, enum_to_eventfd(Autoboot.ReadyStatus.ready)) catch {};
+        eventfdWrite(ready_fd, enumToEventfd(Autoboot.ReadyStatus.ready)) catch {};
     } else {
         // We must write something to ready_fd to ensure reads don't block.
-        eventfd_write(ready_fd, enum_to_eventfd(Autoboot.ReadyStatus.not_ready)) catch {};
+        eventfdWrite(ready_fd, enumToEventfd(Autoboot.ReadyStatus.not_ready)) catch {};
     }
 }
 
@@ -261,12 +207,12 @@ fn autoboot(stop_fd: posix.fd_t) !bool {
     }
 
     try boot_loader.setup();
-    if (try need_to_stop(stop_fd)) {
+    if (try needToStop(stop_fd)) {
         return false;
     }
 
     const boot_devices = try boot_loader.probe(arena.allocator());
-    if (try need_to_stop(stop_fd)) {
+    if (try needToStop(stop_fd)) {
         return false;
     }
 
@@ -276,21 +222,19 @@ fn autoboot(stop_fd: posix.fd_t) !bool {
         while (countdown > 0) : (countdown -= 1) {
             std.log.info("booting in {} second(s)", .{countdown});
             std.time.sleep(std.time.ns_per_s);
-            if (try need_to_stop(stop_fd)) {
+            if (try needToStop(stop_fd)) {
                 return false;
             }
         }
 
-        for (dev.entries) |boot_entry| {
-            if (switch (boot_entry) {
-                .Dir => |dir| kexecLoadFromDir(arena.allocator(), dir),
-                .Disk => |entry| kexecLoad(
-                    arena.allocator(),
-                    entry.linux,
-                    entry.initrd,
-                    entry.cmdline,
-                ),
-            }) {
+        for (dev.entries) |entry| {
+            if (kexecLoad(
+                arena.allocator(),
+                entry.linux,
+                entry.initrd,
+                entry.cmdline,
+            )) {
+                boot_loader.entryLoaded(entry.context);
                 return true;
             } else |err| {
                 std.log.err("failed to load boot entry: {}", .{err});
@@ -321,7 +265,7 @@ pub const Autoboot = struct {
             .ready_fd = try posix.eventfd(0, 0),
             // Ensure that stop_fd can be read from right away without
             // blocking.
-            .stop_fd = try posix.eventfd(@intCast(enum_to_eventfd(StopStatus.keep_going)), 0),
+            .stop_fd = try posix.eventfd(@intCast(enumToEventfd(StopStatus.keep_going)), 0),
             .thread = null,
         };
     }
@@ -336,19 +280,19 @@ pub const Autoboot = struct {
     }
 
     pub fn start(self: *@This()) !void {
-        self.thread = try std.Thread.spawn(.{}, autoboot_wrapper, .{ self.ready_fd, self.stop_fd });
+        self.thread = try std.Thread.spawn(.{}, autobootWrapper, .{ self.ready_fd, self.stop_fd });
     }
 
     pub fn stop(self: *@This()) !void {
         if (self.thread) |thread| {
-            try eventfd_write(self.stop_fd, enum_to_eventfd(StopStatus.stop));
+            try eventfdWrite(self.stop_fd, enumToEventfd(StopStatus.stop));
             thread.join();
         }
     }
 
     pub fn finish(self: *@This()) !?posix.RebootCommand {
-        const rc = try eventfd_read(self.ready_fd);
-        if (rc == enum_to_eventfd(ReadyStatus.ready)) {
+        const rc = try eventfdRead(self.ready_fd);
+        if (rc == enumToEventfd(ReadyStatus.ready)) {
             return posix.RebootCommand.KEXEC;
         } else {
             return null;

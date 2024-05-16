@@ -2,11 +2,8 @@ const std = @import("std");
 const posix = std.posix;
 const system = std.posix.system;
 
-const BootEntry = @import("./boot.zig").BootEntry;
 const ClientMsg = @import("./message.zig").ClientMsg;
 const ServerMsg = @import("./message.zig").ServerMsg;
-const kexecLoad = @import("./boot.zig").kexecLoad;
-const kexecLoadFromDir = @import("./boot.zig").kexecLoadFromDir;
 const readMessage = @import("./message.zig").readMessage;
 const writeMessage = @import("./message.zig").writeMessage;
 
@@ -29,7 +26,7 @@ pub const Server = struct {
         };
     }
 
-    pub fn register_self(self: *@This(), epoll_fd: posix.fd_t) !void {
+    pub fn registerSelf(self: *@This(), epoll_fd: posix.fd_t) !void {
         try posix.epoll_ctl(
             epoll_fd,
             system.EPOLL.CTL_ADD,
@@ -41,7 +38,7 @@ pub const Server = struct {
         );
     }
 
-    pub fn register_client(self: *@This(), epoll_fd: posix.fd_t, client_stream: std.net.Stream) !void {
+    pub fn registerClient(self: *@This(), epoll_fd: posix.fd_t, client_stream: std.net.Stream) !void {
         try self.clients.append(client_stream);
 
         try posix.epoll_ctl(
@@ -55,13 +52,13 @@ pub const Server = struct {
         );
     }
 
-    pub fn force_shell(self: *@This()) void {
+    pub fn forceShell(self: *@This()) void {
         for (self.clients.items) |client| {
             writeMessage(ServerMsg{ .data = .ForceShell }, client.writer()) catch {};
         }
     }
 
-    pub fn handle_new_event(self: *@This(), event: system.epoll_event) !?posix.RebootCommand {
+    pub fn handleNewEvent(self: *@This(), event: system.epoll_event) !?posix.RebootCommand {
         const client = b: {
             for (self.clients.items) |client| {
                 if (event.data.fd == client.handle) {
@@ -79,24 +76,13 @@ pub const Server = struct {
         defer msg.deinit();
 
         switch (msg.value.data) {
-            .Empty => return null,
+            .Empty => {
+                self.forceShell();
+                return null;
+            },
             .Reboot => return posix.RebootCommand.RESTART,
             .Poweroff => return posix.RebootCommand.POWER_OFF,
-            .Boot => |boot_entry| {
-                const ret = switch (boot_entry) {
-                    .Disk => |entry| kexecLoad(self.allocator, entry.linux, entry.initrd, entry.cmdline),
-                    .Dir => |dir| kexecLoadFromDir(self.allocator, dir),
-                };
-
-                if (ret) {
-                    return posix.RebootCommand.KEXEC;
-                } else |err| {
-                    std.log.err("failed to load image: {}", .{err});
-                    return null;
-                }
-
-                return posix.RebootCommand.KEXEC;
-            },
+            .Kexec => return posix.RebootCommand.KEXEC,
         }
     }
 
