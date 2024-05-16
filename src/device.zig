@@ -178,7 +178,7 @@ pub const DeviceWatcher = struct {
         try posix.epoll_ctl(epoll_fd, system.EPOLL.CTL_ADD, self.settle_fd, &timer_event);
     }
 
-    pub fn start_settle_timer(self: *@This()) !void {
+    pub fn startSettleTimer(self: *@This()) !void {
         const timerspec = system.itimerspec{
             // oneshot
             .it_interval = .{ .tv_sec = 0, .tv_nsec = 0 },
@@ -188,11 +188,11 @@ pub const DeviceWatcher = struct {
         try posix.timerfd_settime(self.settle_fd, .{}, &timerspec, null);
     }
 
-    pub fn handle_new_event(self: *@This()) !void {
+    pub fn handleNewEvent(self: *@This()) !void {
         defer _ = self.arena.reset(.retain_capacity);
 
         // reset the timer
-        try self.start_settle_timer();
+        try self.startSettleTimer();
 
         var recv_bytes: [USER_RCVBUF]u8 = undefined;
 

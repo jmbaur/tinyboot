@@ -34,7 +34,7 @@ const CpioEntryType = enum {
     Directory,
     File,
 
-    fn to_mode(self: @This()) u32 {
+    fn toMode(self: @This()) u32 {
         return @as(u32, switch (self) {
             .Directory => std.posix.S.IFDIR,
             .File => std.posix.S.IFREG,
@@ -83,7 +83,7 @@ pub const CpioArchive = struct {
             }
         };
 
-        const mode = entry_type.to_mode() | perms;
+        const mode = entry_type.toMode() | perms;
 
         // add null terminator
         const filepath = path ++ [_]u8{0};

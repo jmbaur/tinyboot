@@ -7,7 +7,7 @@ const GuidError = error{
 };
 
 /// expects a guid string formatted like so: 00000000-0000-0000-0000-000000000000
-fn guid_from_string(str: []const u8) !std.os.uefi.Guid {
+fn guidFromString(str: []const u8) !std.os.uefi.Guid {
     var split = std.mem.splitScalar(u8, str, '-');
 
     const first_section = split.next().?;
@@ -354,7 +354,7 @@ const known_partition_guids = b: {
 
     var result: []const PairMachine = &.{};
     for (known) |part| {
-        const guid = guid_from_string(part.guid) catch @compileError(
+        const guid = guidFromString(part.guid) catch @compileError(
             std.fmt.comptimePrint("invalid guid \"{s}\"", .{part.guid}),
         );
         result = result ++ [_]PairMachine{.{ .type = part.type, .guid = guid }};
@@ -647,7 +647,7 @@ pub const GptPartitionType = enum {
     FuchsiaLegacyEmmcBoot1,
     FuchsiaLegacyEmmcBoot2,
 
-    pub fn from_guid(guid: std.os.uefi.Guid) ?@This() {
+    pub fn fromGuid(guid: std.os.uefi.Guid) ?@This() {
         inline for (known_partition_guids) |part| {
             if (part.guid.eql(guid)) {
                 return part.type;
@@ -674,9 +674,9 @@ const GptPartitionRecord = extern struct {
         return try allocator.dupe(u8, std.mem.trimRight(u8, name_utf8_bytes[0..end], &.{0}));
     }
 
-    pub fn part_type(self: *const @This()) ?GptPartitionType {
+    pub fn partType(self: *const @This()) ?GptPartitionType {
         const guid: std.os.uefi.Guid = @bitCast(self.partition_type);
-        return GptPartitionType.from_guid(guid);
+        return GptPartitionType.fromGuid(guid);
     }
 };
 
@@ -797,7 +797,7 @@ pub const Gpt = struct {
 
             // UnusedEntry is an indication that there are no longer any valid
             // partitions at or beyond our current position.
-            if (part.part_type()) |part_type| {
+            if (part.partType()) |part_type| {
                 if (part_type == .UnusedEntry) {
                     break;
                 }
@@ -811,13 +811,13 @@ pub const Gpt = struct {
 };
 
 test "guid parsing" {
-    const got_guid = try guid_from_string("C12A7328-F81F-11D2-BA4B-00A0C93EC93B");
+    const got_guid = try guidFromString("C12A7328-F81F-11D2-BA4B-00A0C93EC93B");
     const bytes = [_]u8{ 0x28, 0x73, 0x2a, 0xc1, 0x1f, 0xf8, 0xd2, 0x11, 0xba, 0x4b, 0x00, 0xa0, 0xc9, 0x3e, 0xc9, 0x3b };
     const expected_guid: std.os.uefi.Guid = @bitCast(bytes);
 
     try std.testing.expect(expected_guid.eql(got_guid));
 
-    const partition_type = GptPartitionType.from_guid(got_guid).?;
+    const partition_type = GptPartitionType.fromGuid(got_guid).?;
     try std.testing.expectEqual(GptPartitionType.EfiSystem, partition_type);
 }
 
@@ -942,7 +942,7 @@ test "gpt parsing" {
 
     try std.testing.expectEqual(
         GptPartitionType.EfiSystem,
-        partitions[0].part_type() orelse @panic("couldn't get partition type"),
+        partitions[0].partType() orelse @panic("couldn't get partition type"),
     );
 
     const name2 = try partitions[1].name(std.testing.allocator);
@@ -951,7 +951,7 @@ test "gpt parsing" {
 
     try std.testing.expectEqual(
         GptPartitionType.LinuxFilesystemData,
-        partitions[1].part_type() orelse @panic("couldn't get partition type"),
+        partitions[1].partType() orelse @panic("couldn't get partition type"),
     );
 }
 
@@ -960,7 +960,7 @@ pub const MbrPartitionType = enum {
     ProtectedMbr,
     LinuxExtendedBoot,
 
-    pub fn from_value(val: u8) ?@This() {
+    pub fn fromValue(val: u8) ?@This() {
         return switch (val) {
             0x06 => .Fat16,
             0xea => .LinuxExtendedBoot,
@@ -984,11 +984,11 @@ const MbrPartitionRecord = extern struct {
 
     const bootable_flag = 0x80;
 
-    pub fn is_bootable(self: *const @This()) bool {
+    pub fn isBootable(self: *const @This()) bool {
         return self.boot_indicator == bootable_flag;
     }
 
-    pub fn part_type(self: *const @This()) u8 {
+    pub fn partType(self: *const @This()) u8 {
         return self.os_type;
     }
 };
@@ -1093,6 +1093,6 @@ test "mbr parsing" {
 
     try std.testing.expectEqual(@as(u32, 0xbe1afdfa), disk.identifier());
     const partitions = disk.partitions();
-    try std.testing.expect(partitions[0].is_bootable());
-    try std.testing.expectEqual(@as(u8, 0x06), partitions[0].part_type());
+    try std.testing.expect(partitions[0].isBootable());
+    try std.testing.expectEqual(@as(u8, 0x06), partitions[0].partType());
 }

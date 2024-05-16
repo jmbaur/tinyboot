@@ -52,7 +52,7 @@ pub const KEXEC_KERNEL_CHECK_APPRAISE = withNewline("appraise func=KEXEC_KERNEL_
 
 pub const KEXEC_INITRAMFS_CHECK_APPRAISE = withNewline("appraise func=KEXEC_INITRAMFS_CHECK appraise_type=imasig|modsig");
 
-pub fn install_ima_policy(allocator: std.mem.Allocator, policy_entries: []const []const u8) !void {
+fn installImaPolicy(allocator: std.mem.Allocator, policy_entries: []const []const u8) !void {
     const policy = try std.mem.join(allocator, "", policy_entries);
     defer allocator.free(policy);
 
@@ -68,7 +68,7 @@ const Error = error{
     KeyNotFound,
 };
 
-pub fn load_verification_key() !void {
+fn loadVerificationKey() !void {
     // TODO
     return Error.KeyNotFound;
 }
@@ -78,7 +78,7 @@ pub fn load_verification_key() !void {
 // with IMA since we basically get it for free; measurements are held in memory
 // and persisted across kexecs, and the measurements are extended to the
 // system's TPM if one is available.
-pub fn initialize_security(allocator: std.mem.Allocator) !void {
+pub fn initializeSecurity(allocator: std.mem.Allocator) !void {
     var ima_policy = std.ArrayList([]const u8).init(allocator);
     defer ima_policy.deinit();
 
@@ -103,7 +103,7 @@ pub fn initialize_security(allocator: std.mem.Allocator) !void {
     });
 
     var do_verified_boot = true;
-    load_verification_key() catch |err| {
+    loadVerificationKey() catch |err| {
         std.log.warn("failed to load verification key, cannot perform boot verification: {}", .{err});
         do_verified_boot = false;
     };
@@ -117,7 +117,7 @@ pub fn initialize_security(allocator: std.mem.Allocator) !void {
         std.log.info("boot verification is enabled", .{});
     }
 
-    try install_ima_policy(allocator, ima_policy.items);
+    try installImaPolicy(allocator, ima_policy.items);
 }
 
 // Each line in an IMA policy, including the last line, needs to be terminated

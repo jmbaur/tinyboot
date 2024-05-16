@@ -29,7 +29,7 @@ const XmodemChunk = extern struct {
     crc: u16 align(1) = 0,
 };
 
-pub fn xmodem_send(fd: posix.fd_t, filename: []const u8) !void {
+pub fn xmodemSend(fd: posix.fd_t, filename: []const u8) !void {
     var file = try std.fs.cwd().openFile(filename, .{});
     defer file.close();
 
@@ -176,7 +176,7 @@ pub fn xmodem_send(fd: posix.fd_t, filename: []const u8) !void {
     std.debug.print("\ntoo many errors encountered, sending aborted\n", .{});
 }
 
-pub fn xmodem_recv(
+pub fn xmodemRecv(
     allocator: std.mem.Allocator,
     fd: posix.fd_t,
 ) ![]u8 {
@@ -333,11 +333,13 @@ pub fn main() !void {
     const filepath = args.next() orelse usage(prog_name);
 
     if (std.mem.eql(u8, action, "send")) {
-        try setupTty(serial.handle, .file_transfer_send);
+        var tty = try setupTty(serial.handle, .file_transfer_send);
+        defer tty.reset();
 
-        try xmodem_send(serial.handle, filepath);
+        try xmodemSend(serial.handle, filepath);
     } else if (std.mem.eql(u8, action, "recv")) {
-        try setupTty(serial.handle, .file_transfer_recv);
+        var tty = try setupTty(serial.handle, .file_transfer_recv);
+        defer tty.reset();
 
         var gpa = std.heap.GeneralPurposeAllocator(.{ .safety = true }){};
         defer _ = gpa.deinit();
@@ -347,7 +349,7 @@ pub fn main() !void {
         var file = try std.fs.cwd().createFile(filepath, .{});
         defer file.close();
 
-        const file_bytes = try xmodem_recv(allocator, serial.handle);
+        const file_bytes = try xmodemRecv(allocator, serial.handle);
         defer allocator.free(file_bytes);
 
         try file.writeAll(file_bytes);

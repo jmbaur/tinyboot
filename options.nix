@@ -22,6 +22,7 @@ let
     ln -sfn /proc/self/fd/0 /dev/stdin
     ln -sfn /proc/self/fd/1 /dev/stdout
     ln -sfn /proc/self/fd/2 /dev/stderr
+    touch /etc/fstab
   '';
   testInittab = pkgs.writeText "inittab" ''
     ::sysinit:/etc/init.d/rcS
@@ -142,7 +143,7 @@ in
     linux = {
       package = mkOption {
         type = types.package;
-        default = pkgs.linux_latest;
+        default = pkgs.linux_6_8;
       };
       consoles = mkOption {
         type = types.listOf types.str;
