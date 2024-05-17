@@ -8,6 +8,8 @@ const linux_headers = @import("linux_headers");
 const BootEntry = @import("./boot.zig").BootEntry;
 const ClientMsg = @import("./message.zig").ClientMsg;
 const ServerMsg = @import("./message.zig").ServerMsg;
+const Xmodem = @import("./boot/xmodem.zig").Xmodem;
+const BootLoader = @import("./boot.zig").BootLoader;
 const kernelLogs = @import("./system.zig").kernelLogs;
 const kexecLoad = @import("./boot.zig").kexecLoad;
 const readMessage = @import("./message.zig").readMessage;
@@ -642,65 +644,31 @@ pub const Command = struct {
         ;
 
         fn run(c: *Command, args: *ArgsIterator) !?ClientMsg {
-            var tmp_dir = try tmp.tmpDir(.{});
-            defer tmp_dir.cleanup();
+            var xmodem = try Xmodem.init(c.allocator, .{
+                .tty_name = "client-stdin",
+                .tty_fd = posix.STDIN_FILENO,
+                .skip_initrd = if (args.next()) |next|
+                    std.mem.eql(u8, next, "-n")
+                else
+                    false,
+            });
+            var boot_loader = BootLoader{ .xmodem = &xmodem };
+            defer boot_loader.teardown() catch {};
 
-            var tty = try setupTty(posix.STDIN_FILENO, .file_transfer_recv);
-            defer tty.reset();
-
-            const kernel_bytes = try xmodemRecv(c.allocator, posix.STDIN_FILENO);
-            // Free up the kernel bytes since this is large.
-            // TODO(jared): Make xmodemRecv accept a std.io.Writer.
-            defer c.allocator.free(kernel_bytes);
-
-            var kernel = try tmp_dir.dir.createFile("linux", .{});
-            defer kernel.close();
-            try kernel.writeAll(kernel_bytes);
-
-            const skip_initrd = if (args.next()) |next| std.mem.eql(u8, next, "-n") else false;
-
-            if (!skip_initrd) {
-                const initrd_bytes = try xmodemRecv(c.allocator, posix.STDIN_FILENO);
-                // Free up the initrd bytes since this is large.
-                // TODO(jared): Make xmodemRecv accept a std.io.Writer.
-                defer c.allocator.free(initrd_bytes);
-
-                var initrd = try tmp_dir.dir.createFile("initrd", .{});
-                defer initrd.close();
-                try initrd.writeAll(initrd_bytes);
-            }
-
-            const kernel_params_bytes = try xmodemRecv(c.allocator, posix.STDIN_FILENO);
-            defer c.allocator.free(kernel_params_bytes);
-
-            // trim out the xmodem filler character (0xff) and newlines (0x0a)
-            const kernel_params = std.mem.trimRight(
-                u8,
-                kernel_params_bytes,
-                &.{ 0xff, 0x0a },
-            );
-
-            const linux = try tmp_dir.dir.realpathAlloc(c.allocator, "linux");
-            defer c.allocator.free(linux);
-
-            const initrd = if (!skip_initrd) try tmp_dir.dir.realpathAlloc(c.allocator, "initrd") else null;
-            defer {
-                if (initrd) |_initrd| {
-                    c.allocator.free(_initrd);
+            try boot_loader.setup();
+            const devices = try boot_loader.probe(c.allocator);
+            for (devices) |device| {
+                for (device.entries) |entry| {
+                    if (kexecLoad(c.allocator, entry.linux, entry.initrd, entry.cmdline)) {
+                        boot_loader.entryLoaded(entry.context);
+                        return .{ .data = .Kexec };
+                    } else |err| {
+                        std.log.err("failed to load kernel: {}", .{err});
+                    }
                 }
             }
 
-            if (kexecLoad(
-                c.allocator,
-                linux,
-                initrd,
-                if (kernel_params.len == 0) null else kernel_params,
-            )) {
-                return .{ .data = .Kexec };
-            } else |err| {
-                std.log.err("failed to load boot entry: {}", .{err});
-                return null;
-            }
+            return null;
         }
     };
 };

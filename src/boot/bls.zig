@@ -480,7 +480,7 @@ pub const BootLoaderSpec = struct {
         };
     }
 
-    pub fn _entryLoaded(self: *@This(), ctx: *anyopaque) !void {
+    fn _entryLoaded(self: *@This(), ctx: *anyopaque) !void {
         const context: *EntryContext = @ptrCast(@alignCast(ctx));
 
         const dirname = std.fs.path.dirname(context.full_path) orelse return;

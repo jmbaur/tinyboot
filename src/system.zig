@@ -97,7 +97,7 @@ pub const Tty = struct {
     fd: posix.fd_t,
     original: posix.termios,
 
-    pub fn reset(self: *@This()) void {
+    pub fn reset(self: *const @This()) void {
         // wait until everything is sent
         _ = system.tcdrain(self.fd);
 

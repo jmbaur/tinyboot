@@ -5,13 +5,14 @@ const system = std.posix.system;
 const linux_headers = @import("linux_headers");
 
 const BootLoaderSpec = @import("./boot/bls.zig").BootLoaderSpec;
+const Xmodem = @import("./boot/xmodem.zig").Xmodem;
 
 const KEXEC_LOADED = "/sys/kernel/kexec_loaded";
 
 // In eventfd, zero has special meaning (notably it will block reads), so we
 // ensure our enum values aren't zero.
-fn enumToEventfd(_enum: anytype) u64 {
-    return @as(u64, @intFromEnum(_enum)) + 1;
+fn enumToEventfd(enum_variant: anytype) u64 {
+    return @as(u64, @intFromEnum(enum_variant)) + 1;
 }
 
 fn eventfdRead(fd: posix.fd_t) !u64 {
@@ -131,12 +132,12 @@ pub const BootDevice = struct {
     entries: []const BootEntry,
 };
 
+// TODO(jared): Use vtable setup like std.mem.Allocator.
 pub const BootLoader = union(enum) {
     bls: *BootLoaderSpec,
+    xmodem: *Xmodem,
 
     pub fn setup(self: @This()) !void {
-        std.log.debug("boot loader setup", .{});
-
         switch (self) {
             inline else => |boot_loader| try boot_loader.setup(),
         }
@@ -144,8 +145,6 @@ pub const BootLoader = union(enum) {
 
     /// Caller is responsible for all memory corresponding to return value.
     pub fn probe(self: @This(), allocator: std.mem.Allocator) ![]const BootDevice {
-        std.log.debug("boot loader probe", .{});
-
         return switch (self) {
             inline else => |boot_loader| try boot_loader.probe(allocator),
         };
@@ -161,8 +160,6 @@ pub const BootLoader = union(enum) {
     }
 
     pub fn teardown(self: @This()) !void {
-        std.log.debug("boot loader teardown", .{});
-
         switch (self) {
             inline else => |boot_loader| try boot_loader.teardown(),
         }
