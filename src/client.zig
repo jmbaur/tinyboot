@@ -13,10 +13,7 @@ const BootLoader = @import("./boot.zig").BootLoader;
 const kernelLogs = @import("./system.zig").kernelLogs;
 const kexecLoad = @import("./boot.zig").kexecLoad;
 const readMessage = @import("./message.zig").readMessage;
-const setupTty = @import("./system.zig").setupTty;
-const tmp = @import("./tmp.zig");
 const writeMessage = @import("./message.zig").writeMessage;
-const xmodemRecv = @import("./xmodem.zig").xmodemRecv;
 
 pub const Client = struct {
     waiting_for_response: bool = false,

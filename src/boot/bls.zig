@@ -397,7 +397,6 @@ pub const BootLoaderSpec = struct {
                 }
             }
 
-            std.log.debug("HERE {}", .{mount.dir.fd});
             const context = try final_allocator.create(EntryContext);
             context.* = .{
                 .full_path = try entries_dir.realpathAlloc(final_allocator, dir_entry.name),
@@ -432,10 +431,10 @@ pub const BootLoaderSpec = struct {
         std.log.debug("BLS probe start", .{});
         var devices = std.ArrayList(BootDevice).init(allocator);
 
-        // Internal mounts are ordered before external mounts so they are
-        // prioritized in the boot process.
-        std.log.debug("BLS probe found {} internal device(s)", .{self.internal_mounts.len});
-        for (self.internal_mounts) |mount| {
+        // Mounts of external devices are ordered before external mounts so
+        // they are prioritized in the boot process.
+        std.log.debug("BLS probe found {} external device(s)", .{self.external_mounts.len});
+        for (self.external_mounts) |mount| {
             try devices.append(self.searchForEntries(
                 mount,
                 tmp_arena.allocator(),
@@ -449,8 +448,8 @@ pub const BootLoaderSpec = struct {
             });
         }
 
-        std.log.debug("BLS probe found {} external device(s)", .{self.external_mounts.len});
-        for (self.external_mounts) |mount| {
+        std.log.debug("BLS probe found {} internal device(s)", .{self.internal_mounts.len});
+        for (self.internal_mounts) |mount| {
             try devices.append(self.searchForEntries(
                 mount,
                 tmp_arena.allocator(),

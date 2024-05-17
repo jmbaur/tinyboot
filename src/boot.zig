@@ -58,7 +58,7 @@ pub fn kexecLoad(
     std.log.info("preparing kexec", .{});
     std.log.info("loading linux {s}", .{linux});
     std.log.info("loading initrd {s}", .{initrd orelse "<none>"});
-    std.log.info("loading params {s}", .{params orelse "<none>"});
+    std.log.info("loading params \"{s}\"", .{params orelse "<none>"});
 
     const _linux = try std.fs.cwd().openFile(linux, .{});
     defer _linux.close();

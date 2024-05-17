@@ -177,9 +177,14 @@ pub fn xmodemSend(fd: posix.fd_t, filename: []const u8) !void {
 }
 
 pub fn xmodemRecv(
-    allocator: std.mem.Allocator,
     fd: posix.fd_t,
-) ![]u8 {
+    writer: std.fs.File.Writer,
+    opts: struct {
+        /// Output ASCII-compatible content. Strips trailing xmodem chunk
+        /// padding if true.
+        ascii: bool = false,
+    },
+) !void {
     const epoll_fd = try posix.epoll_create1(linux_headers.EPOLL_CLOEXEC);
     defer posix.close(epoll_fd);
 
@@ -190,9 +195,6 @@ pub fn xmodemRecv(
     try posix.epoll_ctl(epoll_fd, system.EPOLL.CTL_ADD, fd, &read_ready_event);
 
     var started = false;
-
-    var data_buf = std.ArrayList(u8).init(allocator);
-    defer data_buf.deinit();
 
     var ms_without_bytes: u32 = 0;
 
@@ -220,6 +222,8 @@ pub fn xmodemRecv(
     var chunk_buf: [@sizeOf(XmodemChunk)]u8 = undefined;
     var chunk_buf_index: usize = 0;
 
+    var last_payload: ?[1024]u8 = null;
+
     while (num_errors < 10) {
         var chunk: XmodemChunk = .{};
 
@@ -235,7 +239,18 @@ pub fn xmodemRecv(
             ms_without_bytes = 0;
         }
 
-        if (chunk_buf_index + chunk_n_read == @sizeOf(XmodemChunk)) {
+        if (chunk_buf[0] == X_EOF) {
+            if (last_payload) |last| {
+                if (opts.ascii) {
+                    try writer.writeAll(std.mem.trimRight(u8, &last, &.{0xff}));
+                } else {
+                    try writer.writeAll(&last);
+                }
+            }
+
+            try ack(fd);
+            return;
+        } else if (chunk_buf_index + chunk_n_read == @sizeOf(XmodemChunk)) {
             @memcpy(std.mem.asBytes(&chunk), &chunk_buf);
             chunk_buf_index = 0;
 
@@ -274,15 +289,14 @@ pub fn xmodemRecv(
                 continue;
             }
 
-            try data_buf.appendSlice(&chunk.payload);
+            if (last_payload) |last| {
+                try writer.writeAll(&last);
+            } else {
+                last_payload = chunk.payload;
+            }
             try ack(fd);
         } else {
             chunk_buf_index += chunk_n_read;
-        }
-
-        if (chunk_buf[0] == X_EOF) {
-            try ack(fd);
-            return try data_buf.toOwnedSlice();
         }
     }
 
@@ -341,20 +355,12 @@ pub fn main() !void {
         var tty = try setupTty(serial.handle, .file_transfer_recv);
         defer tty.reset();
 
-        var gpa = std.heap.GeneralPurposeAllocator(.{ .safety = true }){};
-        defer _ = gpa.deinit();
-
-        const allocator = gpa.allocator();
-
         var file = try std.fs.cwd().createFile(filepath, .{});
         defer file.close();
 
-        const file_bytes = try xmodemRecv(allocator, serial.handle);
-        defer allocator.free(file_bytes);
+        try xmodemRecv(serial.handle, file.writer(), .{});
 
-        try file.writeAll(file_bytes);
-
-        std.debug.print("saved file {s} ({d} bytes)\n", .{ filepath, file_bytes.len });
+        std.debug.print("saved file {s}\n", .{filepath});
     } else {
         usage(prog_name);
     }

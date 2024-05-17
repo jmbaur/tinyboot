@@ -5,3 +5,4 @@
 - use CONFIG_MFD_CROS_EC_DEV & CONFIG_CROS_EC_VBC in linux
 - consider using ymodem instead of xmodem, as it supports "batched" operations
   for multiple files
+- nicer arg parsing for CLI utilities

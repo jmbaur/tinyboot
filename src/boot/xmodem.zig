@@ -7,6 +7,7 @@ const tmp = @import("../tmp.zig");
 const Tty = @import("../system.zig").Tty;
 const xmodemRecv = @import("../xmodem.zig").xmodemRecv;
 const setupTty = @import("../system.zig").setupTty;
+const linux_headers = @import("linux_headers");
 
 pub const Xmodem = struct {
     allocator: std.mem.Allocator,
@@ -42,34 +43,37 @@ pub const Xmodem = struct {
             self.original_tty = null;
         }
 
-        const kernel_bytes = try xmodemRecv(self.allocator, posix.STDIN_FILENO);
-        // Free up the kernel bytes since this is large.
-        // TODO(jared): Make xmodemRecv accept a std.io.Writer.
-        defer self.allocator.free(kernel_bytes);
-
         var linux = try self.tmp_dir.dir.createFile("linux", .{});
         defer linux.close();
-        try linux.writeAll(kernel_bytes);
 
-        const initrd_bytes = try xmodemRecv(self.allocator, posix.STDIN_FILENO);
-        // Free up the initrd bytes since this is large.
-        // TODO(jared): Make xmodemRecv accept a std.io.Writer.
-        defer self.allocator.free(initrd_bytes);
+        try xmodemRecv(posix.STDIN_FILENO, linux.writer(), .{});
 
         if (!self.skip_initrd) {
             var initrd = try self.tmp_dir.dir.createFile("initrd", .{});
             defer initrd.close();
-            try initrd.writeAll(initrd_bytes);
+
+            try xmodemRecv(posix.STDIN_FILENO, initrd.writer(), .{});
         }
 
-        const kernel_params_bytes = try xmodemRecv(final_allocator, posix.STDIN_FILENO);
+        var params_file = try self.tmp_dir.dir.createFile("params", .{
+            .read = true,
+        });
+        defer params_file.close();
 
-        // trim out the xmodem filler character (0xff) and newlines (0x0a)
-        const kernel_params = std.mem.trimRight(
-            u8,
-            kernel_params_bytes,
-            &.{ 0xff, 0x0a },
+        try xmodemRecv(
+            posix.STDIN_FILENO,
+            params_file.writer(),
+            .{ .ascii = true },
         );
+
+        try params_file.seekTo(0);
+        const kernel_params_bytes = try params_file.readToEndAlloc(
+            final_allocator,
+            linux_headers.COMMAND_LINE_SIZE,
+        );
+
+        // trim out newline characters
+        const kernel_params = std.mem.trimRight(u8, kernel_params_bytes, "\n");
 
         var devices = std.ArrayList(BootDevice).init(final_allocator);
         var entries = std.ArrayList(BootEntry).init(final_allocator);

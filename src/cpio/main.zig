@@ -173,17 +173,15 @@ pub const CpioArchive = struct {
 };
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{ .safety = true }){};
-    defer _ = gpa.deinit();
-
-    const allocator = gpa.allocator();
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
 
     var args = std.process.args();
     _ = args.next().?;
     const init = args.next().?;
     const outfile = args.next().?;
 
-    var archive = try CpioArchive.init(allocator);
+    var archive = try CpioArchive.init(arena.allocator());
     defer archive.deinit();
 
     var init_file = try std.fs.openFileAbsolute(init, .{});
