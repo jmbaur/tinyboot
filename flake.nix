@@ -57,10 +57,9 @@
         packages = with pkgs; [
           swtpm
           qemu
+          zon2nix
         ];
-        env.TINYBOOT_KERNEL = ''${
-          pkgs."tinyboot-qemu-${pkgs.stdenv.hostPlatform.qemuArch}".linux
-        }/kernel'';
+        env.TINYBOOT_KERNEL = ''${pkgs."tinyboot-qemu-${pkgs.stdenv.hostPlatform.qemuArch}".linux}/kernel'';
       };
     }) inputs.self.legacyPackages;
     apps = inputs.nixpkgs.lib.mapAttrs (

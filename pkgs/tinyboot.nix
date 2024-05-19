@@ -1,4 +1,5 @@
 {
+  callPackage,
   corebootSupport ? true,
   debug ? false,
   lib,
@@ -40,6 +41,7 @@ stdenv.mkDerivation {
   configurePhase = ''
     runHook preConfigure
     export ZIG_GLOBAL_CACHE_DIR=/tmp
+    ln -s ${callPackage ../deps.nix { }} $ZIG_GLOBAL_CACHE_DIR/p
     runHook postConfigure
   '';
 
