@@ -31,10 +31,6 @@ let
     ::shutdown:/bin/swapoff -a
     ::shutdown:/bin/umount -a -r
     ::restart:/bin/init
-    tty2::askfirst:/bin/sh
-    tty3::askfirst:/bin/sh
-    tty4::askfirst:/bin/sh
-    ttyS0::askfirst:/bin/sh
   '';
   testInitrd = pkgs.makeInitrdNG {
     compressor = "xz";
@@ -280,6 +276,8 @@ in
         prepend = [ "${tinyboot}/tboot-loader.cpio.xz" ];
         compressor = "xz";
         contents = config.extraInitrdContents ++ [
+          # TODO(jared): Hack making makeInitrdNG not working with contents
+          # being an empty list.
           {
             symlink = "/empty";
             object = pkgs.emptyFile;

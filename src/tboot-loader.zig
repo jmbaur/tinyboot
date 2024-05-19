@@ -46,7 +46,7 @@ const State = struct {
     }
 };
 
-fn runEventLoop(allocator: std.mem.Allocator) !?posix.RebootCommand {
+fn runEventLoop(allocator: std.mem.Allocator) !posix.RebootCommand {
     var state = try State.init(allocator);
     defer state.deinit();
 
@@ -195,25 +195,12 @@ fn pid1() !void {
         std.log.warn("failed to initialize secure boot: {}", .{err});
     };
 
-    const reboot_cmd = try runEventLoop(allocator) orelse posix.RebootCommand.POWER_OFF;
+    const reboot_cmd = try runEventLoop(allocator);
 
     try posix.reboot(reboot_cmd);
 }
 
 pub fn main() !void {
-    if (false) {
-        const foo =
-            \\{"msg":{"Boot":{"linux":"/run/GQrY5amWP1ZbtbAZ/kernel","initrd":null,"cmdline":"console=ttyS0,115200n8"}}}
-        ;
-
-        if (std.unicode.utf8ValidateSlice(foo)) {
-            std.log.info("is valid", .{});
-        } else {
-            std.log.info("is not valid", .{});
-        }
-        return;
-    }
-
     switch (system.getpid()) {
         1 => {
             pid1() catch |err| {

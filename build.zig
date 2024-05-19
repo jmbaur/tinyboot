@@ -24,6 +24,8 @@ pub fn build(b: *std.Build) !void {
     tboot_loader_options.addOption(bool, "coreboot_support", coreboot_support);
     tboot_loader_options.addOption(u8, "loglevel", loglevel);
 
+    const strip = optimize != std.builtin.OptimizeMode.Debug;
+
     const tboot_loader_optimize = if (optimize == std.builtin.OptimizeMode.Debug)
         std.builtin.OptimizeMode.Debug
     else
@@ -45,7 +47,7 @@ pub fn build(b: *std.Build) !void {
         .root_source_file = .{ .path = "src/tboot-loader.zig" },
         .target = target,
         .optimize = tboot_loader_optimize,
-        .strip = true,
+        .strip = strip,
     });
     tboot_loader.root_module.addOptions("build_options", tboot_loader_options);
     tboot_loader.root_module.addImport("linux_headers", linux_headers_module);
@@ -72,7 +74,7 @@ pub fn build(b: *std.Build) !void {
         .root_source_file = .{ .path = "src/tboot-bless-boot.zig" },
         .target = target,
         .optimize = optimize,
-        .strip = true,
+        .strip = strip,
     });
     b.installArtifact(tboot_bless_boot);
 
@@ -81,7 +83,7 @@ pub fn build(b: *std.Build) !void {
         .root_source_file = .{ .path = "src/tboot-bless-boot-generator.zig" },
         .target = target,
         .optimize = optimize,
-        .strip = true,
+        .strip = strip,
     });
     b.installArtifact(tboot_bless_boot_generator);
 
@@ -90,7 +92,7 @@ pub fn build(b: *std.Build) !void {
         .root_source_file = .{ .path = "src/tboot-nixos-install.zig" },
         .target = target,
         .optimize = optimize,
-        .strip = true,
+        .strip = strip,
     });
     b.installArtifact(tboot_nixos_install);
 
@@ -99,7 +101,7 @@ pub fn build(b: *std.Build) !void {
         .root_source_file = .{ .path = "src/xmodem.zig" },
         .target = target,
         .optimize = optimize,
-        .strip = true,
+        .strip = strip,
     });
     modem_tool.root_module.addImport("linux_headers", linux_headers_module);
     modem_tool.root_module.addImport("clap", clap.module("clap"));

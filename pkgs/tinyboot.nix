@@ -30,7 +30,7 @@ stdenv.mkDerivation {
   };
 
   nativeBuildInputs = [
-    (pkgsBuildBuild.zig_0_12.overrideAttrs (old: {
+    (pkgsBuildBuild.zig_0_12.overrideAttrs (_: {
       src = zigSrc;
     }))
     xz

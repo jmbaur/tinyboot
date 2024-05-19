@@ -36,7 +36,7 @@ pub const Xmodem = struct {
     }
 
     pub fn probe(self: *@This(), final_allocator: std.mem.Allocator) ![]const BootDevice {
-        defer {
+        errdefer {
             if (self.original_tty) |tty| {
                 tty.reset();
             }
@@ -46,13 +46,13 @@ pub const Xmodem = struct {
         var linux = try self.tmp_dir.dir.createFile("linux", .{});
         defer linux.close();
 
-        try xmodemRecv(posix.STDIN_FILENO, linux.writer(), .{});
+        try xmodemRecv(posix.STDIN_FILENO, linux.writer());
 
         if (!self.skip_initrd) {
             var initrd = try self.tmp_dir.dir.createFile("initrd", .{});
             defer initrd.close();
 
-            try xmodemRecv(posix.STDIN_FILENO, initrd.writer(), .{});
+            try xmodemRecv(posix.STDIN_FILENO, initrd.writer());
         }
 
         var params_file = try self.tmp_dir.dir.createFile("params", .{
@@ -63,8 +63,12 @@ pub const Xmodem = struct {
         try xmodemRecv(
             posix.STDIN_FILENO,
             params_file.writer(),
-            .{ .ascii = true },
         );
+
+        if (self.original_tty) |tty| {
+            tty.reset();
+        }
+        self.original_tty = null;
 
         try params_file.seekTo(0);
         const kernel_params_bytes = try params_file.readToEndAlloc(
@@ -72,15 +76,15 @@ pub const Xmodem = struct {
             linux_headers.COMMAND_LINE_SIZE,
         );
 
-        // trim out newline characters
-        const kernel_params = std.mem.trimRight(u8, kernel_params_bytes, "\n");
+        // trim out whitespace characters
+        const kernel_params = std.mem.trim(u8, kernel_params_bytes, " \t\n");
 
         var devices = std.ArrayList(BootDevice).init(final_allocator);
         var entries = std.ArrayList(BootEntry).init(final_allocator);
 
         try entries.append(.{
             .context = try final_allocator.create(struct {}),
-            .cmdline = kernel_params,
+            .cmdline = if (kernel_params.len > 0) kernel_params else null,
             .initrd = if (!self.skip_initrd) try self.tmp_dir.dir.realpathAlloc(
                 final_allocator,
                 "initrd",

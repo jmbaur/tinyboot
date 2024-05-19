@@ -180,11 +180,6 @@ pub fn xmodemSend(fd: posix.fd_t, filename: []const u8) !void {
 pub fn xmodemRecv(
     fd: posix.fd_t,
     writer: std.fs.File.Writer,
-    opts: struct {
-        /// Output ASCII-compatible content. Strips trailing xmodem chunk
-        /// padding if true.
-        ascii: bool = false,
-    },
 ) !void {
     const epoll_fd = try posix.epoll_create1(linux_headers.EPOLL_CLOEXEC);
     defer posix.close(epoll_fd);
@@ -242,11 +237,7 @@ pub fn xmodemRecv(
 
         if (chunk_buf[0] == X_EOF) {
             if (last_payload) |last| {
-                if (opts.ascii) {
-                    try writer.writeAll(std.mem.trimRight(u8, &last, &.{0xff}));
-                } else {
-                    try writer.writeAll(&last);
-                }
+                try writer.writeAll(std.mem.trimRight(u8, &last, &.{0xff}));
             }
 
             try ack(fd);
@@ -339,7 +330,6 @@ pub fn main() !void {
 
     const params = comptime clap.parseParamsComptime(
         \\-h, --help            Display this help and exit.
-        \\-a, --ascii           Receive content as ASCII.
         \\-t, --tty <FILE>      TTY to send/receive on.
         \\-f, --file <FILE>     File to send/receive.
         \\<ACTION>              send or recv
@@ -356,12 +346,13 @@ pub fn main() !void {
         .ACTION = clap.parsers.enumeration(Action),
     };
 
+    const stderr = std.io.getStdErr().writer();
+
     var diag = clap.Diagnostic{};
     var res = clap.parse(clap.Help, &params, &parsers, .{
         .diagnostic = &diag,
         .allocator = arena.allocator(),
     }) catch |err| {
-        const stderr = std.io.getStdErr().writer();
         try diag.report(stderr, err);
         try clap.usage(stderr, clap.Help, &params);
         return;
@@ -369,11 +360,10 @@ pub fn main() !void {
     defer res.deinit();
 
     if (res.args.help > 0 or res.positionals.len != 1 or res.args.file == null or res.args.tty == null) {
+        try diag.report(stderr, error.InvalidArgs);
         try clap.usage(std.io.getStdErr().writer(), clap.Help, &params);
         return;
     }
-
-    const ascii = res.args.ascii > 0;
 
     var tty_file = try std.fs.cwd().openFile(
         res.args.tty.?,
@@ -395,9 +385,7 @@ pub fn main() !void {
             var file = try std.fs.cwd().createFile(res.args.file.?, .{});
             defer file.close();
 
-            try xmodemRecv(tty_file.handle, file.writer(), .{
-                .ascii = ascii,
-            });
+            try xmodemRecv(tty_file.handle, file.writer());
 
             std.debug.print("saved file {s}\n", .{res.args.file.?});
         },

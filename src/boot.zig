@@ -58,7 +58,7 @@ pub fn kexecLoad(
     std.log.info("preparing kexec", .{});
     std.log.info("loading linux {s}", .{linux});
     std.log.info("loading initrd {s}", .{initrd orelse "<none>"});
-    std.log.info("loading params \"{s}\"", .{params orelse "<none>"});
+    std.log.info("loading params {s}", .{params orelse "<none>"});
 
     const _linux = try std.fs.cwd().openFile(linux, .{});
     defer _linux.close();
@@ -80,6 +80,11 @@ pub fn kexecLoad(
         }
     }
 
+    var flags: usize = 0;
+    if (initrd == null) {
+        flags |= linux_headers.KEXEC_FILE_NO_INITRAMFS;
+    }
+
     // dupeZ() returns a null-terminated slice, however the null-terminator
     // is not included in the length of the slice, so we must add 1.
     const cmdline = try allocator.dupeZ(u8, params orelse "");
@@ -92,7 +97,7 @@ pub fn kexecLoad(
         @as(usize, @bitCast(@as(isize, initrd_fd))),
         cmdline_len,
         @intFromPtr(cmdline.ptr),
-        if (initrd_fd == 0) linux_headers.KEXEC_FILE_NO_INITRAMFS else 0,
+        flags,
     );
 
     switch (posix.errno(rc)) {
@@ -192,7 +197,7 @@ fn autoboot(stop_fd: posix.fd_t) !bool {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
 
-    std.log.debug("autoboot started", .{});
+    std.log.info("autoboot started", .{});
 
     var bls = BootLoaderSpec.init();
     var boot_loader: BootLoader = .{ .bls = &bls };

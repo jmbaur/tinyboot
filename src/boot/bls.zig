@@ -398,11 +398,10 @@ pub const BootLoaderSpec = struct {
             }
 
             const context = try final_allocator.create(EntryContext);
+            errdefer final_allocator.destroy(context);
             context.* = .{
                 .full_path = try entries_dir.realpathAlloc(final_allocator, dir_entry.name),
             };
-
-            errdefer final_allocator.destroy(context);
 
             try entries.append(
                 .{
@@ -491,20 +490,26 @@ pub const BootLoaderSpec = struct {
 
         if (entry.tries_left) |tries_left| {
             std.log.info(
-                "{} tries remaining for entry \"{s}\"",
-                .{ tries_left, entry.name },
+                "{} {s} remaining for entry \"{s}\"",
+                .{
+                    tries_left,
+                    if (tries_left == 1) "try" else "tries",
+                    entry.name,
+                },
             );
         }
 
         const new_name = try entry.toFilename(self.arena.allocator());
 
-        var dir = try std.fs.cwd().openDir(dirname, .{});
-        defer dir.close();
+        if (!std.mem.eql(u8, original_name, new_name)) {
+            var dir = try std.fs.cwd().openDir(dirname, .{});
+            defer dir.close();
 
-        try dir.rename(original_name, new_name);
-        posix.sync();
+            try dir.rename(original_name, new_name);
+            posix.sync();
 
-        std.log.debug("entry renamed to {s}", .{new_name});
+            std.log.debug("entry renamed to {s}", .{new_name});
+        }
     }
 
     pub fn teardown(self: *@This()) !void {
