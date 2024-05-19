@@ -3,11 +3,23 @@ const log = std.log;
 const builtin = @import("builtin");
 
 pub fn build(b: *std.Build) !void {
-    const target = b.standardTargetOptions(.{ .default_target = .{ .cpu_model = .baseline } });
+    const target = b.standardTargetOptions(
+        .{ .default_target = .{ .cpu_model = .baseline } },
+    );
     const optimize = b.standardOptimizeOption(.{});
 
-    const coreboot_support = b.option(bool, "coreboot", "Support for coreboot integration") orelse true;
-    const loglevel = b.option(u8, "loglevel", "Log level") orelse 3;
+    const loglevel = b.option(
+        u8,
+        "loglevel",
+        "Log level",
+    ) orelse @intFromEnum(std.log.Level.debug);
+
+    const coreboot_support = b.option(
+        bool,
+        "coreboot",
+        "Support for coreboot integration",
+    ) orelse true;
+
     const tboot_loader_options = b.addOptions();
     tboot_loader_options.addOption(bool, "coreboot_support", coreboot_support);
     tboot_loader_options.addOption(u8, "loglevel", loglevel);
@@ -26,11 +38,14 @@ pub fn build(b: *std.Build) !void {
 
     const linux_headers_module = linux_headers_translated.addModule("linux_headers");
 
+    const clap = b.dependency("clap", .{});
+
     const tboot_loader = b.addExecutable(.{
         .name = "tboot-loader",
         .root_source_file = .{ .path = "src/tboot-loader.zig" },
         .target = target,
         .optimize = tboot_loader_optimize,
+        .strip = true,
     });
     tboot_loader.root_module.addOptions("build_options", tboot_loader_options);
     tboot_loader.root_module.addImport("linux_headers", linux_headers_module);
@@ -57,6 +72,7 @@ pub fn build(b: *std.Build) !void {
         .root_source_file = .{ .path = "src/tboot-bless-boot.zig" },
         .target = target,
         .optimize = optimize,
+        .strip = true,
     });
     b.installArtifact(tboot_bless_boot);
 
@@ -65,6 +81,7 @@ pub fn build(b: *std.Build) !void {
         .root_source_file = .{ .path = "src/tboot-bless-boot-generator.zig" },
         .target = target,
         .optimize = optimize,
+        .strip = true,
     });
     b.installArtifact(tboot_bless_boot_generator);
 
@@ -73,6 +90,7 @@ pub fn build(b: *std.Build) !void {
         .root_source_file = .{ .path = "src/tboot-nixos-install.zig" },
         .target = target,
         .optimize = optimize,
+        .strip = true,
     });
     b.installArtifact(tboot_nixos_install);
 
@@ -81,8 +99,10 @@ pub fn build(b: *std.Build) !void {
         .root_source_file = .{ .path = "src/xmodem.zig" },
         .target = target,
         .optimize = optimize,
+        .strip = true,
     });
     modem_tool.root_module.addImport("linux_headers", linux_headers_module);
+    modem_tool.root_module.addImport("clap", clap.module("clap"));
     b.installArtifact(modem_tool);
 
     const unit_tests = b.addTest(.{

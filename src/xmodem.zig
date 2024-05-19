@@ -6,8 +6,9 @@ const posix = std.posix;
 const Crc16Xmodem = std.hash.crc.Crc16Xmodem;
 
 const linux_headers = @import("linux_headers");
-
 const setupTty = @import("./system.zig").setupTty;
+
+const clap = @import("clap");
 
 const Error = error{
     InvalidReceiveLength,
@@ -333,35 +334,72 @@ fn usage(prog_name: []const u8) noreturn {
 }
 
 pub fn main() !void {
-    var args = std.process.args();
-    const prog_name = std.fs.path.basename(args.next().?);
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
 
-    const action = args.next() orelse usage(prog_name);
+    const params = comptime clap.parseParamsComptime(
+        \\-h, --help            Display this help and exit.
+        \\-a, --ascii           Receive content as ASCII.
+        \\-t, --tty <FILE>      TTY to send/receive on.
+        \\-f, --file <FILE>     File to send/receive.
+        \\<ACTION>              send or recv
+        \\
+    );
 
-    var serial = try std.fs.cwd().openFile(
-        args.next() orelse usage(prog_name),
+    const Action = enum {
+        send,
+        recv,
+    };
+
+    const parsers = comptime .{
+        .FILE = clap.parsers.string,
+        .ACTION = clap.parsers.enumeration(Action),
+    };
+
+    var diag = clap.Diagnostic{};
+    var res = clap.parse(clap.Help, &params, &parsers, .{
+        .diagnostic = &diag,
+        .allocator = arena.allocator(),
+    }) catch |err| {
+        const stderr = std.io.getStdErr().writer();
+        try diag.report(stderr, err);
+        try clap.usage(stderr, clap.Help, &params);
+        return;
+    };
+    defer res.deinit();
+
+    if (res.args.help > 0 or res.positionals.len != 1 or res.args.file == null or res.args.tty == null) {
+        try clap.usage(std.io.getStdErr().writer(), clap.Help, &params);
+        return;
+    }
+
+    const ascii = res.args.ascii > 0;
+
+    var tty_file = try std.fs.cwd().openFile(
+        res.args.tty.?,
         .{ .mode = .read_write, .lock = .none },
     );
-    defer serial.close();
+    defer tty_file.close();
 
-    const filepath = args.next() orelse usage(prog_name);
+    switch (res.positionals[0]) {
+        .send => {
+            var tty = try setupTty(tty_file.handle, .file_transfer_send);
+            defer tty.reset();
 
-    if (std.mem.eql(u8, action, "send")) {
-        var tty = try setupTty(serial.handle, .file_transfer_send);
-        defer tty.reset();
+            try xmodemSend(tty_file.handle, res.args.file.?);
+        },
+        .recv => {
+            var tty = try setupTty(tty_file.handle, .file_transfer_recv);
+            defer tty.reset();
 
-        try xmodemSend(serial.handle, filepath);
-    } else if (std.mem.eql(u8, action, "recv")) {
-        var tty = try setupTty(serial.handle, .file_transfer_recv);
-        defer tty.reset();
+            var file = try std.fs.cwd().createFile(res.args.file.?, .{});
+            defer file.close();
 
-        var file = try std.fs.cwd().createFile(filepath, .{});
-        defer file.close();
+            try xmodemRecv(tty_file.handle, file.writer(), .{
+                .ascii = ascii,
+            });
 
-        try xmodemRecv(serial.handle, file.writer(), .{});
-
-        std.debug.print("saved file {s}\n", .{filepath});
-    } else {
-        usage(prog_name);
+            std.debug.print("saved file {s}\n", .{res.args.file.?});
+        },
     }
 }
