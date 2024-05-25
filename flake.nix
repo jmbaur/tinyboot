@@ -1,6 +1,8 @@
 {
   description = "A small linuxboot payload for coreboot";
   inputs = {
+    coreboot.flake = false;
+    coreboot.url = "git+https://github.com/coreboot/coreboot?ref=refs/tags/24.05&submodules=1";
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
     zig.flake = false;
     zig.url = "github:ziglang/zig/0.12.x";
@@ -15,6 +17,10 @@
       final: prev:
       (
         {
+          buildCoreboot = import ./pkgs/coreboot {
+            corebootSrc = inputs.coreboot.outPath;
+            version = "24.05";
+          };
           tinyboot = prev.callPackage ./pkgs/tinyboot.nix { zigSrc = inputs.zig.outPath; };
           armTrustedFirmwareMT8183 = prev.callPackage ./pkgs/arm-trusted-firmware-cros.nix {
             platform = "mt8183";

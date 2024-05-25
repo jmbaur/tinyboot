@@ -1,3 +1,4 @@
+{ corebootSrc, version }:
 {
   board,
   fetchgit,
@@ -24,29 +25,11 @@ let
       .${stdenvNoCC.hostPlatform.linuxArch}
     }.override
       { withAda = stdenvNoCC.hostPlatform.isx86_64; };
-  importJsonSource = source: {
-    inherit (lib.importJSON source)
-      url
-      rev
-      hash
-      fetchLFS
-      fetchSubmodules
-      deepClone
-      leaveDotGit
-      ;
-  };
-  installSubmodule =
-    source: dest: ''rm -r ${dest} && ln -sf ${fetchgit (importJsonSource source)} ${dest}'';
 in
 stdenvNoCC.mkDerivation (finalAttrs: {
   pname = "coreboot-${board}";
-  version = "24.02.01";
-  src = fetchgit {
-    url = "https://github.com/coreboot/coreboot";
-    rev = finalAttrs.version;
-    fetchSubmodules = true;
-    hash = "sha256-OV6OsnAAXU51IZYzAIZQu4qZqau8n/rVAc22Lfjt4iw=";
-  };
+  inherit version;
+  src = corebootSrc;
   patches = [
     ./0001-Add-Kconfig-VBOOT_SIGN-option.patch
     ./0002-Fix-build-for-brya.patch
@@ -57,23 +40,14 @@ stdenvNoCC.mkDerivation (finalAttrs: {
     pkg-config
     openssl
     nss
+    python3
   ];
-  nativeBuildInputs = [ python3 ];
-  buildInputs = [ ];
   enableParallelBuilding = true;
-  # nixpkgs fetchgit fetcher does not fetch a submodule if the repo sets
-  # "update=none" on the submodule, so we must fetch them ourselves
-  postPatch = ''
-    patchShebangs util 3rdparty/vboot/scripts
-    ${installSubmodule ./amd_blobs.json "3rdparty/amd_blobs"}
-    ${installSubmodule ./blobs.json "3rdparty/blobs"}
-    ${installSubmodule ./cmocka.json "3rdparty/cmocka"}
-    ${installSubmodule ./fsp.json "3rdparty/fsp"}
-    ${installSubmodule ./intel_microcode.json "3rdparty/intel-microcode"}
-    ${installSubmodule ./qc_blobs.json "3rdparty/qc_blobs"}
-  '';
   inherit kconfig;
   passAsFile = [ "kconfig" ];
+  postPatch = ''
+    patchShebangs util 3rdparty/vboot/scripts
+  '';
   configurePhase = ''
     runHook preConfigure
     cat $kconfigPath > .config
