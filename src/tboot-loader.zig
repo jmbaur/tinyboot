@@ -4,7 +4,6 @@ const posix = std.posix;
 const system = std.posix.system;
 
 const linux_headers = @import("linux_headers");
-const coreboot_support = @import("build_options").coreboot_support;
 const log_level: std.log.Level = @enumFromInt(@import("build_options").loglevel);
 
 const Autoboot = @import("./boot.zig").Autoboot;
@@ -186,10 +185,6 @@ fn pid1() !void {
     std.log.info("{s}", .{cmdline});
 
     std.log.info("tinyboot started", .{});
-
-    if (coreboot_support) {
-        std.log.info("built with coreboot support", .{});
-    }
 
     security.initializeSecurity(allocator) catch |err| {
         std.log.warn("failed to initialize secure boot: {}", .{err});

@@ -1,4 +1,8 @@
 const std = @import("std");
+const posix = std.posix;
+const system = std.posix.system;
+
+const linux_headers = @import("linux_headers");
 
 pub const IMA_POLICY_PATH = "/sys/kernel/security/ima/policy";
 
@@ -64,13 +68,41 @@ fn installImaPolicy(allocator: std.mem.Allocator, policy_entries: []const []cons
     try policy_file.writeAll(policy);
 }
 
-const Error = error{
-    KeyNotFound,
-};
+const TEST_KEY = @embedFile("test_key");
 
-fn loadVerificationKey() !void {
-    // TODO
-    return Error.KeyNotFound;
+// https://github.com/torvalds/linux/blob/3b517966c5616ac011081153482a5ba0e91b17ff/security/integrity/digsig.c#L193
+fn loadVerificationKey(allocator: std.mem.Allocator) !void {
+    const keyfile: ?std.fs.File = b: {
+        inline for (.{ VPD_KEY, FW_CFG_KEY }) |keypath| {
+            if (std.fs.cwd().openFile(keypath, .{})) |file| {
+                break :b file;
+            } else |err| {
+                switch (err) {
+                    error.FileNotFound => {},
+                    else => return err,
+                }
+            }
+        }
+
+        break :b null;
+    };
+
+    if (keyfile) |f| {
+        defer f.close();
+
+        const keyring_id = try addKeyring(IMA_KEYRING_NAME, KeySerial.User);
+        std.log.info("added ima keyring (id 0x{x})", .{keyring_id});
+
+        const keyfile_contents = try f.readToEndAlloc(allocator, 8192);
+        defer allocator.free(keyfile_contents);
+
+        const key_id = try addKey(keyring_id, keyfile_contents);
+        std.log.info("added verification key (id 0x{x})", .{key_id});
+
+        if (std.mem.eql(u8, keyfile_contents, TEST_KEY)) {
+            std.log.warn("test key in use!", .{});
+        }
+    }
 }
 
 // Initialize the IMA subsystem in linux to perform measurements and optionally
@@ -103,7 +135,7 @@ pub fn initializeSecurity(allocator: std.mem.Allocator) !void {
     });
 
     var do_verified_boot = true;
-    loadVerificationKey() catch |err| {
+    loadVerificationKey(allocator) catch |err| {
         std.log.warn("failed to load verification key, cannot perform boot verification: {}", .{err});
         do_verified_boot = false;
     };
@@ -124,4 +156,75 @@ pub fn initializeSecurity(allocator: std.mem.Allocator) !void {
 // with a single line feed.
 fn withNewline(comptime line: []const u8) []const u8 {
     return line ++ "\n";
+}
+
+// https://qemu-project.gitlab.io/qemu/specs/fw_cfg.html
+const FW_CFG_KEY = "/sys/firmware/qemu_fw_cfg/by_name/opt/org.tboot/pubkey/raw";
+
+// The public key is held in VPD as a base64 encoded string.
+// https://github.com/torvalds/linux/blob/master/drivers/firmware/google/vpd.c#L193
+const VPD_KEY = "/sys/firmware/vpd/ro/pubkey";
+
+// We are using the "_ima" keyring and not the ".ima" keyring since we do not use
+// CONFIG_INTEGRITY_TRUSTED_KEYRING=y in our kernel config.
+const IMA_KEYRING_NAME = "_ima";
+
+const KeySerial = enum {
+    User,
+
+    fn to_keyring(self: @This()) i32 {
+        return switch (self) {
+            .User => linux_headers.KEY_SPEC_USER_KEYRING,
+        };
+    }
+};
+
+// https://git.kernel.org/pub/scm/linux/kernel/git/dhowells/keyutils.git/tree/keyctl.c#n705
+fn addKeyring(name: [*:0]const u8, key_serial: KeySerial) !usize {
+    const key_type: [*:0]const u8 = "keyring";
+
+    const keyring = key_serial.to_keyring();
+
+    const key_content: ?[*:0]const u8 = null;
+
+    const rc = system.syscall5(
+        system.SYS.add_key,
+        @intFromPtr(key_type),
+        @intFromPtr(name),
+        @intFromPtr(key_content),
+        0,
+        @as(u32, @bitCast(keyring)),
+    );
+
+    switch (posix.errno(rc)) {
+        .SUCCESS => {
+            return rc;
+        },
+        else => |err| {
+            return posix.unexpectedErrno(err);
+        },
+    }
+}
+
+fn addKey(keyring_id: usize, key_content: []const u8) !usize {
+    const key_type: [*:0]const u8 = "asymmetric";
+
+    const key_desc: ?[*:0]const u8 = null;
+
+    // see https://github.com/torvalds/linux/blob/59f3fd30af355dc893e6df9ccb43ace0b9033faa/security/keys/keyctl.c#L74
+    const rc = system.syscall5(
+        system.SYS.add_key,
+        @intFromPtr(key_type),
+        @intFromPtr(key_desc),
+        @intFromPtr(key_content.ptr),
+        key_content.len,
+        keyring_id,
+    );
+
+    switch (posix.errno(rc)) {
+        .SUCCESS => {
+            return rc;
+        },
+        else => |err| return posix.unexpectedErrno(err),
+    }
 }

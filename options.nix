@@ -6,10 +6,7 @@
   ...
 }:
 let
-  tinyboot = pkgs.tinyboot.override {
-    inherit (config) debug;
-    corebootSupport = config.coreboot.enable;
-  };
+  tinyboot = pkgs.tinyboot.override { inherit (config) debug; };
   buildFitImage = pkgs.callPackage ./fitimage { };
   testStartupScript = pkgs.writeScript "installer-startup-script" ''
     #!/bin/sh

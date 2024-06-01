@@ -14,14 +14,7 @@ pub fn build(b: *std.Build) !void {
         "Log level",
     ) orelse @intFromEnum(std.log.Level.debug);
 
-    const coreboot_support = b.option(
-        bool,
-        "coreboot",
-        "Support for coreboot integration",
-    ) orelse true;
-
     const tboot_loader_options = b.addOptions();
-    tboot_loader_options.addOption(bool, "coreboot_support", coreboot_support);
     tboot_loader_options.addOption(u8, "loglevel", loglevel);
 
     const strip = optimize != std.builtin.OptimizeMode.Debug;
