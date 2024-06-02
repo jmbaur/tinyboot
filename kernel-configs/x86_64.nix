@@ -56,7 +56,6 @@
       UNIX98_PTYS = yes;
       UNWINDER_FRAME_POINTER = unset;
       UNWINDER_GUESS = yes;
-      VGA_CONSOLE = yes;
       WMI_BMOF = yes;
       X86 = yes;
       X86_64 = yes;

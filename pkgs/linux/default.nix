@@ -45,7 +45,6 @@ stdenv.mkDerivation {
   ];
   postInstall = ''
     ln -s $out/${stdenv.hostPlatform.linux-kernel.target} $out/kernel
-    install -Dm0755 --target-directory=$out/bin scripts/sign-file
     install -D --target-directory=$dev .config vmlinux
   '';
 }

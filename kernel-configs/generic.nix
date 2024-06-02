@@ -18,7 +18,6 @@ in
     CC_OPTIMIZE_FOR_PERFORMANCE = unset;
     CC_OPTIMIZE_FOR_SIZE = yes;
     COMMON_CLK = yes;
-    CONSOLE_TRANSLATIONS = yes;
     CRYPTO_HW = yes;
     CRYPTO_SHA256 = yes;
     CRYPTO_SHA512 = yes;
@@ -113,8 +112,6 @@ in
     USB_XHCI_HCD = yes;
     USB_XHCI_PCI = yes;
     VFAT_FS = yes;
-    VT = yes;
-    VT_CONSOLE = yes;
     WATCHDOG = yes;
     WATCHDOG_HANDLE_BOOT_ENABLED = yes;
     WIRELESS = unset;

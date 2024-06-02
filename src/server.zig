@@ -76,10 +76,7 @@ pub const Server = struct {
         defer msg.deinit();
 
         switch (msg.value.data) {
-            .Empty => {
-                self.forceShell();
-                return null;
-            },
+            .Empty => return null,
             .Reboot => return posix.RebootCommand.RESTART,
             .Poweroff => return posix.RebootCommand.POWER_OFF,
             .Kexec => return posix.RebootCommand.KEXEC,

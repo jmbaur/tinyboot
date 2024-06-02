@@ -119,6 +119,7 @@ fn runEventLoop(allocator: std.mem.Allocator) !posix.RebootCommand {
                     try autoboot.start();
                 }
             } else if (event.data.fd == autoboot.ready_fd) {
+                try autoboot.deregister(state.epoll_fd);
                 if (try autoboot.finish()) |outcome| {
                     return outcome;
                 } else {
@@ -135,7 +136,7 @@ fn runEventLoop(allocator: std.mem.Allocator) !posix.RebootCommand {
                 try server.registerClient(state.epoll_fd, conn.stream);
             } else {
                 if (!user_presence) {
-                    try autoboot.stop();
+                    autoboot.stop();
                     user_presence = true;
                     std.log.info("user presence detected", .{});
                 }

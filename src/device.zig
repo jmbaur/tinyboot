@@ -543,15 +543,45 @@ test "uevent kobject remove chardev parsing" {
     try std.testing.expectEqualStrings("3471", kobject.uevent.get("SEQNUM").?);
 }
 
+// Determine if we can use a virtual terminal. Uses the termios ws_ypixel field to detect if , which is updated by the kernel at
+// https://github.com/torvalds/linux/blob/83814698cf48ce3aadc5d88a3f577f04482ff92a/drivers/tty/vt/vt.c#L1267
+fn vtIsUsable(fd: posix.fd_t) bool {
+    var winsize: posix.winsize = undefined;
+    const rc = posix.system.ioctl(fd, posix.T.IOCGWINSZ, @intFromPtr(&winsize));
+    return switch (posix.errno(rc)) {
+        .SUCCESS => winsize.ws_col > 0 and winsize.ws_row > 0,
+        else => false,
+    };
+}
+
+fn serialDeviceIsConnected(fd: posix.fd_t) bool {
+    var serial: c_int = 0;
+
+    if (system.ioctl(fd, linux_headers.TIOCMGET, @intFromPtr(&serial)) != 0) {
+        return false;
+    }
+
+    return serial & linux_headers.TIOCM_DTR == linux_headers.TIOCM_DTR;
+}
+
 /// Find all active serial and virtual terminals where we can spawn a console.
 /// Caller is responsible for the returned list.
 pub fn findActiveConsoles(allocator: std.mem.Allocator) ![]posix.fd_t {
     var devs = std.ArrayList(posix.fd_t).init(allocator);
     errdefer devs.deinit();
 
-    // TODO(jared): don't assume a monitor is connected
-    const tty0_fd = try posix.open("/dev/tty0", .{ .ACCMODE = .RDWR, .NOCTTY = true }, 0);
-    try devs.append(tty0_fd);
+    // Don't assume a monitor is connected
+    if (posix.open("/dev/tty0", .{ .ACCMODE = .RDWR, .NOCTTY = true }, 0)) |fd| {
+        errdefer posix.close(fd);
+
+        if (vtIsUsable(fd)) {
+            try devs.append(fd);
+        } else {
+            posix.close(fd);
+        }
+    } else |err| {
+        err catch {};
+    }
 
     var char_devices_dir = try std.fs.cwd().openDir(
         "/dev/char",
@@ -603,14 +633,4 @@ pub fn findActiveConsoles(allocator: std.mem.Allocator) ![]posix.fd_t {
     }
 
     return devs.toOwnedSlice();
-}
-
-fn serialDeviceIsConnected(fd: posix.fd_t) bool {
-    var serial: c_int = 0;
-
-    if (system.ioctl(fd, linux_headers.TIOCMGET, @intFromPtr(&serial)) != 0) {
-        return false;
-    }
-
-    return serial & linux_headers.TIOCM_DTR == linux_headers.TIOCM_DTR;
 }

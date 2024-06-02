@@ -4,7 +4,11 @@ const builtin = @import("builtin");
 
 pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(
-        .{ .default_target = .{ .cpu_model = .baseline } },
+        .{
+            .default_target = .{
+                .cpu_model = .baseline,
+            },
+        },
     );
     const optimize = b.standardOptimizeOption(.{});
 
@@ -16,8 +20,6 @@ pub fn build(b: *std.Build) !void {
 
     const tboot_loader_options = b.addOptions();
     tboot_loader_options.addOption(u8, "loglevel", loglevel);
-
-    const strip = optimize != std.builtin.OptimizeMode.Debug;
 
     const tboot_loader_optimize = if (optimize == std.builtin.OptimizeMode.Debug)
         std.builtin.OptimizeMode.Debug
@@ -40,7 +42,7 @@ pub fn build(b: *std.Build) !void {
         .root_source_file = .{ .path = "src/tboot-loader.zig" },
         .target = target,
         .optimize = tboot_loader_optimize,
-        .strip = strip,
+        .strip = optimize != std.builtin.OptimizeMode.Debug,
     });
     tboot_loader.root_module.addOptions("build_options", tboot_loader_options);
     tboot_loader.root_module.addImport("linux_headers", linux_headers_module);
@@ -67,7 +69,7 @@ pub fn build(b: *std.Build) !void {
         .root_source_file = .{ .path = "src/tboot-bless-boot.zig" },
         .target = target,
         .optimize = optimize,
-        .strip = strip,
+        .strip = optimize != std.builtin.OptimizeMode.Debug,
     });
     b.installArtifact(tboot_bless_boot);
 
@@ -76,17 +78,32 @@ pub fn build(b: *std.Build) !void {
         .root_source_file = .{ .path = "src/tboot-bless-boot-generator.zig" },
         .target = target,
         .optimize = optimize,
-        .strip = strip,
+        .strip = optimize != std.builtin.OptimizeMode.Debug,
     });
     b.installArtifact(tboot_bless_boot_generator);
+
+    const tboot_sign = b.addExecutable(.{
+        .name = "tboot-sign",
+        .root_source_file = .{ .path = "src/tboot-sign.zig" },
+        .target = b.host,
+        .optimize = optimize,
+        .strip = optimize != std.builtin.OptimizeMode.Debug,
+    });
+    tboot_sign.linkLibC();
+    tboot_sign.linkSystemLibrary("libcrypto");
+    tboot_sign.root_module.addImport("clap", clap.module("clap"));
+    b.installArtifact(tboot_sign);
 
     const tboot_nixos_install = b.addExecutable(.{
         .name = "tboot-nixos-install",
         .root_source_file = .{ .path = "src/tboot-nixos-install.zig" },
         .target = target,
         .optimize = optimize,
-        .strip = strip,
+        .strip = optimize != std.builtin.OptimizeMode.Debug,
     });
+    tboot_nixos_install.linkLibC();
+    tboot_nixos_install.linkSystemLibrary("libcrypto");
+    tboot_nixos_install.root_module.addImport("clap", clap.module("clap"));
     b.installArtifact(tboot_nixos_install);
 
     const modem_tool = b.addExecutable(.{
@@ -94,7 +111,7 @@ pub fn build(b: *std.Build) !void {
         .root_source_file = .{ .path = "src/xmodem.zig" },
         .target = target,
         .optimize = optimize,
-        .strip = strip,
+        .strip = optimize != std.builtin.OptimizeMode.Debug,
     });
     modem_tool.root_module.addImport("linux_headers", linux_headers_module);
     modem_tool.root_module.addImport("clap", clap.module("clap"));

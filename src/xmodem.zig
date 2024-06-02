@@ -329,10 +329,10 @@ pub fn main() !void {
     defer arena.deinit();
 
     const params = comptime clap.parseParamsComptime(
-        \\-h, --help            Display this help and exit.
-        \\-t, --tty <FILE>      TTY to send/receive on.
-        \\-f, --file <FILE>     File to send/receive.
-        \\<ACTION>              send or recv
+        \\-h, --help           Display this help and exit.
+        \\-t, --tty <FILE>     TTY to send/receive on.
+        \\-f, --file <FILE>    File to send/receive.
+        \\<ACTION>             send or recv
         \\
     );
 

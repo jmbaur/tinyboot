@@ -103,7 +103,7 @@ pub fn kexecLoad(
     switch (posix.errno(rc)) {
         .SUCCESS => {},
         // IMA appraisal failed
-        .PERM => return error.PermissionDenied,
+        .ACCES => return error.PermissionDenied,
         // Invalid kernel image (CONFIG_RELOCATABLE not enabled?)
         .NOEXEC => return error.InvalidExe,
         // Another image is already loaded
@@ -171,29 +171,22 @@ pub const BootLoader = union(enum) {
     }
 };
 
-fn needToStop(stop_fd: posix.fd_t) !bool {
-    defer {
-        eventfdWrite(stop_fd, enumToEventfd(Autoboot.StopStatus.keep_going)) catch {};
-    }
-    return try eventfdRead(stop_fd) == enumToEventfd(Autoboot.StopStatus.stop);
-}
-
-fn autobootWrapper(ready_fd: posix.fd_t, stop_fd: posix.fd_t) void {
-    const success = autoboot(stop_fd) catch |err| b: {
+fn autobootWrapper(self: *Autoboot) void {
+    const success = autoboot(self) catch |err| b: {
         std.log.err("autoboot failed: {}", .{err});
         break :b false;
     };
 
     if (success) {
-        eventfdWrite(ready_fd, enumToEventfd(Autoboot.ReadyStatus.ready)) catch {};
+        eventfdWrite(self.ready_fd, enumToEventfd(Autoboot.ReadyStatus.ready)) catch {};
     } else {
         // We must write something to ready_fd to ensure reads don't block.
-        eventfdWrite(ready_fd, enumToEventfd(Autoboot.ReadyStatus.not_ready)) catch {};
+        eventfdWrite(self.ready_fd, enumToEventfd(Autoboot.ReadyStatus.not_ready)) catch {};
     }
 }
 
 /// Returns true if kexec has been successfully loaded.
-fn autoboot(stop_fd: posix.fd_t) !bool {
+fn autoboot(self: *Autoboot) !bool {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
 
@@ -209,12 +202,12 @@ fn autoboot(stop_fd: posix.fd_t) !bool {
     }
 
     try boot_loader.setup();
-    if (try needToStop(stop_fd)) {
+    if (self.needToStop()) {
         return false;
     }
 
     const boot_devices = try boot_loader.probe(arena.allocator());
-    if (try needToStop(stop_fd)) {
+    if (self.needToStop()) {
         return false;
     }
 
@@ -224,7 +217,7 @@ fn autoboot(stop_fd: posix.fd_t) !bool {
         while (countdown > 0) : (countdown -= 1) {
             std.log.info("booting in {} second(s)", .{countdown});
             std.time.sleep(std.time.ns_per_s);
-            if (try needToStop(stop_fd)) {
+            if (self.needToStop()) {
                 return false;
             }
         }
@@ -249,26 +242,21 @@ fn autoboot(stop_fd: posix.fd_t) !bool {
 
 pub const Autoboot = struct {
     ready_fd: posix.fd_t,
-    stop_fd: posix.fd_t,
     thread: ?std.Thread,
+    mutex: std.Thread.Mutex,
+    need_to_stop: bool,
 
     pub const ReadyStatus = enum {
         ready,
         not_ready,
     };
 
-    pub const StopStatus = enum {
-        stop,
-        keep_going,
-    };
-
     pub fn init() !@This() {
         return .{
             .ready_fd = try posix.eventfd(0, 0),
-            // Ensure that stop_fd can be read from right away without
-            // blocking.
-            .stop_fd = try posix.eventfd(@intCast(enumToEventfd(StopStatus.keep_going)), 0),
             .thread = null,
+            .mutex = std.Thread.Mutex{},
+            .need_to_stop = false,
         };
     }
 
@@ -281,15 +269,29 @@ pub const Autoboot = struct {
         try posix.epoll_ctl(epoll_fd, system.EPOLL.CTL_ADD, self.ready_fd, &ready_event);
     }
 
-    pub fn start(self: *@This()) !void {
-        self.thread = try std.Thread.spawn(.{}, autobootWrapper, .{ self.ready_fd, self.stop_fd });
+    pub fn deregister(self: *@This(), epoll_fd: posix.fd_t) !void {
+        try posix.epoll_ctl(epoll_fd, system.EPOLL.CTL_DEL, self.ready_fd, null);
     }
 
-    pub fn stop(self: *@This()) !void {
+    pub fn start(self: *@This()) !void {
+        self.thread = try std.Thread.spawn(.{}, autobootWrapper, .{self});
+    }
+
+    pub fn needToStop(self: *@This()) bool {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        return self.need_to_stop;
+    }
+
+    pub fn stop(self: *@This()) void {
         if (self.thread) |thread| {
-            try eventfdWrite(self.stop_fd, enumToEventfd(StopStatus.stop));
+            self.mutex.lock();
+            self.need_to_stop = true;
+            self.mutex.unlock();
             thread.join();
         }
+
+        self.thread = null;
     }
 
     pub fn finish(self: *@This()) !?posix.RebootCommand {
@@ -303,8 +305,6 @@ pub const Autoboot = struct {
 
     pub fn deinit(self: *@This()) void {
         posix.close(self.ready_fd);
-        posix.close(self.stop_fd);
-        self.stop() catch {};
-        self.thread = null;
+        self.stop();
     }
 };

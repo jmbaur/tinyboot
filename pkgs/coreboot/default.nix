@@ -35,6 +35,7 @@ stdenvNoCC.mkDerivation (finalAttrs: {
     ./0002-Fix-build-for-brya.patch
     ./0003-Allow-for-fitImage-use-on-mt8183-and-mt8192.patch
   ];
+  strictDeps = true;
   depsBuildBuild = [
     pkgsBuildBuild.stdenv.cc
     pkg-config

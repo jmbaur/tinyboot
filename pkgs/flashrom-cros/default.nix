@@ -29,6 +29,7 @@ stdenv.mkDerivation (finalAttrs: {
     "dev"
   ];
   dontUseCmakeConfigure = true;
+  strictDeps = true;
   nativeBuildInputs = [
     meson
     ninja
