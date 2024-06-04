@@ -63,13 +63,46 @@ fn pemPasswordCallback(buff: [*c]u8, len: c_int, w: c_int, v: ?*anyopaque) callc
     }
 }
 
-fn readPrivateKey(allocator: std.mem.Allocator, filepath: []const u8) !*anyopaque {
-    if (std.mem.startsWith(u8, filepath, "pkcs11:")) {
-        return error.Unimplemented;
-        // TODO
-    } else {
-        const filepathZ = try allocator.dupeZ(u8, filepath);
+fn drain_openssl_errors() void {
+    if (C.ERR_peek_error() == 0) {
+        return;
+    }
 
+    while (C.ERR_get_error() != 0) {}
+}
+
+fn readPrivateKey(allocator: std.mem.Allocator, filepath: []const u8) !*anyopaque {
+    const filepathZ = try allocator.dupeZ(u8, filepath);
+
+    if (std.mem.startsWith(u8, filepath, "pkcs11:")) {
+        C.ENGINE_load_builtin_engines();
+
+        drain_openssl_errors();
+
+        const engine = C.ENGINE_by_id("pkcs11") orelse {
+            displayOpensslErrors(@src());
+            return error.OpensslError;
+        };
+
+        if (C.ENGINE_init(engine) == 0) {
+            drain_openssl_errors();
+        } else {
+            displayOpensslErrors(@src());
+            return error.OpensslError;
+        }
+
+        if (key_pass) |pass| {
+            if (C.ENGINE_ctrl_cmd_string(engine, "PIN", try allocator.dupeZ(u8, pass), 0) == 0) {
+                displayOpensslErrors(@src());
+                return error.OpensslError;
+            }
+        }
+
+        return C.ENGINE_load_private_key(engine, filepathZ, null, null) orelse {
+            displayOpensslErrors(@src());
+            return error.OpensslError;
+        };
+    } else {
         const b = C.BIO_new_file(filepathZ, "rb") orelse {
             displayOpensslErrors(@src());
             return error.OpensslError;
