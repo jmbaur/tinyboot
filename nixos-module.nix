@@ -75,7 +75,6 @@ in
             "--max-tries=${toString cfg.maxFailedBootAttempts}"
           ];
         };
-        systemd.additionalUpstreamSystemUnits = [ "boot-complete.target" ];
         systemd.generators.tboot-bless-boot-generator = lib.getExe' pkgs.tinyboot "tboot-bless-boot-generator";
         systemd.services.tboot-bless-boot = {
           description = "Mark the Current Boot Loader Entry as Good";
