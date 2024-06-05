@@ -111,7 +111,7 @@ in
           inherit (cfg.tinyboot.build) firmware;
         };
 
-        boot.kernelPackages = lib.mkDefault pkgs.linuxPackages_latest;
+        boot.kernelPackages = lib.mkDefault (pkgs.linuxPackagesFor cfg.linux.package);
         boot.kernelPatches =
           with lib.kernel;
           with (whenHelpers config.boot.kernelPackages.kernel.version);
