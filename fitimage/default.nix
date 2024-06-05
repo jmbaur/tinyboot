@@ -1,4 +1,10 @@
-{ buildPackages, ... }:
+{
+  runCommand,
+  rsync,
+  ubootTools,
+  dtc,
+  xz,
+}:
 {
   board ? null,
   linux,
@@ -18,12 +24,12 @@ let
     else
       "cp ${dtb} dtbs";
 in
-buildPackages.runCommand "fitimage-${if (board != null) then board else "unknown"}"
+runCommand "fitimage-${if (board != null) then board else "unknown"}"
   {
-    nativeBuildInputs = with buildPackages; [
+    nativeBuildInputs = [
+      dtc
       rsync
       ubootTools
-      dtc
       xz
     ];
   }

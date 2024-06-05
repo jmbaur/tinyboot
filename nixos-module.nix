@@ -7,32 +7,30 @@
 let
   cfg = config.tinyboot;
 
-  inherit
-    ((lib.evalModules {
-      modules = [
-        ({
-          _module.args = {
-            inherit pkgs;
-            inherit (cfg) board;
-          };
-        })
-        ./options.nix
-        ./boards/${cfg.board}/config.nix
-      ];
-    }).config.build
-    )
-    firmware
-    ;
+  externalSubmodule =
+    { config, lib, ... }:
+    {
+      options = with lib; {
+        enable = mkEnableOption "tinyboot bootloader";
+        maxFailedBootAttempts = mkOption {
+          type = types.int;
+          default = 3;
+        };
+      };
+    };
 in
 {
-  options.tinyboot = with lib; {
-    enable = mkEnableOption "tinyboot bootloader";
-    board = mkOption { type = types.enum (builtins.attrNames (builtins.readDir ./boards)); };
-    maxFailedBootAttempts = mkOption {
-      type = types.int;
-      default = 3;
+  options.tinyboot =
+    with lib;
+    mkOption {
+      type = types.submoduleWith {
+        modules = [
+          ./options.nix
+          externalSubmodule
+        ];
+        specialArgs.pkgs = pkgs;
+      };
     };
-  };
   config = lib.mkIf cfg.enable (
     lib.mkMerge [
       {
@@ -111,7 +109,7 @@ in
         };
 
         system.build = {
-          inherit firmware;
+          inherit (cfg.tinyboot.build) firmware;
         };
 
         boot.kernelPackages = lib.mkDefault pkgs.linuxPackages_latest;

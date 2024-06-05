@@ -2,12 +2,11 @@
   config,
   pkgs,
   lib,
-  board,
   ...
 }:
 let
+  boardsDir = builtins.readDir ./boards;
   tinyboot = pkgs.tinyboot.override { inherit (config) debug; };
-  buildFitImage = pkgs.callPackage ./fitimage { };
   testStartupScript = pkgs.writeScript "installer-startup-script" ''
     #!/bin/sh
     mkdir -p /proc && mount -t proc proc /proc
@@ -102,8 +101,11 @@ let
       '';
 in
 {
-  imports = [ ./kernel-configs ];
+  imports = [
+    ./kernel-configs
+  ] ++ (lib.mapAttrsToList (board: _: ./boards/${board}/config.nix) boardsDir);
   options = with lib; {
+    board = mkOption { type = types.enum (builtins.attrNames boardsDir); };
     build = mkOption {
       default = { };
       type = types.submoduleWith {
@@ -287,17 +289,17 @@ in
           inherit (config.linux) kconfig;
         }
       );
-      fitImage = buildFitImage {
-        inherit board;
+      fitImage = (pkgs.callPackage ./fitimage { }) {
+        inherit (config) board;
         inherit (config.build) linux initrd;
         inherit (config.linux) dtb dtbPattern;
       };
       coreboot = pkgs.callPackage pkgs.buildCoreboot {
-        inherit board;
+        inherit (config) board;
         inherit (config.coreboot) kconfig;
       };
       firmware =
-        pkgs.runCommand "tinyboot-${board}"
+        pkgs.runCommand "tinyboot-${config.board}"
           {
             inherit (config.verifiedBoot) requiredSystemFeatures;
             nativeBuildInputs = with pkgs.buildPackages; [

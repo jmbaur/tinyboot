@@ -10,7 +10,7 @@
   outputs = inputs: {
     formatter = inputs.nixpkgs.lib.mapAttrs (_: pkgs: pkgs.nixfmt-rfc-style) inputs.self.legacyPackages;
     nixosModules.default = {
-      imports = [ ./module.nix ];
+      imports = [ ./nixos-module.nix ];
       nixpkgs.overlays = [ inputs.self.overlays.default ];
     };
     overlays.default =

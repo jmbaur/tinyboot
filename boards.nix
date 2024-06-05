@@ -9,12 +9,10 @@ lib.mapAttrs' (
       (lib.evalModules {
         modules = [
           ({
-            _module.args = {
-              inherit pkgs board;
-            };
+            inherit board;
+            _module.args.pkgs = pkgs;
           })
           ./options.nix
-          ./boards/${board}/config.nix
           config
         ];
       }).config.build.firmware
