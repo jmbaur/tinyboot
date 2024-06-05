@@ -21,7 +21,8 @@
             corebootSrc = inputs.coreboot.outPath;
             version = "24.05";
           };
-          tinyboot = prev.callPackage ./pkgs/tinyboot.nix { zigSrc = inputs.zig.outPath; };
+          # TODO(jared): use pkgsStatic for now since zig's cross-compilation dynamic linking support seems to be broken
+          tinyboot = prev.pkgsStatic.callPackage ./pkgs/tinyboot.nix { zigSrc = inputs.zig.outPath; };
           armTrustedFirmwareMT8183 = prev.callPackage ./pkgs/arm-trusted-firmware-cros.nix {
             platform = "mt8183";
           };
@@ -65,6 +66,9 @@
           qemu
           zon2nix
         ];
+        shellHook = ''
+          unset ZIG_GLOBAL_CACHE_DIR
+        '';
         env.TINYBOOT_KERNEL = ''${pkgs."tinyboot-qemu-${pkgs.stdenv.hostPlatform.qemuArch}".linux}/kernel'';
       };
     }) inputs.self.legacyPackages;

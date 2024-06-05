@@ -35,8 +35,9 @@ stdenv.mkDerivation (
     strictDeps = true;
 
     nativeBuildInputs = [
-      (pkgsBuildBuild.zig_0_12.overrideAttrs (_: {
+      (pkgsBuildBuild.zig_0_12.overrideAttrs (old: {
         src = zigSrc;
+        patches = (old.patches or [ ]) ++ [ ./zig-pkg-config-cross.patch ];
       })).hook
       xz
       pkg-config
@@ -56,13 +57,13 @@ stdenv.mkDerivation (
       "${finalAttrs.deps}"
     ];
 
-    # TODO(jared): this is a bug in nixpkgs in the zig hook
+    # TODO(jared): The checkPhase should already include the zigBuildFlags,
+    # probably a nixpkgs bug.
     zigCheckFlags = finalAttrs.zigBuildFlags;
 
     # TODO(jared): make embedFile work better with the test key
     preConfigure = ''
       ln -sf ${../test/keys/tboot/key.der} src/test_key
-      export ZIG_GLOBAL_CACHE_DIR=$(mktemp -d)
     '';
 
     postInstall = ''

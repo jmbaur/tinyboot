@@ -85,7 +85,7 @@ pub fn build(b: *std.Build) !void {
     const tboot_sign = b.addExecutable(.{
         .name = "tboot-sign",
         .root_source_file = .{ .path = "src/tboot-sign.zig" },
-        .target = b.host,
+        .target = target,
         .optimize = optimize,
         .strip = optimize != std.builtin.OptimizeMode.Debug,
     });

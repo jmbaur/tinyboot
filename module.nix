@@ -69,11 +69,11 @@ in
         boot.loader.external.enable = true;
         boot.loader.external.installHook = toString [
           (lib.getExe' pkgs.tinyboot "tboot-nixos-install")
-          "efi-sys-mount-point=${config.boot.loader.efi.efiSysMountPoint}"
-          "private-key=${cfg.verifiedBoot.tbootPrivateKey}"
-          "public-key=${cfg.verifiedBoot.tbootPublicCertificate}"
-          "timeout=${toString config.boot.loader.timeout}"
-          "max-tries=${toString cfg.maxFailedBootAttempts}"
+          "--esp-mnt=${config.boot.loader.efi.efiSysMountPoint}"
+          "--private-key=${cfg.verifiedBoot.tbootPrivateKey}"
+          "--public-key=${cfg.verifiedBoot.tbootPublicCertificate}"
+          "--timeout=${toString config.boot.loader.timeout}"
+          "--max-tries=${toString cfg.maxFailedBootAttempts}"
         ];
         systemd.additionalUpstreamSystemUnits = [ "boot-complete.target" ];
         systemd.generators.tboot-bless-boot-generator = lib.getExe' pkgs.tinyboot "tboot-bless-boot-generator";
