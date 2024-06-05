@@ -66,15 +66,17 @@ in
         boot.loader.supportsInitrdSecrets = lib.mkForce false;
         boot.loader.efi.canTouchEfiVariables = lib.mkForce false;
         boot.bootspec.enable = true;
-        boot.loader.external.enable = true;
-        boot.loader.external.installHook = toString [
-          (lib.getExe' pkgs.tinyboot "tboot-nixos-install")
-          "--esp-mnt=${config.boot.loader.efi.efiSysMountPoint}"
-          "--private-key=${cfg.verifiedBoot.tbootPrivateKey}"
-          "--public-key=${cfg.verifiedBoot.tbootPublicCertificate}"
-          "--timeout=${toString config.boot.loader.timeout}"
-          "--max-tries=${toString cfg.maxFailedBootAttempts}"
-        ];
+        boot.loader.external = lib.mkIf (with config.system.switch; enable || enableNg) {
+          enable = true;
+          installHook = toString [
+            (lib.getExe' pkgs.tinyboot "tboot-nixos-install")
+            "--esp-mnt=${config.boot.loader.efi.efiSysMountPoint}"
+            "--private-key=${cfg.verifiedBoot.tbootPrivateKey}"
+            "--public-key=${cfg.verifiedBoot.tbootPublicCertificate}"
+            "--timeout=${toString config.boot.loader.timeout}"
+            "--max-tries=${toString cfg.maxFailedBootAttempts}"
+          ];
+        };
         systemd.additionalUpstreamSystemUnits = [ "boot-complete.target" ];
         systemd.generators.tboot-bless-boot-generator = lib.getExe' pkgs.tinyboot "tboot-bless-boot-generator";
         systemd.services.tboot-bless-boot = {
