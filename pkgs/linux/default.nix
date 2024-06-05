@@ -22,12 +22,10 @@ stdenv.mkDerivation {
   '';
   inherit kconfig;
   passAsFile = [ "kconfig" ];
-  configurePhase = ''
-    runHook preConfigure
+  postConfigure = ''
     cat $kconfigPath $extraConfigPath > all.config
     make ARCH=${stdenv.hostPlatform.linuxArch} KCONFIG_ALLCONFIG=1 allnoconfig
     bash ${./check_config.bash} all.config .config
-    runHook postConfigure
   '';
   buildFlags = [
     "DTC_FLAGS=-@"
@@ -45,6 +43,6 @@ stdenv.mkDerivation {
   ];
   postInstall = ''
     ln -s $out/${stdenv.hostPlatform.linux-kernel.target} $out/kernel
-    install -D --target-directory=$dev .config vmlinux
+    install -Dt $dev .config vmlinux
   '';
 }
