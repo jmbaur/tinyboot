@@ -6,30 +6,30 @@
 }:
 let
   cfg = config.tinyboot;
-
-  externalSubmodule =
-    { config, lib, ... }:
-    {
-      options = with lib; {
-        enable = mkEnableOption "tinyboot bootloader";
-        maxFailedBootAttempts = mkOption {
-          type = types.int;
-          default = 3;
-        };
-      };
-    };
 in
 {
   options.tinyboot =
     with lib;
     mkOption {
       type = types.submoduleWith {
+        specialArgs.pkgs = pkgs;
         modules = [
           ./options.nix
-          externalSubmodule
+          (
+            { lib, ... }:
+            {
+              options = with lib; {
+                enable = mkEnableOption "tinyboot bootloader";
+                maxFailedBootAttempts = mkOption {
+                  type = types.int;
+                  default = 3;
+                };
+              };
+            }
+          )
         ];
-        specialArgs.pkgs = pkgs;
       };
+      default = { };
     };
   config = lib.mkIf cfg.enable (
     lib.mkMerge [
