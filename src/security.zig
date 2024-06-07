@@ -72,7 +72,7 @@ const TEST_KEY = @embedFile("test_key");
 
 // https://github.com/torvalds/linux/blob/3b517966c5616ac011081153482a5ba0e91b17ff/security/integrity/digsig.c#L193
 fn loadVerificationKey(allocator: std.mem.Allocator) !void {
-    const keyfile: ?std.fs.File = b: {
+    const keyfile: std.fs.File = b: {
         inline for (.{ VPD_KEY, FW_CFG_KEY }) |keypath| {
             if (std.fs.cwd().openFile(keypath, .{})) |file| {
                 break :b file;
@@ -85,23 +85,21 @@ fn loadVerificationKey(allocator: std.mem.Allocator) !void {
         }
 
         break :b null;
-    };
+    } orelse return error.MissingKey;
 
-    if (keyfile) |f| {
-        defer f.close();
+    defer keyfile.close();
 
-        const keyring_id = try addKeyring(IMA_KEYRING_NAME, KeySerial.User);
-        std.log.info("added ima keyring (id 0x{x})", .{keyring_id});
+    const keyring_id = try addKeyring(IMA_KEYRING_NAME, KeySerial.User);
+    std.log.info("added ima keyring (id 0x{x})", .{keyring_id});
 
-        const keyfile_contents = try f.readToEndAlloc(allocator, 8192);
-        defer allocator.free(keyfile_contents);
+    const keyfile_contents = try keyfile.readToEndAlloc(allocator, 8192);
+    defer allocator.free(keyfile_contents);
 
-        const key_id = try addKey(keyring_id, keyfile_contents);
-        std.log.info("added verification key (id 0x{x})", .{key_id});
+    const key_id = try addKey(keyring_id, keyfile_contents);
+    std.log.info("added verification key (id 0x{x})", .{key_id});
 
-        if (std.mem.eql(u8, keyfile_contents, TEST_KEY)) {
-            std.log.warn("test key in use!", .{});
-        }
+    if (std.mem.eql(u8, keyfile_contents, TEST_KEY)) {
+        std.log.warn("test key in use!", .{});
     }
 }
 
@@ -145,11 +143,15 @@ pub fn initializeSecurity(allocator: std.mem.Allocator) !void {
             KEXEC_KERNEL_CHECK_APPRAISE,
             KEXEC_INITRAMFS_CHECK_APPRAISE,
         });
-
-        std.log.info("boot verification is enabled", .{});
     }
 
     try installImaPolicy(allocator, ima_policy.items);
+
+    std.log.info("boot measurement is enabled", .{});
+
+    if (do_verified_boot) {
+        std.log.info("boot verification is enabled", .{});
+    }
 }
 
 // Each line in an IMA policy, including the last line, needs to be terminated
