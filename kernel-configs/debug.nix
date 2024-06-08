@@ -11,7 +11,6 @@ in
       DEBUG_KERNEL = yes;
       DEBUG_MUTEXES = yes;
       DYNAMIC_DEBUG = yes;
-      EARLY_PRINTK = yes;
       EFI_EARLYCON = lib.mkIf efi yes;
       FTRACE = yes;
       GENERIC_BUG = yes;

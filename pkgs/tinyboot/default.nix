@@ -24,11 +24,11 @@ stdenv.mkDerivation (
     version = "0.1.0";
 
     src = lib.fileset.toSource {
-      root = ../.;
+      root = ../../.;
       fileset = lib.fileset.unions [
-        ../build.zig
-        ../build.zig.zon
-        ../src
+        ../../build.zig
+        ../../build.zig.zon
+        ../../src
       ];
     };
 
@@ -47,7 +47,7 @@ stdenv.mkDerivation (
 
     doCheck = true;
 
-    deps = callPackage ../build.zig.zon.nix { };
+    deps = callPackage ../../build.zig.zon.nix { };
 
     zigBuildFlags = [
       "-Dtarget=${stdenv.hostPlatform.qemuArch}-${stdenv.hostPlatform.parsed.kernel.name}-${zigLibc}"
@@ -63,7 +63,7 @@ stdenv.mkDerivation (
 
     # TODO(jared): make embedFile work better with the test key
     preConfigure = ''
-      ln -sf ${../test/keys/tboot/key.der} src/test_key
+      ln -sf ${../../test/keys/tboot/key.der} src/test_key
     '';
 
     postInstall = ''

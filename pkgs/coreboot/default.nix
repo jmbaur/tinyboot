@@ -56,9 +56,10 @@ stdenvNoCC.mkDerivation (finalAttrs: {
     runHook postConfigure
   '';
   makeFlags = [
-    "XGCCPATH=${toolchain}/bin/"
+    "BUILD_TIMELESS=1"
     "KERNELVERSION=${finalAttrs.version}"
     "UPDATED_SUBMODULES=1"
+    "XGCCPATH=${toolchain}/bin/"
   ];
   installPhase = ''
     runHook preInstall
