@@ -78,7 +78,7 @@ in
         systemd.generators.tboot-bless-boot-generator = lib.getExe' pkgs.tinyboot "tboot-bless-boot-generator";
         systemd.services.tboot-bless-boot = {
           description = "Mark the Current Boot Loader Entry as Good";
-          documentation = [ "github.com/jmbaur/tinyboot" ];
+          documentation = [ "https://github.com/jmbaur/tinyboot" ];
           requires = [ "boot-complete.target" ];
           conflicts = [ "shutdown.target" ];
           before = [ "shutdown.target" ];
