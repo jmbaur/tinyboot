@@ -15,6 +15,9 @@
       BOARD_GOOGLE_SPHERION = yes;
       FMDFILE = freeform ./layout.fmd;
       VENDOR_GOOGLE = yes;
+      # obtained from stock ROM
+      GBB_FLAG_DEV_SCREEN_SHORT_DELAY = yes;
+      GBB_FLAG_FORCE_DEV_SWITCH_ON = yes;
     };
   };
 }
