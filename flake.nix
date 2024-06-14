@@ -22,7 +22,7 @@
             version = "24.05";
           };
           # TODO(jared): use pkgsStatic for now since zig's cross-compilation dynamic linking support seems to be broken
-          tinyboot = prev.pkgsStatic.callPackage ./pkgs/tinyboot { zigSrc = inputs.zig.outPath; };
+          tinyboot = prev.pkgsStatic.callPackage ./pkgs/tinyboot { zigInput = inputs.zig; };
           armTrustedFirmwareMT8183 = prev.callPackage ./pkgs/arm-trusted-firmware-cros {
             platform = "mt8183";
           };

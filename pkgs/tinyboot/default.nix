@@ -7,7 +7,7 @@
   pkgsBuildBuild,
   stdenv,
   xz,
-  zigSrc,
+  zigInput,
 }:
 stdenv.mkDerivation (
   finalAttrs:
@@ -36,7 +36,8 @@ stdenv.mkDerivation (
 
     nativeBuildInputs = [
       (pkgsBuildBuild.zig_0_12.overrideAttrs (old: {
-        src = zigSrc;
+        src = zigInput.outPath;
+        version = zigInput.shortRev;
         patches = (old.patches or [ ]) ++ [ ./zig-pkg-config-cross.patch ];
       })).hook
       xz
