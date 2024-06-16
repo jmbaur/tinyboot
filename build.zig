@@ -143,8 +143,6 @@ pub fn build(b: *std.Build) !void {
         modem_tool.root_module.addImport("clap", clap.module("clap"));
         b.installArtifact(modem_tool);
     }
-    // make the default step just compile tboot-loader
-    // b.default_step = &tboot_loader.step;
 
     const unit_tests = b.addTest(.{
         .root_source_file = .{ .path = "src/test.zig" },
