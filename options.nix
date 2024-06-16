@@ -6,7 +6,7 @@
 }:
 let
   boardsDir = builtins.readDir ./boards;
-  tinyboot = pkgs.tinyboot.override { inherit (config) debug; };
+  tinyboot = pkgs.tinybootLoader.override { inherit (config) debug; };
   testStartupScript = pkgs.writeScript "installer-startup-script" ''
     #!/bin/sh
     mkdir -p /proc && mount -t proc proc /proc

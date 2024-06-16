@@ -13,8 +13,8 @@ jobs:
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
       - name: Native build for x86_64-linux
-        run: nix build --print-build-logs .\#tinyboot
-      - name: Cross build for aarch64-linux
-        run: nix build --print-build-logs .\#pkgsCross.aarch64-multiplatform.tinyboot
+        run: nix build --print-build-logs .\#tinybootLoader .\#tinybootTools
+      - name: Cross build loader for aarch64-linux
+        run: nix build --print-build-logs .\#pkgsCross.aarch64-multiplatform.tinybootLoader
       - name: Check nix flake
         run: nix flake check --print-build-logs

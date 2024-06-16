@@ -3,9 +3,7 @@
   inputs = {
     coreboot.flake = false;
     coreboot.url = "git+https://github.com/coreboot/coreboot?ref=refs/tags/24.05&submodules=1";
-    nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
-    zig.flake = false;
-    zig.url = "github:ziglang/zig/0.12.x";
+    nixpkgs.url = "github:nixos/nixpkgs/master";
   };
   outputs = inputs: {
     formatter = inputs.nixpkgs.lib.mapAttrs (_: pkgs: pkgs.nixfmt-rfc-style) inputs.self.legacyPackages;
@@ -21,8 +19,14 @@
             corebootSrc = inputs.coreboot.outPath;
             version = "24.05";
           };
-          # TODO(jared): use pkgsStatic for now since zig's cross-compilation dynamic linking support seems to be broken
-          tinyboot = prev.pkgsStatic.callPackage ./pkgs/tinyboot { zigInput = inputs.zig; };
+          tinybootLoader = prev.callPackage ./pkgs/tinyboot {
+            withLoader = true;
+            withTools = false;
+          };
+          tinybootTools = prev.callPackage ./pkgs/tinyboot {
+            withLoader = false;
+            withTools = true;
+          };
           armTrustedFirmwareMT8183 = prev.callPackage ./pkgs/arm-trusted-firmware-cros {
             platform = "mt8183";
           };
@@ -60,7 +64,7 @@
         );
     devShells = inputs.nixpkgs.lib.mapAttrs (_: pkgs: {
       default = pkgs.mkShell {
-        inputsFrom = [ pkgs.tinyboot ];
+        inputsFrom = [ pkgs.tinybootLoader ];
         packages = with pkgs; [
           swtpm
           qemu

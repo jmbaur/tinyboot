@@ -1,13 +1,15 @@
 {
-  callPackage,
   debug ? false,
+  withLoader ? true,
+  withTools ? true,
+
+  callPackage,
   lib,
   openssl,
   pkg-config,
   pkgsBuildBuild,
   stdenv,
   xz,
-  zigInput,
 }:
 stdenv.mkDerivation (
   finalAttrs:
@@ -34,17 +36,9 @@ stdenv.mkDerivation (
 
     strictDeps = true;
 
-    nativeBuildInputs = [
-      (pkgsBuildBuild.zig_0_12.overrideAttrs (old: {
-        src = zigInput.outPath;
-        version = zigInput.shortRev;
-        patches = (old.patches or [ ]) ++ [ ./zig-pkg-config-cross.patch ];
-      })).hook
-      xz
-      pkg-config
-    ];
-
-    buildInputs = [ openssl ];
+    depsBuildBuild = [ pkgsBuildBuild.zig_0_12.hook ];
+    nativeBuildInputs = lib.optionals withLoader [ xz ] ++ lib.optionals withTools [ pkg-config ];
+    buildInputs = lib.optionals withTools [ openssl ];
 
     doCheck = true;
 
@@ -54,6 +48,8 @@ stdenv.mkDerivation (
       "-Dtarget=${stdenv.hostPlatform.qemuArch}-${stdenv.hostPlatform.parsed.kernel.name}-${zigLibc}"
       "-Ddynamic-linker=${stdenv.cc.bintools.dynamicLinker}"
       "-Dloglevel=${toString (if debug then 3 else 2)}" # https://github.com/ziglang/zig/blob/084c2cd90f79d5e7edf76b7ddd390adb95a27f0c/lib/std/log.zig#L78
+      "-Dloader=${lib.boolToString withLoader}"
+      "-Dtools=${lib.boolToString withTools}"
       "--system"
       "${finalAttrs.deps}"
     ];
@@ -67,7 +63,7 @@ stdenv.mkDerivation (
       ln -sf ${../../test/keys/tboot/key.der} src/test_key
     '';
 
-    postInstall = ''
+    postInstall = lib.optionalString withLoader ''
       xz --check=crc32 --lzma2=dict=512KiB $out/tboot-loader.cpio
     '';
 

@@ -67,7 +67,7 @@ in
         boot.loader.external = lib.mkIf (with config.system.switch; enable || enableNg) {
           enable = true;
           installHook = toString [
-            (lib.getExe' pkgs.tinyboot "tboot-nixos-install")
+            (lib.getExe' pkgs.tinybootTools "tboot-nixos-install")
             "--esp-mnt=${config.boot.loader.efi.efiSysMountPoint}"
             "--private-key=${cfg.verifiedBoot.tbootPrivateKey}"
             "--public-key=${cfg.verifiedBoot.tbootPublicCertificate}"
@@ -75,7 +75,7 @@ in
             "--max-tries=${toString cfg.maxFailedBootAttempts}"
           ];
         };
-        systemd.generators.tboot-bless-boot-generator = lib.getExe' pkgs.tinyboot "tboot-bless-boot-generator";
+        systemd.generators.tboot-bless-boot-generator = lib.getExe' pkgs.tinybootTools "tboot-bless-boot-generator";
         systemd.services.tboot-bless-boot = {
           description = "Mark the Current Boot Loader Entry as Good";
           documentation = [ "https://github.com/jmbaur/tinyboot" ];
@@ -91,7 +91,7 @@ in
           serviceConfig = {
             Type = "oneshot";
             RemainAfterExit = true;
-            ExecStart = "${lib.getExe' pkgs.tinyboot "tboot-bless-boot"} ${config.boot.loader.efi.efiSysMountPoint} good";
+            ExecStart = "${lib.getExe' pkgs.tinybootTools "tboot-bless-boot"} ${config.boot.loader.efi.efiSysMountPoint} good";
           };
         };
       }
