@@ -142,13 +142,14 @@ fn findEntry(
             continue;
         }
 
-        const bls_entry = bls.EntryFilename.parse(entry.name) catch |err| {
+        var bls_entry = bls.EntryFilename.parse(allocator, entry.name) catch |err| {
             std.log.debug(
                 "failed to parse boot entry {s}: {}",
                 .{ entry.name, err },
             );
             continue;
         };
+        defer bls_entry.deinit();
 
         if (std.mem.eql(u8, bls_entry.name, entry_name)) {
             switch (action) {

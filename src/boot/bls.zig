@@ -2,6 +2,8 @@ const std = @import("std");
 const posix = std.posix;
 const system = std.posix.system;
 
+const linux_headers = @import("linux_headers");
+
 const BootDevice = @import("../boot.zig").BootDevice;
 const BootEntry = @import("../boot.zig").BootEntry;
 const FsType = @import("../disk/filesystem.zig").FsType;
@@ -333,10 +335,11 @@ pub const BootLoaderSpec = struct {
                 continue;
             }
 
-            const entry_filename = EntryFilename.parse(dir_entry.name) catch |err| {
+            var entry_filename = EntryFilename.parse(tmp_allocator, dir_entry.name) catch |err| {
                 std.log.err("invalid entry filename for {s}: {}", .{ dir_entry.name, err });
                 continue;
             };
+            defer entry_filename.deinit();
 
             if (entry_filename.tries_left) |tries_left| {
                 if (tries_left == 0) {
@@ -387,15 +390,18 @@ pub const BootLoaderSpec = struct {
                 }
             }
 
-            const options = if (type1_entry.options) |opts|
-                try std.mem.join(final_allocator, " ", opts)
-            else
-                null;
-            errdefer {
-                if (options) |_options| {
-                    final_allocator.free(_options);
+            var options_with_bls_entry: [linux_headers.COMMAND_LINE_SIZE]u8 = undefined;
+            const options = b: {
+                if (type1_entry.options) |opts| {
+                    const orig = try std.mem.join(tmp_allocator, " ", opts);
+                    break :b try std.fmt.bufPrint(&options_with_bls_entry, "{s} tboot.bls-entry={s}", .{ orig, entry_filename.name });
+                } else {
+                    break :b try std.fmt.bufPrint(&options_with_bls_entry, "tboot.bls-entry={s}", .{entry_filename.name});
                 }
-            }
+            };
+
+            const final_options = try final_allocator.dupe(u8, options);
+            errdefer final_allocator.free(options);
 
             const context = try final_allocator.create(EntryContext);
             errdefer final_allocator.destroy(context);
@@ -406,7 +412,7 @@ pub const BootLoaderSpec = struct {
             try entries.append(
                 .{
                     .context = context,
-                    .cmdline = options,
+                    .cmdline = final_options,
                     .initrd = initrd,
                     .linux = linux,
                 },
@@ -483,7 +489,7 @@ pub const BootLoaderSpec = struct {
 
         const dirname = std.fs.path.dirname(context.full_path) orelse return;
         const original_name = std.fs.path.basename(context.full_path);
-        var entry = try EntryFilename.parse(original_name);
+        var entry = try EntryFilename.parse(self.arena.allocator(), original_name);
 
         if (entry.tries_done) |*done| done.* +|= 1;
         if (entry.tries_left) |*left| left.* -|= 1;
@@ -540,6 +546,7 @@ pub const BootLoaderSpec = struct {
 };
 
 pub const EntryFilename = struct {
+    allocator: std.mem.Allocator,
     name: []const u8,
     tries_left: ?u8 = null,
     tries_done: ?u8 = null,
@@ -573,15 +580,27 @@ pub const EntryFilename = struct {
         return filename.toOwnedSlice();
     }
 
-    pub fn parse(contents: []const u8) @This().Error!@This() {
-        const filename_wo_suffix = std.mem.trimRight(u8, contents, ".conf");
-        if (contents.len == filename_wo_suffix.len) {
+    pub fn init(allocator: std.mem.Allocator, name: []const u8, opts: struct {
+        tries_left: ?u8 = null,
+        tries_done: ?u8 = null,
+    }) !@This() {
+        return .{
+            .allocator = allocator,
+            .name = try allocator.dupe(u8, name),
+            .tries_left = opts.tries_left,
+            .tries_done = opts.tries_done,
+        };
+    }
+
+    pub fn parse(allocator: std.mem.Allocator, filename: []const u8) !@This() {
+        if (!std.mem.eql(u8, std.fs.path.extension(filename), ".conf")) {
             return Error.MissingSuffix;
         }
 
-        var plus_split = std.mem.splitSequence(u8, filename_wo_suffix, "+");
+        const stem = std.fs.path.stem(filename);
 
-        // stdlib says it will always return at least `buffer`
+        var plus_split = std.mem.splitSequence(u8, stem, "+");
+
         const name = plus_split.next().?;
 
         if (plus_split.next()) |counter_info| {
@@ -596,70 +615,83 @@ pub const EntryFilename = struct {
                 const tries_done = std.fmt.parseInt(u8, minus_info, 10) catch {
                     return Error.InvalidTriesSyntax;
                 };
-                return .{ .name = name, .tries_left = tries_left, .tries_done = tries_done };
+                return @This().init(allocator, name, .{
+                    .tries_left = tries_left,
+                    .tries_done = tries_done,
+                });
             } else {
-                return .{ .name = name, .tries_left = tries_left };
+                return @This().init(allocator, name, .{
+                    .tries_left = tries_left,
+                });
             }
         } else {
-            return .{ .name = name };
+            return @This().init(allocator, name, .{});
         }
+    }
+
+    pub fn deinit(self: *@This()) void {
+        self.allocator.free(self.name);
     }
 };
 
 test "entry filename parsing" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
     try std.testing.expectError(
         EntryFilename.Error.MissingSuffix,
-        EntryFilename.parse("my-entry"),
+        EntryFilename.parse(allocator, "my-entry"),
     );
 
     try std.testing.expectError(
         EntryFilename.Error.InvalidTriesSyntax,
-        EntryFilename.parse("my-entry+foo.conf"),
+        EntryFilename.parse(allocator, "my-entry+foo.conf"),
     );
 
     try std.testing.expectError(
         EntryFilename.Error.InvalidTriesSyntax,
-        EntryFilename.parse("my-entry+foo-bar.conf"),
+        EntryFilename.parse(allocator, "my-entry+foo-bar.conf"),
     );
 
     try std.testing.expectEqualDeep(
-        EntryFilename{ .name = "my-entry" },
-        EntryFilename.parse("my-entry.conf"),
+        EntryFilename.init(allocator, "my-entry", .{}),
+        EntryFilename.parse(allocator, "my-entry.conf"),
     );
 
     try std.testing.expectEqualDeep(
-        EntryFilename{ .name = "my-entry-1" },
-        EntryFilename.parse("my-entry-1.conf"),
+        EntryFilename.init(allocator, "my-entry-1", .{}),
+        EntryFilename.parse(allocator, "my-entry-1.conf"),
     );
 
     try std.testing.expectEqualDeep(
-        EntryFilename{ .name = "my-entry", .tries_left = 1 },
-        EntryFilename.parse("my-entry+1.conf"),
+        EntryFilename.init(allocator, "my-entry", .{ .tries_left = 1 }),
+        EntryFilename.parse(allocator, "my-entry+1.conf"),
     );
 
     try std.testing.expectEqualDeep(
-        EntryFilename{ .name = "my-entry", .tries_left = 0 },
-        EntryFilename.parse("my-entry+0.conf"),
+        EntryFilename.init(allocator, "my-entry", .{ .tries_left = 0 }),
+        EntryFilename.parse(allocator, "my-entry+0.conf"),
     );
 
     try std.testing.expectEqualDeep(
-        EntryFilename{ .name = "my-entry", .tries_left = 0, .tries_done = 3 },
-        EntryFilename.parse("my-entry+0-3.conf"),
+        EntryFilename.init(allocator, "my-entry", .{ .tries_left = 0, .tries_done = 3 }),
+        EntryFilename.parse(allocator, "my-entry+0-3.conf"),
     );
 
     try std.testing.expectEqualDeep(
-        EntryFilename{ .name = "my-entry-1", .tries_left = 5, .tries_done = 0 },
-        EntryFilename.parse("my-entry-1+5-0.conf"),
+        EntryFilename.init(allocator, "my-entry-1", .{ .tries_left = 5, .tries_done = 0 }),
+        EntryFilename.parse(allocator, "my-entry-1+5-0.conf"),
     );
 
     try std.testing.expectEqualDeep(
-        EntryFilename{ .name = "my-entry-2", .tries_left = 3, .tries_done = 1 },
-        EntryFilename.parse("my-entry-2+3-1.conf"),
+        EntryFilename.init(allocator, "my-entry-2", .{ .tries_left = 3, .tries_done = 1 }),
+        EntryFilename.parse(allocator, "my-entry-2+3-1.conf"),
     );
 
     try std.testing.expectEqualDeep(
-        EntryFilename{ .name = "my-entry-3", .tries_left = 2 },
-        EntryFilename.parse("my-entry-3+2.conf"),
+        EntryFilename.init(allocator, "my-entry-3", .{ .tries_left = 2 }),
+        EntryFilename.parse(allocator, "my-entry-3+2.conf"),
     );
 }
 
@@ -668,11 +700,10 @@ test "entry filename marshalling" {
     defer arena.deinit();
 
     {
-        var entry = EntryFilename{
-            .name = "foo",
+        var entry = EntryFilename.init(arena.allocator(), "foo", .{
             .tries_left = null,
             .tries_done = null,
-        };
+        }) catch unreachable;
         try std.testing.expectEqualStrings(
             entry.toFilename(arena.allocator()) catch unreachable,
             "foo.conf",
@@ -680,11 +711,10 @@ test "entry filename marshalling" {
     }
 
     {
-        var entry = EntryFilename{
-            .name = "foo",
+        var entry = EntryFilename.init(arena.allocator(), "foo", .{
             .tries_left = 1,
             .tries_done = null,
-        };
+        }) catch unreachable;
         try std.testing.expectEqualStrings(
             entry.toFilename(arena.allocator()) catch unreachable,
             "foo+1.conf",
@@ -692,11 +722,10 @@ test "entry filename marshalling" {
     }
 
     {
-        var entry = EntryFilename{
-            .name = "foo",
+        var entry = EntryFilename.init(arena.allocator(), "foo", .{
             .tries_left = 1,
             .tries_done = 2,
-        };
+        }) catch unreachable;
         try std.testing.expectEqualStrings(
             entry.toFilename(arena.allocator()) catch unreachable,
             "foo+1-2.conf",
