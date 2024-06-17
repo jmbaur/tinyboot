@@ -180,7 +180,7 @@ fn installGeneration(
             continue;
         }
 
-        const existing_entry = bls.EntryFilename.parse(entry.name) catch continue;
+        const existing_entry = bls.EntryFilename.parse(allocator, entry.name) catch continue;
 
         if (std.mem.eql(u8, existing_entry.name, entry_name)) {
             std.log.debug("entry {s} already installed", .{entry_name});
