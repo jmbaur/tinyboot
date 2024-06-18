@@ -3,7 +3,7 @@
   inputs = {
     coreboot.flake = false;
     coreboot.url = "git+https://github.com/coreboot/coreboot?ref=refs/tags/24.05&submodules=1";
-    nixpkgs.url = "github:nixos/nixpkgs/master";
+    nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
   };
   outputs = inputs: {
     formatter = inputs.nixpkgs.lib.mapAttrs (_: pkgs: pkgs.nixfmt-rfc-style) inputs.self.legacyPackages;
