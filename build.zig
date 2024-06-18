@@ -29,7 +29,7 @@ pub fn build(b: *std.Build) !void {
     const clap = b.dependency("clap", .{});
 
     const linux_headers_translated = b.addTranslateC(.{
-        .root_source_file = .{ .path = "src/linux.h" },
+        .root_source_file = b.path("src/linux.h"),
         .target = target,
         // TODO(jared): how much does optimization do for the translate-c stuff?
         .optimize = tboot_loader_optimize,
@@ -42,7 +42,7 @@ pub fn build(b: *std.Build) !void {
     if (with_loader) {
         const tboot_loader = b.addExecutable(.{
             .name = "tboot-loader",
-            .root_source_file = .{ .path = "src/tboot-loader.zig" },
+            .root_source_file = b.path("src/tboot-loader.zig"),
             .target = target,
             .optimize = tboot_loader_optimize,
             .strip = optimize != std.builtin.OptimizeMode.Debug,
@@ -53,7 +53,7 @@ pub fn build(b: *std.Build) !void {
         const cpio_tool = b.addRunArtifact(b.addExecutable(.{
             .name = "cpio",
             .target = b.host,
-            .root_source_file = .{ .path = "src/cpio/main.zig" },
+            .root_source_file = b.path("src/cpio/main.zig"),
         }));
         cpio_tool.addArtifactArg(tboot_loader);
         const cpio_archive = b.addInstallFile(
@@ -67,7 +67,7 @@ pub fn build(b: *std.Build) !void {
         const runner_tool = b.addRunArtifact(b.addExecutable(.{
             .name = "tboot-runner",
             .target = b.host,
-            .root_source_file = .{ .path = "src/runner.zig" },
+            .root_source_file = b.path("src/runner.zig"),
         }));
         runner_tool.step.dependOn(&cpio_archive.step);
         runner_tool.addArg(b.makeTempPath());
@@ -92,7 +92,7 @@ pub fn build(b: *std.Build) !void {
     if (with_tools) {
         const tboot_bless_boot = b.addExecutable(.{
             .name = "tboot-bless-boot",
-            .root_source_file = .{ .path = "src/tboot-bless-boot.zig" },
+            .root_source_file = b.path("src/tboot-bless-boot.zig"),
             .target = target,
             .optimize = optimize,
             .strip = optimize != std.builtin.OptimizeMode.Debug,
@@ -101,7 +101,7 @@ pub fn build(b: *std.Build) !void {
 
         const tboot_bless_boot_generator = b.addExecutable(.{
             .name = "tboot-bless-boot-generator",
-            .root_source_file = .{ .path = "src/tboot-bless-boot-generator.zig" },
+            .root_source_file = b.path("src/tboot-bless-boot-generator.zig"),
             .target = target,
             .optimize = optimize,
             .strip = optimize != std.builtin.OptimizeMode.Debug,
@@ -110,7 +110,7 @@ pub fn build(b: *std.Build) !void {
 
         const tboot_sign = b.addExecutable(.{
             .name = "tboot-sign",
-            .root_source_file = .{ .path = "src/tboot-sign.zig" },
+            .root_source_file = b.path("src/tboot-sign.zig"),
             .target = target,
             .optimize = optimize,
             .strip = optimize != std.builtin.OptimizeMode.Debug,
@@ -122,7 +122,7 @@ pub fn build(b: *std.Build) !void {
 
         const tboot_nixos_install = b.addExecutable(.{
             .name = "tboot-nixos-install",
-            .root_source_file = .{ .path = "src/tboot-nixos-install.zig" },
+            .root_source_file = b.path("src/tboot-nixos-install.zig"),
             .target = target,
             .optimize = optimize,
             .strip = optimize != std.builtin.OptimizeMode.Debug,
@@ -134,7 +134,7 @@ pub fn build(b: *std.Build) !void {
 
         const modem_tool = b.addExecutable(.{
             .name = "xmodem",
-            .root_source_file = .{ .path = "src/xmodem.zig" },
+            .root_source_file = b.path("src/xmodem.zig"),
             .target = target,
             .optimize = optimize,
             .strip = optimize != std.builtin.OptimizeMode.Debug,
@@ -145,7 +145,7 @@ pub fn build(b: *std.Build) !void {
     }
 
     const unit_tests = b.addTest(.{
-        .root_source_file = .{ .path = "src/test.zig" },
+        .root_source_file = b.path("src/test.zig"),
         .target = target,
         .optimize = optimize,
     });

@@ -64,7 +64,10 @@
         );
     devShells = inputs.nixpkgs.lib.mapAttrs (_: pkgs: {
       default = pkgs.mkShell {
-        inputsFrom = [ pkgs.tinybootLoader ];
+        inputsFrom = [
+          pkgs.tinybootLoader
+          pkgs.tinybootTools
+        ];
         packages = with pkgs; [
           swtpm
           qemu

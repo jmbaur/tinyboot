@@ -1,6 +1,6 @@
 *.iso
 *.qcow2
 /.direnv
-/zig-cache
+/.zig-cache
 /zig-out
 result*
