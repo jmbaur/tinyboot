@@ -36,8 +36,9 @@ stdenv.mkDerivation (
 
     strictDeps = true;
 
-    depsBuildBuild = [ pkgsBuildBuild.zig_0_12.hook ];
-    nativeBuildInputs = lib.optionals withLoader [ xz ] ++ lib.optionals withTools [ pkg-config ];
+    nativeBuildInputs = [
+      pkgsBuildBuild.zig_0_12.hook
+    ] ++ lib.optionals withLoader [ xz ] ++ lib.optionals withTools [ pkg-config ];
     buildInputs = lib.optionals withTools [ openssl ];
 
     doCheck = true;
