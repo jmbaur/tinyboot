@@ -329,17 +329,25 @@ pub const BootLoaderSpec = struct {
         );
         defer entries_dir.close();
 
+        var entry_filenames = std.ArrayList(EntryFilename).init(tmp_allocator);
+        // defer {
+        //     for (entry_filenames.items) |e| {
+        //         var entry_filename: EntryFilename = @constCast(&e);
+        //         entry_filename.deinit();
+        //     }
+        //     entry_filenames.deinit();
+        // }
+
         var it = entries_dir.iterate();
         while (try it.next()) |dir_entry| {
             if (dir_entry.kind != .file) {
                 continue;
             }
 
-            var entry_filename = EntryFilename.parse(tmp_allocator, dir_entry.name) catch |err| {
+            const entry_filename = EntryFilename.parse(tmp_allocator, dir_entry.name) catch |err| {
                 std.log.err("invalid entry filename for {s}: {}", .{ dir_entry.name, err });
                 continue;
             };
-            defer entry_filename.deinit();
 
             if (entry_filename.tries_left) |tries_left| {
                 if (tries_left == 0) {
@@ -351,20 +359,28 @@ pub const BootLoaderSpec = struct {
                 }
             }
 
-            var entry_file = entries_dir.openFile(dir_entry.name, .{}) catch continue;
+            try entry_filenames.append(entry_filename);
+        }
 
-            std.log.debug("inspecting BLS entry {s} on \"{s}\"", .{ dir_entry.name, mount.disk_name });
+        std.sort.pdq(EntryFilename, entry_filenames, void);
+
+        for (entry_filenames.items) |entry_filename| {
+            const filename = entry_filename.toFilename(tmp_allocator);
+
+            var entry_file = entries_dir.openFile(filename, .{}) catch continue;
+
+            std.log.debug("inspecting BLS entry {s} on \"{s}\"", .{ filename, mount.disk_name });
 
             // We should definitely not get any boot entry files larger than this.
             const entry_contents = try entry_file.readToEndAlloc(tmp_allocator, 1 << 16);
             var type1_entry = Type1Entry.parse(tmp_allocator, entry_contents) catch |err| {
-                std.log.err("failed to parse {s} as BLS type 1 entry: {}", .{ dir_entry.name, err });
+                std.log.err("failed to parse {s} as BLS type 1 entry: {}", .{ filename, err });
                 continue;
             };
             defer type1_entry.deinit();
 
             const linux = try mount.dir.realpathAlloc(final_allocator, type1_entry.linux orelse {
-                std.log.err("missing linux kernel in {s}", .{dir_entry.name});
+                std.log.err("missing linux kernel in {s}", .{filename});
                 continue;
             });
             errdefer final_allocator.free(linux);
@@ -406,7 +422,7 @@ pub const BootLoaderSpec = struct {
             const context = try final_allocator.create(EntryContext);
             errdefer final_allocator.destroy(context);
             context.* = .{
-                .full_path = try entries_dir.realpathAlloc(final_allocator, dir_entry.name),
+                .full_path = try entries_dir.realpathAlloc(final_allocator, filename),
             };
 
             try entries.append(
