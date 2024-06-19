@@ -642,8 +642,8 @@ pub const Command = struct {
 
         fn run(c: *Command, args: *ArgsIterator) !?ClientMsg {
             var xmodem = try Xmodem.init(c.allocator, .{
-                .tty_name = "client-stdin",
-                .tty_fd = posix.STDIN_FILENO,
+                .serial_name = "client-stdin",
+                .serial_fd = posix.STDIN_FILENO,
                 .skip_initrd = if (args.next()) |next|
                     std.mem.eql(u8, next, "-n")
                 else
@@ -653,7 +653,7 @@ pub const Command = struct {
             defer boot_loader.teardown() catch {};
 
             try boot_loader.setup();
-            const devices = try boot_loader.probe(c.allocator);
+            const devices = try boot_loader.probe();
             for (devices) |device| {
                 for (device.entries) |entry| {
                     if (kexecLoad(c.allocator, entry.linux, entry.initrd, entry.cmdline)) {

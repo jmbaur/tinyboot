@@ -301,15 +301,10 @@ pub const BootLoaderSpec = struct {
         self.external_mounts = try external_mounts.toOwnedSlice();
     }
 
-    fn searchForEntries(
-        self: *@This(),
-        mount: Mount,
-        tmp_allocator: std.mem.Allocator,
-        final_allocator: std.mem.Allocator,
-    ) !BootDevice {
-        _ = self;
+    fn searchForEntries(self: *@This(), mount: Mount) !BootDevice {
+        const allocator = self.arena.allocator();
 
-        var entries = std.ArrayList(BootEntry).init(final_allocator);
+        var entries = std.ArrayList(BootEntry).init(allocator);
         errdefer entries.deinit();
 
         const loader_conf: LoaderConf = b: {
@@ -319,7 +314,7 @@ pub const BootLoaderSpec = struct {
             };
             defer file.close();
             std.log.debug("found loader.conf on \"{s}\"", .{mount.disk_name});
-            const contents = try file.readToEndAlloc(tmp_allocator, 4096);
+            const contents = try file.readToEndAlloc(allocator, 4096);
             break :b LoaderConf.parse(contents);
         };
 
@@ -335,7 +330,7 @@ pub const BootLoaderSpec = struct {
                 continue;
             }
 
-            var entry_filename = EntryFilename.parse(tmp_allocator, dir_entry.name) catch |err| {
+            var entry_filename = EntryFilename.parse(allocator, dir_entry.name) catch |err| {
                 std.log.err("invalid entry filename for {s}: {}", .{ dir_entry.name, err });
                 continue;
             };
@@ -356,18 +351,18 @@ pub const BootLoaderSpec = struct {
             std.log.debug("inspecting BLS entry {s} on \"{s}\"", .{ dir_entry.name, mount.disk_name });
 
             // We should definitely not get any boot entry files larger than this.
-            const entry_contents = try entry_file.readToEndAlloc(tmp_allocator, 1 << 16);
-            var type1_entry = Type1Entry.parse(tmp_allocator, entry_contents) catch |err| {
+            const entry_contents = try entry_file.readToEndAlloc(allocator, 1 << 16);
+            var type1_entry = Type1Entry.parse(allocator, entry_contents) catch |err| {
                 std.log.err("failed to parse {s} as BLS type 1 entry: {}", .{ dir_entry.name, err });
                 continue;
             };
             defer type1_entry.deinit();
 
-            const linux = try mount.dir.realpathAlloc(final_allocator, type1_entry.linux orelse {
+            const linux = try mount.dir.realpathAlloc(allocator, type1_entry.linux orelse {
                 std.log.err("missing linux kernel in {s}", .{dir_entry.name});
                 continue;
             });
-            errdefer final_allocator.free(linux);
+            errdefer allocator.free(linux);
 
             // NOTE: Multiple initrds won't work if we have IMA appraisal
             // of signed initrds, so we can only load one.
@@ -377,7 +372,7 @@ pub const BootLoaderSpec = struct {
             var initrd: ?[]const u8 = null;
             if (type1_entry.initrd) |_initrd| {
                 if (_initrd.len > 0) {
-                    initrd = try mount.dir.realpathAlloc(final_allocator, _initrd[0]);
+                    initrd = try mount.dir.realpathAlloc(allocator, _initrd[0]);
                 }
 
                 if (_initrd.len > 1) {
@@ -386,27 +381,27 @@ pub const BootLoaderSpec = struct {
             }
             errdefer {
                 if (initrd) |_initrd| {
-                    final_allocator.free(_initrd);
+                    allocator.free(_initrd);
                 }
             }
 
             var options_with_bls_entry: [linux_headers.COMMAND_LINE_SIZE]u8 = undefined;
             const options = b: {
                 if (type1_entry.options) |opts| {
-                    const orig = try std.mem.join(tmp_allocator, " ", opts);
+                    const orig = try std.mem.join(allocator, " ", opts);
                     break :b try std.fmt.bufPrint(&options_with_bls_entry, "{s} tboot.bls-entry={s}", .{ orig, entry_filename.name });
                 } else {
                     break :b try std.fmt.bufPrint(&options_with_bls_entry, "tboot.bls-entry={s}", .{entry_filename.name});
                 }
             };
 
-            const final_options = try final_allocator.dupe(u8, options);
-            errdefer final_allocator.free(options);
+            const final_options = try allocator.dupe(u8, options);
+            errdefer allocator.free(options);
 
-            const context = try final_allocator.create(EntryContext);
-            errdefer final_allocator.destroy(context);
+            const context = try allocator.create(EntryContext);
+            errdefer allocator.destroy(context);
             context.* = .{
-                .full_path = try entries_dir.realpathAlloc(final_allocator, dir_entry.name),
+                .full_path = try entries_dir.realpathAlloc(allocator, dir_entry.name),
             };
 
             try entries.append(
@@ -420,31 +415,22 @@ pub const BootLoaderSpec = struct {
         }
 
         return .{
-            .name = try final_allocator.dupe(u8, mount.disk_name),
+            .name = try allocator.dupe(u8, mount.disk_name),
             .timeout = loader_conf.timeout,
             .entries = try entries.toOwnedSlice(),
         };
     }
 
     /// Caller is responsible for the returned slice.
-    pub fn probe(self: *@This(), allocator: std.mem.Allocator) ![]const BootDevice {
-        // A temporary allocator for stuff not saved after the probe and not
-        // included in the return value.
-        var tmp_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-        defer tmp_arena.deinit();
-
+    pub fn probe(self: *@This()) ![]const BootDevice {
         std.log.debug("BLS probe start", .{});
-        var devices = std.ArrayList(BootDevice).init(allocator);
+        var devices = std.ArrayList(BootDevice).init(self.arena.allocator());
 
         // Mounts of external devices are ordered before external mounts so
         // they are prioritized in the boot process.
         std.log.debug("BLS probe found {} external device(s)", .{self.external_mounts.len});
         for (self.external_mounts) |mount| {
-            try devices.append(self.searchForEntries(
-                mount,
-                tmp_arena.allocator(),
-                allocator,
-            ) catch |err| {
+            try devices.append(self.searchForEntries(mount) catch |err| {
                 std.log.err(
                     "failed to search for entries on \"{s}\": {}",
                     .{ mount.disk_name, err },
@@ -455,11 +441,7 @@ pub const BootLoaderSpec = struct {
 
         std.log.debug("BLS probe found {} internal device(s)", .{self.internal_mounts.len});
         for (self.internal_mounts) |mount| {
-            try devices.append(self.searchForEntries(
-                mount,
-                tmp_arena.allocator(),
-                allocator,
-            ) catch |err| {
+            try devices.append(self.searchForEntries(mount) catch |err| {
                 std.log.err(
                     "failed to search for entries on \"{s}\": {}",
                     .{ mount.disk_name, err },
@@ -1003,40 +985,45 @@ const Type1Entry = struct {
         var options = std.ArrayList([]const u8).init(allocator);
         errdefer options.deinit();
 
-        while (all_split.next()) |line| {
-            if (std.mem.eql(u8, line, "")) {
+        while (all_split.next()) |unprocessed_line| {
+            if (std.mem.eql(u8, unprocessed_line, "")) {
                 continue;
             }
 
-            var line_split = std.mem.splitSequence(u8, line, " ");
+            const line_without_tabs = try self.allocator.dupe(u8, unprocessed_line);
+            defer self.allocator.free(line_without_tabs);
+            const num_replacements = std.mem.replace(u8, unprocessed_line, "\t", " ", line_without_tabs);
+            _ = num_replacements;
+            const line = std.mem.collapseRepeats(u8, line_without_tabs, ' ');
+            var line_split = std.mem.splitSequence(u8, std.mem.trim(u8, line, " "), " ");
 
             const key = line_split.next() orelse continue;
 
             if (std.mem.eql(u8, key, "title")) {
-                self.title = line_split.rest();
+                self.title = try self.allocator.dupe(u8, line_split.rest());
             } else if (std.mem.eql(u8, key, "version")) {
-                self.version = line_split.rest();
+                self.version = try self.allocator.dupe(u8, line_split.rest());
             } else if (std.mem.eql(u8, key, "machine-id")) {
-                self.machine_id = line_split.rest();
+                self.machine_id = try self.allocator.dupe(u8, line_split.rest());
             } else if (std.mem.eql(u8, key, "sort_key")) {
-                self.sort_key = line_split.rest();
+                self.sort_key = try self.allocator.dupe(u8, line_split.rest());
             } else if (std.mem.eql(u8, key, "linux")) {
-                self.linux = std.mem.trimLeft(u8, line_split.rest(), "/");
+                self.linux = try self.allocator.dupe(u8, std.mem.trimLeft(u8, line_split.rest(), "/"));
             } else if (std.mem.eql(u8, key, "initrd")) {
-                try initrd.append(std.mem.trimLeft(u8, line_split.rest(), "/"));
+                try initrd.append(try self.allocator.dupe(u8, std.mem.trimLeft(u8, line_split.rest(), "/")));
             } else if (std.mem.eql(u8, key, "efi")) {
-                self.efi = std.mem.trimLeft(u8, line_split.rest(), "/");
+                self.efi = try self.allocator.dupe(u8, std.mem.trimLeft(u8, line_split.rest(), "/"));
             } else if (std.mem.eql(u8, key, "options")) {
                 while (line_split.next()) |next| {
-                    try options.append(next);
+                    try options.append(try self.allocator.dupe(u8, next));
                 }
             } else if (std.mem.eql(u8, key, "devicetree")) {
-                self.devicetree = std.mem.trimLeft(u8, line_split.rest(), "/");
+                self.devicetree = try self.allocator.dupe(u8, std.mem.trimLeft(u8, line_split.rest(), "/"));
             } else if (std.mem.eql(u8, key, "devicetree-overlay")) {
                 var devicetree_overlay = std.ArrayList([]const u8).init(allocator);
                 errdefer devicetree_overlay.deinit();
                 while (line_split.next()) |next| {
-                    try devicetree_overlay.append(std.mem.trimLeft(u8, next, "/"));
+                    try devicetree_overlay.append(try self.allocator.dupe(u8, std.mem.trimLeft(u8, next, "/")));
                 }
                 self.devicetree_overlay = try devicetree_overlay.toOwnedSlice();
             } else if (std.mem.eql(u8, key, "architecture")) {
@@ -1057,30 +1044,75 @@ const Type1Entry = struct {
 
     pub fn deinit(self: *@This()) void {
         if (self.initrd) |initrd| {
-            self.allocator.free(initrd);
+            defer self.allocator.free(initrd);
+            for (initrd) |_initrd| {
+                self.allocator.free(_initrd);
+            }
         }
         if (self.options) |options| {
-            self.allocator.free(options);
+            defer self.allocator.free(options);
+            for (options) |option| {
+                self.allocator.free(option);
+            }
         }
         if (self.devicetree_overlay) |dt_overlay| {
-            self.allocator.free(dt_overlay);
+            defer self.allocator.free(dt_overlay);
+            for (dt_overlay) |dt| {
+                self.allocator.free(dt);
+            }
+        }
+        if (self.linux) |linux| {
+            self.allocator.free(linux);
+        }
+        if (self.title) |title| {
+            self.allocator.free(title);
+        }
+        if (self.version) |version| {
+            self.allocator.free(version);
+        }
+        if (self.machine_id) |machine_id| {
+            self.allocator.free(machine_id);
+        }
+        if (self.sort_key) |sort_key| {
+            self.allocator.free(sort_key);
+        }
+        if (self.efi) |efi| {
+            self.allocator.free(efi);
         }
     }
 };
 
 test "type 1 boot entry parsing" {
-    const simple =
-        \\title Foo
-        \\linux /EFI/foo/Image
-        \\options console=ttyAMA0 loglevel=7
-        \\architecture aa64
-    ;
+    {
+        const simple =
+            \\title Foo
+            \\linux /EFI/foo/Image
+            \\options console=ttyAMA0 loglevel=7
+            \\architecture aa64
+        ;
 
-    var type1_entry = try Type1Entry.parse(std.testing.allocator, simple);
-    defer type1_entry.deinit();
+        var type1_entry = try Type1Entry.parse(std.testing.allocator, simple);
+        defer type1_entry.deinit();
 
-    try std.testing.expectEqualStrings("EFI/foo/Image", type1_entry.linux.?);
-    try std.testing.expect(type1_entry.options.?.len == 2);
-    try std.testing.expectEqualStrings("console=ttyAMA0", type1_entry.options.?[0]);
-    try std.testing.expectEqualStrings("loglevel=7", type1_entry.options.?[1]);
+        try std.testing.expectEqualStrings("EFI/foo/Image", type1_entry.linux.?);
+        try std.testing.expect(type1_entry.options.?.len == 2);
+        try std.testing.expectEqualStrings("console=ttyAMA0", type1_entry.options.?[0]);
+        try std.testing.expectEqualStrings("loglevel=7", type1_entry.options.?[1]);
+    }
+    {
+        const weird_formatting =
+            \\title       Foo
+            \\linux      /EFI/foo/Image
+            \\options                   console=ttyAMA0 loglevel=7
+            \\architecture  aa64
+        ;
+
+        var type1_entry = try Type1Entry.parse(std.testing.allocator, weird_formatting);
+        defer type1_entry.deinit();
+
+        try std.testing.expectEqualStrings("EFI/foo/Image", type1_entry.linux.?);
+        try std.testing.expect(type1_entry.options.?.len == 2);
+        try std.testing.expectEqualStrings("console=ttyAMA0", type1_entry.options.?[0]);
+        try std.testing.expectEqualStrings("loglevel=7", type1_entry.options.?[1]);
+    }
 }

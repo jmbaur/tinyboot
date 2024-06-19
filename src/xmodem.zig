@@ -359,7 +359,11 @@ pub fn main() !void {
     };
     defer res.deinit();
 
-    if (res.args.help > 0 or res.positionals.len != 1 or res.args.file == null or res.args.tty == null) {
+    if (res.args.help != 0) {
+        return clap.help(std.io.getStdErr().writer(), clap.Help, &params, .{});
+    }
+
+    if (res.positionals.len != 1 or res.args.file == null or res.args.tty == null) {
         try diag.report(stderr, error.InvalidArgs);
         try clap.usage(std.io.getStdErr().writer(), clap.Help, &params);
         return;

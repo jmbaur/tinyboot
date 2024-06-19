@@ -300,7 +300,11 @@ pub fn main() !void {
     };
     defer res.deinit();
 
-    if (res.args.help > 0 or res.positionals.len != 2 or res.args.@"private-key" == null or res.args.@"public-key" == null) {
+    if (res.args.help != 0) {
+        return clap.help(std.io.getStdErr().writer(), clap.Help, &params, .{});
+    }
+
+    if (res.positionals.len != 2 or res.args.@"private-key" == null or res.args.@"public-key" == null) {
         try diag.report(stderr, error.InvalidArgs);
         try clap.usage(stderr, clap.Help, &params);
         return;

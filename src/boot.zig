@@ -137,7 +137,6 @@ pub const BootDevice = struct {
     entries: []const BootEntry,
 };
 
-// TODO(jared): Use vtable setup like std.mem.Allocator.
 pub const BootLoader = union(enum) {
     bls: *BootLoaderSpec,
     xmodem: *Xmodem,
@@ -149,9 +148,9 @@ pub const BootLoader = union(enum) {
     }
 
     /// Caller is responsible for all memory corresponding to return value.
-    pub fn probe(self: @This(), allocator: std.mem.Allocator) ![]const BootDevice {
+    pub fn probe(self: @This()) ![]const BootDevice {
         return switch (self) {
-            inline else => |boot_loader| try boot_loader.probe(allocator),
+            inline else => |boot_loader| try boot_loader.probe(),
         };
     }
 
@@ -185,6 +184,8 @@ fn autobootWrapper(self: *Autoboot) void {
     }
 }
 
+// TODO(jared): more fine-grained return values, we can fail to kexec-load for
+// many reasons.
 /// Returns true if kexec has been successfully loaded.
 fn autoboot(self: *Autoboot) !bool {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -206,7 +207,7 @@ fn autoboot(self: *Autoboot) !bool {
         return false;
     }
 
-    const boot_devices = try boot_loader.probe(arena.allocator());
+    const boot_devices = try boot_loader.probe();
     if (self.needToStop()) {
         return false;
     }
