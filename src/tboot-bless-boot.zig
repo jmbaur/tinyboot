@@ -31,9 +31,9 @@ fn markAsGood(
     allocator: std.mem.Allocator,
     parent_path: []const u8,
     original_entry_filename: []const u8,
-    bls_entry: bls.EntryFilename,
+    bls_entry_file: bls.BlsEntryFile,
 ) !void {
-    if (bls_entry.tries_left) |tries_left| {
+    if (bls_entry_file.tries_left) |tries_left| {
         _ = tries_left;
 
         const orig_fullpath = try std.fs.path.join(
@@ -44,7 +44,7 @@ fn markAsGood(
         const new_filename = try std.fmt.allocPrint(
             allocator,
             "{s}.conf",
-            .{bls_entry.name},
+            .{bls_entry_file.name},
         );
 
         const new_fullpath = try std.fs.path.join(
@@ -60,7 +60,7 @@ fn markAsBad(
     allocator: std.mem.Allocator,
     parent_path: []const u8,
     original_entry_filename: []const u8,
-    bls_entry: bls.EntryFilename,
+    bls_entry_file: bls.BlsEntryFile,
 ) !void {
     const orig_fullpath = try std.fs.path.join(
         allocator,
@@ -68,17 +68,17 @@ fn markAsBad(
     );
 
     const new_filename = b: {
-        if (bls_entry.tries_done) |tries_done| {
+        if (bls_entry_file.tries_done) |tries_done| {
             break :b try std.fmt.allocPrint(
                 allocator,
                 "{s}+0-{}.conf",
-                .{ bls_entry.name, tries_done },
+                .{ bls_entry_file.name, tries_done },
             );
         } else {
             break :b try std.fmt.allocPrint(
                 allocator,
                 "{s}+0.conf",
-                .{bls_entry.name},
+                .{bls_entry_file.name},
             );
         }
     };
@@ -95,7 +95,7 @@ fn printStatus(
     allocator: std.mem.Allocator,
     parent_path: []const u8,
     original_entry_filename: []const u8,
-    bls_entry: bls.EntryFilename,
+    bls_entry_file: bls.BlsEntryFile,
 ) !void {
     const orig_fullpath = try std.fs.path.join(
         allocator,
@@ -106,10 +106,10 @@ fn printStatus(
 
     try stdout.print("{s}:\n", .{orig_fullpath});
 
-    if (bls_entry.tries_left) |tries_left| {
+    if (bls_entry_file.tries_left) |tries_left| {
         if (tries_left > 0) {
             try stdout.print("\t{} tries left until entry is bad\n", .{tries_left});
-        } else if (bls_entry.tries_done) |tries_done| {
+        } else if (bls_entry_file.tries_done) |tries_done| {
             try stdout.print("\tentry is bad, {} tries attempted\n", .{tries_done});
         } else {
             try stdout.print("\tentry is bad\n", .{});
@@ -137,25 +137,24 @@ fn findEntry(
     defer entries_dir.close();
 
     var iter = entries_dir.iterate();
-    while (try iter.next()) |entry| {
-        if (entry.kind != .file) {
+    while (try iter.next()) |dir_entry| {
+        if (dir_entry.kind != .file) {
             continue;
         }
 
-        var bls_entry = bls.EntryFilename.parse(allocator, entry.name) catch |err| {
+        const bls_entry = bls.BlsEntryFile.parse(dir_entry.name) catch |err| {
             std.log.debug(
                 "failed to parse boot entry {s}: {}",
-                .{ entry.name, err },
+                .{ dir_entry.name, err },
             );
             continue;
         };
-        defer bls_entry.deinit();
 
         if (std.mem.eql(u8, bls_entry.name, entry_name)) {
             switch (action) {
-                .good => try markAsGood(allocator, entries_path, entry.name, bls_entry),
-                .bad => try markAsBad(allocator, entries_path, entry.name, bls_entry),
-                .status => try printStatus(allocator, entries_path, entry.name, bls_entry),
+                .good => try markAsGood(allocator, entries_path, dir_entry.name, bls_entry),
+                .bad => try markAsBad(allocator, entries_path, dir_entry.name, bls_entry),
+                .status => try printStatus(allocator, entries_path, dir_entry.name, bls_entry),
             }
         }
     }

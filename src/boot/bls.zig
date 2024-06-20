@@ -98,9 +98,231 @@ fn diskName(allocator: std.mem.Allocator, devname: []const u8) ![]const u8 {
     return name.toOwnedSlice();
 }
 
+fn versionInId(id: []const u8) ?std.SemanticVersion {
+    for (id, 0..) |char, idx| {
+        if ('0' <= char and char <= '9') {
+            return std.SemanticVersion.parse(id[idx..]) catch break;
+        }
+    }
+
+    return null;
+}
+
+// Example implementation in systemd-boot https://github.com/systemd/systemd/blob/de732ade0909c2d44a214fb1eaea5f5b1721e9f1/src/boot/efi/boot.c#L1670
+/// Follows logic outlined by Boot Loader Specification sorting (described at https://uapi-group.org/specifications/specs/boot_loader_specification/#sorting).
+///
+/// Version comparisons are done by parsing version fields using semantic versioning.
+fn blsEntryLessThan(context: void, a: BlsEntry, b: BlsEntry) bool {
+    _ = context;
+
+    // Order entries that have no tries left to the end of the list.
+    if (a.tries_left != null and b.tries_left != null) {
+        const a_tries_left = a.tries_left.?;
+        const b_tries_left = b.tries_left.?;
+
+        if (a_tries_left == 0) {
+            return a_tries_left > b_tries_left;
+        }
+    }
+
+    // One has a sort key and the other does not, prefer the one with the sort
+    // key.
+    if ((a.sort_key == null) != (b.sort_key == null)) {
+        return a.sort_key != null;
+    }
+
+    if (a.sort_key != null and b.sort_key != null) {
+        // Both have a sort key, do new-style ordering.
+        const a_sort_key = a.sort_key.?;
+        const b_sort_key = b.sort_key.?;
+
+        switch (std.mem.order(u8, a_sort_key, b_sort_key)) {
+            .eq => {},
+            .gt => return false,
+            .lt => return true,
+        }
+
+        switch (std.mem.order(u8, a.machine_id orelse "", b.machine_id orelse "")) {
+            .eq => {},
+            .gt => return false,
+            .lt => return true,
+        }
+
+        {
+            const a_version = std.SemanticVersion.parse(a.version orelse "0.0.0") catch b: {
+                std.log.debug("invalid version in {s}: {?s}", .{ a.id, a.version });
+                break :b std.SemanticVersion{
+                    .major = 0,
+                    .minor = 0,
+                    .patch = 0,
+                };
+            };
+            const b_version = std.SemanticVersion.parse(b.version orelse "0.0.0") catch b: {
+                std.log.debug("invalid version in {s}: {?s}", .{ b.id, b.version });
+                break :b std.SemanticVersion{
+                    .major = 0,
+                    .minor = 0,
+                    .patch = 0,
+                };
+            };
+
+            switch (std.SemanticVersion.order(a_version, b_version)) {
+                .eq => {},
+                .gt => return true,
+                .lt => return false,
+            }
+        }
+    }
+
+    {
+        const a_id_version = versionInId(a.id);
+        const b_id_version = versionInId(b.id);
+        if (a_id_version != null and b_id_version != null) {
+            switch (std.SemanticVersion.order(a_id_version.?, b_id_version.?)) {
+                .eq => {},
+                .gt => return true,
+                .lt => return false,
+            }
+        }
+    }
+
+    if (a.tries_left == null or b.tries_left == null) {
+        return false;
+    }
+
+    const a_tries_left = a.tries_left.?;
+    const b_tries_left = b.tries_left.?;
+    if (a_tries_left != b_tries_left) {
+        return a_tries_left > b_tries_left;
+    }
+
+    // If both have the same number of tries left, choose the one with less
+    // tries done.
+    return a.tries_done orelse 0 < b.tries_done orelse 0;
+}
+
+test "boot entry sorting" {
+    // no tries left is always ordered less than some tries left
+    try std.testing.expect(blsEntryLessThan(
+        {},
+        BlsEntry{
+            .allocator = std.testing.allocator,
+            .id = "foo",
+            .tries_left = 1,
+        },
+        BlsEntry{
+            .allocator = std.testing.allocator,
+            .id = "bar",
+            .tries_left = 0,
+        },
+    ));
+
+    // entries with sort keys are ordered before entries without sort keys
+    try std.testing.expect(blsEntryLessThan(
+        {},
+        BlsEntry{
+            .allocator = std.testing.allocator,
+            .id = "foo",
+            .sort_key = "asdf",
+        },
+        BlsEntry{
+            .allocator = std.testing.allocator,
+            .id = "bar",
+            .sort_key = null,
+        },
+    ));
+
+    // entries with different sort keys are sorted based on the sort key
+    try std.testing.expect(blsEntryLessThan(
+        {},
+        BlsEntry{
+            .allocator = std.testing.allocator,
+            .id = "foo",
+            .sort_key = "abcd",
+        },
+        BlsEntry{
+            .allocator = std.testing.allocator,
+            .id = "bar",
+            .sort_key = "bcde",
+        },
+    ));
+
+    // entries with the same sort key and different machine IDs are sorted
+    // based on the machine ID
+    try std.testing.expect(blsEntryLessThan(
+        {},
+        BlsEntry{
+            .allocator = std.testing.allocator,
+            .id = "foo",
+            .sort_key = "yo",
+            .machine_id = "abc",
+        },
+        BlsEntry{
+            .allocator = std.testing.allocator,
+            .id = "bar",
+            .sort_key = "yo",
+            .machine_id = "xyz",
+        },
+    ));
+
+    // entries with the same sort key and same machine IDs are sorted
+    // based on the version
+    try std.testing.expect(blsEntryLessThan(
+        {},
+        BlsEntry{
+            .allocator = std.testing.allocator,
+            .id = "foo",
+            .sort_key = "yo",
+            .machine_id = "abc",
+            .version = "0.0.2",
+        },
+        BlsEntry{
+            .allocator = std.testing.allocator,
+            .id = "bar",
+            .sort_key = "yo",
+            .machine_id = "abc",
+            .version = "0.0.1",
+        },
+    ));
+
+    // entries without sort keys are sorted based on the version potentially
+    // embedded in the filename
+    try std.testing.expect(blsEntryLessThan(
+        {},
+        BlsEntry{
+            .allocator = std.testing.allocator,
+            .id = "foo-0.0.2",
+        },
+        BlsEntry{
+            .allocator = std.testing.allocator,
+            .id = "foo-0.0.1",
+        },
+    ));
+
+    // entries without sort keys, no versions encoded in the filenames, and the
+    // same number of tries left are sorted based on which entry has less tries
+    // done
+    try std.testing.expect(blsEntryLessThan(
+        {},
+        BlsEntry{
+            .allocator = std.testing.allocator,
+            .id = "foo",
+            .tries_left = 1,
+            .tries_done = 0,
+        },
+        BlsEntry{
+            .allocator = std.testing.allocator,
+            .id = "bar",
+            .tries_left = 1,
+            .tries_done = 1,
+        },
+    ));
+}
+
 pub const BootLoaderSpec = struct {
     const EntryContext = struct {
-        full_path: []const u8,
+        bls_entry_file: *BlsEntryFile,
+        parent_dir: []const u8,
     };
 
     arena: std.heap.ArenaAllocator,
@@ -148,12 +370,12 @@ pub const BootLoaderSpec = struct {
         defer sysfs_block.close();
         var it = sysfs_block.iterate();
 
-        while (try it.next()) |entry| {
-            if (entry.kind != .sym_link) {
+        while (try it.next()) |dir_entry| {
+            if (dir_entry.kind != .sym_link) {
                 continue;
             }
 
-            const uevent_path = try std.fs.path.join(allocator, &.{ entry.name, "uevent" });
+            const uevent_path = try std.fs.path.join(allocator, &.{ dir_entry.name, "uevent" });
             var uevent_file = try sysfs_block.openFile(uevent_path, .{});
             defer uevent_file.close();
 
@@ -166,7 +388,7 @@ pub const BootLoaderSpec = struct {
 
             std.log.debug(
                 "inspecting block device {s} ({s})",
-                .{ entry.name, devtype },
+                .{ dir_entry.name, devtype },
             );
 
             if (!std.mem.eql(u8, devtype, "disk")) {
@@ -182,7 +404,7 @@ pub const BootLoaderSpec = struct {
             ) catch |err| {
                 std.log.err(
                     "failed to open disk alias for {s}: {}",
-                    .{ entry.name, err },
+                    .{ dir_entry.name, err },
                 );
                 continue;
             };
@@ -307,6 +529,8 @@ pub const BootLoaderSpec = struct {
         var entries = std.ArrayList(BootEntry).init(allocator);
         errdefer entries.deinit();
 
+        var bls_entries = std.ArrayList(BlsEntry).init(allocator);
+
         const loader_conf: LoaderConf = b: {
             var file = mount.dir.openFile("loader/loader.conf", .{}) catch {
                 std.log.debug("no loader.conf found on {s}, using defaults", .{mount.disk_name});
@@ -330,13 +554,12 @@ pub const BootLoaderSpec = struct {
                 continue;
             }
 
-            var entry_filename = EntryFilename.parse(allocator, dir_entry.name) catch |err| {
+            const bls_entry_file = BlsEntryFile.parse(dir_entry.name) catch |err| {
                 std.log.err("invalid entry filename for {s}: {}", .{ dir_entry.name, err });
                 continue;
             };
-            defer entry_filename.deinit();
 
-            if (entry_filename.tries_left) |tries_left| {
+            if (bls_entry_file.tries_left) |tries_left| {
                 if (tries_left == 0) {
                     std.log.warn(
                         "skipping entry {s} because all tries have been exhausted",
@@ -347,21 +570,35 @@ pub const BootLoaderSpec = struct {
             }
 
             var entry_file = entries_dir.openFile(dir_entry.name, .{}) catch continue;
+            defer entry_file.close();
 
             std.log.debug("inspecting BLS entry {s} on \"{s}\"", .{ dir_entry.name, mount.disk_name });
 
             // We should definitely not get any boot entry files larger than this.
             const entry_contents = try entry_file.readToEndAlloc(allocator, 1 << 16);
-            var type1_entry = Type1Entry.parse(allocator, entry_contents) catch |err| {
+            var type1_entry = BlsEntry.parse(allocator, bls_entry_file, entry_contents) catch |err| {
                 std.log.err("failed to parse {s} as BLS type 1 entry: {}", .{ dir_entry.name, err });
                 continue;
             };
-            defer type1_entry.deinit();
+            errdefer type1_entry.deinit();
 
-            const linux = try mount.dir.realpathAlloc(allocator, type1_entry.linux orelse {
-                std.log.err("missing linux kernel in {s}", .{dir_entry.name});
+            try bls_entries.append(type1_entry);
+        }
+
+        std.log.debug("sorting BLS entries", .{});
+        std.mem.sort(BlsEntry, bls_entries.items, {}, blsEntryLessThan);
+
+        for (bls_entries.items) |entry| {
+            const linux = mount.dir.realpathAlloc(allocator, entry.linux orelse {
+                std.log.err("missing linux kernel in entry {s}", .{entry.id});
                 continue;
-            });
+            }) catch |err| switch (err) {
+                error.OutOfMemory => return err,
+                else => {
+                    std.log.err("linux kernel \"{?s}\" not found on \"{s}\"", .{ entry.linux, mount.disk_name });
+                    continue;
+                },
+            };
             errdefer allocator.free(linux);
 
             // NOTE: Multiple initrds won't work if we have IMA appraisal
@@ -370,9 +607,15 @@ pub const BootLoaderSpec = struct {
             // TODO(jared): If IMA appraisal is disabled, we can
             // concatenate all the initrds together.
             var initrd: ?[]const u8 = null;
-            if (type1_entry.initrd) |_initrd| {
+            if (entry.initrd) |_initrd| {
                 if (_initrd.len > 0) {
-                    initrd = try mount.dir.realpathAlloc(allocator, _initrd[0]);
+                    initrd = mount.dir.realpathAlloc(allocator, _initrd[0]) catch |err| switch (err) {
+                        error.OutOfMemory => return err,
+                        else => {
+                            std.log.err("initrd \"{s}\" not found on \"{s}\"", .{ _initrd[0], mount.disk_name });
+                            continue;
+                        },
+                    };
                 }
 
                 if (_initrd.len > 1) {
@@ -385,13 +628,16 @@ pub const BootLoaderSpec = struct {
                 }
             }
 
+            // TODO(jared): Make it nicer to continue appending kernel
+            // params...perhaps keep the ArrayList so we still get to
+            // `.append()`.
             var options_with_bls_entry: [linux_headers.COMMAND_LINE_SIZE]u8 = undefined;
             const options = b: {
-                if (type1_entry.options) |opts| {
+                if (entry.options) |opts| {
                     const orig = try std.mem.join(allocator, " ", opts);
-                    break :b try std.fmt.bufPrint(&options_with_bls_entry, "{s} tboot.bls-entry={s}", .{ orig, entry_filename.name });
+                    break :b try std.fmt.bufPrint(&options_with_bls_entry, "{s} tboot.bls-entry={s}", .{ orig, entry.id });
                 } else {
-                    break :b try std.fmt.bufPrint(&options_with_bls_entry, "tboot.bls-entry={s}", .{entry_filename.name});
+                    break :b try std.fmt.bufPrint(&options_with_bls_entry, "tboot.bls-entry={s}", .{entry.id});
                 }
             };
 
@@ -400,8 +646,18 @@ pub const BootLoaderSpec = struct {
 
             const context = try allocator.create(EntryContext);
             errdefer allocator.destroy(context);
+
+            const bls_entry_file = try allocator.create(BlsEntryFile);
+            errdefer allocator.destroy(bls_entry_file);
+
+            bls_entry_file.* = BlsEntryFile.init(entry.id, .{
+                .tries_left = entry.tries_left,
+                .tries_done = entry.tries_done,
+            });
+
             context.* = .{
-                .full_path = try entries_dir.realpathAlloc(allocator, dir_entry.name),
+                .parent_dir = try mount.dir.realpathAlloc(allocator, "loader/entries"),
+                .bls_entry_file = bls_entry_file,
             };
 
             try entries.append(
@@ -469,28 +725,28 @@ pub const BootLoaderSpec = struct {
     fn _entryLoaded(self: *@This(), ctx: *anyopaque) !void {
         const context: *EntryContext = @ptrCast(@alignCast(ctx));
 
-        const dirname = std.fs.path.dirname(context.full_path) orelse return;
-        const original_name = std.fs.path.basename(context.full_path);
-        var entry = try EntryFilename.parse(self.arena.allocator(), original_name);
+        const original_name = try context.bls_entry_file.toFilename(self.arena.allocator());
 
-        if (entry.tries_done) |*done| done.* +|= 1;
-        if (entry.tries_left) |*left| left.* -|= 1;
+        var bls_entry_file = context.bls_entry_file;
 
-        if (entry.tries_left) |tries_left| {
+        if (bls_entry_file.tries_done) |*done| done.* +|= 1;
+        if (bls_entry_file.tries_left) |*left| left.* -|= 1;
+
+        if (bls_entry_file.tries_left) |tries_left| {
             std.log.info(
                 "{} {s} remaining for entry \"{s}\"",
                 .{
                     tries_left,
                     if (tries_left == 1) "try" else "tries",
-                    entry.name,
+                    bls_entry_file.name,
                 },
             );
         }
 
-        const new_name = try entry.toFilename(self.arena.allocator());
+        const new_name = try bls_entry_file.toFilename(self.arena.allocator());
 
         if (!std.mem.eql(u8, original_name, new_name)) {
-            var dir = try std.fs.cwd().openDir(dirname, .{});
+            var dir = try std.fs.cwd().openDir(context.parent_dir, .{});
             defer dir.close();
 
             try dir.rename(original_name, new_name);
@@ -527,8 +783,7 @@ pub const BootLoaderSpec = struct {
     }
 };
 
-pub const EntryFilename = struct {
-    allocator: std.mem.Allocator,
+pub const BlsEntryFile = struct {
     name: []const u8,
     tries_left: ?u8 = null,
     tries_done: ?u8 = null,
@@ -538,7 +793,7 @@ pub const EntryFilename = struct {
         InvalidTriesSyntax,
     };
 
-    pub fn toFilename(self: *@This(), allocator: std.mem.Allocator) ![]const u8 {
+    pub fn toFilename(self: *const @This(), allocator: std.mem.Allocator) ![]const u8 {
         var filename = std.ArrayList(u8).init(allocator);
 
         try filename.appendSlice(self.name);
@@ -562,19 +817,18 @@ pub const EntryFilename = struct {
         return filename.toOwnedSlice();
     }
 
-    pub fn init(allocator: std.mem.Allocator, name: []const u8, opts: struct {
+    pub fn init(name: []const u8, opts: struct {
         tries_left: ?u8 = null,
         tries_done: ?u8 = null,
-    }) !@This() {
+    }) @This() {
         return .{
-            .allocator = allocator,
-            .name = try allocator.dupe(u8, name),
+            .name = name,
             .tries_left = opts.tries_left,
             .tries_done = opts.tries_done,
         };
     }
 
-    pub fn parse(allocator: std.mem.Allocator, filename: []const u8) !@This() {
+    pub fn parse(filename: []const u8) !@This() {
         if (!std.mem.eql(u8, std.fs.path.extension(filename), ".conf")) {
             return Error.MissingSuffix;
         }
@@ -597,83 +851,75 @@ pub const EntryFilename = struct {
                 const tries_done = std.fmt.parseInt(u8, minus_info, 10) catch {
                     return Error.InvalidTriesSyntax;
                 };
-                return @This().init(allocator, name, .{
+                return @This().init(name, .{
                     .tries_left = tries_left,
                     .tries_done = tries_done,
                 });
             } else {
-                return @This().init(allocator, name, .{
+                return @This().init(name, .{
                     .tries_left = tries_left,
                 });
             }
         } else {
-            return @This().init(allocator, name, .{});
+            return @This().init(name, .{});
         }
-    }
-
-    pub fn deinit(self: *@This()) void {
-        self.allocator.free(self.name);
     }
 };
 
 test "entry filename parsing" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-
     try std.testing.expectError(
-        EntryFilename.Error.MissingSuffix,
-        EntryFilename.parse(allocator, "my-entry"),
+        BlsEntryFile.Error.MissingSuffix,
+        BlsEntryFile.parse("my-entry"),
     );
 
     try std.testing.expectError(
-        EntryFilename.Error.InvalidTriesSyntax,
-        EntryFilename.parse(allocator, "my-entry+foo.conf"),
+        BlsEntryFile.Error.InvalidTriesSyntax,
+        BlsEntryFile.parse("my-entry+foo.conf"),
     );
 
     try std.testing.expectError(
-        EntryFilename.Error.InvalidTriesSyntax,
-        EntryFilename.parse(allocator, "my-entry+foo-bar.conf"),
+        BlsEntryFile.Error.InvalidTriesSyntax,
+        BlsEntryFile.parse("my-entry+foo-bar.conf"),
     );
 
     try std.testing.expectEqualDeep(
-        EntryFilename.init(allocator, "my-entry", .{}),
-        EntryFilename.parse(allocator, "my-entry.conf"),
+        BlsEntryFile.init("my-entry", .{}),
+        BlsEntryFile.parse("my-entry.conf"),
     );
 
     try std.testing.expectEqualDeep(
-        EntryFilename.init(allocator, "my-entry-1", .{}),
-        EntryFilename.parse(allocator, "my-entry-1.conf"),
+        BlsEntryFile.init("my-entry-1", .{}),
+        BlsEntryFile.parse("my-entry-1.conf"),
     );
 
     try std.testing.expectEqualDeep(
-        EntryFilename.init(allocator, "my-entry", .{ .tries_left = 1 }),
-        EntryFilename.parse(allocator, "my-entry+1.conf"),
+        BlsEntryFile.init("my-entry", .{ .tries_left = 1 }),
+        BlsEntryFile.parse("my-entry+1.conf"),
     );
 
     try std.testing.expectEqualDeep(
-        EntryFilename.init(allocator, "my-entry", .{ .tries_left = 0 }),
-        EntryFilename.parse(allocator, "my-entry+0.conf"),
+        BlsEntryFile.init("my-entry", .{ .tries_left = 0 }),
+        BlsEntryFile.parse("my-entry+0.conf"),
     );
 
     try std.testing.expectEqualDeep(
-        EntryFilename.init(allocator, "my-entry", .{ .tries_left = 0, .tries_done = 3 }),
-        EntryFilename.parse(allocator, "my-entry+0-3.conf"),
+        BlsEntryFile.init("my-entry", .{ .tries_left = 0, .tries_done = 3 }),
+        BlsEntryFile.parse("my-entry+0-3.conf"),
     );
 
     try std.testing.expectEqualDeep(
-        EntryFilename.init(allocator, "my-entry-1", .{ .tries_left = 5, .tries_done = 0 }),
-        EntryFilename.parse(allocator, "my-entry-1+5-0.conf"),
+        BlsEntryFile.init("my-entry-1", .{ .tries_left = 5, .tries_done = 0 }),
+        BlsEntryFile.parse("my-entry-1+5-0.conf"),
     );
 
     try std.testing.expectEqualDeep(
-        EntryFilename.init(allocator, "my-entry-2", .{ .tries_left = 3, .tries_done = 1 }),
-        EntryFilename.parse(allocator, "my-entry-2+3-1.conf"),
+        BlsEntryFile.init("my-entry-2", .{ .tries_left = 3, .tries_done = 1 }),
+        BlsEntryFile.parse("my-entry-2+3-1.conf"),
     );
 
     try std.testing.expectEqualDeep(
-        EntryFilename.init(allocator, "my-entry-3", .{ .tries_left = 2 }),
-        EntryFilename.parse(allocator, "my-entry-3+2.conf"),
+        BlsEntryFile.init("my-entry-3", .{ .tries_left = 2 }),
+        BlsEntryFile.parse("my-entry-3+2.conf"),
     );
 }
 
@@ -682,10 +928,10 @@ test "entry filename marshalling" {
     defer arena.deinit();
 
     {
-        var entry = EntryFilename.init(arena.allocator(), "foo", .{
+        var entry = BlsEntryFile.init("foo", .{
             .tries_left = null,
             .tries_done = null,
-        }) catch unreachable;
+        });
         try std.testing.expectEqualStrings(
             entry.toFilename(arena.allocator()) catch unreachable,
             "foo.conf",
@@ -693,10 +939,10 @@ test "entry filename marshalling" {
     }
 
     {
-        var entry = EntryFilename.init(arena.allocator(), "foo", .{
+        var entry = BlsEntryFile.init("foo", .{
             .tries_left = 1,
             .tries_done = null,
-        }) catch unreachable;
+        });
         try std.testing.expectEqualStrings(
             entry.toFilename(arena.allocator()) catch unreachable,
             "foo+1.conf",
@@ -704,10 +950,10 @@ test "entry filename marshalling" {
     }
 
     {
-        var entry = EntryFilename.init(arena.allocator(), "foo", .{
+        var entry = BlsEntryFile.init("foo", .{
             .tries_left = 1,
             .tries_done = 2,
-        }) catch unreachable;
+        });
         try std.testing.expectEqualStrings(
             entry.toFilename(arena.allocator()) catch unreachable,
             "foo+1-2.conf",
@@ -954,8 +1200,15 @@ const Architecture = enum {
 
 /// Configuration of the type #1 boot entry as defined in
 /// https://uapi-group.org/specifications/specs/boot_loader_specification/#type-1-boot-loader-specification-entries.
-const Type1Entry = struct {
+const BlsEntry = struct {
     allocator: std.mem.Allocator,
+
+    /// `id` is derived from the filename
+    id: []const u8,
+    /// `tries_left` is derived from the filename
+    tries_left: ?u8 = null,
+    /// `tries_done` is derived from the filename
+    tries_done: ?u8 = null,
 
     title: ?[]const u8 = null,
     version: ?[]const u8 = null,
@@ -972,9 +1225,15 @@ const Type1Entry = struct {
     // Ensures all path options have their leading forward-slash trimmed so
     // that the paths can be used directly with the ESP mountpoint's std.fs.Dir
     // instance.
-    pub fn parse(allocator: std.mem.Allocator, contents: []const u8) !@This() {
+    pub fn parse(allocator: std.mem.Allocator, file: BlsEntryFile, contents: []const u8) !@This() {
+        const id = try allocator.dupe(u8, file.name);
+        errdefer allocator.free(id);
+
         var self = @This(){
             .allocator = allocator,
+            .id = id,
+            .tries_left = file.tries_left,
+            .tries_done = file.tries_done,
         };
 
         var all_split = std.mem.splitSequence(u8, contents, "\n");
@@ -1043,6 +1302,8 @@ const Type1Entry = struct {
     }
 
     pub fn deinit(self: *@This()) void {
+        self.allocator.free(self.id);
+
         if (self.initrd) |initrd| {
             defer self.allocator.free(initrd);
             for (initrd) |_initrd| {
@@ -1091,7 +1352,11 @@ test "type 1 boot entry parsing" {
             \\architecture aa64
         ;
 
-        var type1_entry = try Type1Entry.parse(std.testing.allocator, simple);
+        var type1_entry = try BlsEntry.parse(
+            std.testing.allocator,
+            .{ .name = "foo" },
+            simple,
+        );
         defer type1_entry.deinit();
 
         try std.testing.expectEqualStrings("EFI/foo/Image", type1_entry.linux.?);
@@ -1107,7 +1372,11 @@ test "type 1 boot entry parsing" {
             \\architecture  aa64
         ;
 
-        var type1_entry = try Type1Entry.parse(std.testing.allocator, weird_formatting);
+        var type1_entry = try BlsEntry.parse(
+            std.testing.allocator,
+            .{ .name = "foo" },
+            weird_formatting,
+        );
         defer type1_entry.deinit();
 
         try std.testing.expectEqualStrings("EFI/foo/Image", type1_entry.linux.?);

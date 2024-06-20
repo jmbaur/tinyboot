@@ -175,12 +175,12 @@ fn installGeneration(
     defer entries_dir.close();
 
     var it = entries_dir.iterate();
-    while (try it.next()) |entry| {
-        if (entry.kind != .file) {
+    while (try it.next()) |dir_entry| {
+        if (dir_entry.kind != .file) {
             continue;
         }
 
-        const existing_entry = bls.EntryFilename.parse(allocator, entry.name) catch continue;
+        const existing_entry = bls.BlsEntryFile.parse(dir_entry.name) catch continue;
 
         if (std.mem.eql(u8, existing_entry.name, entry_name)) {
             std.log.debug("entry {s} already installed", .{entry_name});
@@ -189,7 +189,7 @@ fn installGeneration(
                 args.efi_sys_mount_point,
                 "loader",
                 "entries",
-                entry.name,
+                dir_entry.name,
             });
             try known_files.put(known_entry, {});
             return;
