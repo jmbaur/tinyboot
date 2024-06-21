@@ -138,7 +138,7 @@ in
     linux = {
       package = mkOption {
         type = types.package;
-        default = pkgs.linux_6_8;
+        default = pkgs.linux_6_9;
       };
       consoles = mkOption {
         type = types.listOf types.str;

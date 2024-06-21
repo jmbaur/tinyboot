@@ -11,7 +11,6 @@
       ATA_ACPI = yes;
       CMDLINE_BOOL = yes;
       CPU_MITIGATIONS = yes;
-      CPU_SRSO = yes;
       CPU_SUP_AMD = yes;
       CRYPTO_SHA256_SSSE3 = yes;
       CRYPTO_SHA512_SSSE3 = yes;
@@ -27,12 +26,13 @@
       KERNEL_XZ = yes;
       MFD_INTEL_LPSS_ACPI = yes;
       MFD_INTEL_LPSS_PCI = yes;
+      MITIGATION_RETHUNK = yes;
+      MITIGATION_RETPOLINE = yes;
+      MITIGATION_SRSO = yes;
       MTRR = yes;
       PCI_MSI = yes;
       PNP = yes;
       PREEMPT_VOLUNTARY = yes;
-      RETHUNK = yes;
-      RETPOLINE = yes;
       RTC_DRV_CMOS = yes;
       SERIAL_8250 = yes;
       SERIAL_8250_CONSOLE = yes;
