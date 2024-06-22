@@ -32,7 +32,7 @@ pub fn main() !void {
         return;
     }
 
-    var kernel_cmdline_file = try std.fs.openFileAbsolute("/proc/cmdline", .{});
+    var kernel_cmdline_file = try std.fs.cwd().openFile("/proc/cmdline", .{});
     defer kernel_cmdline_file.close();
 
     const kernel_cmdline = try kernel_cmdline_file.readToEndAlloc(allocator, 1024);
@@ -43,12 +43,12 @@ pub fn main() !void {
             &.{ early_dir, "basic.target.wants" },
         );
 
-        std.fs.makeDirAbsolute(basic_target_path) catch |err| switch (err) {
+        std.fs.cwd().makeDir(basic_target_path) catch |err| switch (err) {
             error.PathAlreadyExists => {},
             else => return err,
         };
 
-        var basic_target_dir = try std.fs.openDirAbsolute(basic_target_path, .{});
+        var basic_target_dir = try std.fs.cwd().openDir(basic_target_path, .{});
         defer basic_target_dir.close();
 
         try basic_target_dir.symLink(

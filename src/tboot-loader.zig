@@ -174,7 +174,7 @@ fn pid1() !void {
     defer log.deinitLogger();
 
     const cmdline = cmdline: {
-        var cmdline_file = try std.fs.openFileAbsolute("/proc/self/cmdline", .{ .mode = .read_only });
+        var cmdline_file = try std.fs.cwd().openFile("/proc/self/cmdline", .{ .mode = .read_only });
         defer cmdline_file.close();
         const cmdline_raw = try cmdline_file.readToEndAlloc(allocator, 2048);
         defer allocator.free(cmdline_raw);

@@ -91,6 +91,7 @@ pub fn build(b: *std.Build) !void {
             .optimize = optimize,
             .strip = optimize != std.builtin.OptimizeMode.Debug,
         });
+        tboot_bless_boot.root_module.addImport("clap", clap.module("clap"));
         b.installArtifact(tboot_bless_boot);
 
         const tboot_bless_boot_generator = b.addExecutable(.{

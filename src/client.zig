@@ -41,7 +41,7 @@ pub const Client = struct {
             .stream = try std.net.connectUnixSocket("/run/bus"),
             .arena = arena,
             .writer = std.io.bufferedWriter(std.io.getStdOut().writer()),
-            .log_file = try std.fs.openFileAbsolute("/run/log", .{}),
+            .log_file = try std.fs.cwd().openFile("/run/log", .{}),
         };
     }
 

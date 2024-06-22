@@ -197,7 +197,7 @@ fn installGeneration(
     }
 
     if (!args.dry_run) {
-        var entry_file = try std.fs.createFileAbsolute(entry_path, .{});
+        var entry_file = try std.fs.cwd().createFile(entry_path, .{});
         defer entry_file.close();
 
         try entry_file.writeAll(entry_contents);
@@ -227,7 +227,7 @@ fn cleanupDir(
 
         if (known_files.get(full_path) == null) {
             if (!args.dry_run) {
-                try std.fs.deleteFileAbsolute(full_path);
+                try std.fs.cwd().deleteFile(full_path);
             }
             std.log.info("cleaned up {s}", .{full_path});
         }
@@ -319,7 +319,7 @@ pub fn main() !void {
         std.log.warn("running a dry run, no filesystem changes will occur", .{});
     }
 
-    const esp = try std.fs.openDirAbsolute(args.efi_sys_mount_point, .{
+    const esp = try std.fs.cwd().openDir(args.efi_sys_mount_point, .{
         .iterate = true,
     });
 
@@ -328,7 +328,7 @@ pub fn main() !void {
         &args,
     );
 
-    var nixos_system_profile_dir = try std.fs.openDirAbsolute(
+    var nixos_system_profile_dir = try std.fs.cwd().openDir(
         "/nix/var/nix/profiles",
         .{ .iterate = true },
     );

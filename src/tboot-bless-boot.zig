@@ -1,10 +1,10 @@
 const std = @import("std");
 
+const clap = @import("clap");
+
 const bls = @import("./boot/bls.zig");
 
 const Error = error{
-    MissingEfiSysMountPoint,
-    MissingAction,
     InvalidAction,
     MissingBlsEntry,
 };
@@ -29,17 +29,12 @@ const Action = enum {
 
 fn markAsGood(
     allocator: std.mem.Allocator,
-    parent_path: []const u8,
+    parent_dir: std.fs.Dir,
     original_entry_filename: []const u8,
     bls_entry_file: bls.BlsEntryFile,
 ) !void {
     if (bls_entry_file.tries_left) |tries_left| {
         _ = tries_left;
-
-        const orig_fullpath = try std.fs.path.join(
-            allocator,
-            &.{ parent_path, original_entry_filename },
-        );
 
         const new_filename = try std.fmt.allocPrint(
             allocator,
@@ -47,26 +42,16 @@ fn markAsGood(
             .{bls_entry_file.name},
         );
 
-        const new_fullpath = try std.fs.path.join(
-            allocator,
-            &.{ parent_path, new_filename },
-        );
-
-        try std.fs.renameAbsolute(orig_fullpath, new_fullpath);
+        try parent_dir.rename(original_entry_filename, new_filename);
     }
 }
 
 fn markAsBad(
     allocator: std.mem.Allocator,
-    parent_path: []const u8,
+    parent_dir: std.fs.Dir,
     original_entry_filename: []const u8,
     bls_entry_file: bls.BlsEntryFile,
 ) !void {
-    const orig_fullpath = try std.fs.path.join(
-        allocator,
-        &.{ parent_path, original_entry_filename },
-    );
-
     const new_filename = b: {
         if (bls_entry_file.tries_done) |tries_done| {
             break :b try std.fmt.allocPrint(
@@ -83,28 +68,16 @@ fn markAsBad(
         }
     };
 
-    const new_fullpath = try std.fs.path.join(
-        allocator,
-        &.{ parent_path, new_filename },
-    );
-
-    try std.fs.renameAbsolute(orig_fullpath, new_fullpath);
+    try parent_dir.rename(original_entry_filename, new_filename);
 }
 
 fn printStatus(
-    allocator: std.mem.Allocator,
-    parent_path: []const u8,
     original_entry_filename: []const u8,
     bls_entry_file: bls.BlsEntryFile,
 ) !void {
-    const orig_fullpath = try std.fs.path.join(
-        allocator,
-        &.{ parent_path, original_entry_filename },
-    );
-
     var stdout = std.io.getStdOut().writer();
 
-    try stdout.print("{s}:\n", .{orig_fullpath});
+    try stdout.print("{s}:\n", .{original_entry_filename});
 
     if (bls_entry_file.tries_left) |tries_left| {
         if (tries_left > 0) {
@@ -114,6 +87,10 @@ fn printStatus(
         } else {
             try stdout.print("\tentry is bad\n", .{});
         }
+
+        if (bls_entry_file.tries_done) |tries_done| {
+            try stdout.print("\t{} tries done\n", .{tries_done});
+        }
     } else {
         try stdout.print("\tentry is good\n", .{});
     }
@@ -121,16 +98,16 @@ fn printStatus(
 
 fn findEntry(
     allocator: std.mem.Allocator,
-    efi_sys_mount_point: []const u8,
+    esp_mnt: []const u8,
     entry_name: []const u8,
     action: Action,
 ) !void {
     const entries_path = try std.fs.path.join(
         allocator,
-        &.{ efi_sys_mount_point, "loader", "entries" },
+        &.{ esp_mnt, "loader", "entries" },
     );
 
-    var entries_dir = try std.fs.openDirAbsolute(
+    var entries_dir = try std.fs.cwd().openDir(
         entries_path,
         .{ .iterate = true },
     );
@@ -151,13 +128,15 @@ fn findEntry(
         };
 
         if (std.mem.eql(u8, bls_entry.name, entry_name)) {
-            switch (action) {
-                .good => try markAsGood(allocator, entries_path, dir_entry.name, bls_entry),
-                .bad => try markAsBad(allocator, entries_path, dir_entry.name, bls_entry),
-                .status => try printStatus(allocator, entries_path, dir_entry.name, bls_entry),
-            }
+            return switch (action) {
+                .good => try markAsGood(allocator, entries_dir, dir_entry.name, bls_entry),
+                .bad => try markAsBad(allocator, entries_dir, dir_entry.name, bls_entry),
+                .status => try printStatus(dir_entry.name, bls_entry),
+            };
         }
     }
+
+    return Error.MissingBlsEntry;
 }
 
 pub fn main() !void {
@@ -165,15 +144,39 @@ pub fn main() !void {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    var args = std.process.args();
+    const params = comptime clap.parseParamsComptime(
+        \\-h, --help              Display this help and exit.
+        \\--esp-mnt <DIR>         UEFI system partition mountpoint (default /boot).
+        \\<ACTION>                Action to take against current boot entry (mark as "good"/"bad", or print "status").
+        \\
+    );
 
-    const argv0 = args.next().?;
-    _ = argv0;
+    const parsers = comptime .{
+        .ACTION = clap.parsers.string,
+        .DIR = clap.parsers.string,
+    };
 
-    const efi_sys_mount_point = args.next() orelse return Error.MissingEfiSysMountPoint;
-    const action = try Action.fromStr(args.next() orelse return Error.MissingAction);
+    const stderr = std.io.getStdErr().writer();
 
-    const kernel_cmdline_file = try std.fs.openFileAbsolute("/proc/cmdline", .{});
+    var diag = clap.Diagnostic{};
+    var res = clap.parse(clap.Help, &params, &parsers, .{
+        .diagnostic = &diag,
+        .allocator = arena.allocator(),
+    }) catch |err| {
+        try diag.report(stderr, err);
+        try clap.usage(stderr, clap.Help, &params);
+        return;
+    };
+    defer res.deinit();
+
+    if (res.args.help != 0) {
+        return clap.help(std.io.getStdErr().writer(), clap.Help, &params, .{});
+    }
+
+    const esp_mnt = res.args.@"esp-mnt" orelse std.fs.path.sep_str ++ "boot";
+    const action = if (res.positionals.len > 0) try Action.fromStr(res.positionals[0]) else Action.status;
+
+    const kernel_cmdline_file = try std.fs.cwd().openFile("/proc/cmdline", .{});
     defer kernel_cmdline_file.close();
 
     const kernel_cmdline = try kernel_cmdline_file.readToEndAlloc(allocator, 1024);
@@ -184,7 +187,13 @@ pub fn main() !void {
             if (std.mem.startsWith(u8, kernel_param, "tboot.bls-entry=")) {
                 var param_split = std.mem.splitScalar(u8, kernel_param, '=');
                 _ = param_split.next().?;
-                break :b param_split.next() orelse return Error.MissingBlsEntry;
+
+                // /proc/cmdline contains newline at the end of the file
+                break :b std.mem.trimRight(
+                    u8,
+                    param_split.next() orelse return Error.MissingBlsEntry,
+                    "\n",
+                );
             }
         }
 
@@ -193,7 +202,7 @@ pub fn main() !void {
 
     try findEntry(
         allocator,
-        efi_sys_mount_point,
+        esp_mnt,
         tboot_bls_entry,
         action,
     );

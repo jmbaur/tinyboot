@@ -184,13 +184,13 @@ pub fn main() !void {
     var archive = try CpioArchive.init(arena.allocator());
     defer archive.deinit();
 
-    var init_file = try std.fs.openFileAbsolute(init, .{});
+    var init_file = try std.fs.cwd().openFile(init, .{});
     defer init_file.close();
 
     var init_source = std.io.StreamSource{ .file = init_file };
     try archive.addEntry(&init_source, "./init", .File, 0o755);
 
-    var archive_file = try std.fs.createFileAbsolute(outfile, .{});
+    var archive_file = try std.fs.cwd().createFile(outfile, .{});
     defer archive_file.close();
 
     var archive_file_source = std.io.StreamSource{ .file = archive_file };

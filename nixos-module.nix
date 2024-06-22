@@ -77,7 +77,7 @@ in
         };
         systemd.generators.tboot-bless-boot-generator = lib.getExe' pkgs.tinybootTools "tboot-bless-boot-generator";
         systemd.services.tboot-bless-boot = {
-          description = "Mark the Current Boot Loader Entry as Good";
+          description = "Mark the current boot loader entry as good";
           documentation = [ "https://github.com/jmbaur/tinyboot" ];
           requires = [ "boot-complete.target" ];
           conflicts = [ "shutdown.target" ];
@@ -91,7 +91,7 @@ in
           serviceConfig = {
             Type = "oneshot";
             RemainAfterExit = true;
-            ExecStart = "${lib.getExe' pkgs.tinybootTools "tboot-bless-boot"} ${config.boot.loader.efi.efiSysMountPoint} good";
+            ExecStart = "${lib.getExe' pkgs.tinybootTools "tboot-bless-boot"} --esp-mnt=${config.boot.loader.efi.efiSysMountPoint} good";
           };
         };
       }

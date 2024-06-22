@@ -8,7 +8,7 @@ pub fn initLogger(t: enum {
 }) !void {
     switch (t) {
         .Server => {
-            log_file = try std.fs.createFileAbsolute("/run/log", .{
+            log_file = try std.fs.cwd().createFile("/run/log", .{
                 .truncate = true,
             });
         },

@@ -2,7 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 fn pathExists(p: []const u8) bool {
-    std.fs.accessAbsolute(p, .{}) catch {
+    std.fs.cwd().access(p, .{}) catch {
         return false;
     };
 
