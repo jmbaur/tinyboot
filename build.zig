@@ -42,6 +42,9 @@ pub fn build(b: *std.Build) !void {
             .strip = optimize != std.builtin.OptimizeMode.Debug,
         });
         tboot_loader.root_module.addOptions("build_options", tboot_loader_options);
+        tboot_loader.root_module.addAnonymousImport("test_key", .{
+            .root_source_file = b.path("test/keys/tboot/key.der"),
+        });
         tboot_loader.root_module.addImport("linux_headers", linux_headers_module);
 
         const cpio_tool = b.addRunArtifact(b.addExecutable(.{

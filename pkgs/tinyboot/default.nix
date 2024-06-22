@@ -31,6 +31,7 @@ stdenv.mkDerivation (
         ../../build.zig
         ../../build.zig.zon
         ../../src
+        ../../test/keys/tboot/key.der
       ];
     };
 
@@ -60,11 +61,6 @@ stdenv.mkDerivation (
     # TODO(jared): The checkPhase should already include the zigBuildFlags,
     # probably a nixpkgs bug.
     zigCheckFlags = finalAttrs.zigBuildFlags;
-
-    # TODO(jared): make embedFile work better with the test key
-    preConfigure = ''
-      ln -sf ${../../test/keys/tboot/key.der} src/test_key
-    '';
 
     postInstall = lib.optionalString withLoader ''
       xz --check=crc32 --lzma2=dict=512KiB $out/tboot-loader.cpio

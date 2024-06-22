@@ -8,7 +8,6 @@ pub const filesystem = @import("./disk/filesystem.zig");
 pub const log = @import("./log.zig");
 pub const message = @import("./message.zig");
 pub const partition_table = @import("./disk/partition_table.zig");
-pub const security = @import("./security.zig");
 pub const server = @import("./server.zig");
 pub const system = @import("./system.zig");
 pub const tmp = @import("./tmp.zig");
