@@ -5,7 +5,7 @@
       "locked": {
         "lastModified": 1715724830,
         "narHash": "sha256-PIxiLcirJESkm8gEj8BFWep40rO6F9iDHYIvoOhKajs=",
-        "ref": "refs/tags/24.05",
+        "ref": "24.05",
         "rev": "695a79fdb4627439c19eaa790fee6849cfec0abd",
         "revCount": 56550,
         "submodules": true,
@@ -13,7 +13,7 @@
         "url": "https://github.com/coreboot/coreboot"
       },
       "original": {
-        "ref": "refs/tags/24.05",
+        "ref": "24.05",
         "submodules": true,
         "type": "git",
         "url": "https://github.com/coreboot/coreboot"
