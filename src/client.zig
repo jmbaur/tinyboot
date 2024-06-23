@@ -6,14 +6,88 @@ const system = std.posix.system;
 const linux_headers = @import("linux_headers");
 
 const BootEntry = @import("./boot.zig").BootEntry;
+const BootLoader = @import("./boot.zig").BootLoader;
+const BootLoaderSpec = @import("./boot/bls.zig").BootLoaderSpec;
 const ClientMsg = @import("./message.zig").ClientMsg;
 const ServerMsg = @import("./message.zig").ServerMsg;
 const Xmodem = @import("./boot/xmodem.zig").Xmodem;
-const BootLoader = @import("./boot.zig").BootLoader;
 const kernelLogs = @import("./system.zig").kernelLogs;
 const kexecLoad = @import("./boot.zig").kexecLoad;
 const readMessage = @import("./message.zig").readMessage;
 const writeMessage = @import("./message.zig").writeMessage;
+
+const ArgsIterator = process.ArgIteratorGeneral(.{});
+
+pub const Context = struct {
+    loader: BootLoader,
+
+    const argv0 = enum {
+        help, // NOTE: keep "help" at the top
+        exit,
+        list,
+    };
+
+    pub fn init(loader_name: []const u8) !@This() {
+        _ = loader_name;
+
+        // if (std.mem.eql(u8, loader_name, "disk")) {
+        //     return .{
+        //         .loader = BootLoader{ .disk = BootLoaderSpec.init() },
+        //     };
+        // }
+
+        return error.UnknownBootLoader;
+    }
+
+    pub fn name(self: *const @This()) []const u8 {
+        _ = self;
+        // TODO(jared): can probably do @typeInfo here?
+        // return switch (self.loader) {
+        //     .disk => "disk",
+        //     .xmodem => "xmodem",
+        // };
+        return "TODO";
+    }
+
+    pub fn runCommand(self: *const @This(), args: *ArgsIterator) !?ClientMsg {
+        _ = self;
+        _ = args;
+
+        return null;
+
+        // if (args.next()) |cmd| {
+        //     var found = false;
+        //
+        //     inline for (std.meta.fields(argv0)) |field| {
+        //         if (std.mem.eql(u8, field.name, cmd)) {
+        //             found = true;
+        //             return @field(@This(), field.name).run(self, &args);
+        //         }
+        //     }
+        //
+        //     if (!found) {
+        //         std.debug.print("unknown command \"{s}\"\n", .{cmd});
+        //     }
+        // }
+        //
+        // return null;
+    }
+
+    const exit = struct {
+        const short_help = "boot from disk";
+        const long_help =
+            \\Enter disk context
+        ;
+
+        fn run(c: *Command, args: *ArgsIterator) !?ClientMsg {
+            _ = args;
+
+            c.shell_instance.ctx = null;
+
+            return null;
+        }
+    };
+};
 
 pub const Client = struct {
     waiting_for_response: bool = false,
@@ -25,6 +99,7 @@ pub const Client = struct {
     input_buffer: [buffer_size]u8 = undefined,
     log_file: std.fs.File,
     writer: BufferedWriter,
+    ctx: ?Context = null,
 
     /// Used for dynamically allocating memory when running commands. This is
     /// reset after every command run.
@@ -68,7 +143,10 @@ pub const Client = struct {
     }
 
     fn prompt(self: *@This()) !void {
-        try self.writeAllAndFlush(&.{ 0xc2, 0xbb, 0x20 });
+        if (self.ctx) |ctx| {
+            try self.writeAll(ctx.name());
+        }
+        try self.writeAllAndFlush("> ");
     }
 
     pub fn run(self: *@This()) !void {
@@ -422,66 +500,42 @@ pub const Client = struct {
         }
 
         if (done and self.input_end > 0) {
-            _ = self.arena.reset(.retain_capacity);
+            defer _ = self.arena.reset(.retain_capacity);
 
             const end = self.input_end;
             self.input_cursor = 0;
             self.input_end = 0;
 
-            var cmd = Command{
-                .allocator = self.arena.allocator(),
-                .user_input = self.input_buffer[0..end],
-                .shell_instance = self,
-            };
+            const user_input = self.input_buffer[0..end];
+            var args = try ArgsIterator.init(self.arena.allocator(), user_input);
+            defer args.deinit();
 
-            const maybe_msg = cmd.run() catch |err| {
+            const maybe_msg = if (self.ctx) |ctx| ctx.runCommand(&args) else self.runCommand(&args);
+
+            const msg = maybe_msg catch |err| {
                 std.debug.print("\nerror running command: {any}\n", .{err});
                 try self.prompt();
                 return;
+            } orelse {
+                return try self.prompt();
             };
 
-            if (maybe_msg) |msg| {
-                if (writeMessage(msg, self.stream.writer())) {
-                    self.waiting_for_response = true;
-                } else |err| {
-                    std.log.err("failed to send message to server: {}", .{err});
-                }
-            } else {
-                // Write the next prompt
-                try self.prompt();
+            if (writeMessage(msg, self.stream.writer())) {
+                self.waiting_for_response = true;
+            } else |err| {
+                std.log.err("failed to send message to server: {}", .{err});
             }
         }
     }
-};
 
-pub const Command = struct {
-    allocator: std.mem.Allocator,
-    user_input: []const u8,
-    shell_instance: *Client,
-
-    const ArgsIterator = process.ArgIteratorGeneral(.{});
-
-    const argv0 = enum {
-        help, // NOTE: keep "help" at the top
-        boot_xmodem,
-        clear,
-        dmesg,
-        logs,
-        poweroff,
-        reboot,
-    };
-
-    pub fn run(self: *@This()) !?ClientMsg {
-        var args = try ArgsIterator.init(self.allocator, self.user_input);
-        defer args.deinit();
-
+    fn runCommand(self: *@This(), args: *ArgsIterator) !?ClientMsg {
         if (args.next()) |cmd| {
             var found = false;
 
-            inline for (std.meta.fields(argv0)) |field| {
+            inline for (std.meta.fields(Command.argv0)) |field| {
                 if (std.mem.eql(u8, field.name, cmd)) {
                     found = true;
-                    return @field(@This(), field.name).run(self, &args);
+                    return @field(Command, field.name).run(self, args);
                 }
             }
 
@@ -492,6 +546,18 @@ pub const Command = struct {
 
         return null;
     }
+};
+
+pub const Command = struct {
+    const argv0 = enum {
+        help, // NOTE: keep "help" at the top
+        clear,
+        dmesg,
+        loader,
+        logs,
+        poweroff,
+        reboot,
+    };
 
     const help = struct {
         const short_help = "get help";
@@ -502,9 +568,7 @@ pub const Command = struct {
             \\help [command]
         ;
 
-        fn run(c: *Command, args: *ArgsIterator) !?ClientMsg {
-            _ = c;
-
+        fn run(_: *Client, args: *ArgsIterator) !?ClientMsg {
             if (args.next()) |next| {
                 var found = false;
                 inline for (std.meta.fields(argv0)) |field| {
@@ -541,10 +605,7 @@ pub const Command = struct {
             \\poweroff
         ;
 
-        fn run(c: *Command, args: *ArgsIterator) !?ClientMsg {
-            _ = args;
-            _ = c;
-
+        fn run(_: *Client, _: *ArgsIterator) !?ClientMsg {
             return .{ .data = .Poweroff };
         }
     };
@@ -558,10 +619,7 @@ pub const Command = struct {
             \\reboot
         ;
 
-        fn run(c: *Command, args: *ArgsIterator) !?ClientMsg {
-            _ = c;
-            _ = args;
-
+        fn run(_: *Client, _: *ArgsIterator) !?ClientMsg {
             return .{ .data = .Reboot };
         }
     };
@@ -575,10 +633,8 @@ pub const Command = struct {
             \\logs
         ;
 
-        fn run(c: *Command, args: *ArgsIterator) !?ClientMsg {
-            _ = args;
-
-            try c.shell_instance.printLogs(.{});
+        fn run(client: *Client, _: *ArgsIterator) !?ClientMsg {
+            try client.printLogs(.{});
             return null;
         }
     };
@@ -595,11 +651,10 @@ pub const Command = struct {
             \\dmesg 7
         ;
 
-        fn run(c: *Command, args: *ArgsIterator) !?ClientMsg {
+        fn run(client: *Client, args: *ArgsIterator) !?ClientMsg {
             const filter = if (args.next()) |filter_str| try std.fmt.parseInt(u8, filter_str, 10) else 6;
-            const kernel_logs = try kernelLogs(c.allocator, filter);
-            defer c.allocator.free(kernel_logs);
-            try c.shell_instance.writeAllAndFlush(kernel_logs);
+            const kernel_logs = try kernelLogs(client.arena.allocator(), filter);
+            try client.writeAllAndFlush(kernel_logs);
 
             return null;
         }
@@ -614,58 +669,71 @@ pub const Command = struct {
             \\clear
         ;
 
-        fn run(c: *Command, args: *ArgsIterator) !?ClientMsg {
-            _ = args;
-
-            c.shell_instance.clearScreen();
+        fn run(client: *Client, _: *ArgsIterator) !?ClientMsg {
+            client.clearScreen();
 
             return null;
         }
     };
 
-    const boot_xmodem = struct {
-        const short_help = "boot over xmodem";
+    const loader = struct {
+        const short_help = "choose a bootloader";
         const long_help =
-            \\Boot via kernel and initrd obtained over the xmodem protocol. The
-            \\serial console will fetch the following content over xmodem in
-            \\succession:
-            \\ - kernel
-            \\ - initrd (optional)
-            \\ - kernel params
-            \\
-            \\Usage:
-            \\boot_xmodem [options]
-            \\
-            \\Options:
-            \\  -n              No initrd
+            \\Choose a bootloader.
         ;
 
-        fn run(c: *Command, args: *ArgsIterator) !?ClientMsg {
-            var xmodem = try Xmodem.init(c.allocator, .{
-                .serial_name = "client-stdin",
-                .serial_fd = posix.STDIN_FILENO,
-                .skip_initrd = if (args.next()) |next|
-                    std.mem.eql(u8, next, "-n")
-                else
-                    false,
-            });
-            var boot_loader = BootLoader{ .xmodem = &xmodem };
-            defer boot_loader.teardown() catch {};
-
-            try boot_loader.setup();
-            const devices = try boot_loader.probe();
-            for (devices) |device| {
-                for (device.entries) |entry| {
-                    if (kexecLoad(c.allocator, entry.linux, entry.initrd, entry.cmdline)) {
-                        boot_loader.entryLoaded(entry.context);
-                        return .{ .data = .Kexec };
-                    } else |err| {
-                        std.log.err("failed to load kernel: {}", .{err});
-                    }
-                }
-            }
+        fn run(client: *Client, args: *ArgsIterator) !?ClientMsg {
+            client.ctx = try Context.init(
+                args.next() orelse return error.InvalidArgs,
+            );
 
             return null;
         }
     };
 };
+
+// const boot_xmodem = struct {
+//     const short_help = "boot over xmodem";
+//     const long_help =
+//         \\Boot via kernel and initrd obtained over the xmodem protocol. The
+//         \\serial console will fetch the following content over xmodem in
+//         \\succession:
+//         \\ - kernel
+//         \\ - initrd (optional)
+//         \\ - kernel params
+//         \\
+//         \\Usage:
+//         \\boot_xmodem [options]
+//         \\
+//         \\Options:
+//         \\  -n              No initrd
+//     ;
+//
+//     fn run(client: *Client, args: *ArgsIterator) !?ClientMsg {
+//         var xmodem = try Xmodem.init(client.allocator, .{
+//             .serial_name = "client-stdin",
+//             .serial_fd = posix.STDIN_FILENO,
+//             .skip_initrd = if (args.next()) |next|
+//                 std.mem.eql(u8, next, "-n")
+//             else
+//                 false,
+//         });
+//         var boot_loader = BootLoader{ .xmodem = &xmodem };
+//         defer boot_loader.teardown() catch {};
+//
+//         try boot_loader.setup();
+//         const devices = try boot_loader.probe();
+//         for (devices) |device| {
+//             for (device.entries) |entry| {
+//                 if (kexecLoad(c.allocator, entry.linux, entry.initrd, entry.cmdline)) {
+//                     boot_loader.entryLoaded(entry.context);
+//                     return .{ .data = .Kexec };
+//                 } else |err| {
+//                     std.log.err("failed to load kernel: {}", .{err});
+//                 }
+//             }
+//         }
+//
+//         return null;
+//     }
+// };

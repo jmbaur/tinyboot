@@ -137,36 +137,35 @@ pub const BootDevice = struct {
     entries: []const BootEntry,
 };
 
-pub const BootLoader = union(enum) {
-    bls: *BootLoaderSpec,
-    xmodem: *Xmodem,
+pub const VTable = struct {
+    setup: *const fn (ctx: *anyopaque) anyerror!void,
+    probe: *const fn (ctx: *anyopaque) anyerror![]const BootDevice,
+    entryLoaded: *const fn (ctx: *anyopaque, ctx2: *anyopaque) void,
+    teardown: *const fn (ctx: *anyopaque) anyerror!void,
+};
+
+pub const BootLoader = struct {
+    ptr: *anyopaque,
+    vtable: *const VTable,
 
     pub fn setup(self: @This()) !void {
-        switch (self) {
-            inline else => |boot_loader| try boot_loader.setup(),
-        }
+        try self.vtable.setup(self.ptr);
     }
 
     /// Caller is responsible for all memory corresponding to return value.
     pub fn probe(self: @This()) ![]const BootDevice {
-        return switch (self) {
-            inline else => |boot_loader| try boot_loader.probe(),
-        };
+        return try self.vtable.probe(self.ptr);
     }
 
     /// An infallible function that provides a way to hook into the stage of
     /// the boot process after a successful kexec load has been performed
     /// and before the reboot occurs.
     pub fn entryLoaded(self: @This(), ctx: *anyopaque) void {
-        switch (self) {
-            inline else => |boot_loader| boot_loader.entryLoaded(ctx),
-        }
+        self.vtable.entryLoaded(self.ptr, ctx);
     }
 
     pub fn teardown(self: @This()) !void {
-        switch (self) {
-            inline else => |boot_loader| try boot_loader.teardown(),
-        }
+        try self.vtable.teardown(self.ptr);
     }
 };
 
@@ -193,8 +192,11 @@ fn autoboot(self: *Autoboot) !bool {
 
     std.log.info("autoboot started", .{});
 
-    var bls = BootLoaderSpec.init();
-    var boot_loader: BootLoader = .{ .bls = &bls };
+    var bls = BootLoaderSpec.init(arena.allocator());
+    defer bls.deinit();
+
+    const boot_loader = bls.loader();
+
     defer {
         boot_loader.teardown() catch |err| {
             std.log.err("failed to teardown bootloader: {}", .{err});
@@ -214,10 +216,13 @@ fn autoboot(self: *Autoboot) !bool {
 
     for (boot_devices) |dev| {
         std.log.info("using device \"{s}\"", .{dev.name});
+
         var countdown = dev.timeout;
         while (countdown > 0) : (countdown -= 1) {
             std.log.info("booting in {} second(s)", .{countdown});
+
             std.time.sleep(std.time.ns_per_s);
+
             if (self.needToStop()) {
                 return false;
             }
