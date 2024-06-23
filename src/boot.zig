@@ -144,28 +144,35 @@ pub const VTable = struct {
     teardown: *const fn (ctx: *anyopaque) anyerror!void,
 };
 
-pub const BootLoader = struct {
-    ptr: *anyopaque,
-    vtable: *const VTable,
+pub const BootLoader = union(enum) {
+    disk: BootLoaderSpec,
 
     pub fn setup(self: @This()) !void {
-        try self.vtable.setup(self.ptr);
+        return switch (self) {
+            .disk => |*disk| disk.setup(),
+            // inline else => |*l| l.setup(),
+        };
     }
 
-    /// Caller is responsible for all memory corresponding to return value.
     pub fn probe(self: @This()) ![]const BootDevice {
-        return try self.vtable.probe(self.ptr);
+        return switch (self) {
+            inline else => |*l| l.probe(),
+        };
     }
 
     /// An infallible function that provides a way to hook into the stage of
     /// the boot process after a successful kexec load has been performed
     /// and before the reboot occurs.
     pub fn entryLoaded(self: @This(), ctx: *anyopaque) void {
-        self.vtable.entryLoaded(self.ptr, ctx);
+        return switch (self) {
+            inline else => |*l| l.entryLoaded(ctx),
+        };
     }
 
     pub fn teardown(self: @This()) !void {
-        try self.vtable.teardown(self.ptr);
+        return switch (self) {
+            inline else => |*l| l.teardown(),
+        };
     }
 };
 
@@ -192,10 +199,7 @@ fn autoboot(self: *Autoboot) !bool {
 
     std.log.info("autoboot started", .{});
 
-    var bls = BootLoaderSpec.init(arena.allocator());
-    defer bls.deinit();
-
-    const boot_loader = bls.loader();
+    var boot_loader = BootLoader{ .disk = BootLoaderSpec.init(arena.allocator()) };
 
     defer {
         boot_loader.teardown() catch |err| {

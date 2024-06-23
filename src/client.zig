@@ -24,54 +24,45 @@ pub const Context = struct {
     const argv0 = enum {
         help, // NOTE: keep "help" at the top
         exit,
-        list,
+        // list,
     };
 
-    pub fn init(loader_name: []const u8) !@This() {
-        _ = loader_name;
+    const help = struct {
+        const short_help = "get help";
+        const long_help =
+            \\Print all available commands or print specific command usage.
+            \\
+            \\Usage:
+            \\help [command]
+        ;
 
-        // if (std.mem.eql(u8, loader_name, "disk")) {
-        //     return .{
-        //         .loader = BootLoader{ .disk = BootLoaderSpec.init() },
-        //     };
-        // }
+        fn run(_: *Client, args: *ArgsIterator, _: BootLoader) !?ClientMsg {
+            if (args.next()) |next| {
+                var found = false;
+                inline for (std.meta.fields(argv0)) |field| {
+                    if (std.mem.eql(u8, field.name, next)) {
+                        found = true;
+                        const cmd_long_help = comptime @field(Context, field.name).long_help;
+                        std.debug.print("\n{s}\n", .{cmd_long_help});
+                    }
+                }
 
-        return error.UnknownBootLoader;
-    }
+                if (!found) {
+                    std.debug.print("unknown command \"{s}\"\n", .{next});
+                }
+            } else {
+                std.debug.print("\n", .{});
 
-    pub fn name(self: *const @This()) []const u8 {
-        _ = self;
-        // TODO(jared): can probably do @typeInfo here?
-        // return switch (self.loader) {
-        //     .disk => "disk",
-        //     .xmodem => "xmodem",
-        // };
-        return "TODO";
-    }
+                inline for (std.meta.fields(argv0)) |field| {
+                    const cmd_short_help = comptime @field(Context, field.name).short_help;
+                    const space = 20 - comptime field.name.len;
+                    std.debug.print("{s}{s}{s}\n", .{ field.name, " " ** space, cmd_short_help });
+                }
+            }
 
-    pub fn runCommand(self: *const @This(), args: *ArgsIterator) !?ClientMsg {
-        _ = self;
-        _ = args;
-
-        return null;
-
-        // if (args.next()) |cmd| {
-        //     var found = false;
-        //
-        //     inline for (std.meta.fields(argv0)) |field| {
-        //         if (std.mem.eql(u8, field.name, cmd)) {
-        //             found = true;
-        //             return @field(@This(), field.name).run(self, &args);
-        //         }
-        //     }
-        //
-        //     if (!found) {
-        //         std.debug.print("unknown command \"{s}\"\n", .{cmd});
-        //     }
-        // }
-        //
-        // return null;
-    }
+            return null;
+        }
+    };
 
     const exit = struct {
         const short_help = "boot from disk";
@@ -79,10 +70,16 @@ pub const Context = struct {
             \\Enter disk context
         ;
 
-        fn run(c: *Command, args: *ArgsIterator) !?ClientMsg {
-            _ = args;
+        fn run(client: *Client, _: *ArgsIterator, loader: BootLoader) !?ClientMsg {
+            try loader.teardown();
+            // if (client.loaderCtx) |ctx| switch (ctx) {
+            //     .disk => |disk| {
+            //         disk.teardown();
+            //         disk.deinit();
+            //     },
+            // };
 
-            c.shell_instance.ctx = null;
+            client.context = null;
 
             return null;
         }
@@ -99,7 +96,7 @@ pub const Client = struct {
     input_buffer: [buffer_size]u8 = undefined,
     log_file: std.fs.File,
     writer: BufferedWriter,
-    ctx: ?Context = null,
+    context: ?BootLoader = null,
 
     /// Used for dynamically allocating memory when running commands. This is
     /// reset after every command run.
@@ -143,8 +140,10 @@ pub const Client = struct {
     }
 
     fn prompt(self: *@This()) !void {
-        if (self.ctx) |ctx| {
-            try self.writeAll(ctx.name());
+        if (self.context) |ctx| {
+            try self.writeAll(switch (ctx) {
+                .disk => "disk",
+            });
         }
         try self.writeAllAndFlush("> ");
     }
@@ -500,7 +499,11 @@ pub const Client = struct {
         }
 
         if (done and self.input_end > 0) {
-            defer _ = self.arena.reset(.retain_capacity);
+            defer {
+                if (self.context == null) {
+                    _ = self.arena.reset(.retain_capacity);
+                }
+            }
 
             const end = self.input_end;
             self.input_cursor = 0;
@@ -510,7 +513,7 @@ pub const Client = struct {
             var args = try ArgsIterator.init(self.arena.allocator(), user_input);
             defer args.deinit();
 
-            const maybe_msg = if (self.ctx) |ctx| ctx.runCommand(&args) else self.runCommand(&args);
+            const maybe_msg = self.runCommand(&args);
 
             const msg = maybe_msg catch |err| {
                 std.debug.print("\nerror running command: {any}\n", .{err});
@@ -529,18 +532,27 @@ pub const Client = struct {
     }
 
     fn runCommand(self: *@This(), args: *ArgsIterator) !?ClientMsg {
-        if (args.next()) |cmd| {
-            var found = false;
+        if (self.context) |ctx| {
+            _ = ctx;
+            std.debug.print("do something!\n", .{});
+            // inline for (std.meta.fields(Context.argv0)) |field| {
+            //     _ = field;
+            //     // if (std.mem.eql(u8, field.name, cmd
+            // }
+        } else {
+            if (args.next()) |cmd| {
+                var found = false;
 
-            inline for (std.meta.fields(Command.argv0)) |field| {
-                if (std.mem.eql(u8, field.name, cmd)) {
-                    found = true;
-                    return @field(Command, field.name).run(self, args);
+                inline for (std.meta.fields(Command.argv0)) |field| {
+                    if (std.mem.eql(u8, field.name, cmd)) {
+                        found = true;
+                        return @field(Command, field.name).run(self, args);
+                    }
                 }
-            }
 
-            if (!found) {
-                std.debug.print("unknown command \"{s}\"\n", .{cmd});
+                if (!found) {
+                    std.debug.print("unknown command \"{s}\"\n", .{cmd});
+                }
             }
         }
 
@@ -683,9 +695,11 @@ pub const Command = struct {
         ;
 
         fn run(client: *Client, args: *ArgsIterator) !?ClientMsg {
-            client.ctx = try Context.init(
-                args.next() orelse return error.InvalidArgs,
-            );
+            const loader_name = args.next() orelse return error.InvalidArgs;
+
+            if (std.mem.eql(u8, loader_name, "disk")) {
+                client.context = .{ .disk = BootLoaderSpec.init(client.arena.allocator()) };
+            }
 
             return null;
         }

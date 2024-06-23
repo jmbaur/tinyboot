@@ -352,26 +352,12 @@ pub const BootLoaderSpec = struct {
         };
     }
 
-    pub fn deinit(self: *@This()) void {
+    fn deinit(self: *@This()) void {
         self.internal_mounts.deinit();
         self.external_mounts.deinit();
     }
 
-    pub fn loader(self: *@This()) BootLoader {
-        return .{
-            .ptr = self,
-            .vtable = &.{
-                .setup = setup,
-                .probe = probe,
-                .entryLoaded = entryLoaded,
-                .teardown = teardown,
-            },
-        };
-    }
-
-    pub fn setup(ctx: *anyopaque) anyerror!void {
-        const self: *@This() = @ptrCast(@alignCast(ctx));
-
+    pub fn setup(self: *@This()) anyerror!void {
         std.log.debug("BLS setup", .{});
 
         var disk_alias_dir = try std.fs.cwd().openDir(
@@ -680,9 +666,7 @@ pub const BootLoaderSpec = struct {
     }
 
     /// Caller is responsible for the returned slice.
-    pub fn probe(ctx: *anyopaque) ![]const BootDevice {
-        const self: *@This() = @ptrCast(@alignCast(ctx));
-
+    pub fn probe(self: *@This()) ![]const BootDevice {
         std.log.debug("BLS probe start", .{});
         var devices = std.ArrayList(BootDevice).init(self.allocator);
 
@@ -717,10 +701,8 @@ pub const BootLoaderSpec = struct {
         return try devices.toOwnedSlice();
     }
 
-    pub fn entryLoaded(ctx: *anyopaque, ctx2: *anyopaque) void {
-        const self: *@This() = @ptrCast(@alignCast(ctx));
-
-        self._entryLoaded(ctx2) catch |err| {
+    pub fn entryLoaded(self: *@This(), ctx: *anyopaque) void {
+        self._entryLoaded(ctx) catch |err| {
             std.log.err(
                 "failed to finalize BLS boot counter for chosen entry: {}",
                 .{err},
@@ -762,8 +744,8 @@ pub const BootLoaderSpec = struct {
         }
     }
 
-    pub fn teardown(ctx: *anyopaque) !void {
-        const self: *@This() = @ptrCast(@alignCast(ctx));
+    pub fn teardown(self: *@This()) !void {
+        defer self.deinit();
 
         std.log.debug("BLS teardown", .{});
 
