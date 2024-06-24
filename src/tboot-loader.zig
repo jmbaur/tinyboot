@@ -6,12 +6,11 @@ const system = std.posix.system;
 const linux_headers = @import("linux_headers");
 
 const Autoboot = @import("./boot.zig").Autoboot;
-const Client = @import("./client.zig").Client;
+const Console = @import("./console.zig");
 const DeviceWatcher = @import("./device/watch.zig");
 const log = @import("./log.zig");
 const security = @import("./security.zig");
 const setupSystem = @import("./system.zig").setupSystem;
-const setupTty = @import("./system.zig").setupTty;
 
 pub const std_options = .{
     .logFn = log.logFn,
@@ -85,9 +84,9 @@ const State = struct {
 };
 
 fn runEventLoop(state: *State) !posix.RebootCommand {
-    var autoboot = try Autoboot.init();
-    try autoboot.register(state.epoll);
-    defer autoboot.deinit();
+    // var autoboot = try Autoboot.init();
+    // try autoboot.register(state.epoll);
+    // defer autoboot.deinit();
 
     try state.resetSettle();
 
@@ -95,6 +94,7 @@ fn runEventLoop(state: *State) !posix.RebootCommand {
 
     // main event loop
     while (true) {
+        std.debug.print("HI\n", .{});
         const max_events = 8;
         var events = [_]system.epoll_event{undefined} ** max_events;
 
@@ -109,38 +109,27 @@ fn runEventLoop(state: *State) !posix.RebootCommand {
                 try state.resetSettle();
             } else if (event.data.fd == state.settle) {
                 std.log.info("devices settled", .{});
+                std.debug.print("devices settled\n", .{});
                 //     if (!user_presence) {
                 //         try autoboot.start();
                 //     }
-            } else if (event.data.fd == autoboot.ready_fd) {
-                try autoboot.deregister(state.epoll);
-                if (try autoboot.finish()) |outcome| {
-                    return outcome;
-                } else {
-                    std.log.info("nothing to boot", .{});
-                }
-            } else {
+                // } else if (event.data.fd == autoboot.ready_fd) {
+                //     try autoboot.deregister(state.epoll);
+                //     if (try autoboot.finish()) |outcome| {
+                //         return outcome;
+                //     } else {
+                //         std.log.info("nothing to boot", .{});
+                //     }
+            } else if (event.data.fd == state.console) {
                 if (!user_presence) {
-                    autoboot.stop();
+                    // autoboot.stop();
                     user_presence = true;
                     std.log.info("user presence detected", .{});
                 }
+                std.debug.print("got msg from console\n", .{});
             }
         }
     }
-}
-
-fn consoleClient() !void {
-    var tty = try setupTty(posix.STDIN_FILENO, .user_input);
-    defer tty.reset();
-
-    try log.init();
-    defer log.deinit();
-
-    var client = try Client.init();
-    defer client.deinit();
-
-    try client.run();
 }
 
 pub fn main() !void {
@@ -156,6 +145,13 @@ pub fn main() !void {
         state.done,
     });
     defer device_watch_thread.join();
+
+    var console_thread = try std.Thread.spawn(
+        .{},
+        Console.input,
+        .{ state.console, state.done },
+    );
+    defer console_thread.join();
 
     try log.init();
     defer log.deinit();

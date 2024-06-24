@@ -85,7 +85,7 @@ pub fn watch(self: *@This(), new_device_notify: posix.fd_t, done: posix.fd_t) !v
         while (i_event < n_events) : (i_event += 1) {
             const event = events[i_event];
             if (event.data.fd == done) {
-                std.log.info("done watching devices", .{});
+                std.log.debug("done watching devices", .{});
                 break;
             } else if (event.data.fd == self.nl_fd) {
                 _ = try posix.write(new_device_notify, std.mem.asBytes(&1));
