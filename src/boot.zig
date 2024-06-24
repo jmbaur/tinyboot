@@ -137,42 +137,77 @@ pub const BootDevice = struct {
     entries: []const BootEntry,
 };
 
-pub const VTable = struct {
-    setup: *const fn (ctx: *anyopaque) anyerror!void,
-    probe: *const fn (ctx: *anyopaque) anyerror![]const BootDevice,
-    entryLoaded: *const fn (ctx: *anyopaque, ctx2: *anyopaque) void,
-    teardown: *const fn (ctx: *anyopaque) anyerror!void,
+pub const BootLoaderType = enum {
+    disk,
 };
 
-pub const BootLoader = union(enum) {
-    disk: BootLoaderSpec,
+pub const BootLoader = struct {
+    allocator: std.mem.Allocator,
 
-    pub fn setup(self: @This()) !void {
-        return switch (self) {
-            .disk => |*disk| disk.setup(),
-            // inline else => |*l| l.setup(),
+    state: enum {
+        uninitialized,
+        setup,
+        probed,
+    } = .uninitialized,
+
+    inner: union(BootLoaderType) {
+        disk: *BootLoaderSpec,
+    },
+
+    pub fn init(allocator: std.mem.Allocator, loader_type: BootLoaderType) !@This() {
+        switch (loader_type) {
+            .disk => {
+                const disk = try allocator.create(BootLoaderSpec);
+                disk.* = BootLoaderSpec.init(allocator);
+                return .{
+                    .allocator = allocator,
+                    .inner = .{ .disk = disk },
+                };
+            },
+        }
+    }
+
+    pub fn deinit(self: *@This()) !void {
+        switch (self.inner) {
+            inline else => |l| {
+                defer self.allocator.destroy(l);
+                return l.teardown();
+            },
+        }
+    }
+
+    pub fn name(self: *@This()) []const u8 {
+        return switch (self.inner) {
+            .disk => "disk",
         };
     }
 
-    pub fn probe(self: @This()) ![]const BootDevice {
-        return switch (self) {
-            inline else => |*l| l.probe(),
+    pub fn setup(self: *@This()) !void {
+        return switch (self.inner) {
+            inline else => |l| l.setup(),
+        };
+    }
+
+    pub fn probe(self: *@This()) ![]const BootDevice {
+        return switch (self.inner) {
+            inline else => |l| l.probe(),
         };
     }
 
     /// An infallible function that provides a way to hook into the stage of
     /// the boot process after a successful kexec load has been performed
     /// and before the reboot occurs.
-    pub fn entryLoaded(self: @This(), ctx: *anyopaque) void {
-        return switch (self) {
-            inline else => |*l| l.entryLoaded(ctx),
+    pub fn entryLoaded(self: *@This(), ctx: *anyopaque) void {
+        return switch (self.inner) {
+            inline else => |l| l.entryLoaded(ctx),
         };
     }
 
-    pub fn teardown(self: @This()) !void {
-        return switch (self) {
-            inline else => |*l| l.teardown(),
-        };
+    pub fn listBootDevices(self: *@This()) ![]const BootDevice {
+        switch (self.state) {
+            .uninitialized => {},
+        }
+        self.probe();
     }
 };
 
@@ -199,10 +234,10 @@ fn autoboot(self: *Autoboot) !bool {
 
     std.log.info("autoboot started", .{});
 
-    var boot_loader = BootLoader{ .disk = BootLoaderSpec.init(arena.allocator()) };
+    var boot_loader = try BootLoader.init(arena.allocator(), .disk);
 
     defer {
-        boot_loader.teardown() catch |err| {
+        boot_loader.deinit() catch |err| {
             std.log.err("failed to teardown bootloader: {}", .{err});
         };
         std.log.debug("autoboot stopped", .{});

@@ -4,6 +4,28 @@ const system = std.posix.system;
 
 const linux_headers = @import("linux_headers");
 
+// TODO(jared): some comptime magic to automate this
+pub const MAX_POLICY_SIZE =
+    (PROC_SUPER_MAGIC.len +
+    SYSFS_MAGIC.len +
+    DEBUGFS_MAGIC.len +
+    TMPFS_MAGIC.len +
+    DEVPTS_SUPER_MAGIC.len +
+    BINFMTFS_MAGIC.len +
+    SECURITYFS_MAGIC.len +
+    SELINUX_MAGIC.len +
+    SMACK_MAGIC.len +
+    CGROUP_SUPER_MAGIC.len +
+    CGROUP2_SUPER_MAGIC.len +
+    NSFS_MAGIC.len +
+    KEY_CHECK.len +
+    POLICY_CHECK.len +
+    KEXEC_KERNEL_CHECK.len +
+    KEXEC_INITRAMFS_CHECK.len +
+    KEXEC_CMDLINE.len +
+    KEXEC_KERNEL_CHECK_APPRAISE.len +
+    KEXEC_INITRAMFS_CHECK_APPRAISE.len) * 2; // TODO(jared): this extra space shouldn't be needed?
+
 pub const IMA_POLICY_PATH = "/sys/kernel/security/ima/policy";
 
 // PROC_SUPER_MAGIC = 0x9fa0
@@ -56,10 +78,7 @@ pub const KEXEC_KERNEL_CHECK_APPRAISE = withNewline("appraise func=KEXEC_KERNEL_
 
 pub const KEXEC_INITRAMFS_CHECK_APPRAISE = withNewline("appraise func=KEXEC_INITRAMFS_CHECK appraise_type=imasig|modsig");
 
-fn installImaPolicy(allocator: std.mem.Allocator, policy_entries: []const []const u8) !void {
-    const policy = try std.mem.join(allocator, "", policy_entries);
-    defer allocator.free(policy);
-
+fn installImaPolicy(policy: []const u8) !void {
     var policy_file = try std.fs.openFileAbsolute(IMA_POLICY_PATH, .{ .mode = .write_only });
     defer policy_file.close();
 
@@ -71,7 +90,7 @@ fn installImaPolicy(allocator: std.mem.Allocator, policy_entries: []const []cons
 const TEST_KEY = @embedFile("test_key");
 
 // https://github.com/torvalds/linux/blob/3b517966c5616ac011081153482a5ba0e91b17ff/security/integrity/digsig.c#L193
-fn loadVerificationKey(allocator: std.mem.Allocator) !void {
+fn loadVerificationKey() !void {
     const keyfile: std.fs.File = b: {
         inline for (.{ VPD_KEY, FW_CFG_KEY }) |keypath| {
             if (std.fs.cwd().openFile(keypath, .{})) |file| {
@@ -90,13 +109,14 @@ fn loadVerificationKey(allocator: std.mem.Allocator) !void {
     defer keyfile.close();
 
     const keyring_id = try addKeyring(IMA_KEYRING_NAME, KeySerial.User);
-    std.log.info("added ima keyring (id 0x{x})", .{keyring_id});
+    std.log.info("added ima keyring (id = 0x{x})", .{keyring_id});
 
-    const keyfile_contents = try keyfile.readToEndAlloc(allocator, 8192);
-    defer allocator.free(keyfile_contents);
+    var buf: [8192]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&buf);
+    const keyfile_contents = try keyfile.readToEndAlloc(fba.allocator(), buf.len);
 
     const key_id = try addKey(keyring_id, keyfile_contents);
-    std.log.info("added verification key (id 0x{x})", .{key_id});
+    std.log.info("added verification key (id = 0x{x})", .{key_id});
 
     if (std.mem.eql(u8, keyfile_contents, TEST_KEY)) {
         std.log.warn("test key in use!", .{});
@@ -108,50 +128,43 @@ fn loadVerificationKey(allocator: std.mem.Allocator) !void {
 // with IMA since we basically get it for free; measurements are held in memory
 // and persisted across kexecs, and the measurements are extended to the
 // system's TPM if one is available.
-pub fn initializeSecurity(allocator: std.mem.Allocator) !void {
-    var ima_policy = std.ArrayList([]const u8).init(allocator);
+pub fn initializeSecurity() !void {
+    var buf: [MAX_POLICY_SIZE]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&buf);
+    const allocator = fba.allocator();
+
+    var ima_policy = std.ArrayList(u8).init(allocator);
     defer ima_policy.deinit();
 
-    try ima_policy.appendSlice(&.{
-        PROC_SUPER_MAGIC,
-        SYSFS_MAGIC,
-        DEBUGFS_MAGIC,
-        TMPFS_MAGIC,
-        DEVPTS_SUPER_MAGIC,
-        BINFMTFS_MAGIC,
-        SECURITYFS_MAGIC,
-        SELINUX_MAGIC,
-        SMACK_MAGIC,
-        CGROUP_SUPER_MAGIC,
-        CGROUP2_SUPER_MAGIC,
-        NSFS_MAGIC,
-        KEY_CHECK,
-        POLICY_CHECK,
-        KEXEC_KERNEL_CHECK,
-        KEXEC_INITRAMFS_CHECK,
-        KEXEC_CMDLINE,
-    });
-
-    var do_verified_boot = true;
-    loadVerificationKey(allocator) catch |err| {
-        std.log.warn("failed to load verification key, cannot perform boot verification: {}", .{err});
-        do_verified_boot = false;
-    };
-
-    if (do_verified_boot) {
-        try ima_policy.appendSlice(&.{
-            KEXEC_KERNEL_CHECK_APPRAISE,
-            KEXEC_INITRAMFS_CHECK_APPRAISE,
-        });
-    }
-
-    try installImaPolicy(allocator, ima_policy.items);
+    try ima_policy.appendSlice(PROC_SUPER_MAGIC);
+    try ima_policy.appendSlice(SYSFS_MAGIC);
+    try ima_policy.appendSlice(DEBUGFS_MAGIC);
+    try ima_policy.appendSlice(TMPFS_MAGIC);
+    try ima_policy.appendSlice(DEVPTS_SUPER_MAGIC);
+    try ima_policy.appendSlice(BINFMTFS_MAGIC);
+    try ima_policy.appendSlice(SECURITYFS_MAGIC);
+    try ima_policy.appendSlice(SELINUX_MAGIC);
+    try ima_policy.appendSlice(SMACK_MAGIC);
+    try ima_policy.appendSlice(CGROUP_SUPER_MAGIC);
+    try ima_policy.appendSlice(CGROUP2_SUPER_MAGIC);
+    try ima_policy.appendSlice(NSFS_MAGIC);
+    try ima_policy.appendSlice(KEY_CHECK);
+    try ima_policy.appendSlice(POLICY_CHECK);
+    try ima_policy.appendSlice(KEXEC_KERNEL_CHECK);
+    try ima_policy.appendSlice(KEXEC_INITRAMFS_CHECK);
+    try ima_policy.appendSlice(KEXEC_CMDLINE);
 
     std.log.info("boot measurement is enabled", .{});
 
-    if (do_verified_boot) {
+    if (loadVerificationKey()) {
+        try ima_policy.appendSlice(KEXEC_KERNEL_CHECK_APPRAISE);
+        try ima_policy.appendSlice(KEXEC_INITRAMFS_CHECK_APPRAISE);
         std.log.info("boot verification is enabled", .{});
+    } else |err| {
+        std.log.warn("failed to load verification key, cannot perform boot verification: {}", .{err});
     }
+
+    try installImaPolicy(ima_policy.items);
 }
 
 // Each line in an IMA policy, including the last line, needs to be terminated

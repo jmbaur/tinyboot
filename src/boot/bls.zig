@@ -12,7 +12,7 @@ const Gpt = @import("../disk/partition_table.zig").Gpt;
 const GptPartitionType = @import("../disk/partition_table.zig").GptPartitionType;
 const Mbr = @import("../disk/partition_table.zig").Mbr;
 const MbrPartitionType = @import("../disk/partition_table.zig").MbrPartitionType;
-const device = @import("../device.zig");
+const kobject = @import("../device/kobject.zig");
 
 const Mount = struct {
     allocator: std.mem.Allocator,
@@ -357,7 +357,7 @@ pub const BootLoaderSpec = struct {
         self.external_mounts.deinit();
     }
 
-    pub fn setup(self: *@This()) anyerror!void {
+    pub fn setup(self: *@This()) !void {
         std.log.debug("BLS setup", .{});
 
         var disk_alias_dir = try std.fs.cwd().openDir(
@@ -387,7 +387,7 @@ pub const BootLoaderSpec = struct {
             const max_bytes = 10 * 1024 * 1024;
             const uevent_contents = try uevent_file.readToEndAlloc(self.allocator, max_bytes);
 
-            var uevent = try device.parseUeventFileContents(self.allocator, uevent_contents);
+            var uevent = try kobject.parseUeventFileContents(self.allocator, uevent_contents);
 
             const devtype = uevent.get("DEVTYPE") orelse continue;
 

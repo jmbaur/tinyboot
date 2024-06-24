@@ -1,49 +1,39 @@
 const std = @import("std");
-const fs = std.fs;
 const posix = std.posix;
 const system = std.posix.system;
 
 const linux_headers = @import("linux_headers");
 
-const MountError = error{
-    Todo,
-};
-
 fn mountPseudoFs(
     path: [*:0]const u8,
     fstype: [*:0]const u8,
     flags: u32,
-) MountError!void {
+) !void {
     const rc = system.mount("", path, fstype, flags, 0);
 
     switch (posix.errno(rc)) {
         .SUCCESS => {},
-        // TODO(jared): parse errno
-        else => return MountError.Todo,
+        else => |err| return posix.unexpectedErrno(err),
     }
 }
 
 /// Does initial system setup and mounts basic psuedo-filesystems.
 pub fn setupSystem() !void {
-    try fs.makeDirAbsolute("/proc");
+    try std.fs.cwd().makePath("/proc");
     try mountPseudoFs("/proc", "proc", system.MS.NOSUID | system.MS.NODEV | system.MS.NOEXEC);
 
-    try fs.makeDirAbsolute("/sys");
+    try std.fs.cwd().makePath("/sys");
     try mountPseudoFs("/sys", "sysfs", system.MS.NOSUID | system.MS.NODEV | system.MS.NOEXEC | system.MS.RELATIME);
     try mountPseudoFs("/sys/kernel/security", "securityfs", system.MS.NOSUID | system.MS.NODEV | system.MS.NOEXEC | system.MS.RELATIME);
     try mountPseudoFs("/sys/kernel/debug", "debugfs", system.MS.NOSUID | system.MS.NODEV | system.MS.NOEXEC | system.MS.RELATIME);
 
-    // we use CONFIG_DEVTMPFS, so we don't need to create /dev
+    try std.fs.cwd().makePath("/dev");
     try mountPseudoFs("/dev", "devtmpfs", system.MS.SILENT | system.MS.NOSUID | system.MS.NOEXEC);
 
-    try fs.makeDirAbsolute("/run");
+    try std.fs.cwd().makePath("/run");
     try mountPseudoFs("/run", "tmpfs", system.MS.NOSUID | system.MS.NODEV);
 
-    try fs.makeDirAbsolute("/mnt");
-
-    try fs.symLinkAbsolute("/proc/self/fd/0", "/dev/stdin", .{});
-    try fs.symLinkAbsolute("/proc/self/fd/1", "/dev/stdout", .{});
-    try fs.symLinkAbsolute("/proc/self/fd/2", "/dev/stderr", .{});
+    try std.fs.cwd().makePath("/mnt");
 }
 
 const TCFLSH = linux_headers.TCFLSH;

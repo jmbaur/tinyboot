@@ -7,83 +7,16 @@ const linux_headers = @import("linux_headers");
 
 const BootEntry = @import("./boot.zig").BootEntry;
 const BootLoader = @import("./boot.zig").BootLoader;
-const BootLoaderSpec = @import("./boot/bls.zig").BootLoaderSpec;
-const ClientMsg = @import("./message.zig").ClientMsg;
-const ServerMsg = @import("./message.zig").ServerMsg;
 const Xmodem = @import("./boot/xmodem.zig").Xmodem;
 const kernelLogs = @import("./system.zig").kernelLogs;
 const kexecLoad = @import("./boot.zig").kexecLoad;
-const readMessage = @import("./message.zig").readMessage;
-const writeMessage = @import("./message.zig").writeMessage;
 
 const ArgsIterator = process.ArgIteratorGeneral(.{});
 
-pub const Context = struct {
-    loader: BootLoader,
-
-    const argv0 = enum {
-        help, // NOTE: keep "help" at the top
-        exit,
-        // list,
-    };
-
-    const help = struct {
-        const short_help = "get help";
-        const long_help =
-            \\Print all available commands or print specific command usage.
-            \\
-            \\Usage:
-            \\help [command]
-        ;
-
-        fn run(_: *Client, args: *ArgsIterator, _: BootLoader) !?ClientMsg {
-            if (args.next()) |next| {
-                var found = false;
-                inline for (std.meta.fields(argv0)) |field| {
-                    if (std.mem.eql(u8, field.name, next)) {
-                        found = true;
-                        const cmd_long_help = comptime @field(Context, field.name).long_help;
-                        std.debug.print("\n{s}\n", .{cmd_long_help});
-                    }
-                }
-
-                if (!found) {
-                    std.debug.print("unknown command \"{s}\"\n", .{next});
-                }
-            } else {
-                std.debug.print("\n", .{});
-
-                inline for (std.meta.fields(argv0)) |field| {
-                    const cmd_short_help = comptime @field(Context, field.name).short_help;
-                    const space = 20 - comptime field.name.len;
-                    std.debug.print("{s}{s}{s}\n", .{ field.name, " " ** space, cmd_short_help });
-                }
-            }
-
-            return null;
-        }
-    };
-
-    const exit = struct {
-        const short_help = "boot from disk";
-        const long_help =
-            \\Enter disk context
-        ;
-
-        fn run(client: *Client, _: *ArgsIterator, loader: BootLoader) !?ClientMsg {
-            try loader.teardown();
-            // if (client.loaderCtx) |ctx| switch (ctx) {
-            //     .disk => |disk| {
-            //         disk.teardown();
-            //         disk.deinit();
-            //     },
-            // };
-
-            client.context = null;
-
-            return null;
-        }
-    };
+pub const Notification = enum {
+    Reboot,
+    Poweroff,
+    Kexec,
 };
 
 pub const Client = struct {
@@ -140,10 +73,8 @@ pub const Client = struct {
     }
 
     fn prompt(self: *@This()) !void {
-        if (self.context) |ctx| {
-            try self.writeAll(switch (ctx) {
-                .disk => "disk",
-            });
+        if (self.context) |*ctx| {
+            try self.writeAll(ctx.name());
         }
         try self.writeAllAndFlush("> ");
     }
@@ -168,15 +99,6 @@ pub const Client = struct {
         };
         try posix.epoll_ctl(epoll_fd, system.EPOLL.CTL_ADD, self.stream.handle, &server_event);
 
-        const inotify_fd = try posix.inotify_init1(0);
-        const logs_watch_fd = try posix.inotify_add_watch(inotify_fd, "/run/log", system.IN.MODIFY);
-        defer posix.close(inotify_fd);
-        var inotify_event = system.epoll_event{
-            .data = .{ .fd = inotify_fd },
-            .events = system.EPOLL.IN,
-        };
-        try posix.epoll_ctl(epoll_fd, system.EPOLL.CTL_ADD, inotify_fd, &inotify_event);
-
         // main event loop
         while (true) {
             const max_events = 8; // arbitrary
@@ -187,15 +109,6 @@ pub const Client = struct {
             var i_event: usize = 0;
             while (i_event < n_events) : (i_event += 1) {
                 const event = events[i_event];
-
-                // If we got an event that wasn't on the inotify fd, it means
-                // the client will no longer need to passively watch logs, so
-                // we remove the inotify watcher.
-                if (event.data.fd != inotify_fd and self.watching_logs) {
-                    try posix.epoll_ctl(epoll_fd, system.EPOLL.CTL_DEL, inotify_fd, null);
-                    posix.inotify_rm_watch(inotify_fd, logs_watch_fd);
-                    self.watching_logs = false;
-                }
 
                 if (event.data.fd == self.stream.handle) {
                     const should_quit = try self.handleMsg();
@@ -210,48 +123,42 @@ pub const Client = struct {
                     }
                 } else if (event.data.fd == posix.STDIN_FILENO) {
                     try self.handleStdin();
-                } else if (event.data.fd == inotify_fd and self.watching_logs) {
-                    // Consume the event on the inotify fd. We don't
-                    // actually use the data since we only have one file
-                    // registered. If we don't do this, we will continue to
-                    // get epoll notifications for this fd.
-                    var buf: [@sizeOf(system.inotify_event)]u8 = undefined;
-                    _ = posix.read(inotify_fd, &buf) catch {};
-                    try self.printLogs(.{ .from_start = false });
                 }
             }
         }
     }
 
     fn notifyUserPresence(self: *@This()) !void {
-        writeMessage(ClientMsg{ .data = .Empty }, self.stream.writer()) catch {
-            std.log.err("failed to notify user presence", .{});
-        };
+        _ = self;
+        // writeMessage(Outcome{ .data = .Empty }, self.stream.writer()) catch {
+        //     std.log.err("failed to notify user presence", .{});
+        // };
     }
 
     /// Returns true if the remote side shutdown, indicating we are done.
     fn handleMsg(self: *@This()) !bool {
-        const msg = readMessage(
-            ServerMsg,
-            self.arena.allocator(),
-            self.stream.reader(),
-        ) catch |err| {
-            if (err == error.EOF) {
-                return true;
-            }
-            return err;
-        };
-        defer msg.deinit();
-
-        switch (msg.value.data) {
-            .ForceShell => {
-                if (!self.has_prompt) {
-                    std.log.debug("shell forced from server", .{});
-                    try self.prompt();
-                    self.has_prompt = true;
-                }
-            },
-        }
+        _ = self;
+        // const msg = readMessage(
+        //     ServerMsg,
+        //     self.arena.allocator(),
+        //     self.stream.reader(),
+        // ) catch |err| {
+        //     if (err == error.EOF) {
+        //         return true;
+        //     }
+        //     return err;
+        // };
+        // defer msg.deinit();
+        //
+        // switch (msg.value.data) {
+        //     .ForceShell => {
+        //         if (!self.has_prompt) {
+        //             std.log.debug("shell forced from server", .{});
+        //             try self.prompt();
+        //             self.has_prompt = true;
+        //         }
+        //     },
+        // }
 
         return false;
     }
@@ -513,9 +420,9 @@ pub const Client = struct {
             var args = try ArgsIterator.init(self.arena.allocator(), user_input);
             defer args.deinit();
 
-            const maybe_msg = self.runCommand(&args);
+            const maybe_notification = self.runCommand(&args);
 
-            const msg = maybe_msg catch |err| {
+            const notification = maybe_notification catch |err| {
                 std.debug.print("\nerror running command: {any}\n", .{err});
                 try self.prompt();
                 return;
@@ -523,37 +430,38 @@ pub const Client = struct {
                 return try self.prompt();
             };
 
-            if (writeMessage(msg, self.stream.writer())) {
-                self.waiting_for_response = true;
-            } else |err| {
-                std.log.err("failed to send message to server: {}", .{err});
-            }
+            _ = notification;
+
+            // TODO(jared):
+            // if (writeMessage(notification, self.stream.writer())) {
+            //     self.waiting_for_response = true;
+            // } else |err| {
+            //     std.log.err("failed to send message to server: {}", .{err});
+            // }
         }
     }
 
-    fn runCommand(self: *@This(), args: *ArgsIterator) !?ClientMsg {
-        if (self.context) |ctx| {
-            _ = ctx;
-            std.debug.print("do something!\n", .{});
-            // inline for (std.meta.fields(Context.argv0)) |field| {
-            //     _ = field;
-            //     // if (std.mem.eql(u8, field.name, cmd
-            // }
-        } else {
-            if (args.next()) |cmd| {
-                var found = false;
+    fn runCommand(self: *@This(), args: *ArgsIterator) !?Notification {
+        if (args.next()) |cmd| {
+            if (std.mem.eql(u8, cmd, "help")) {
+                return @field(Command, "help").run(self, args);
+            }
 
-                inline for (std.meta.fields(Command.argv0)) |field| {
+            if (self.context) |*ctx| {
+                inline for (std.meta.fields(Command.Context)) |field| {
                     if (std.mem.eql(u8, field.name, cmd)) {
-                        found = true;
+                        return @field(Command, field.name).run(self, args, ctx);
+                    }
+                }
+            } else {
+                inline for (std.meta.fields(Command.NoContext)) |field| {
+                    if (std.mem.eql(u8, field.name, cmd)) {
                         return @field(Command, field.name).run(self, args);
                     }
                 }
-
-                if (!found) {
-                    std.debug.print("unknown command \"{s}\"\n", .{cmd});
-                }
             }
+
+            std.debug.print("unknown command \"{s}\"\n", .{cmd});
         }
 
         return null;
@@ -561,14 +469,18 @@ pub const Client = struct {
 };
 
 pub const Command = struct {
-    const argv0 = enum {
-        help, // NOTE: keep "help" at the top
+    const NoContext = enum {
         clear,
         dmesg,
         loader,
         logs,
         poweroff,
         reboot,
+    };
+
+    const Context = enum {
+        exit,
+        list,
     };
 
     const help = struct {
@@ -580,27 +492,48 @@ pub const Command = struct {
             \\help [command]
         ;
 
-        fn run(_: *Client, args: *ArgsIterator) !?ClientMsg {
-            if (args.next()) |next| {
-                var found = false;
-                inline for (std.meta.fields(argv0)) |field| {
-                    if (std.mem.eql(u8, field.name, next)) {
-                        found = true;
-                        const cmd_long_help = comptime @field(Command, field.name).long_help;
-                        std.debug.print("\n{s}\n", .{cmd_long_help});
-                    }
-                }
+        /// Prints a help message for all commands.
+        fn helpAll(t: anytype) void {
+            std.debug.print("\n", .{});
 
-                if (!found) {
-                    std.debug.print("unknown command \"{s}\"\n", .{next});
+            inline for (std.meta.fields(t)) |field| {
+                const cmd_short_help = comptime @field(Command, field.name).short_help;
+                const space = 20 - comptime field.name.len;
+                std.debug.print("{s}{s}{s}\n", .{ field.name, " " ** space, cmd_short_help });
+            }
+        }
+
+        /// Prints a help message for a single command.
+        fn helpOne(t: anytype, cmd: []const u8) void {
+            if (std.mem.eql(u8, cmd, "help")) {
+                const cmd_long_help = comptime @field(Command, "help").long_help;
+                std.debug.print("\n{s}\n", .{cmd_long_help});
+                return;
+            }
+
+            inline for (std.meta.fields(t)) |field| {
+                if (std.mem.eql(u8, field.name, cmd)) {
+                    const cmd_long_help = comptime @field(Command, field.name).long_help;
+                    std.debug.print("\n{s}\n", .{cmd_long_help});
+                    return;
+                }
+            }
+
+            std.debug.print("unknown command \"{s}\"\n", .{cmd});
+        }
+
+        fn run(client: *Client, args: *ArgsIterator) !?Notification {
+            if (args.next()) |cmd| {
+                if (client.context == null) {
+                    helpOne(NoContext, cmd);
+                } else {
+                    helpOne(Context, cmd);
                 }
             } else {
-                std.debug.print("\n", .{});
-
-                inline for (std.meta.fields(argv0)) |field| {
-                    const cmd_short_help = comptime @field(Command, field.name).short_help;
-                    const space = 20 - comptime field.name.len;
-                    std.debug.print("{s}{s}{s}\n", .{ field.name, " " ** space, cmd_short_help });
+                if (client.context == null) {
+                    helpAll(NoContext);
+                } else {
+                    helpAll(Context);
                 }
             }
 
@@ -617,8 +550,8 @@ pub const Command = struct {
             \\poweroff
         ;
 
-        fn run(_: *Client, _: *ArgsIterator) !?ClientMsg {
-            return .{ .data = .Poweroff };
+        fn run(_: *Client, _: *ArgsIterator) !?Notification {
+            return .Poweroff;
         }
     };
 
@@ -631,8 +564,8 @@ pub const Command = struct {
             \\reboot
         ;
 
-        fn run(_: *Client, _: *ArgsIterator) !?ClientMsg {
-            return .{ .data = .Reboot };
+        fn run(_: *Client, _: *ArgsIterator) !?Notification {
+            return .Reboot;
         }
     };
 
@@ -645,7 +578,7 @@ pub const Command = struct {
             \\logs
         ;
 
-        fn run(client: *Client, _: *ArgsIterator) !?ClientMsg {
+        fn run(client: *Client, _: *ArgsIterator) !?Notification {
             try client.printLogs(.{});
             return null;
         }
@@ -663,7 +596,7 @@ pub const Command = struct {
             \\dmesg 7
         ;
 
-        fn run(client: *Client, args: *ArgsIterator) !?ClientMsg {
+        fn run(client: *Client, args: *ArgsIterator) !?Notification {
             const filter = if (args.next()) |filter_str| try std.fmt.parseInt(u8, filter_str, 10) else 6;
             const kernel_logs = try kernelLogs(client.arena.allocator(), filter);
             try client.writeAllAndFlush(kernel_logs);
@@ -681,7 +614,7 @@ pub const Command = struct {
             \\clear
         ;
 
-        fn run(client: *Client, _: *ArgsIterator) !?ClientMsg {
+        fn run(client: *Client, _: *ArgsIterator) !?Notification {
             client.clearScreen();
 
             return null;
@@ -690,15 +623,60 @@ pub const Command = struct {
 
     const loader = struct {
         const short_help = "choose a bootloader";
+        // TODO(jared): comptime generation of possible list of bootloaders
         const long_help =
-            \\Choose a bootloader.
+            \\Choose a bootloader. One of "disk" or "xmodem".
+            \\
+            \\Usage:
+            \\loader [bootloader]
+            \\
+            \\Example:
+            \\loader disk
         ;
 
-        fn run(client: *Client, args: *ArgsIterator) !?ClientMsg {
+        fn run(client: *Client, args: *ArgsIterator) !?Notification {
             const loader_name = args.next() orelse return error.InvalidArgs;
 
             if (std.mem.eql(u8, loader_name, "disk")) {
-                client.context = .{ .disk = BootLoaderSpec.init(client.arena.allocator()) };
+                client.context = try BootLoader.init(client.arena.allocator(), .disk);
+            }
+
+            return null;
+        }
+    };
+
+    const exit = struct {
+        const short_help = "exit context";
+        const long_help =
+            \\Exit bootloader context.
+            \\
+            \\Usage:
+            \\exit
+        ;
+
+        fn run(client: *Client, _: *ArgsIterator, boot_loader: *BootLoader) !?Notification {
+            defer client.context = null;
+
+            try boot_loader.deinit();
+
+            return null;
+        }
+    };
+
+    const list = struct {
+        const short_help = "list boot devices";
+        const long_help =
+            \\List boot devices.
+            \\
+            \\Usage:
+            \\list
+        ;
+
+        fn run(_: *Client, _: *ArgsIterator, boot_loader: *BootLoader) !?Notification {
+            const devices = try boot_loader.listBootDevices();
+
+            for (devices) |device| {
+                std.debug.print("{}\n", .{device.name});
             }
 
             return null;
@@ -723,7 +701,7 @@ pub const Command = struct {
 //         \\  -n              No initrd
 //     ;
 //
-//     fn run(client: *Client, args: *ArgsIterator) !?ClientMsg {
+//     fn run(client: *Client, args: *ArgsIterator) !?Outcome {
 //         var xmodem = try Xmodem.init(client.allocator, .{
 //             .serial_name = "client-stdin",
 //             .serial_fd = posix.STDIN_FILENO,
