@@ -39,8 +39,9 @@ pub fn init() !@This() {
     };
     errdefer self.deinit();
 
-    try self.makeInitialNodes(.block);
-    try self.makeInitialNodes(.char);
+    inline for (std.meta.fields(Device.Subsystem)) |field| {
+        self.scanAndCreateExistingDevices(field.name) catch {};
+    }
 
     return self;
 }
@@ -102,16 +103,13 @@ fn handleNewEvent(self: *@This()) !void {
 
     const bytes_read = try posix.read(self.nl_fd, &recv_bytes);
 
-    const kobj = try kobject.parseUeventKobjectContents(
+    const action = try kobject.parseUeventKobjectContents(
         recv_bytes[0..bytes_read],
     ) orelse return;
 
-    if (kobj.action == .add) {
-        try self.addDevice(kobj.device);
-    } else {
-        if (kobj.action == .remove) {
-            try self.removeDevice(kobj.device);
-        }
+    switch (action) {
+        .add => |device| try self.addDevice(device),
+        .remove => |dev_name| try self.removeDevice(dev_name),
     }
 }
 
@@ -145,33 +143,50 @@ fn mknod(self: *@This(), node_type: NodeType, major: u32, minor: u32) !void {
     }
 }
 
+// stat() on any uevent file always returns 4096
+const UEVENT_FILE_SIZE = 4096;
+
 /// Scan sysfs and create all nodes that currently exist on the system.
-fn makeInitialNodes(self: *@This(), node_type: NodeType) !void {
-    var dir = try std.fs.cwd().openDir(switch (node_type) {
-        .block => "/sys/dev/block",
-        .char => "/sys/dev/char",
-    }, .{ .iterate = true });
-    defer dir.close();
+fn scanAndCreateExistingDevices(
+    self: *@This(),
+    comptime subsystem: []const u8,
+) !void {
+    var subsystem_dir = try std.fs.cwd().openDir(
+        "/sys/class/" ++ subsystem,
+        .{ .iterate = true },
+    );
+    defer subsystem_dir.close();
 
-    var iter = dir.iterate();
+    var iter = subsystem_dir.iterate();
 
+    var device_path_buf: [posix.PATH_MAX]u8 = undefined;
     while (try iter.next()) |entry| {
-        // we expect all entries to be a symlink
+        // TODO(jared): Do we have any reason to believe all the files
+        // won't be symlinks?
         if (entry.kind != .sym_link) {
             continue;
         }
 
-        var split = std.mem.split(u8, entry.name, ":");
+        const device_path = subsystem_dir.realpath(entry.name, &device_path_buf) catch continue;
 
-        const major = std.fmt.parseInt(u32, split.next() orelse continue, 10) catch continue;
-        const minor = std.fmt.parseInt(u32, split.next() orelse continue, 10) catch continue;
+        var device_dir = subsystem_dir.openDir(entry.name, .{}) catch continue;
+        defer device_dir.close();
 
-        // // add device
-        // var buf: [posix.PATH_MAX]u8 = undefined;
-        // const device = dir.realpath(entry.name, &buf) catch continue;
-        // try DEVICES.append(Device.init(device));
+        var device_uevent = device_dir.openFile("uevent", .{}) catch continue;
+        defer device_uevent.close();
 
-        try self.mknod(node_type, major, minor);
+        var buf: [UEVENT_FILE_SIZE]u8 = undefined;
+        const n_read = device_uevent.readAll(&buf) catch continue;
+
+        const device = kobject.parseUeventFileContents(
+            @field(Device.Subsystem, subsystem),
+            device_path,
+            buf[0..n_read],
+        ) catch continue;
+
+        if (device) |d| {
+            try self.addDevice(d);
+        }
     }
 }
 
@@ -187,18 +202,18 @@ fn addDevice(self: *@This(), device: *Device) !void {
     try Device.add(device);
 }
 
-fn removeDevice(self: *@This(), device: *Device) !void {
-    defer device.deinit();
+fn removeDevice(self: *@This(), dev_name: []const u8) !void {
+    if (Device.findByName(dev_name)) |d| {
+        defer Device.remove(d);
 
-    if (device.node) |node| {
-        const major, const minor = node;
-        try self.removeNode(switch (device.subsystem) {
-            .block => .block,
-            else => .char,
-        }, major, minor);
+        if (d.node) |node| {
+            const major, const minor = node;
+            try self.removeNode(switch (d.subsystem) {
+                .block => .block,
+                else => .char,
+            }, major, minor);
+        }
     }
-
-    try Device.remove(device.dev_name);
 }
 
 fn removeNode(self: *@This(), node_type: NodeType, major: u32, minor: u32) !void {

@@ -2,28 +2,62 @@ const std = @import("std");
 
 const utils = @import("../utils.zig");
 
+const Device = @This();
+
 pub var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
 
 var m = std.Thread.Mutex{};
-var all_devices = std.ArrayList(*@This()).init(arena.allocator());
+var all_devices = std.ArrayList(*Device).init(arena.allocator());
 
-pub fn add(device: *@This()) !void {
+/// Adds a preinitialized device to the device list.
+pub fn add(device: *Device) !void {
     m.lock();
     defer m.unlock();
 
     try all_devices.append(device);
 }
 
-pub fn remove(dev_name: []const u8) !void {
+/// Removes the device from the device list and deinitializes the device
+/// structure.
+pub fn remove(device: *Device) void {
     m.lock();
     defer m.unlock();
 
     for (all_devices.items, 0..) |d, index| {
-        if (std.mem.eql(u8, d.dev_name, dev_name)) {
+        if (d == device) {
             const removed = all_devices.orderedRemove(index);
             removed.deinit();
         }
     }
+}
+
+pub fn findByNumber(want_major: u32, want_minor: u32) ?*Device {
+    m.lock();
+    defer m.unlock();
+
+    for (all_devices.items) |d| {
+        if (d.node) |node| {
+            const major, const minor = node;
+            if (major == want_major and minor == want_minor) {
+                return d;
+            }
+        }
+    }
+
+    return null;
+}
+
+pub fn findByName(want_name: []const u8) ?*Device {
+    m.lock();
+    defer m.unlock();
+
+    for (all_devices.items) |d| {
+        if (std.mem.eql(u8, d.dev_name, want_name)) {
+            return d;
+        }
+    }
+
+    return null;
 }
 
 // grep --no-filename DEVTYPE /sys/class/*/*/uevent  | cut -d'=' -f2 | sort | uniq
@@ -58,18 +92,21 @@ pub const Subsystem = enum {
 subsystem: Subsystem,
 dev_type: ?DevType = null,
 node: ?struct { u32, u32 } = null,
+dev_path: []const u8,
 dev_name: []const u8,
 
-pub fn init(subsystem: Subsystem, dev_name: []const u8) !*@This() {
-    const self = try arena.allocator().create(@This());
+pub fn init(subsystem: Subsystem, dev_path: []const u8, dev_name: []const u8) !*Device {
+    const self = try arena.allocator().create(Device);
     self.* = .{
         .subsystem = subsystem,
+        .dev_path = try arena.allocator().dupe(u8, dev_path),
         .dev_name = try arena.allocator().dupe(u8, dev_name),
     };
     return self;
 }
 
-pub fn deinit(self: *@This()) void {
+pub fn deinit(self: *Device) void {
+    arena.allocator().free(self.dev_path);
     arena.allocator().free(self.dev_name);
     arena.allocator().destroy(self);
     self.* = undefined;

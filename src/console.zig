@@ -62,11 +62,12 @@ pub fn input(notify: posix.fd_t, done: posix.fd_t) !void {
         try posix.dup2(console.handle, posix.STDERR_FILENO);
     }
 
+    writeAllAndFlush("\npress <ENTER> to interrupt\n\n");
+
     var tty = try setupTty(posix.STDIN_FILENO, .user_input);
     defer tty.reset();
 
     var console = Console{ .notify = notify };
-    writeAllAndFlush("\npress <ENTER> to interrupt\n\n");
 
     const epoll_fd = try posix.epoll_create1(linux_headers.EPOLL_CLOEXEC);
     defer posix.close(epoll_fd);
@@ -365,7 +366,7 @@ fn handleStdin(self: *Console) !void {
         const maybe_notification = self.runCommand(&args);
 
         const notification = maybe_notification catch |err| {
-            std.debug.print("\nerror running command: {any}\n", .{err});
+            std.debug.print("\nerror running command: {}\n", .{err});
             try self.prompt();
             return;
         } orelse {

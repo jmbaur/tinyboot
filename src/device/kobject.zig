@@ -1,4 +1,5 @@
 const std = @import("std");
+const posix = std.posix;
 
 const utils = @import("../utils.zig");
 
@@ -6,6 +7,7 @@ const Device = @import("./device.zig");
 
 pub fn parseUeventFileContents(
     subsystem: Device.Subsystem,
+    device_path: []const u8,
     contents: []const u8,
 ) !?*Device {
     var iter = std.mem.splitSequence(u8, contents, "\n");
@@ -31,14 +33,14 @@ pub fn parseUeventFileContents(
         }
     }
 
-    var device = try Device.init(subsystem, dev_name orelse return null);
+    var device = try Device.init(subsystem, device_path, dev_name orelse return null);
 
     if (dev_type) |t| {
         device.dev_type = t;
     }
 
     if (major != null and minor != null) {
-        device.node = .{ major, minor };
+        device.node = .{ major.?, minor.? };
     }
 
     return device;
@@ -51,6 +53,7 @@ pub fn parseUeventKobjectContents(contents: []const u8) !?KobjectResult {
     var first_line_split = std.mem.splitSequence(u8, first_line, "@");
     const action = Action.fromStr(first_line_split.next().?) catch return null;
 
+    var dev_path: ?[]const u8 = null;
     var dev_name: ?[]const u8 = null;
     var subsystem: ?Device.Subsystem = null;
     var dev_type: ?Device.DevType = null;
@@ -63,6 +66,15 @@ pub fn parseUeventKobjectContents(contents: []const u8) !?KobjectResult {
         const value = split.next() orelse continue;
         if (std.mem.eql(u8, key, "DEVNAME")) {
             dev_name = value;
+        } else if (std.mem.eql(u8, key, "DEVPATH")) {
+            dev_path = b: {
+                var buf: [posix.PATH_MAX]u8 = undefined;
+                break :b std.fmt.bufPrint(
+                    &buf,
+                    "/sys/{s}",
+                    .{value},
+                ) catch return null;
+            };
         } else if (std.mem.eql(u8, key, "SUBSYSTEM")) {
             subsystem = Device.Subsystem.fromStr(value) catch return null;
         } else if (std.mem.eql(u8, key, "DEVTYPE")) {
@@ -74,23 +86,28 @@ pub fn parseUeventKobjectContents(contents: []const u8) !?KobjectResult {
         }
     }
 
-    var device = try Device.init(
-        subsystem orelse return null,
-        dev_name orelse return null,
-    );
+    switch (action) {
+        .remove => return .{ .remove = dev_name orelse return null },
+        .add => {
+            var device = try Device.init(
+                subsystem orelse return null,
+                dev_path orelse return null,
+                dev_name orelse return null,
+            );
 
-    if (dev_type) |t| {
-        device.dev_type = t;
+            if (dev_type) |t| {
+                device.dev_type = t;
+            }
+
+            if (major != null and minor != null) {
+                device.node = .{ major.?, minor.? };
+            }
+
+            return .{
+                .add = device,
+            };
+        },
     }
-
-    if (major != null and minor != null) {
-        device.node = .{ major.?, minor.? };
-    }
-
-    return .{
-        .action = action,
-        .device = device,
-    };
 }
 
 // test "uevent file content parsing" {
@@ -187,14 +204,13 @@ pub fn parseUeventKobjectContents(contents: []const u8) !?KobjectResult {
 pub const Action = enum {
     add,
     remove,
-    bind,
 
     fn fromStr(value: []const u8) !@This() {
         return utils.enumFromStr(@This(), value);
     }
 };
 
-pub const KobjectResult = struct {
-    action: Action,
-    device: *Device,
+pub const KobjectResult = union(Action) {
+    add: *Device,
+    remove: []const u8,
 };
