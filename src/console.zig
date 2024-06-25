@@ -8,39 +8,65 @@ const linux_headers = @import("linux_headers");
 const BootEntry = @import("./boot.zig").BootEntry;
 const BootLoader = @import("./boot.zig").BootLoader;
 const Xmodem = @import("./boot/xmodem.zig").Xmodem;
-const kernelLogs = @import("./system.zig").kernelLogs;
+const printKernelLogs = @import("./system.zig").printKernelLogs;
 const setupTty = @import("./system.zig").setupTty;
 const kexecLoad = @import("./boot.zig").kexecLoad;
+const utils = @import("./utils.zig");
+
+const esc = std.ascii.control_code.esc;
 
 const ArgsIterator = process.ArgIteratorGeneral(.{});
 
 pub const Notification = enum {
-    Reboot,
-    Poweroff,
-    Kexec,
+    /// Indication that a user is present at the console, only sent once.
+    presence,
+
+    /// Reboot initiated from console.
+    reboot,
+
+    /// Poweroff initiated from console.
+    poweroff,
+
+    /// Kexec initiated from console.
+    kexec,
 };
+
+const Console = @This();
 
 const CONSOLE = "/dev/char/5:1";
 
-pub fn input(input_notify: posix.fd_t, done: posix.fd_t) !void {
-    var console = try std.fs.cwd().openFile(CONSOLE, .{
-        .allow_ctty = true,
-        .mode = .read_write,
-    });
-    defer console.close();
+const IO_BUFFER_SIZE = 4096;
 
-    try posix.dup2(console.handle, posix.STDIN_FILENO);
-    try posix.dup2(console.handle, posix.STDOUT_FILENO);
-    try posix.dup2(console.handle, posix.STDERR_FILENO);
+var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
 
-    _ = try posix.write(input_notify, std.mem.asBytes(&1));
+var out = std.io.bufferedWriter(std.io.getStdOut().writer());
 
-    std.debug.print("HI\n", .{});
+notify: posix.fd_t,
+waiting_for_response: bool = false,
+has_prompt: bool = false,
+watching_logs: bool = true,
+input_cursor: u16 = 0,
+input_end: u16 = 0,
+input_buffer: [IO_BUFFER_SIZE]u8 = undefined,
+context: ?BootLoader = null,
+
+pub fn input(notify: posix.fd_t, done: posix.fd_t) !void {
+    defer arena.deinit();
+
+    {
+        var console = try std.fs.cwd().openFile(CONSOLE, .{ .mode = .read_write });
+        defer console.close();
+
+        try posix.dup2(console.handle, posix.STDIN_FILENO);
+        try posix.dup2(console.handle, posix.STDOUT_FILENO);
+        try posix.dup2(console.handle, posix.STDERR_FILENO);
+    }
 
     var tty = try setupTty(posix.STDIN_FILENO, .user_input);
     defer tty.reset();
 
-    std.debug.print("HI\n", .{});
+    var console = Console{ .notify = notify };
+    writeAllAndFlush("\npress <ENTER> to interrupt\n\n");
 
     const epoll_fd = try posix.epoll_create1(linux_headers.EPOLL_CLOEXEC);
     defer posix.close(epoll_fd);
@@ -65,466 +91,322 @@ pub fn input(input_notify: posix.fd_t, done: posix.fd_t) !void {
         while (i_event < n_events) : (i_event += 1) {
             const event = events[i_event];
             if (event.data.fd == done) {
-                std.log.debug("done accepting console input", .{});
-                break;
+                writeAllAndFlush("\ngoodbye!\n\n");
+                return;
+            } else if (event.data.fd == posix.STDIN_FILENO) {
+                try console.handleStdin();
             }
         }
     }
 }
 
-pub const Client = struct {
-    waiting_for_response: bool = false,
-    has_prompt: bool = false,
-    watching_logs: bool = true,
-    input_cursor: u16 = 0,
-    input_end: u16 = 0,
-    stream: std.net.Stream,
-    input_buffer: [buffer_size]u8 = undefined,
-    log_file: std.fs.File,
-    writer: BufferedWriter,
-    context: ?BootLoader = null,
+fn flush() void {
+    out.flush() catch {};
+}
 
-    /// Used for dynamically allocating memory when running commands. This is
-    /// reset after every command run.
-    arena: std.heap.ArenaAllocator,
+fn writeAll(bytes: []const u8) void {
+    out.writer().writeAll(bytes) catch {};
+}
 
-    const buffer_size = 4096;
-    const BufferedWriter = std.io.BufferedWriter(buffer_size, std.fs.File.Writer);
+fn writeAllAndFlush(bytes: []const u8) void {
+    writeAll(bytes);
+    flush();
+}
 
-    pub fn init() !@This() {
-        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-        errdefer arena.deinit();
+fn prompt(self: *Console) !void {
+    if (self.context) |*ctx| {
+        try out.writer().writeAll(ctx.name());
+    }
+    writeAllAndFlush("> ");
+}
 
-        return @This(){
-            .stream = try std.net.connectUnixSocket("/run/bus"),
-            .arena = arena,
-            .writer = std.io.bufferedWriter(std.io.getStdOut().writer()),
-            .log_file = try std.fs.cwd().openFile("/run/log", .{}),
-        };
+fn writeNotification(self: *Console, notification: Notification) !void {
+    _ = try posix.write(
+        self.notify,
+        std.mem.asBytes(&@as(u64, @intFromEnum(notification) + 1)),
+    );
+}
+
+/// Caller required to flush
+fn cursorLeft(n: u16) void {
+    if (n > 0) {
+        out.writer().print(.{esc} ++ "[{d:0>5}D", .{n}) catch {};
+    }
+}
+
+/// Caller required to flush
+fn cursorRight(n: u16) void {
+    if (n > 0) {
+        out.writer().print(.{esc} ++ "[{d}C", .{n}) catch {};
+    }
+}
+
+/// Caller required to flush
+fn eraseToEndOfLine() void {
+    out.writer().writeAll(.{esc} ++ "[K") catch {};
+}
+
+/// Empties the display and moves the cursor to absolute position 0, 0.
+fn clearScreen() void {
+    // empties the display
+    out.writer().writeAll(.{esc} ++ "[2J") catch {};
+    // moves the cursor to 0, 0
+    out.writer().writeAll(.{esc} ++ "[0;0H") catch {};
+}
+
+fn handleStdin(self: *Console) !void {
+    // We may already have a prompt from a boot timeout, so don't print
+    // a prompt if we already have one.
+    if (!self.has_prompt) {
+        try utils.eventfdWriteEnum(Notification, self.notify, .presence);
+        try self.prompt();
+        self.has_prompt = true;
     }
 
-    pub fn deinit(self: *@This()) void {
-        self.log_file.close();
-        self.stream.close();
-        self.arena.deinit();
+    // We should only ever get 1 byte of data from stdin since we put the
+    // terminal in raw mode.
+    var buf = [_]u8{0};
+    if (try std.io.getStdIn().read(&buf) != 1) {
+        return;
     }
 
-    fn flush(self: *@This()) !void {
-        try self.writer.flush();
-    }
+    const char = buf[0];
 
-    fn writeAll(self: *@This(), bytes: []const u8) !void {
-        var index: usize = 0;
-        while (index < bytes.len) {
-            index += try self.writer.write(bytes[index..]);
-        }
-    }
+    var done = false;
 
-    fn writeAllAndFlush(self: *@This(), bytes: []const u8) !void {
-        try self.writeAll(bytes);
-        return self.flush();
-    }
-
-    fn prompt(self: *@This()) !void {
-        if (self.context) |*ctx| {
-            try self.writeAll(ctx.name());
-        }
-        try self.writeAllAndFlush("> ");
-    }
-
-    pub fn run(self: *@This()) !void {
-        try self.writeAllAndFlush("\npress <ENTER> to interrupt\n\n");
-
-        try self.printLogs(.{}); // print all logs we've received up to now
-
-        const epoll_fd = try posix.epoll_create1(linux_headers.EPOLL_CLOEXEC);
-        defer posix.close(epoll_fd);
-
-        var stdin_event = system.epoll_event{
-            .data = .{ .fd = posix.STDIN_FILENO },
-            .events = system.EPOLL.IN,
-        };
-        try posix.epoll_ctl(epoll_fd, system.EPOLL.CTL_ADD, posix.STDIN_FILENO, &stdin_event);
-
-        var server_event = system.epoll_event{
-            .data = .{ .fd = self.stream.handle },
-            .events = system.EPOLL.IN,
-        };
-        try posix.epoll_ctl(epoll_fd, system.EPOLL.CTL_ADD, self.stream.handle, &server_event);
-
-        // main event loop
-        while (true) {
-            const max_events = 8; // arbitrary
-            var events = [_]system.epoll_event{undefined} ** max_events;
-
-            const n_events = posix.epoll_wait(epoll_fd, &events, -1);
-
-            var i_event: usize = 0;
-            while (i_event < n_events) : (i_event += 1) {
-                const event = events[i_event];
-
-                if (event.data.fd == self.stream.handle) {
-                    const should_quit = try self.handleMsg();
-                    if (should_quit) {
-                        self.writeAllAndFlush("\ngoodbye!\n\n") catch {};
-                        return;
-                    }
-
-                    if (self.waiting_for_response) {
-                        self.waiting_for_response = false;
-                        try self.prompt();
-                    }
-                } else if (event.data.fd == posix.STDIN_FILENO) {
-                    try self.handleStdin();
-                }
-            }
-        }
-    }
-
-    fn notifyUserPresence(self: *@This()) !void {
-        _ = self;
-        // writeMessage(Outcome{ .data = .Empty }, self.stream.writer()) catch {
-        //     std.log.err("failed to notify user presence", .{});
-        // };
-    }
-
-    /// Returns true if the remote side shutdown, indicating we are done.
-    fn handleMsg(self: *@This()) !bool {
-        _ = self;
-        // const msg = readMessage(
-        //     ServerMsg,
-        //     self.arena.allocator(),
-        //     self.stream.reader(),
-        // ) catch |err| {
-        //     if (err == error.EOF) {
-        //         return true;
-        //     }
-        //     return err;
-        // };
-        // defer msg.deinit();
-        //
-        // switch (msg.value.data) {
-        //     .ForceShell => {
-        //         if (!self.has_prompt) {
-        //             std.log.debug("shell forced from server", .{});
-        //             try self.prompt();
-        //             self.has_prompt = true;
-        //         }
-        //     },
-        // }
-
-        return false;
-    }
-
-    pub fn printLogs(self: *@This(), opts: struct {
-        from_start: bool = true,
-    }) !void {
-        if (opts.from_start) {
-            try self.log_file.seekTo(0);
-        }
-
-        while (true) {
-            var buf: [4096]u8 = undefined;
-            const n_bytes = try self.log_file.reader().readAll(&buf);
-            try self.writeAll(buf[0..n_bytes]);
-            if (n_bytes < buf.len) {
-                try self.flush();
-                break;
-            }
-        }
-    }
-
-    /// Caller required to flush
-    fn cursorLeft(self: *@This(), n: u16) void {
-        if (n > 0) {
-            var buf: [5]u8 = undefined;
-            const out = std.fmt.bufPrint(&buf, "{d:0>5}", .{n}) catch return;
-            self.writeAll(&.{ 0x1b, '[', out[0], out[1], out[2], out[3], out[4], 'D' }) catch {};
-        }
-    }
-
-    /// Caller required to flush
-    fn cursorRight(self: *@This(), n: u16) void {
-        if (n > 0) {
-            var buf: [5]u8 = undefined;
-            const out = std.fmt.bufPrint(&buf, "{d:0>5}", .{n}) catch return;
-            self.writeAll(&.{ 0x1b, '[', out[0], out[1], out[2], out[3], out[4], 'C' }) catch {};
-        }
-    }
-
-    /// Caller required to flush
-    fn eraseToEndOfLine(self: *@This()) void {
-        self.writeAll(&.{ 0x1b, '[', 'K' }) catch {};
-    }
-
-    /// Empties the display and moves the cursor to absolute position 0, 0.
-    fn clearScreen(self: *@This()) void {
-        // empties the display
-        self.writeAll(&.{ 0x1b, '[', '2', 'J' }) catch {};
-        // moves the cursor to 0, 0
-        self.writeAll(&.{ 0x1b, '[', '0', ';', '0', 'H' }) catch {};
-    }
-
-    fn handleStdin(self: *@This()) !void {
-        // We may already have a prompt from a boot timeout, so don't print
-        // a prompt if we already have one.
-        if (!self.has_prompt) {
-            try self.notifyUserPresence();
-            try self.prompt();
-            self.has_prompt = true;
-        }
-
-        // We should only ever get 1 byte of data from stdin since we put the
-        // terminal in raw mode.
-        var buf = [_]u8{0};
-        if (try posix.read(posix.STDIN_FILENO, &buf) != 1) {
-            return;
-        }
-
-        const char = buf[0];
-
-        var done = false;
-
-        const needs_flush = switch (char) {
-            // C-k
-            0x0b => b: {
-                self.eraseToEndOfLine();
-                self.input_end = self.input_cursor;
-                break :b true;
-            },
-            // C-a
-            0x01 => b: {
-                if (self.input_cursor > 0) {
-                    self.cursorLeft(self.input_cursor);
-                    self.input_cursor = 0;
-                    break :b true;
-                }
-
-                break :b false;
-            },
-            // C-b
-            0x02 => b: {
-                if (self.input_cursor > 0) {
-                    self.cursorLeft(1);
-                    self.input_cursor -= 1;
-                    break :b true;
-                }
-
-                break :b false;
-            },
-            // C-c
-            0x03 => b: {
-                try self.writeAll("\n");
+    const needs_flush = switch (char) {
+        // C-k
+        0x0b => b: {
+            eraseToEndOfLine();
+            self.input_end = self.input_cursor;
+            break :b true;
+        },
+        // C-a
+        0x01 => b: {
+            if (self.input_cursor > 0) {
+                cursorLeft(self.input_cursor);
                 self.input_cursor = 0;
-                self.input_end = 0;
-                try self.prompt();
-                break :b false;
-            },
-            // C-d
-            0x04 => b: {
-                if (self.input_cursor < self.input_end) {
-                    std.mem.copyForwards(
-                        u8,
-                        self.input_buffer[self.input_cursor .. self.input_end - 1],
-                        self.input_buffer[self.input_cursor + 1 .. self.input_end],
-                    );
-                    self.input_end -= 1;
-                    try self.writeAll(self.input_buffer[self.input_cursor..self.input_end]);
-                    self.eraseToEndOfLine();
-                    self.cursorLeft(self.input_end - self.input_cursor);
-                    break :b true;
-                }
-
-                break :b false;
-            },
-            // C-e
-            0x05 => b: {
-                if (self.input_cursor < self.input_end) {
-                    self.cursorRight(self.input_end - self.input_cursor);
-                    self.input_cursor = self.input_end;
-                    break :b true;
-                }
-
-                break :b false;
-            },
-            // C-f
-            0x06 => b: {
-                if (self.input_cursor < self.input_end) {
-                    self.cursorRight(1);
-                    self.input_cursor += 1;
-                    break :b true;
-                }
-
-                break :b false;
-            },
-            // C-h, Backspace
-            0x08, 0x7f => b: {
-                if (self.input_cursor > 0) {
-                    std.mem.copyForwards(
-                        u8,
-                        self.input_buffer[self.input_cursor - 1 .. self.input_end - 1],
-                        self.input_buffer[self.input_cursor..self.input_end],
-                    );
-                    self.input_cursor -= 1;
-                    self.input_end -= 1;
-                    self.cursorLeft(1);
-                    try self.writeAll(self.input_buffer[self.input_cursor..self.input_end]);
-                    self.eraseToEndOfLine();
-                    self.cursorLeft(self.input_end - self.input_cursor);
-                    break :b true;
-                }
-
-                break :b false;
-            },
-            // C-l
-            0x0c => b: {
-                self.clearScreen();
-                try self.prompt();
-                try self.writeAll(self.input_buffer[0..self.input_end]);
-                self.cursorLeft(self.input_end - self.input_cursor);
                 break :b true;
-            },
-            // \r, \n; \n is also known as C-j
-            0x0d, 0x0a => b: {
-                try self.writeAll("\n");
-                if (self.input_cursor == 0) {
-                    try self.prompt();
-                } else {
-                    done = true;
-                }
-                break :b true;
-            },
-            // C-n
-            0x0e => false,
-            // C-p
-            0x10 => false,
-            // C-r
-            0x12 => false,
-            // C-t
-            0x14 => b: {
-                if (0 < self.input_cursor and self.input_cursor < self.input_end) {
-                    std.mem.swap(
-                        u8,
-                        &self.input_buffer[self.input_cursor - 1],
-                        &self.input_buffer[self.input_cursor],
-                    );
-                    self.cursorLeft(1);
-                    self.input_cursor += 1;
-                    try self.writeAll(self.input_buffer[self.input_cursor - 2 .. self.input_cursor]);
-                    break :b true;
-                }
-
-                break :b false;
-            },
-            // C-u
-            0x15 => b: {
-                if (self.input_cursor > 0) {
-                    self.cursorLeft(self.input_cursor);
-                    try self.writeAll(self.input_buffer[self.input_cursor..self.input_end]);
-                    self.eraseToEndOfLine();
-                    self.input_end = self.input_end - self.input_cursor;
-                    self.input_cursor = 0;
-                    self.cursorLeft(self.input_end);
-                    break :b true;
-                }
-
-                break :b false;
-            },
-            // C-w
-            0x17 => false,
-            // Space...~
-            0x20...0x7e => b: {
-                // make sure we have room for another character
-                if (self.input_end + 1 < self.input_buffer.len) {
-                    std.mem.copyBackwards(
-                        u8,
-                        self.input_buffer[self.input_cursor + 1 .. self.input_end + 1],
-                        self.input_buffer[self.input_cursor..self.input_end],
-                    );
-                    self.input_buffer[self.input_cursor] = char;
-                    self.input_end += 1;
-                    try self.writeAll(self.input_buffer[self.input_cursor..self.input_end]);
-                    self.input_cursor += 1;
-                    self.cursorLeft(self.input_end - self.input_cursor);
-                    break :b true;
-                }
-
-                break :b false;
-            },
-            else => false,
-        };
-
-        if (needs_flush) {
-            try self.writer.flush();
-        }
-
-        if (done and self.input_end > 0) {
-            defer {
-                if (self.context == null) {
-                    _ = self.arena.reset(.retain_capacity);
-                }
             }
 
-            const end = self.input_end;
+            break :b false;
+        },
+        // C-b
+        0x02 => b: {
+            if (self.input_cursor > 0) {
+                cursorLeft(1);
+                self.input_cursor -= 1;
+                break :b true;
+            }
+
+            break :b false;
+        },
+        // C-c
+        0x03 => b: {
+            writeAll("\n");
             self.input_cursor = 0;
             self.input_end = 0;
+            try self.prompt();
+            break :b false;
+        },
+        // C-d
+        0x04 => b: {
+            if (self.input_cursor < self.input_end) {
+                std.mem.copyForwards(
+                    u8,
+                    self.input_buffer[self.input_cursor .. self.input_end - 1],
+                    self.input_buffer[self.input_cursor + 1 .. self.input_end],
+                );
+                self.input_end -= 1;
+                writeAll(self.input_buffer[self.input_cursor..self.input_end]);
+                eraseToEndOfLine();
+                cursorLeft(self.input_end - self.input_cursor);
+                break :b true;
+            }
 
-            const user_input = self.input_buffer[0..end];
-            var args = try ArgsIterator.init(self.arena.allocator(), user_input);
-            defer args.deinit();
+            break :b false;
+        },
+        // C-e
+        0x05 => b: {
+            if (self.input_cursor < self.input_end) {
+                cursorRight(self.input_end - self.input_cursor);
+                self.input_cursor = self.input_end;
+                break :b true;
+            }
 
-            const maybe_notification = self.runCommand(&args);
+            break :b false;
+        },
+        // C-f
+        0x06 => b: {
+            if (self.input_cursor < self.input_end) {
+                cursorRight(1);
+                self.input_cursor += 1;
+                break :b true;
+            }
 
-            const notification = maybe_notification catch |err| {
-                std.debug.print("\nerror running command: {any}\n", .{err});
+            break :b false;
+        },
+        // C-h, Backspace
+        0x08, 0x7f => b: {
+            if (self.input_cursor > 0) {
+                std.mem.copyForwards(
+                    u8,
+                    self.input_buffer[self.input_cursor - 1 .. self.input_end - 1],
+                    self.input_buffer[self.input_cursor..self.input_end],
+                );
+                self.input_cursor -= 1;
+                self.input_end -= 1;
+                cursorLeft(1);
+                writeAll(self.input_buffer[self.input_cursor..self.input_end]);
+                eraseToEndOfLine();
+                cursorLeft(self.input_end - self.input_cursor);
+                break :b true;
+            }
+
+            break :b false;
+        },
+        // C-l
+        0x0c => b: {
+            clearScreen();
+            try self.prompt();
+            writeAll(self.input_buffer[0..self.input_end]);
+            cursorLeft(self.input_end - self.input_cursor);
+            break :b true;
+        },
+        // \r, \n; \n is also known as C-j
+        0x0d, 0x0a => b: {
+            writeAll("\n");
+            if (self.input_cursor == 0) {
                 try self.prompt();
-                return;
-            } orelse {
-                return try self.prompt();
-            };
-
-            _ = notification;
-
-            // TODO(jared):
-            // if (writeMessage(notification, self.stream.writer())) {
-            //     self.waiting_for_response = true;
-            // } else |err| {
-            //     std.log.err("failed to send message to server: {}", .{err});
-            // }
-        }
-    }
-
-    fn runCommand(self: *@This(), args: *ArgsIterator) !?Notification {
-        if (args.next()) |cmd| {
-            if (std.mem.eql(u8, cmd, "help")) {
-                return @field(Command, "help").run(self, args);
-            }
-
-            if (self.context) |*ctx| {
-                inline for (std.meta.fields(Command.Context)) |field| {
-                    if (std.mem.eql(u8, field.name, cmd)) {
-                        return @field(Command, field.name).run(self, args, ctx);
-                    }
-                }
             } else {
-                inline for (std.meta.fields(Command.NoContext)) |field| {
-                    if (std.mem.eql(u8, field.name, cmd)) {
-                        return @field(Command, field.name).run(self, args);
-                    }
-                }
+                done = true;
+            }
+            break :b true;
+        },
+        // C-n
+        0x0e => false,
+        // C-p
+        0x10 => false,
+        // C-r
+        0x12 => false,
+        // C-t
+        0x14 => b: {
+            if (0 < self.input_cursor and self.input_cursor < self.input_end) {
+                std.mem.swap(
+                    u8,
+                    &self.input_buffer[self.input_cursor - 1],
+                    &self.input_buffer[self.input_cursor],
+                );
+                cursorLeft(1);
+                self.input_cursor += 1;
+                writeAll(self.input_buffer[self.input_cursor - 2 .. self.input_cursor]);
+                break :b true;
             }
 
-            std.debug.print("unknown command \"{s}\"\n", .{cmd});
+            break :b false;
+        },
+        // C-u
+        0x15 => b: {
+            if (self.input_cursor > 0) {
+                cursorLeft(self.input_cursor);
+                writeAll(self.input_buffer[self.input_cursor..self.input_end]);
+                eraseToEndOfLine();
+                self.input_end = self.input_end - self.input_cursor;
+                self.input_cursor = 0;
+                cursorLeft(self.input_end);
+                break :b true;
+            }
+
+            break :b false;
+        },
+        // C-w
+        0x17 => false,
+        // Space...~
+        0x20...0x7e => b: {
+            // make sure we have room for another character
+            if (self.input_end + 1 < self.input_buffer.len) {
+                std.mem.copyBackwards(
+                    u8,
+                    self.input_buffer[self.input_cursor + 1 .. self.input_end + 1],
+                    self.input_buffer[self.input_cursor..self.input_end],
+                );
+                self.input_buffer[self.input_cursor] = char;
+                self.input_end += 1;
+                writeAll(self.input_buffer[self.input_cursor..self.input_end]);
+                self.input_cursor += 1;
+                cursorLeft(self.input_end - self.input_cursor);
+                break :b true;
+            }
+
+            break :b false;
+        },
+        else => false,
+    };
+
+    if (needs_flush) {
+        flush();
+    }
+
+    if (done and self.input_end > 0) {
+        defer {
+            if (self.context == null) {
+                _ = arena.reset(.retain_capacity);
+            }
         }
 
-        return null;
+        const end = self.input_end;
+        self.input_cursor = 0;
+        self.input_end = 0;
+
+        const user_input = self.input_buffer[0..end];
+        var args = try ArgsIterator.init(arena.allocator(), user_input);
+        defer args.deinit();
+
+        const maybe_notification = self.runCommand(&args);
+
+        const notification = maybe_notification catch |err| {
+            std.debug.print("\nerror running command: {any}\n", .{err});
+            try self.prompt();
+            return;
+        } orelse {
+            return try self.prompt();
+        };
+
+        utils.eventfdWriteEnum(Notification, self.notify, notification) catch |err| {
+            std.log.err("failed to send notification from console: {}", .{err});
+        };
     }
-};
+}
+
+fn runCommand(self: *Console, args: *ArgsIterator) !?Notification {
+    if (args.next()) |cmd| {
+        if (std.mem.eql(u8, cmd, "help")) {
+            return @field(Command, "help").run(self, args);
+        }
+
+        if (self.context) |*ctx| {
+            inline for (std.meta.fields(Command.Context)) |field| {
+                if (std.mem.eql(u8, field.name, cmd)) {
+                    return @field(Command, field.name).run(self, args, ctx);
+                }
+            }
+        } else {
+            inline for (std.meta.fields(Command.NoContext)) |field| {
+                if (std.mem.eql(u8, field.name, cmd)) {
+                    return @field(Command, field.name).run(self, args);
+                }
+            }
+        }
+
+        std.debug.print("unknown command \"{s}\"\n", .{cmd});
+    }
+
+    return null;
+}
 
 pub const Command = struct {
     const NoContext = enum {
         clear,
-        dmesg,
         loader,
         logs,
         poweroff,
@@ -532,8 +414,8 @@ pub const Command = struct {
     };
 
     const Context = enum {
-        exit,
-        list,
+        // exit,
+        // list,
     };
 
     const help = struct {
@@ -575,15 +457,15 @@ pub const Command = struct {
             std.debug.print("unknown command \"{s}\"\n", .{cmd});
         }
 
-        fn run(client: *Client, args: *ArgsIterator) !?Notification {
+        fn run(console: *Console, args: *ArgsIterator) !?Notification {
             if (args.next()) |cmd| {
-                if (client.context == null) {
+                if (console.context == null) {
                     helpOne(NoContext, cmd);
                 } else {
                     helpOne(Context, cmd);
                 }
             } else {
-                if (client.context == null) {
+                if (console.context == null) {
                     helpAll(NoContext);
                 } else {
                     helpAll(Context);
@@ -603,8 +485,8 @@ pub const Command = struct {
             \\poweroff
         ;
 
-        fn run(_: *Client, _: *ArgsIterator) !?Notification {
-            return .Poweroff;
+        fn run(_: *Console, _: *ArgsIterator) !?Notification {
+            return .poweroff;
         }
     };
 
@@ -617,42 +499,35 @@ pub const Command = struct {
             \\reboot
         ;
 
-        fn run(_: *Client, _: *ArgsIterator) !?Notification {
-            return .Reboot;
+        fn run(_: *Console, _: *ArgsIterator) !?Notification {
+            return .reboot;
         }
     };
 
     const logs = struct {
-        const short_help = "view tinyboot logs";
-        const long_help =
-            \\View tinyboot logs.
-            \\
-            \\Usage:
-            \\logs
-        ;
-
-        fn run(client: *Client, _: *ArgsIterator) !?Notification {
-            try client.printLogs(.{});
-            return null;
-        }
-    };
-
-    const dmesg = struct {
         const short_help = "view kernel logs";
         const long_help =
-            \\View kernel logs.
+            \\View kernel logs. All logs at or below the specified filter will
+            \\be shown.
             \\
             \\Usage:
-            \\dmesg [filter log level]              Default filter is log level 6
+            \\logs [log level filter]          Default filter is log level 6
             \\
             \\Example:
-            \\dmesg 7
+            \\logs 7
         ;
 
-        fn run(client: *Client, args: *ArgsIterator) !?Notification {
-            const filter = if (args.next()) |filter_str| try std.fmt.parseInt(u8, filter_str, 10) else 6;
-            const kernel_logs = try kernelLogs(client.arena.allocator(), filter);
-            try client.writeAllAndFlush(kernel_logs);
+        fn run(_: *Console, args: *ArgsIterator) !?Notification {
+            const filter = if (args.next()) |filter_str|
+                try std.fmt.parseInt(u3, filter_str, 10)
+            else
+                6;
+
+            try printKernelLogs(
+                arena.allocator(),
+                filter,
+                out.writer().any(),
+            );
 
             return null;
         }
@@ -667,8 +542,8 @@ pub const Command = struct {
             \\clear
         ;
 
-        fn run(client: *Client, _: *ArgsIterator) !?Notification {
-            client.clearScreen();
+        fn run(_: *Console, _: *ArgsIterator) !?Notification {
+            clearScreen();
 
             return null;
         }
@@ -687,54 +562,55 @@ pub const Command = struct {
             \\loader disk
         ;
 
-        fn run(client: *Client, args: *ArgsIterator) !?Notification {
+        fn run(console: *Console, args: *ArgsIterator) !?Notification {
             const loader_name = args.next() orelse return error.InvalidArgs;
 
             if (std.mem.eql(u8, loader_name, "disk")) {
-                client.context = try BootLoader.init(client.arena.allocator(), .disk);
+                _ = console;
+                // console.context = try BootLoader.init(arena.allocator(), .disk);
             }
 
             return null;
         }
     };
 
-    const exit = struct {
-        const short_help = "exit context";
-        const long_help =
-            \\Exit bootloader context.
-            \\
-            \\Usage:
-            \\exit
-        ;
+    // const exit = struct {
+    //     const short_help = "exit context";
+    //     const long_help =
+    //         \\Exit bootloader context.
+    //         \\
+    //         \\Usage:
+    //         \\exit
+    //     ;
+    //
+    //     fn run(console: *Console, _: *ArgsIterator, boot_loader: *BootLoader) !?Notification {
+    //         defer console.context = null;
+    //
+    //         try boot_loader.deinit();
+    //
+    //         return null;
+    //     }
+    // };
 
-        fn run(client: *Client, _: *ArgsIterator, boot_loader: *BootLoader) !?Notification {
-            defer client.context = null;
-
-            try boot_loader.deinit();
-
-            return null;
-        }
-    };
-
-    const list = struct {
-        const short_help = "list boot devices";
-        const long_help =
-            \\List boot devices.
-            \\
-            \\Usage:
-            \\list
-        ;
-
-        fn run(_: *Client, _: *ArgsIterator, boot_loader: *BootLoader) !?Notification {
-            const devices = try boot_loader.listBootDevices();
-
-            for (devices) |device| {
-                std.debug.print("{}\n", .{device.name});
-            }
-
-            return null;
-        }
-    };
+    // const list = struct {
+    //     const short_help = "list boot devices";
+    //     const long_help =
+    //         \\List boot devices.
+    //         \\
+    //         \\Usage:
+    //         \\list
+    //     ;
+    //
+    //     fn run(_: *Console, _: *ArgsIterator, boot_loader: *BootLoader) !?Notification {
+    //         const devices = try boot_loader.listBootDevices();
+    //
+    //         for (devices) |device| {
+    //             std.debug.print("{}\n", .{device.name});
+    //         }
+    //
+    //         return null;
+    //     }
+    // };
 };
 
 // const boot_xmodem = struct {
@@ -754,9 +630,9 @@ pub const Command = struct {
 //         \\  -n              No initrd
 //     ;
 //
-//     fn run(client: *Client, args: *ArgsIterator) !?Outcome {
-//         var xmodem = try Xmodem.init(client.allocator, .{
-//             .serial_name = "client-stdin",
+//     fn run(console: *Console, args: *ArgsIterator) !?Outcome {
+//         var xmodem = try Xmodem.init(console.allocator, .{
+//             .serial_name = "console-stdin",
 //             .serial_fd = posix.STDIN_FILENO,
 //             .skip_initrd = if (args.next()) |next|
 //                 std.mem.eql(u8, next, "-n")
@@ -772,7 +648,7 @@ pub const Command = struct {
 //             for (device.entries) |entry| {
 //                 if (kexecLoad(c.allocator, entry.linux, entry.initrd, entry.cmdline)) {
 //                     boot_loader.entryLoaded(entry.context);
-//                     return .{ .data = .Kexec };
+//                     return .{ .data = .kexec };
 //                 } else |err| {
 //                     std.log.err("failed to load kernel: {}", .{err});
 //                 }

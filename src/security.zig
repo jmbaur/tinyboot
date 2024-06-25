@@ -109,14 +109,14 @@ fn loadVerificationKey() !void {
     defer keyfile.close();
 
     const keyring_id = try addKeyring(IMA_KEYRING_NAME, KeySerial.User);
-    std.log.info("added ima keyring (id = 0x{x})", .{keyring_id});
+    std.log.info("added ima keyring (id=0x{x})", .{keyring_id});
 
     var buf: [8192]u8 = undefined;
     var fba = std.heap.FixedBufferAllocator.init(&buf);
     const keyfile_contents = try keyfile.readToEndAlloc(fba.allocator(), buf.len);
 
     const key_id = try addKey(keyring_id, keyfile_contents);
-    std.log.info("added verification key (id = 0x{x})", .{key_id});
+    std.log.info("added verification key (id=0x{x})", .{key_id});
 
     if (std.mem.eql(u8, keyfile_contents, TEST_KEY)) {
         std.log.warn("test key in use!", .{});

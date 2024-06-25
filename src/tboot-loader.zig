@@ -11,6 +11,7 @@ const DeviceWatcher = @import("./device/watch.zig");
 const log = @import("./log.zig");
 const security = @import("./security.zig");
 const setupSystem = @import("./system.zig").setupSystem;
+const utils = @import("./utils.zig");
 
 pub const std_options = .{
     .logFn = log.logFn,
@@ -37,6 +38,8 @@ const State = struct {
     /// have settled (no new devices have been discovered in some amount of
     /// time).
     settle: posix.fd_t,
+
+    user_presence: bool = false,
 
     pub fn init() !@This() {
         const self = @This(){
@@ -74,6 +77,23 @@ const State = struct {
         }), null);
     }
 
+    pub fn handleConsole(self: *@This()) !?posix.RebootCommand {
+        switch (try utils.eventfdReadEnum(Console.Notification, self.console)) {
+            .presence => {
+                if (!self.user_presence) {
+                    // autoboot.stop();
+                    self.user_presence = true;
+                    std.log.info("user presence detected", .{});
+                }
+            },
+            .reboot => return posix.RebootCommand.RESTART,
+            .poweroff => return posix.RebootCommand.POWER_OFF,
+            .kexec => return posix.RebootCommand.KEXEC,
+        }
+
+        return null;
+    }
+
     pub fn deinit(self: *@This()) void {
         posix.close(self.done);
         posix.close(self.device);
@@ -90,11 +110,8 @@ fn runEventLoop(state: *State) !posix.RebootCommand {
 
     try state.resetSettle();
 
-    var user_presence = false;
-
     // main event loop
     while (true) {
-        std.debug.print("HI\n", .{});
         const max_events = 8;
         var events = [_]system.epoll_event{undefined} ** max_events;
 
@@ -105,12 +122,12 @@ fn runEventLoop(state: *State) !posix.RebootCommand {
             const event = events[i_event];
 
             if (event.data.fd == state.device) {
+                std.debug.print("new device\n", .{});
                 _ = try posix.read(state.device, std.mem.asBytes(&1)); // consume
                 try state.resetSettle();
             } else if (event.data.fd == state.settle) {
                 std.log.info("devices settled", .{});
-                std.debug.print("devices settled\n", .{});
-                //     if (!user_presence) {
+                //     if (!state.user_presence) {
                 //         try autoboot.start();
                 //     }
                 // } else if (event.data.fd == autoboot.ready_fd) {
@@ -121,12 +138,13 @@ fn runEventLoop(state: *State) !posix.RebootCommand {
                 //         std.log.info("nothing to boot", .{});
                 //     }
             } else if (event.data.fd == state.console) {
-                if (!user_presence) {
-                    // autoboot.stop();
-                    user_presence = true;
-                    std.log.info("user presence detected", .{});
+                if (state.handleConsole()) |outcome| {
+                    if (outcome) |reboot_cmd| {
+                        return reboot_cmd;
+                    }
+                } else |err| {
+                    std.log.err("failed to handle console notification: {}", .{err});
                 }
-                std.debug.print("got msg from console\n", .{});
             }
         }
     }

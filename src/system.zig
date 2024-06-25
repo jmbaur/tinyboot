@@ -193,7 +193,11 @@ const SYSLOG_ACTION_UNREAD = 9;
 
 /// Read kernel logs (AKA syslog/dmesg). Caller is responsible for returned
 /// slice.
-pub fn kernelLogs(allocator: std.mem.Allocator, filter: u8) ![]const u8 {
+pub fn printKernelLogs(
+    allocator: std.mem.Allocator,
+    filter: u3,
+    writer: std.io.AnyWriter,
+) !void {
     const bytes_available = system.syscall3(system.SYS.syslog, SYSLOG_ACTION_UNREAD, 0, 0);
     const buf = try allocator.alloc(u8, bytes_available);
     defer allocator.free(buf);
@@ -211,19 +215,18 @@ pub fn kernelLogs(allocator: std.mem.Allocator, filter: u8) ![]const u8 {
         else => |err| return posix.unexpectedErrno(err),
     }
 
-    var logs = std.ArrayList(u8).init(allocator);
     var split = std.mem.splitScalar(u8, buf, '\n');
     while (split.next()) |line| {
-        if (line.len <= 2) {
+        if (line.len <= 2 or line[0] != '<') {
             break;
         }
 
-        const log_level = try std.fmt.parseInt(u8, line[1..2], 10);
-        if (log_level <= filter) {
-            try logs.appendSlice(line[3..]);
-            try logs.append('\n');
+        if (std.mem.indexOf(u8, line[0..5], ">")) |right_chevron_index| {
+            const syslog_prefix = try std.fmt.parseInt(u32, line[1..right_chevron_index], 10);
+            const log_level = 0x7 & syslog_prefix; // lower 3 bits
+            if (log_level <= filter) {
+                try writer.print("{s}\n", .{line[right_chevron_index + 1 ..]});
+            }
         }
     }
-
-    return logs.toOwnedSlice();
 }

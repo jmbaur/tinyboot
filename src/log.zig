@@ -1,8 +1,14 @@
 const std = @import("std");
 
+const LOG_PREFIX = "boot";
+
 const KMSG = "/dev/char/1:11";
 
 const SYSLOG_FACILITY_USER = 1;
+
+// https://github.com/torvalds/linux/blob/55027e689933ba2e64f3d245fb1ff185b3e7fc81/kernel/printk/internal.h#L38C9-L38C28
+// https://github.com/torvalds/linux/blob/55027e689933ba2e64f3d245fb1ff185b3e7fc81/kernel/printk/printk.c#L735
+const PRINTKRB_RECORD_MAX = 1024;
 
 var m = std.Thread.Mutex{};
 var kmsg: ?std.fs.File = null;
@@ -50,13 +56,20 @@ pub fn logFn(
         break :b fbs.getWritten();
     };
 
-    if (kmsg) |file| {
+    if (kmsg) |k| {
         m.lock();
         defer m.unlock();
 
-        file.writer().print(
-            "<" ++ syslog_prefix ++ ">" ++ "boot: " ++ format,
+        // The Zig string formatter can make many individual writes to our
+        // writer depending on the format string, so we do all the formatting
+        // ahead of time here so we can perform the write all at once when the
+        // log line goes to the kernel.
+        var buf: [PRINTKRB_RECORD_MAX]u8 = undefined;
+        var stream = std.io.fixedBufferStream(&buf);
+        stream.writer().print(
+            "<" ++ syslog_prefix ++ ">" ++ LOG_PREFIX ++ ": " ++ format,
             args,
         ) catch {};
+        _ = k.write(buf[0..stream.pos]) catch {};
     }
 }
