@@ -9,4 +9,6 @@ const BootLoader = @This();
 ptr: *anyopaque,
 vtable: *const VTable,
 
-pub const VTable = struct {};
+pub const VTable = struct {
+    deinit: *const fn () void,
+};

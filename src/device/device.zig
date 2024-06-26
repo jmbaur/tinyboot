@@ -134,5 +134,8 @@ pub fn deinit(self: *Device) void {
     arena.allocator().free(self.dev_path);
     arena.allocator().free(self.dev_name);
     arena.allocator().destroy(self);
+    // if (self.driver) |driver| {
+    //     driver
+    // }
     self.* = undefined;
 }
