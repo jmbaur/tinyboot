@@ -5,16 +5,16 @@ const system = std.posix.system;
 
 const linux_headers = @import("linux_headers");
 
-const Autoboot = @import("./boot.zig").Autoboot;
 const Console = @import("./console.zig");
+const Device = @import("./device/device.zig");
 const DeviceWatcher = @import("./device/watch.zig");
-const log = @import("./log.zig");
+const Log = @import("./log.zig");
 const security = @import("./security.zig");
 const setupSystem = @import("./system.zig").setupSystem;
 const utils = @import("./utils.zig");
 
 pub const std_options = .{
-    .logFn = log.logFn,
+    .logFn = Log.logFn,
     .log_level = .debug, // let the kernel do our filtering for us
 };
 
@@ -39,10 +39,12 @@ const State = struct {
     /// time).
     settle: posix.fd_t,
 
+    settled: bool = false,
+
     user_presence: bool = false,
 
     pub fn init() !@This() {
-        const self = @This(){
+        var self = @This(){
             .epoll = try posix.epoll_create1(linux_headers.EPOLL_CLOEXEC),
             .done = try posix.eventfd(0, 0),
             .device = try posix.eventfd(0, 0),
@@ -65,16 +67,9 @@ const State = struct {
             .events = system.EPOLL.IN,
         }));
 
-        return self;
-    }
+        try self.resetSettle();
 
-    pub fn resetSettle(self: *@This()) !void {
-        try posix.timerfd_settime(self.settle, .{}, @constCast(&.{
-            // oneshot
-            .it_interval = .{ .tv_sec = 0, .tv_nsec = 0 },
-            // consider settled after 2 seconds without any new events
-            .it_value = .{ .tv_sec = 2, .tv_nsec = 0 },
-        }), null);
+        return self;
     }
 
     pub fn handleConsole(self: *@This()) !?posix.RebootCommand {
@@ -94,6 +89,28 @@ const State = struct {
         return null;
     }
 
+    fn resetSettle(self: *@This()) !void {
+        try posix.timerfd_settime(self.settle, .{}, @constCast(&.{
+            // oneshot
+            .it_interval = .{ .tv_sec = 0, .tv_nsec = 0 },
+            // consider settled after 2 seconds without any new events
+            .it_value = .{ .tv_sec = 2, .tv_nsec = 0 },
+        }), null);
+    }
+
+    pub fn handleDevice(self: *@This()) !void {
+        _ = try posix.read(self.device, std.mem.asBytes(&1)); // consume
+
+        if (!self.settled) {
+            try self.resetSettle();
+        }
+    }
+
+    fn handleSettle(self: *@This()) void {
+        std.log.info("devices settled", .{});
+        self.settled = true;
+    }
+
     pub fn deinit(self: *@This()) void {
         posix.close(self.done);
         posix.close(self.device);
@@ -108,8 +125,6 @@ fn runEventLoop(state: *State) !posix.RebootCommand {
     // try autoboot.register(state.epoll);
     // defer autoboot.deinit();
 
-    try state.resetSettle();
-
     // main event loop
     while (true) {
         const max_events = 8;
@@ -122,12 +137,10 @@ fn runEventLoop(state: *State) !posix.RebootCommand {
             const event = events[i_event];
 
             if (event.data.fd == state.device) {
-                std.debug.print("new device\n", .{});
-                _ = try posix.read(state.device, std.mem.asBytes(&1)); // consume
-                try state.resetSettle();
+                try state.handleDevice();
             } else if (event.data.fd == state.settle) {
-                std.log.info("devices settled", .{});
-                //     if (!state.user_presence) {
+                state.handleSettle();
+                // if (!state.user_presence) {
                 //         try autoboot.start();
                 //     }
                 // } else if (event.data.fd == autoboot.ready_fd) {
@@ -157,6 +170,15 @@ pub fn main() !void {
     defer state.deinit();
 
     var device_watcher = try DeviceWatcher.init();
+    defer device_watcher.deinit();
+
+    try device_watcher.scanAndCreateExistingDevices();
+
+    // We should be able to log right after we've initialized the device
+    // watcher.
+    try Log.init();
+    defer Log.deinit();
+
     var device_watch_thread = try std.Thread.spawn(.{}, DeviceWatcher.watch, .{
         &device_watcher,
         state.device,
@@ -170,9 +192,6 @@ pub fn main() !void {
         .{ state.console, state.done },
     );
     defer console_thread.join();
-
-    try log.init();
-    defer log.deinit();
 
     std.log.info("tinyboot started", .{});
 

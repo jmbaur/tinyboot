@@ -28,7 +28,7 @@ char_dir: std.fs.Dir,
 nl_fd: posix.fd_t,
 
 pub fn init() !@This() {
-    var self = @This(){
+    return .{
         .block_dir = try std.fs.cwd().makeOpenPath("/dev/block", .{}),
         .char_dir = try std.fs.cwd().makeOpenPath("/dev/char", .{}),
         .nl_fd = try posix.socket(
@@ -37,13 +37,6 @@ pub fn init() !@This() {
             system.NETLINK.KOBJECT_UEVENT,
         ),
     };
-    errdefer self.deinit();
-
-    inline for (std.meta.fields(Device.Subsystem)) |field| {
-        self.scanAndCreateExistingDevices(field.name) catch {};
-    }
-
-    return self;
 }
 
 // Does not exit until end of program
@@ -73,8 +66,6 @@ pub fn watch(self: *@This(), new_device_notify: posix.fd_t, done: posix.fd_t) !v
         .data = .{ .fd = done },
         .events = system.EPOLL.IN | system.EPOLL.ONESHOT,
     }));
-
-    std.log.debug("watching devices", .{});
 
     while (true) {
         const max_events = 8;
@@ -113,7 +104,7 @@ fn handleNewEvent(self: *@This()) !void {
     }
 }
 
-fn deinit(self: *@This()) void {
+pub fn deinit(self: *@This()) void {
     self.block_dir.close();
     self.char_dir.close();
     posix.close(self.nl_fd);
@@ -146,15 +137,22 @@ fn mknod(self: *@This(), node_type: NodeType, major: u32, minor: u32) !void {
 // stat() on any uevent file always returns 4096
 const UEVENT_FILE_SIZE = 4096;
 
-/// Scan sysfs and create all nodes that currently exist on the system.
-fn scanAndCreateExistingDevices(
+/// Scan sysfs and create all nodes of interest that currently exist on the
+/// system.
+pub fn scanAndCreateExistingDevices(self: *@This()) !void {
+    inline for (std.meta.fields(Device.Subsystem)) |field| {
+        try self.scanAndCreateExistingDevicesForSubsystem(field.name);
+    }
+}
+
+pub fn scanAndCreateExistingDevicesForSubsystem(
     self: *@This(),
     comptime subsystem: []const u8,
 ) !void {
-    var subsystem_dir = try std.fs.cwd().openDir(
+    var subsystem_dir = std.fs.cwd().openDir(
         "/sys/class/" ++ subsystem,
         .{ .iterate = true },
-    );
+    ) catch return; // don't hard fail if the subsystem does not exist
     defer subsystem_dir.close();
 
     var iter = subsystem_dir.iterate();
@@ -181,12 +179,11 @@ fn scanAndCreateExistingDevices(
         const device = kobject.parseUeventFileContents(
             @field(Device.Subsystem, subsystem),
             device_path,
+            entry.name,
             buf[0..n_read],
         ) catch continue;
 
-        if (device) |d| {
-            try self.addDevice(d);
-        }
+        try self.addDevice(device);
     }
 }
 

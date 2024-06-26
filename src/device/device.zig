@@ -2,19 +2,40 @@ const std = @import("std");
 
 const utils = @import("../utils.zig");
 
+const BootLoader = @import("../boot/bootloader.zig");
+
 const Device = @This();
 
 pub var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
 
 var m = std.Thread.Mutex{};
-var all_devices = std.ArrayList(*Device).init(arena.allocator());
+var ALL_DEVICES = std.ArrayList(*Device).init(arena.allocator());
+
+pub fn forEach(callback: *const fn (*const Device) void) void {
+    m.lock();
+    defer m.unlock();
+
+    for (ALL_DEVICES.items) |device| {
+        callback(device);
+    }
+}
 
 /// Adds a preinitialized device to the device list.
 pub fn add(device: *Device) !void {
     m.lock();
     defer m.unlock();
 
-    try all_devices.append(device);
+    inline for (std.meta.fields(Driver)) |driver_variant| {
+        inline for (@field(driver_variant.type, "ALL")) |driver| {
+            if (driver.match(device)) {
+                var driver_instance = try arena.allocator().create(driver_variant.type);
+                driver_instance.* = driver.init();
+                device.driver = driver_instance.driver();
+            }
+        }
+    }
+
+    try ALL_DEVICES.append(device);
 }
 
 /// Removes the device from the device list and deinitializes the device
@@ -23,9 +44,9 @@ pub fn remove(device: *Device) void {
     m.lock();
     defer m.unlock();
 
-    for (all_devices.items, 0..) |d, index| {
+    for (ALL_DEVICES.items, 0..) |d, index| {
         if (d == device) {
-            const removed = all_devices.orderedRemove(index);
+            const removed = ALL_DEVICES.orderedRemove(index);
             removed.deinit();
         }
     }
@@ -35,7 +56,7 @@ pub fn findByNumber(want_major: u32, want_minor: u32) ?*Device {
     m.lock();
     defer m.unlock();
 
-    for (all_devices.items) |d| {
+    for (ALL_DEVICES.items) |d| {
         if (d.node) |node| {
             const major, const minor = node;
             if (major == want_major and minor == want_minor) {
@@ -51,7 +72,7 @@ pub fn findByName(want_name: []const u8) ?*Device {
     m.lock();
     defer m.unlock();
 
-    for (all_devices.items) |d| {
+    for (ALL_DEVICES.items) |d| {
         if (std.mem.eql(u8, d.dev_name, want_name)) {
             return d;
         }
@@ -78,6 +99,7 @@ pub const DevType = enum {
 /// Subsystems we care about when acting as a bootloader.
 pub const Subsystem = enum {
     block,
+    mem,
     mtd,
     net,
     rtc,
@@ -89,6 +111,9 @@ pub const Subsystem = enum {
     }
 };
 
+pub const Driver = union(enum) { bootloader: BootLoader };
+
+driver: ?Driver = null,
 subsystem: Subsystem,
 dev_type: ?DevType = null,
 node: ?struct { u32, u32 } = null,

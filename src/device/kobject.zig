@@ -8,11 +8,11 @@ const Device = @import("./device.zig");
 pub fn parseUeventFileContents(
     subsystem: Device.Subsystem,
     device_path: []const u8,
+    device_name: []const u8,
     contents: []const u8,
-) !?*Device {
+) !*Device {
     var iter = std.mem.splitSequence(u8, contents, "\n");
 
-    var dev_name: ?[]const u8 = null;
     var dev_type: ?Device.DevType = null;
     var major: ?u32 = null;
     var minor: ?u32 = null;
@@ -22,9 +22,7 @@ pub fn parseUeventFileContents(
         const key = split.next() orelse continue;
         const value = split.next() orelse continue;
 
-        if (std.mem.eql(u8, key, "DEVNAME")) {
-            dev_name = value;
-        } else if (std.mem.eql(u8, key, "DEVTYPE")) {
+        if (std.mem.eql(u8, key, "DEVTYPE")) {
             dev_type = Device.DevType.fromStr(value) catch continue;
         } else if (std.mem.eql(u8, key, "MAJOR")) {
             major = std.fmt.parseInt(u32, value, 10) catch continue;
@@ -33,7 +31,7 @@ pub fn parseUeventFileContents(
         }
     }
 
-    var device = try Device.init(subsystem, device_path, dev_name orelse return null);
+    var device = try Device.init(subsystem, device_path, device_name);
 
     if (dev_type) |t| {
         device.dev_type = t;
@@ -64,6 +62,9 @@ pub fn parseUeventKobjectContents(contents: []const u8) !?KobjectResult {
         var split = std.mem.splitSequence(u8, line, "=");
         const key = split.next() orelse continue;
         const value = split.next() orelse continue;
+
+        // TODO(jared): The net subsystem (possibly) doesn't set DEVNAME, but
+        // rather INTERFACE.
         if (std.mem.eql(u8, key, "DEVNAME")) {
             dev_name = value;
         } else if (std.mem.eql(u8, key, "DEVPATH")) {

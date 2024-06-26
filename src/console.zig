@@ -12,6 +12,7 @@ const printKernelLogs = @import("./system.zig").printKernelLogs;
 const setupTty = @import("./system.zig").setupTty;
 const kexecLoad = @import("./boot.zig").kexecLoad;
 const utils = @import("./utils.zig");
+const Device = @import("./device/device.zig");
 
 const esc = std.ascii.control_code.esc;
 
@@ -408,10 +409,10 @@ fn runCommand(self: *Console, args: *ArgsIterator) !?Notification {
 pub const Command = struct {
     const NoContext = enum {
         clear,
-        loader,
         logs,
         poweroff,
         reboot,
+        list,
     };
 
     const Context = enum {
@@ -550,26 +551,28 @@ pub const Command = struct {
         }
     };
 
-    const loader = struct {
-        const short_help = "choose a bootloader";
-        // TODO(jared): comptime generation of possible list of bootloaders
+    const list = struct {
+        const short_help = "list bootable devices";
         const long_help =
-            \\Choose a bootloader. One of "disk" or "xmodem".
+            \\List all bootable devices.
             \\
             \\Usage:
-            \\loader [bootloader]
-            \\
-            \\Example:
-            \\loader disk
+            \\list
         ;
 
-        fn run(console: *Console, args: *ArgsIterator) !?Notification {
-            const loader_name = args.next() orelse return error.InvalidArgs;
-
-            if (std.mem.eql(u8, loader_name, "disk")) {
-                _ = console;
-                // console.context = try BootLoader.init(arena.allocator(), .disk);
+        fn printIfBootable(d: *const Device) void {
+            if (d.driver) |driver| {
+                switch (driver) {
+                    .bootloader => out.writer().print(
+                        "{s} [{s}]\n",
+                        .{ d.dev_name, d.dev_path },
+                    ) catch {},
+                }
             }
+        }
+
+        fn run(_: *Console, _: *ArgsIterator) !?Notification {
+            Device.forEach(printIfBootable);
 
             return null;
         }
@@ -588,26 +591,6 @@ pub const Command = struct {
     //         defer console.context = null;
     //
     //         try boot_loader.deinit();
-    //
-    //         return null;
-    //     }
-    // };
-
-    // const list = struct {
-    //     const short_help = "list boot devices";
-    //     const long_help =
-    //         \\List boot devices.
-    //         \\
-    //         \\Usage:
-    //         \\list
-    //     ;
-    //
-    //     fn run(_: *Console, _: *ArgsIterator, boot_loader: *BootLoader) !?Notification {
-    //         const devices = try boot_loader.listBootDevices();
-    //
-    //         for (devices) |device| {
-    //             std.debug.print("{}\n", .{device.name});
-    //         }
     //
     //         return null;
     //     }
