@@ -21,11 +21,9 @@ const DiskBootLoader = @This();
 
 arena: std.heap.ArenaAllocator = std.heap.ArenaAllocator.init(std.heap.page_allocator),
 
-pub fn init() DiskBootLoader {
-    return .{};
-}
+fn deinit(ctx: *anyopaque) void {
+    var self: *DiskBootLoader = @ptrCast(@alignCast(ctx));
 
-pub fn deinit(self: *DiskBootLoader) void {
     defer self.arena.deinit();
 }
 
@@ -44,10 +42,14 @@ fn probe(ctx: *anyopaque, device: *const Device) void {
     _ = device;
 }
 
-pub fn driver(self: *DiskBootLoader) BootLoader {
+pub fn init(allocator: std.mem.Allocator) !BootLoader {
+    const self = try allocator.create(DiskBootLoader);
+
     return .{
         .ptr = self,
-        .vtable = &.{},
+        .vtable = &.{
+            .deinit = deinit,
+        },
     };
 }
 

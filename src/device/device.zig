@@ -7,9 +7,10 @@ const BootLoader = @import("../boot/bootloader.zig");
 const Device = @This();
 
 pub var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+const arena_allocator = arena.allocator();
 
 var m = std.Thread.Mutex{};
-var ALL_DEVICES = std.ArrayList(*Device).init(arena.allocator());
+var ALL_DEVICES = std.ArrayList(*Device).init(arena_allocator);
 
 pub fn forEach(callback: *const fn (*const Device) void) void {
     m.lock();
@@ -25,9 +26,11 @@ pub fn add(device: *Device) !void {
     inline for (std.meta.fields(Driver)) |driver_variant| {
         inline for (@field(driver_variant.type, "ALL")) |driver| {
             if (driver.match(device)) {
-                var driver_instance = try arena.allocator().create(driver);
-                driver_instance.* = driver.init();
-                device.driver = @unionInit(Driver, driver_variant.name, driver_instance.driver());
+                device.driver = @unionInit(
+                    Driver,
+                    driver_variant.name,
+                    try driver.init(arena_allocator),
+                );
             }
         }
     }
@@ -111,7 +114,16 @@ pub const Subsystem = enum {
     }
 };
 
-pub const Driver = union(enum) { bootloader: BootLoader };
+pub const Driver = union(enum) {
+    bootloader: BootLoader,
+
+    fn deinit(self: *@This(), a: std.mem.Allocator) void {
+        // switch (self) {
+        //     .bootloader => |l| l.deinit(a),
+        // }
+        self.bootloader.deinit(a);
+    }
+};
 
 driver: ?Driver = null,
 subsystem: Subsystem,
@@ -120,22 +132,26 @@ node: ?struct { u32, u32 } = null,
 dev_path: []const u8,
 dev_name: []const u8,
 
-pub fn init(subsystem: Subsystem, dev_path: []const u8, dev_name: []const u8) !*Device {
-    const self = try arena.allocator().create(Device);
+pub fn init(
+    subsystem: Subsystem,
+    dev_path: []const u8,
+    dev_name: []const u8,
+) !*Device {
+    const self = try arena_allocator.create(Device);
     self.* = .{
         .subsystem = subsystem,
-        .dev_path = try arena.allocator().dupe(u8, dev_path),
-        .dev_name = try arena.allocator().dupe(u8, dev_name),
+        .dev_path = try arena_allocator.dupe(u8, dev_path),
+        .dev_name = try arena_allocator.dupe(u8, dev_name),
     };
     return self;
 }
 
 pub fn deinit(self: *Device) void {
-    arena.allocator().free(self.dev_path);
-    arena.allocator().free(self.dev_name);
-    arena.allocator().destroy(self);
-    // if (self.driver) |driver| {
-    //     driver
-    // }
+    arena_allocator.free(self.dev_path);
+    arena_allocator.free(self.dev_name);
+    arena_allocator.destroy(self);
+    if (self.driver) |*driver| {
+        driver.deinit(arena_allocator);
+    }
     self.* = undefined;
 }
