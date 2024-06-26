@@ -7,6 +7,6 @@ pub const ALL = .{DiskBootLoader};
 const BootLoader = @This();
 
 ptr: *anyopaque,
-vtable: Vtable,
+vtable: *const VTable,
 
-pub const Vtable = struct {};
+pub const VTable = struct {};

@@ -14,6 +14,7 @@ const linux_headers = @import("linux_headers");
 // const MbrPartitionType = @import("../disk/partition_table.zig").MbrPartitionType;
 // const kobject = @import("../device/kobject.zig");
 
+const BootLoader = @import("./bootloader.zig");
 const Device = @import("../device/device.zig");
 
 const DiskBootLoader = @This();
@@ -43,12 +44,10 @@ fn probe(ctx: *anyopaque, device: *const Device) void {
     _ = device;
 }
 
-pub fn driver(self: *DiskBootLoader) Device.Driver {
+pub fn driver(self: *DiskBootLoader) BootLoader {
     return .{
-        .bootloader = .{
-            .ptr = self,
-            .vtable = &.{},
-        },
+        .ptr = self,
+        .vtable = &.{},
     };
 }
 

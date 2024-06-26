@@ -22,18 +22,18 @@ pub fn forEach(callback: *const fn (*const Device) void) void {
 
 /// Adds a preinitialized device to the device list.
 pub fn add(device: *Device) !void {
-    m.lock();
-    defer m.unlock();
-
     inline for (std.meta.fields(Driver)) |driver_variant| {
         inline for (@field(driver_variant.type, "ALL")) |driver| {
             if (driver.match(device)) {
-                var driver_instance = try arena.allocator().create(driver_variant.type);
+                var driver_instance = try arena.allocator().create(driver);
                 driver_instance.* = driver.init();
-                device.driver = driver_instance.driver();
+                device.driver = @unionInit(Driver, driver_variant.name, driver_instance.driver());
             }
         }
     }
+
+    m.lock();
+    defer m.unlock();
 
     try ALL_DEVICES.append(device);
 }
