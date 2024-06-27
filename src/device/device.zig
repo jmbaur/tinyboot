@@ -3,40 +3,37 @@ const std = @import("std");
 const utils = @import("../utils.zig");
 
 const BootLoader = @import("../boot/bootloader.zig");
+const DiskBootLoader = @import("../boot/disk.zig");
 
 const Device = @This();
 
 pub var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
 const arena_allocator = arena.allocator();
 
-var m = std.Thread.Mutex{};
+var mutex = std.Thread.Mutex{};
 var ALL_DEVICES = std.ArrayList(*Device).init(arena_allocator);
 
 pub fn forEach(callback: *const fn (*const Device) void) void {
-    m.lock();
-    defer m.unlock();
+    mutex.lock();
+    defer mutex.unlock();
 
     for (ALL_DEVICES.items) |device| {
         callback(device);
     }
 }
 
+const ALL_DRIVERS = .{DiskBootLoader};
+
 /// Adds a preinitialized device to the device list.
 pub fn add(device: *Device) !void {
-    inline for (std.meta.fields(Driver)) |driver_variant| {
-        inline for (@field(driver_variant.type, "ALL")) |driver| {
-            if (driver.match(device)) {
-                device.driver = @unionInit(
-                    Driver,
-                    driver_variant.name,
-                    try driver.init(arena_allocator),
-                );
-            }
+    inline for (ALL_DRIVERS) |driver| {
+        if (driver.match(device)) {
+            device.driver = try Driver.init(driver);
         }
     }
 
-    m.lock();
-    defer m.unlock();
+    mutex.lock();
+    defer mutex.unlock();
 
     try ALL_DEVICES.append(device);
 }
@@ -44,8 +41,8 @@ pub fn add(device: *Device) !void {
 /// Removes the device from the device list and deinitializes the device
 /// structure.
 pub fn remove(device: *Device) void {
-    m.lock();
-    defer m.unlock();
+    mutex.lock();
+    defer mutex.unlock();
 
     for (ALL_DEVICES.items, 0..) |d, index| {
         if (d == device) {
@@ -56,8 +53,8 @@ pub fn remove(device: *Device) void {
 }
 
 pub fn findByNumber(want_major: u32, want_minor: u32) ?*Device {
-    m.lock();
-    defer m.unlock();
+    mutex.lock();
+    defer mutex.unlock();
 
     for (ALL_DEVICES.items) |d| {
         if (d.node) |node| {
@@ -72,8 +69,8 @@ pub fn findByNumber(want_major: u32, want_minor: u32) ?*Device {
 }
 
 pub fn findByName(want_name: []const u8) ?*Device {
-    m.lock();
-    defer m.unlock();
+    mutex.lock();
+    defer mutex.unlock();
 
     for (ALL_DEVICES.items) |d| {
         if (std.mem.eql(u8, d.dev_name, want_name)) {
@@ -114,17 +111,29 @@ pub const Subsystem = enum {
     }
 };
 
-pub const Driver = union(enum) {
-    bootloader: BootLoader,
+pub const Driver = struct {
+    ptr: *anyopaque,
+    driver_type: enum { bootloader },
+    vtable: *const struct {
+        deinit: *const fn (ctx: *anyopaque, allocator: std.mem.Allocator) void,
+    },
 
-    fn deinit(self: *@This(), a: std.mem.Allocator) void {
-        // switch (self) {
-        //     .bootloader => |l| l.deinit(a),
-        // }
-        self.bootloader.deinit(a);
+    fn init(driver: anytype) !@This() {
+        return .{
+            .ptr = try driver.init(arena_allocator),
+            .driver_type = driver.driver_type,
+            .vtable = &.{
+                .deinit = driver.deinit,
+            },
+        };
+    }
+
+    fn deinit(self: *@This()) void {
+        self.vtable.deinit(self.ptr, arena_allocator);
     }
 };
 
+mutex: std.Thread.Mutex = .{},
 driver: ?Driver = null,
 subsystem: Subsystem,
 dev_type: ?DevType = null,
@@ -151,7 +160,7 @@ pub fn deinit(self: *Device) void {
     arena_allocator.free(self.dev_name);
     arena_allocator.destroy(self);
     if (self.driver) |*driver| {
-        driver.deinit(arena_allocator);
+        driver.deinit();
     }
     self.* = undefined;
 }

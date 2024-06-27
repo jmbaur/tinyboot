@@ -16,8 +16,14 @@ pub const VTable = struct {
 };
 
 pub fn deinit(self: BootLoader, allocator: std.mem.Allocator) void {
-    _ = self;
-    _ = allocator;
+    // _ = self;
+    // _ = allocator;
     // self.vtable.deinit(self.ptr);
-    // allocator.destroy(self.ptr);
+    allocator.destroy(self.ptr);
 }
+
+// pub fn BootLoader_() type {
+//     return struct {
+//
+//     };
+// }

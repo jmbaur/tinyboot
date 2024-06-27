@@ -562,7 +562,7 @@ pub const Command = struct {
 
         fn printIfBootable(d: *const Device) void {
             if (d.driver) |driver| {
-                switch (driver) {
+                switch (driver.driver_type) {
                     .bootloader => out.writer().print(
                         "{s} [{s}]\n",
                         .{ d.dev_name, d.dev_path },
