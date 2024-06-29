@@ -46,7 +46,6 @@ pub fn main() !void {
 
     // TODO(jared): "-drive", "if=virtio,file=TODO.raw,format=raw,media=disk"
     try qemu_args.appendSlice(&.{
-        "-no-reboot",
         "-display",
         "none",
         "-serial",

@@ -21,25 +21,7 @@ const DiskBootLoader = @This();
 
 arena: std.heap.ArenaAllocator = std.heap.ArenaAllocator.init(std.heap.page_allocator),
 
-pub const driver_type = .bootloader;
-
-pub fn init(allocator: std.mem.Allocator) !*anyopaque {
-    const self = try allocator.create(DiskBootLoader);
-
-    // nothing to initialize, yet
-
-    return self;
-}
-
-pub fn deinit(ctx: *anyopaque, allocator: std.mem.Allocator) void {
-    var self: *DiskBootLoader = @ptrCast(@alignCast(ctx));
-
-    self.arena.deinit();
-
-    defer allocator.destroy(self);
-}
-
-pub fn match(device: *const Device) bool {
+fn match(device: *const Device) bool {
     const dev_type = device.dev_type orelse return false;
 
     return switch (dev_type) {
@@ -47,6 +29,20 @@ pub fn match(device: *const Device) bool {
         else => false,
     };
 }
+
+fn init(self: *DiskBootLoader) anyerror!void {
+    _ = self;
+}
+
+fn deinit(self: *DiskBootLoader) void {
+    self.arena.deinit();
+}
+
+pub const driver = Device.Driver.new(DiskBootLoader, .bootloader, .{
+    .match = match,
+    .init = init,
+    .deinit = deinit,
+});
 
 // const Mount = struct {
 //     allocator: std.mem.Allocator,

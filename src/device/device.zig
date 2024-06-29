@@ -22,13 +22,13 @@ pub fn forEach(callback: *const fn (*const Device) void) void {
     }
 }
 
-const ALL_DRIVERS = .{DiskBootLoader};
+const ALL_DRIVERS = .{DiskBootLoader.driver};
 
 /// Adds a preinitialized device to the device list.
 pub fn add(device: *Device) !void {
     inline for (ALL_DRIVERS) |driver| {
         if (driver.match(device)) {
-            device.driver = try Driver.init(driver);
+            device.driver = driver;
         }
     }
 
@@ -111,25 +111,78 @@ pub const Subsystem = enum {
     }
 };
 
+pub fn driverInit(T: type, real_init: *const fn (self: *T) void) !*anyopaque {
+    var self = try arena_allocator.create(T);
+    real_init(&self);
+    return self;
+}
+
+// pub fn driverDeinit(T: type, real_deinit: *const fn (self: *T) void) void {
+//     defer arena_allocator.destroy();
+// }
+
+pub fn foo() type {
+    return *const fn () void;
+}
+
+pub const DriverType = enum { bootloader };
+
 pub const Driver = struct {
-    ptr: *anyopaque,
-    driver_type: enum { bootloader },
+    ptr: ?*anyopaque = null,
+    driver_type: DriverType,
     vtable: *const struct {
-        deinit: *const fn (ctx: *anyopaque, allocator: std.mem.Allocator) void,
+        match: *const fn (device: *const Device) bool,
+        init: *const fn () anyerror!*anyopaque,
+        deinit: *const fn (ctx: *anyopaque) void,
     },
 
-    fn init(driver: anytype) !@This() {
+    pub fn new(
+        T: type,
+        driver_type: DriverType,
+        vtable: struct {
+            match: *const fn (device: *const Device) bool,
+            init: *const fn (self: *T) anyerror!void,
+            deinit: *const fn (self: *T) void,
+        },
+    ) Driver {
+        const wrapper = struct {
+            pub fn init() !*anyopaque {
+                const ptr = try arena_allocator.create(T);
+                try vtable.init(ptr);
+                return ptr;
+            }
+
+            pub fn deinit(ctx: *anyopaque) void {
+                const ptr: *T = @ptrCast(@alignCast(ctx));
+                defer arena_allocator.destroy(ptr);
+                vtable.deinit(ptr);
+            }
+        };
+
         return .{
-            .ptr = try driver.init(arena_allocator),
-            .driver_type = driver.driver_type,
+            .driver_type = driver_type,
             .vtable = &.{
-                .deinit = driver.deinit,
+                .match = vtable.match,
+                .init = wrapper.init,
+                .deinit = wrapper.deinit,
             },
         };
     }
 
-    fn deinit(self: *@This()) void {
-        self.vtable.deinit(self.ptr, arena_allocator);
+    pub fn match(self: *const @This(), device: *const Device) bool {
+        return self.vtable.match(device);
+    }
+
+    pub fn init(self: *@This()) !void {
+        if (self.ptr == null) {
+            self.ptr = try self.vtable.init();
+        }
+    }
+
+    pub fn deinit(self: *@This()) void {
+        if (self.ptr) |ptr| {
+            self.vtable.deinit(ptr);
+        }
     }
 };
 
