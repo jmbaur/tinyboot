@@ -13,22 +13,27 @@ const arena_allocator = arena.allocator();
 var mutex = std.Thread.Mutex{};
 var ALL_DEVICES = std.ArrayList(*Device).init(arena_allocator);
 
-pub fn forEach(callback: *const fn (*const Device) void) void {
+pub fn forEach(ctx: *anyopaque, callback: *const fn (ctx: *anyopaque, *const Device) utils.IterResult) void {
     mutex.lock();
     defer mutex.unlock();
 
     for (ALL_DEVICES.items) |device| {
-        callback(device);
+        switch (callback(ctx, device)) {
+            .@"break" => break,
+            .@"continue" => continue,
+        }
     }
 }
 
-const ALL_DRIVERS = .{DiskBootLoader.driver};
+const ALL_DRIVERS = .{DiskBootLoader};
 
 /// Adds a preinitialized device to the device list.
 pub fn add(device: *Device) !void {
     inline for (ALL_DRIVERS) |driver| {
-        if (driver.match(device)) {
-            device.driver = driver;
+        var driver_instance = driver.driver();
+        if (driver_instance.match(device)) {
+            device.driver = driver_instance;
+            break;
         }
     }
 
@@ -47,8 +52,20 @@ pub fn remove(device: *Device) void {
     for (ALL_DEVICES.items, 0..) |d, index| {
         if (d == device) {
             const removed = ALL_DEVICES.orderedRemove(index);
-            removed.deinit();
+            return removed.deinit();
         }
+    }
+}
+
+/// Deinitializes all devices. Should only _ever_ be called once at the end of
+/// the program.
+pub fn removeAll() void {
+    mutex.lock();
+    defer mutex.unlock();
+
+    for (ALL_DEVICES.items, 0..) |_, index| {
+        const removed = ALL_DEVICES.orderedRemove(index);
+        removed.deinit();
     }
 }
 
@@ -111,25 +128,16 @@ pub const Subsystem = enum {
     }
 };
 
-pub fn driverInit(T: type, real_init: *const fn (self: *T) void) !*anyopaque {
-    var self = try arena_allocator.create(T);
-    real_init(&self);
-    return self;
-}
-
-// pub fn driverDeinit(T: type, real_deinit: *const fn (self: *T) void) void {
-//     defer arena_allocator.destroy();
-// }
-
-pub fn foo() type {
-    return *const fn () void;
-}
-
-pub const DriverType = enum { bootloader };
+pub const DriverType = union(enum) { bootloader: BootLoader };
 
 pub const Driver = struct {
+    /// Opaque pointer is null when unitialized
     ptr: ?*anyopaque = null,
+
+    mutex: std.Thread.Mutex = .{},
+
     driver_type: DriverType,
+
     vtable: *const struct {
         match: *const fn (device: *const Device) bool,
         init: *const fn () anyerror!*anyopaque,
@@ -137,9 +145,9 @@ pub const Driver = struct {
     },
 
     pub fn new(
-        T: type,
-        driver_type: DriverType,
-        vtable: struct {
+        comptime T: type,
+        comptime driver_type: DriverType,
+        comptime vtable: struct {
             match: *const fn (device: *const Device) bool,
             init: *const fn (self: *T) anyerror!void,
             deinit: *const fn (self: *T) void,
@@ -186,7 +194,6 @@ pub const Driver = struct {
     }
 };
 
-mutex: std.Thread.Mutex = .{},
 driver: ?Driver = null,
 subsystem: Subsystem,
 dev_type: ?DevType = null,
@@ -211,9 +218,14 @@ pub fn init(
 pub fn deinit(self: *Device) void {
     arena_allocator.free(self.dev_path);
     arena_allocator.free(self.dev_name);
-    arena_allocator.destroy(self);
+
     if (self.driver) |*driver| {
+        driver.mutex.lock();
+        defer driver.mutex.unlock();
         driver.deinit();
     }
+
+    arena_allocator.destroy(self);
+
     self.* = undefined;
 }

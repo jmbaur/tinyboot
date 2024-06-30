@@ -1,7 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const posix = std.posix;
-const system = std.posix.system;
 
 const linux_headers = @import("linux_headers");
 
@@ -10,7 +9,7 @@ const Device = @import("./device/device.zig");
 const DeviceWatcher = @import("./device/watch.zig");
 const Log = @import("./log.zig");
 const security = @import("./security.zig");
-const setupSystem = @import("./system.zig").setupSystem;
+const system = @import("./system.zig");
 const utils = @import("./utils.zig");
 
 pub const std_options = .{
@@ -18,21 +17,18 @@ pub const std_options = .{
     .log_level = .debug, // let the kernel do our filtering for us
 };
 
-const State = struct {
+pub const State = struct {
+    pub const DeviceWatcherIO = utils.IoPair(DeviceWatcher.Event, State.Event);
+    pub const ConsoleIO = utils.IoPair(Console.Event, State.Event);
+
     /// Master epoll file descriptor for driving the event loop.
     epoll: posix.fd_t,
 
-    /// An eventfd file descriptor that will be written to when all work is
-    /// done.
-    done: posix.fd_t,
+    /// A channel used to communicate with the device thread.
+    device: DeviceWatcherIO,
 
-    /// An eventfd file descriptor that will be written to each time a new
-    /// device is found.
-    device: posix.fd_t,
-
-    /// An eventfd file descriptor that will be written to each time a new user
-    /// input event occurs.
-    console: posix.fd_t,
+    /// A channel used to communicate with the console thread.
+    console: ConsoleIO,
 
     /// A timerfd file descriptor that (when timed out) indicates when devices
     /// have settled (no new devices have been discovered in some amount of
@@ -41,46 +37,66 @@ const State = struct {
 
     settled: bool = false,
 
-    user_presence: bool = false,
+    pub const Event = enum {
+        start,
+        settled,
+        done,
+    };
 
     pub fn init() !@This() {
         var self = @This(){
             .epoll = try posix.epoll_create1(linux_headers.EPOLL_CLOEXEC),
-            .done = try posix.eventfd(0, 0),
-            .device = try posix.eventfd(0, 0),
-            .console = try posix.eventfd(0, 0),
-            .settle = try posix.timerfd_create(posix.CLOCK.REALTIME, .{}),
+            .settle = try posix.timerfd_create(posix.CLOCK.MONOTONIC, .{}),
+            .device = try DeviceWatcherIO.init(),
+            .console = try ConsoleIO.init(),
         };
 
-        try posix.epoll_ctl(self.epoll, system.EPOLL.CTL_ADD, self.device, @constCast(&.{
-            .data = .{ .fd = self.device },
-            .events = system.EPOLL.IN,
-        }));
+        try posix.epoll_ctl(
+            self.epoll,
+            posix.system.EPOLL.CTL_ADD,
+            self.settle,
+            @constCast(&.{
+                .data = .{ .fd = self.settle },
+                // Oneshot because we only have one window of time per-boot
+                // where we were once considered "unsettled".
+                .events = posix.system.EPOLL.IN | posix.system.EPOLL.ONESHOT,
+            }),
+        );
 
-        try posix.epoll_ctl(self.epoll, system.EPOLL.CTL_ADD, self.settle, @constCast(&.{
-            .data = .{ .fd = self.settle },
-            .events = system.EPOLL.IN | system.EPOLL.ONESHOT,
-        }));
+        try posix.epoll_ctl(
+            self.epoll,
+            posix.system.EPOLL.CTL_ADD,
+            self.device.in,
+            @constCast(&.{
+                .data = .{ .fd = self.device.in },
+                .events = posix.system.EPOLL.IN,
+            }),
+        );
 
-        try posix.epoll_ctl(self.epoll, system.EPOLL.CTL_ADD, self.console, @constCast(&.{
-            .data = .{ .fd = self.console },
-            .events = system.EPOLL.IN,
-        }));
+        try posix.epoll_ctl(
+            self.epoll,
+            posix.system.EPOLL.CTL_ADD,
+            self.console.in,
+            @constCast(&.{
+                .data = .{ .fd = self.console.in },
+                .events = posix.system.EPOLL.IN,
+            }),
+        );
+
+        try self.notify(.start);
 
         try self.resetSettle();
 
         return self;
     }
 
+    pub fn notify(self: *@This(), event: Event) !void {
+        try self.device.write(event);
+        try self.console.write(event);
+    }
+
     pub fn handleConsole(self: *@This()) !?posix.RebootCommand {
-        switch (try utils.eventfdReadEnum(Console.Notification, self.console)) {
-            .presence => {
-                if (!self.user_presence) {
-                    // autoboot.stop();
-                    self.user_presence = true;
-                    std.log.info("user presence detected", .{});
-                }
-            },
+        switch (try self.console.read()) {
             .reboot => return posix.RebootCommand.RESTART,
             .poweroff => return posix.RebootCommand.POWER_OFF,
             .kexec => return posix.RebootCommand.KEXEC,
@@ -90,45 +106,52 @@ const State = struct {
     }
 
     fn resetSettle(self: *@This()) !void {
-        try posix.timerfd_settime(self.settle, .{}, @constCast(&.{
+        // var ts: posix.timespec = undefined;
+        // try posix.clock_gettime(posix.CLOCK.MONOTONIC, &ts);
+        try posix.timerfd_settime(self.settle, .{}, &.{
             // oneshot
             .it_interval = .{ .tv_sec = 0, .tv_nsec = 0 },
             // consider settled after 2 seconds without any new events
             .it_value = .{ .tv_sec = 2, .tv_nsec = 0 },
-        }), null);
+        }, null);
     }
 
+    // TODO(jared): do driver probing here? This would let the device thread
+    // not be blocked on any slow probes (e.g. probes that require reading and
+    // mounting disks).
     pub fn handleDevice(self: *@This()) !void {
-        _ = try posix.read(self.device, std.mem.asBytes(&1)); // consume
+        // consume, no data actually used
+        _ = try self.device.read();
+
+        std.log.debug("new device", .{});
 
         if (!self.settled) {
             try self.resetSettle();
         }
     }
 
-    fn handleSettle(self: *@This()) void {
-        std.log.info("devices settled", .{});
-        self.settled = true;
+    fn handleSettle(self: *@This()) !void {
+        try self.notify(.settled);
     }
 
     pub fn deinit(self: *@This()) void {
-        posix.close(self.done);
-        posix.close(self.device);
-        posix.close(self.console);
+        // Notify all threads that we are done.
+        self.notify(.done) catch |err| {
+            std.log.err("failed to notify finished state: {}", .{err});
+        };
+
+        self.device.deinit();
+        self.console.deinit();
         posix.close(self.settle);
         posix.close(self.epoll);
     }
 };
 
 fn runEventLoop(state: *State) !posix.RebootCommand {
-    // var autoboot = try Autoboot.init();
-    // try autoboot.register(state.epoll);
-    // defer autoboot.deinit();
-
     // main event loop
     while (true) {
         const max_events = 8;
-        var events = [_]system.epoll_event{undefined} ** max_events;
+        var events = [_]posix.system.epoll_event{undefined} ** max_events;
 
         const n_events = posix.epoll_wait(state.epoll, &events, -1);
 
@@ -136,21 +159,11 @@ fn runEventLoop(state: *State) !posix.RebootCommand {
         while (i_event < n_events) : (i_event += 1) {
             const event = events[i_event];
 
-            if (event.data.fd == state.device) {
+            if (event.data.fd == state.settle) {
+                try state.handleSettle();
+            } else if (event.data.fd == state.device.in) {
                 try state.handleDevice();
-            } else if (event.data.fd == state.settle) {
-                state.handleSettle();
-                // if (!state.user_presence) {
-                //         try autoboot.start();
-                //     }
-                // } else if (event.data.fd == autoboot.ready_fd) {
-                //     try autoboot.deregister(state.epoll);
-                //     if (try autoboot.finish()) |outcome| {
-                //         return outcome;
-                //     } else {
-                //         std.log.info("nothing to boot", .{});
-                //     }
-            } else if (event.data.fd == state.console) {
+            } else if (event.data.fd == state.console.in) {
                 if (state.handleConsole()) |outcome| {
                     if (outcome) |reboot_cmd| {
                         return reboot_cmd;
@@ -158,13 +171,18 @@ fn runEventLoop(state: *State) !posix.RebootCommand {
                 } else |err| {
                     std.log.err("failed to handle console notification: {}", .{err});
                 }
+            } else {
+                std.log.debug("unknown event: {}", .{event});
+                std.debug.assert(false);
             }
         }
     }
 }
 
 pub fn main() !void {
-    try setupSystem();
+    defer Device.removeAll();
+
+    try system.mountPseudoFilesystems();
 
     var state = try State.init();
     defer state.deinit();
@@ -181,15 +199,14 @@ pub fn main() !void {
 
     var device_watch_thread = try std.Thread.spawn(.{}, DeviceWatcher.watch, .{
         &device_watcher,
-        state.device,
-        state.done,
+        state.device.invert(),
     });
     defer device_watch_thread.join();
 
     var console_thread = try std.Thread.spawn(
         .{},
         Console.input,
-        .{ state.console, state.done },
+        .{state.console.invert()},
     );
     defer console_thread.join();
 

@@ -202,6 +202,7 @@ pub fn parseUeventKobjectContents(contents: []const u8) !?KobjectResult {
 //     try std.testing.expectEqualStrings("3471", kobject.uevent.get("SEQNUM").?);
 // }
 
+// https://github.com/torvalds/linux/blob/afcd48134c58d6af45fb3fdb648f1260b20f2326/lib/kobject_uevent.c#L50
 pub const Action = enum {
     add,
     remove,

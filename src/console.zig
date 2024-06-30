@@ -1,27 +1,24 @@
 const std = @import("std");
 const posix = std.posix;
 const process = std.process;
-const system = std.posix.system;
 
 const linux_headers = @import("linux_headers");
 
 const BootEntry = @import("./boot.zig").BootEntry;
 const BootLoader = @import("./boot.zig").BootLoader;
-const Xmodem = @import("./boot/xmodem.zig").Xmodem;
-const printKernelLogs = @import("./system.zig").printKernelLogs;
-const setupTty = @import("./system.zig").setupTty;
-const kexecLoad = @import("./boot.zig").kexecLoad;
-const utils = @import("./utils.zig");
 const Device = @import("./device/device.zig");
+const State = @import("./tboot-loader.zig").State;
+const Xmodem = @import("./boot/xmodem.zig").Xmodem;
+const kexecLoad = @import("./boot.zig").kexecLoad;
+const printKernelLogs = @import("./system.zig").printKernelLogs;
+const system = @import("./system.zig");
+const utils = @import("./utils.zig");
 
 const esc = std.ascii.control_code.esc;
 
 const ArgsIterator = process.ArgIteratorGeneral(.{});
 
-pub const Notification = enum {
-    /// Indication that a user is present at the console, only sent once.
-    presence,
-
+pub const Event = enum {
     /// Reboot initiated from console.
     reboot,
 
@@ -42,59 +39,88 @@ var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
 
 var out = std.io.bufferedWriter(std.io.getStdOut().writer());
 
-notify: posix.fd_t,
-waiting_for_response: bool = false,
-has_prompt: bool = false,
-watching_logs: bool = true,
+comm: State.ConsoleIO.Inverted,
 input_cursor: u16 = 0,
 input_end: u16 = 0,
 input_buffer: [IO_BUFFER_SIZE]u8 = undefined,
 context: ?BootLoader = null,
+tty: ?system.Tty = null,
 
-pub fn input(notify: posix.fd_t, done: posix.fd_t) !void {
+pub fn input(comm: State.ConsoleIO.Inverted) !void {
     defer arena.deinit();
 
+    // Setup stdio to point to the linux system console.
     {
-        var console = try std.fs.cwd().openFile(CONSOLE, .{ .mode = .read_write });
-        defer console.close();
+        var dev_console = try std.fs.cwd().openFile(
+            CONSOLE,
+            .{ .mode = .read_write },
+        );
+        defer dev_console.close();
 
-        try posix.dup2(console.handle, posix.STDIN_FILENO);
-        try posix.dup2(console.handle, posix.STDOUT_FILENO);
-        try posix.dup2(console.handle, posix.STDERR_FILENO);
+        try posix.dup2(dev_console.handle, posix.STDIN_FILENO);
+        try posix.dup2(dev_console.handle, posix.STDOUT_FILENO);
+        try posix.dup2(dev_console.handle, posix.STDERR_FILENO);
     }
 
-    writeAllAndFlush("\npress <ENTER> to interrupt\n\n");
+    // Turn off local echo, making the ENTER key the only thing that shows a
+    // sign of user input.
+    {
+        _ = try system.setupTty(posix.STDIN_FILENO, .no_echo);
+        writeAllAndFlush("\npress <ENTER> to interrupt\n\n");
+    }
 
-    var tty = try setupTty(posix.STDIN_FILENO, .user_input);
-    defer tty.reset();
-
-    var console = Console{ .notify = notify };
+    var console = Console{ .comm = comm };
+    defer console.deinit();
 
     const epoll_fd = try posix.epoll_create1(linux_headers.EPOLL_CLOEXEC);
     defer posix.close(epoll_fd);
 
-    try posix.epoll_ctl(epoll_fd, system.EPOLL.CTL_ADD, done, @constCast(&.{
-        .data = .{ .fd = done },
-        .events = system.EPOLL.IN | system.EPOLL.ONESHOT,
-    }));
+    try posix.epoll_ctl(
+        epoll_fd,
+        posix.system.EPOLL.CTL_ADD,
+        comm.in,
+        @constCast(&.{
+            .data = .{ .fd = comm.in },
+            .events = posix.system.EPOLL.IN,
+        }),
+    );
 
-    try posix.epoll_ctl(epoll_fd, system.EPOLL.CTL_ADD, posix.STDIN_FILENO, @constCast(&.{
-        .data = .{ .fd = posix.STDIN_FILENO },
-        .events = system.EPOLL.IN,
-    }));
+    try posix.epoll_ctl(
+        epoll_fd,
+        posix.system.EPOLL.CTL_ADD,
+        posix.STDIN_FILENO,
+        @constCast(&.{
+            .data = .{ .fd = posix.STDIN_FILENO },
+            .events = posix.system.EPOLL.IN,
+        }),
+    );
 
     while (true) {
         const max_events = 8;
-        var events = [_]system.epoll_event{undefined} ** max_events;
+        var events = [_]posix.system.epoll_event{undefined} ** max_events;
 
         const n_events = posix.epoll_wait(epoll_fd, &events, -1);
 
         var i_event: usize = 0;
         while (i_event < n_events) : (i_event += 1) {
             const event = events[i_event];
-            if (event.data.fd == done) {
-                writeAllAndFlush("\ngoodbye!\n\n");
-                return;
+            if (event.data.fd == comm.in) {
+                switch (try comm.read()) {
+                    .settled => {
+                        if (console.tty == null) {
+                            var result: ?Event = null;
+                            Device.forEach(&result, autoboot);
+                            if (result) |e| {
+                                try console.comm.write(e);
+                            }
+                        }
+                    },
+                    .done => {
+                        writeAllAndFlush("\ngoodbye!\n\n");
+                        return;
+                    },
+                    else => {},
+                }
             } else if (event.data.fd == posix.STDIN_FILENO) {
                 try console.handleStdin();
             }
@@ -102,8 +128,48 @@ pub fn input(notify: posix.fd_t, done: posix.fd_t) !void {
     }
 }
 
+fn autoboot(ctx: *anyopaque, device: *const Device) utils.IterResult {
+    const result: *?Event = @ptrCast(@alignCast(ctx));
+    _ = result;
+
+    std.log.debug("autobooting {s}\n", .{device.dev_name});
+
+    var driver = device.driver orelse return .@"continue";
+
+    driver.mutex.lock();
+    defer driver.mutex.unlock();
+
+    if (driver.driver_type != .bootloader) {
+        return .@"continue";
+    }
+
+    const bl = switch (driver.driver_type) {
+        .bootloader => |bl| bl,
+    };
+
+    if (driver.ptr == null) {
+        driver.init() catch |err| {
+            std.log.err("failed to initialize driver: {}", .{err});
+            return .@"continue";
+        };
+    }
+
+    bl.probe(driver.ptr.?, device) catch |err| {
+        std.log.err("probe of {s} failed: {}", .{ device.dev_name, err });
+        return .@"continue";
+    };
+
+    return .@"continue";
+}
+
 fn flush() void {
     out.flush() catch {};
+}
+
+/// Flushes occur transparently. Do not use if control over when flushes occur
+/// is needed.
+fn print(comptime format: []const u8, args: anytype) void {
+    out.writer().print(format, args) catch {};
 }
 
 fn writeAll(bytes: []const u8) void {
@@ -122,12 +188,12 @@ fn prompt(self: *Console) !void {
     writeAllAndFlush("> ");
 }
 
-fn writeNotification(self: *Console, notification: Notification) !void {
-    _ = try posix.write(
-        self.notify,
-        std.mem.asBytes(&@as(u64, @intFromEnum(notification) + 1)),
-    );
-}
+// fn writeNotification(self: *Console, notification: Notification) !void {
+//     _ = try posix.write(
+//         self.notify,
+//         std.mem.asBytes(&@as(u64, @intFromEnum(notification) + 1)),
+//     );
+// }
 
 /// Caller required to flush
 fn cursorLeft(n: u16) void {
@@ -156,13 +222,19 @@ fn clearScreen() void {
     out.writer().writeAll(.{esc} ++ "[0;0H") catch {};
 }
 
+fn deinit(self: *Console) void {
+    if (self.tty) |*tty| {
+        tty.reset();
+    }
+}
+
 fn handleStdin(self: *Console) !void {
     // We may already have a prompt from a boot timeout, so don't print
     // a prompt if we already have one.
-    if (!self.has_prompt) {
-        try utils.eventfdWriteEnum(Notification, self.notify, .presence);
+    if (self.tty == null) {
+        self.tty = try system.setupTty(posix.STDIN_FILENO, .user_input);
+        std.log.debug("user presence detected", .{});
         try self.prompt();
-        self.has_prompt = true;
     }
 
     // We should only ever get 1 byte of data from stdin since we put the
@@ -366,21 +438,21 @@ fn handleStdin(self: *Console) !void {
 
         const maybe_notification = self.runCommand(&args);
 
-        const notification = maybe_notification catch |err| {
-            std.debug.print("\nerror running command: {}\n", .{err});
+        const event = maybe_notification catch |err| {
+            print("\nerror running command: {}\n", .{err});
             try self.prompt();
             return;
         } orelse {
             return try self.prompt();
         };
 
-        utils.eventfdWriteEnum(Notification, self.notify, notification) catch |err| {
+        self.comm.write(event) catch |err| {
             std.log.err("failed to send notification from console: {}", .{err});
         };
     }
 }
 
-fn runCommand(self: *Console, args: *ArgsIterator) !?Notification {
+fn runCommand(self: *Console, args: *ArgsIterator) !?Event {
     if (args.next()) |cmd| {
         if (std.mem.eql(u8, cmd, "help")) {
             return @field(Command, "help").run(self, args);
@@ -400,7 +472,7 @@ fn runCommand(self: *Console, args: *ArgsIterator) !?Notification {
             }
         }
 
-        std.debug.print("unknown command \"{s}\"\n", .{cmd});
+        print("unknown command \"{s}\"\n", .{cmd});
     }
 
     return null;
@@ -431,12 +503,12 @@ pub const Command = struct {
 
         /// Prints a help message for all commands.
         fn helpAll(t: anytype) void {
-            std.debug.print("\n", .{});
+            print("\n", .{});
 
             inline for (std.meta.fields(t)) |field| {
                 const cmd_short_help = comptime @field(Command, field.name).short_help;
                 const space = 20 - comptime field.name.len;
-                std.debug.print("{s}{s}{s}\n", .{ field.name, " " ** space, cmd_short_help });
+                print("{s}{s}{s}\n", .{ field.name, " " ** space, cmd_short_help });
             }
         }
 
@@ -444,22 +516,22 @@ pub const Command = struct {
         fn helpOne(t: anytype, cmd: []const u8) void {
             if (std.mem.eql(u8, cmd, "help")) {
                 const cmd_long_help = comptime @field(Command, "help").long_help;
-                std.debug.print("\n{s}\n", .{cmd_long_help});
+                print("\n{s}\n", .{cmd_long_help});
                 return;
             }
 
             inline for (std.meta.fields(t)) |field| {
                 if (std.mem.eql(u8, field.name, cmd)) {
                     const cmd_long_help = comptime @field(Command, field.name).long_help;
-                    std.debug.print("\n{s}\n", .{cmd_long_help});
+                    print("\n{s}\n", .{cmd_long_help});
                     return;
                 }
             }
 
-            std.debug.print("unknown command \"{s}\"\n", .{cmd});
+            print("unknown command \"{s}\"\n", .{cmd});
         }
 
-        fn run(console: *Console, args: *ArgsIterator) !?Notification {
+        fn run(console: *Console, args: *ArgsIterator) !?Event {
             if (args.next()) |cmd| {
                 if (console.context == null) {
                     helpOne(NoContext, cmd);
@@ -487,7 +559,7 @@ pub const Command = struct {
             \\poweroff
         ;
 
-        fn run(_: *Console, _: *ArgsIterator) !?Notification {
+        fn run(_: *Console, _: *ArgsIterator) !?Event {
             return .poweroff;
         }
     };
@@ -501,7 +573,7 @@ pub const Command = struct {
             \\reboot
         ;
 
-        fn run(_: *Console, _: *ArgsIterator) !?Notification {
+        fn run(_: *Console, _: *ArgsIterator) !?Event {
             return .reboot;
         }
     };
@@ -519,7 +591,7 @@ pub const Command = struct {
             \\logs 7
         ;
 
-        fn run(_: *Console, args: *ArgsIterator) !?Notification {
+        fn run(_: *Console, args: *ArgsIterator) !?Event {
             const filter = if (args.next()) |filter_str|
                 try std.fmt.parseInt(u3, filter_str, 10)
             else
@@ -544,7 +616,7 @@ pub const Command = struct {
             \\clear
         ;
 
-        fn run(_: *Console, _: *ArgsIterator) !?Notification {
+        fn run(_: *Console, _: *ArgsIterator) !?Event {
             clearScreen();
 
             return null;
@@ -560,7 +632,7 @@ pub const Command = struct {
             \\list
         ;
 
-        fn printIfBootable(d: *const Device) void {
+        fn printIfBootable(_: *anyopaque, d: *const Device) utils.IterResult {
             if (d.driver) |driver| {
                 switch (driver.driver_type) {
                     .bootloader => out.writer().print(
@@ -569,10 +641,13 @@ pub const Command = struct {
                     ) catch {},
                 }
             }
+
+            return .@"continue";
         }
 
-        fn run(_: *Console, _: *ArgsIterator) !?Notification {
-            Device.forEach(printIfBootable);
+        fn run(_: *Console, _: *ArgsIterator) !?Event {
+            var none = {};
+            Device.forEach(&none, printIfBootable);
 
             return null;
         }

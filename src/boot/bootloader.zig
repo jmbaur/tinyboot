@@ -2,28 +2,26 @@ const std = @import("std");
 
 const Device = @import("../device/device.zig");
 
-const DiskBootLoader = @import("./disk.zig");
-
-pub const ALL = .{DiskBootLoader};
-
 const BootLoader = @This();
 
-ptr: *anyopaque,
-vtable: *const VTable,
+probe: *const fn (ctx: *anyopaque, device: *const Device) anyerror!void,
 
-pub const VTable = struct {
-    deinit: *const fn (ctx: *anyopaque) void,
-};
+pub fn new(
+    comptime T: type,
+    comptime vtable: struct {
+        probe: *const fn (self: *T, device: *const Device) anyerror!void,
+    },
+) Device.DriverType {
+    const wrapper = struct {
+        pub fn probe(ctx: *anyopaque, device: *const Device) !void {
+            const ptr: *T = @ptrCast(@alignCast(ctx));
+            try vtable.probe(ptr, device);
+        }
+    };
 
-pub fn deinit(self: BootLoader, allocator: std.mem.Allocator) void {
-    // _ = self;
-    // _ = allocator;
-    // self.vtable.deinit(self.ptr);
-    allocator.destroy(self.ptr);
+    return .{
+        .bootloader = .{
+            .probe = wrapper.probe,
+        },
+    };
 }
-
-// pub fn BootLoader_() type {
-//     return struct {
-//
-//     };
-// }

@@ -17,8 +17,8 @@ fn mountPseudoFs(
     }
 }
 
-/// Does initial system setup and mounts basic psuedo-filesystems.
-pub fn setupSystem() !void {
+/// Mounts basic psuedo-filesystems (/dev, /proc, /sys, etc.).
+pub fn mountPseudoFilesystems() !void {
     try std.fs.cwd().makePath("/proc");
     try mountPseudoFs("/proc", "proc", system.MS.NOSUID | system.MS.NODEV | system.MS.NOEXEC);
 
@@ -78,6 +78,7 @@ fn cfmakeraw(t: *posix.termios) void {
 }
 
 pub const TtyMode = enum {
+    no_echo,
     user_input,
     file_transfer_recv,
     file_transfer_send,
@@ -87,7 +88,7 @@ pub const Tty = struct {
     fd: posix.fd_t,
     original: posix.termios,
 
-    pub fn reset(self: *const @This()) void {
+    pub fn reset(self: *@This()) void {
         // wait until everything is sent
         _ = system.tcdrain(self.fd);
 
@@ -110,6 +111,9 @@ pub fn setupTty(fd: posix.fd_t, mode: TtyMode) !Tty {
     var termios = orig.original;
 
     switch (mode) {
+        .no_echo => {
+            termios.lflag.ECHO = false;
+        },
         .user_input => {
             termios.cc[VINTR] = 3; // C-c
             termios.cc[VQUIT] = 28; // C-\

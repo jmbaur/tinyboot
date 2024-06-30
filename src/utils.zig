@@ -1,6 +1,8 @@
 const std = @import("std");
 const posix = std.posix;
 
+pub const IterResult = enum { @"break", @"continue" };
+
 pub fn enumFromStr(T: anytype, value: []const u8) !T {
     inline for (std.meta.fields(T)) |field| {
         if (std.mem.eql(u8, field.name, value)) {
@@ -23,4 +25,40 @@ pub fn eventfdReadEnum(T: anytype, eventfd: posix.fd_t) !T {
     _ = try posix.read(eventfd, std.mem.asBytes(&input));
     // Subtract 1 to ensure we are consistent with eventfdWriteEnum.
     return @enumFromInt(input - 1);
+}
+
+pub fn IoPair(I: type, O: type) type {
+    return struct {
+        in: posix.fd_t,
+        out: posix.fd_t,
+
+        pub const Inverted = IoPair(O, I);
+
+        pub fn init() !@This() {
+            return .{
+                .in = try posix.eventfd(0, 0),
+                .out = try posix.eventfd(0, 0),
+            };
+        }
+
+        pub fn deinit(self: *@This()) void {
+            posix.close(self.in);
+            posix.close(self.out);
+        }
+
+        pub fn invert(self: *@This()) Inverted {
+            return .{
+                .in = self.out,
+                .out = self.in,
+            };
+        }
+
+        pub fn write(self: *const @This(), data: O) !void {
+            try eventfdWriteEnum(O, self.out, data);
+        }
+
+        pub fn read(self: *const @This()) !I {
+            return try eventfdReadEnum(I, self.in);
+        }
+    };
 }

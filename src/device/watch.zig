@@ -4,9 +4,15 @@ const path = std.fs.path;
 const system = posix.system;
 
 const Device = @import("./device.zig");
+const State = @import("../tboot-loader.zig").State;
 const kobject = @import("./kobject.zig");
+const utils = @import("../utils.zig");
 
 const linux_headers = @import("linux_headers");
+
+const DeviceWatcher = @This();
+
+pub const Event = enum { add_device, remove_device };
 
 fn makedev(major: u32, minor: u32) u32 {
     return std.math.shl(u32, major & 0xfffff000, 32) |
@@ -27,7 +33,7 @@ char_dir: std.fs.Dir,
 /// Netlink socket fd for subscribing to new device events.
 nl_fd: posix.fd_t,
 
-pub fn init() !@This() {
+pub fn init() !DeviceWatcher {
     return .{
         .block_dir = try std.fs.cwd().makeOpenPath("/dev/block", .{}),
         .char_dir = try std.fs.cwd().makeOpenPath("/dev/char", .{}),
@@ -40,13 +46,24 @@ pub fn init() !@This() {
 }
 
 // Does not exit until end of program
-pub fn watch(self: *@This(), new_device_notify: posix.fd_t, done: posix.fd_t) !void {
+pub fn watch(self: *DeviceWatcher, comm: State.DeviceWatcherIO.Inverted) !void {
     defer Device.arena.deinit();
 
     defer self.deinit();
 
-    try posix.setsockopt(self.nl_fd, posix.SOL.SOCKET, posix.SO.RCVBUF, &std.mem.toBytes(@as(c_int, KERN_RCVBUF)));
-    try posix.setsockopt(self.nl_fd, posix.SOL.SOCKET, posix.SO.RCVBUFFORCE, &std.mem.toBytes(@as(c_int, KERN_RCVBUF)));
+    try posix.setsockopt(
+        self.nl_fd,
+        posix.SOL.SOCKET,
+        posix.SO.RCVBUF,
+        &std.mem.toBytes(@as(c_int, KERN_RCVBUF)),
+    );
+
+    try posix.setsockopt(
+        self.nl_fd,
+        posix.SOL.SOCKET,
+        posix.SO.RCVBUFFORCE,
+        &std.mem.toBytes(@as(c_int, KERN_RCVBUF)),
+    );
 
     const nls = posix.sockaddr.nl{
         .groups = 1, // KOBJECT_UEVENT groups bitmask must be 1
@@ -57,15 +74,25 @@ pub fn watch(self: *@This(), new_device_notify: posix.fd_t, done: posix.fd_t) !v
     const epoll_fd = try posix.epoll_create1(linux_headers.EPOLL_CLOEXEC);
     defer posix.close(epoll_fd);
 
-    try posix.epoll_ctl(epoll_fd, system.EPOLL.CTL_ADD, self.nl_fd, @constCast(&.{
-        .data = .{ .fd = self.nl_fd },
-        .events = system.EPOLL.IN,
-    }));
+    try posix.epoll_ctl(
+        epoll_fd,
+        system.EPOLL.CTL_ADD,
+        self.nl_fd,
+        @constCast(&.{
+            .data = .{ .fd = self.nl_fd },
+            .events = system.EPOLL.IN,
+        }),
+    );
 
-    try posix.epoll_ctl(epoll_fd, system.EPOLL.CTL_ADD, done, @constCast(&.{
-        .data = .{ .fd = done },
-        .events = system.EPOLL.IN | system.EPOLL.ONESHOT,
-    }));
+    try posix.epoll_ctl(
+        epoll_fd,
+        system.EPOLL.CTL_ADD,
+        comm.in,
+        @constCast(&.{
+            .data = .{ .fd = comm.in },
+            .events = system.EPOLL.IN,
+        }),
+    );
 
     while (true) {
         const max_events = 8;
@@ -76,41 +103,56 @@ pub fn watch(self: *@This(), new_device_notify: posix.fd_t, done: posix.fd_t) !v
         var i_event: usize = 0;
         while (i_event < n_events) : (i_event += 1) {
             const event = events[i_event];
-            if (event.data.fd == done) {
-                std.log.debug("done watching devices", .{});
-                break;
+
+            if (event.data.fd == comm.in) {
+                switch (try comm.read()) {
+                    .settled => {},
+                    .done => {
+                        std.log.debug("done watching devices", .{});
+                        return;
+                    },
+                    else => {},
+                }
             } else if (event.data.fd == self.nl_fd) {
-                _ = try posix.write(new_device_notify, std.mem.asBytes(&1));
-                self.handleNewEvent() catch |err| {
+                if (self.handleNewEvent()) |maybe_action| {
+                    if (maybe_action) |action| {
+                        try comm.write(switch (action) {
+                            .add => .add_device,
+                            .remove => .remove_device,
+                        });
+                    }
+                } else |err| {
                     std.log.err("failed to handle new device: {}", .{err});
-                };
+                }
             }
         }
     }
 }
 
-fn handleNewEvent(self: *@This()) !void {
+fn handleNewEvent(self: *DeviceWatcher) !?kobject.Action {
     var recv_bytes: [USER_RCVBUF]u8 = undefined;
 
     const bytes_read = try posix.read(self.nl_fd, &recv_bytes);
 
     const action = try kobject.parseUeventKobjectContents(
         recv_bytes[0..bytes_read],
-    ) orelse return;
+    ) orelse return null;
 
     switch (action) {
         .add => |device| try self.addDevice(device),
         .remove => |dev_name| try self.removeDevice(dev_name),
     }
+
+    return @as(kobject.Action, action);
 }
 
-pub fn deinit(self: *@This()) void {
+pub fn deinit(self: *DeviceWatcher) void {
     self.block_dir.close();
     self.char_dir.close();
     posix.close(self.nl_fd);
 }
 
-fn mknod(self: *@This(), node_type: NodeType, major: u32, minor: u32) !void {
+fn mknod(self: *DeviceWatcher, node_type: NodeType, major: u32, minor: u32) !void {
     var buf: [10]u8 = undefined;
     const device = try std.fmt.bufPrintZ(&buf, "{}:{}", .{ major, minor });
 
@@ -139,14 +181,14 @@ const UEVENT_FILE_SIZE = 4096;
 
 /// Scan sysfs and create all nodes of interest that currently exist on the
 /// system.
-pub fn scanAndCreateExistingDevices(self: *@This()) !void {
+pub fn scanAndCreateExistingDevices(self: *DeviceWatcher) !void {
     inline for (std.meta.fields(Device.Subsystem)) |field| {
         try self.scanAndCreateExistingDevicesForSubsystem(field.name);
     }
 }
 
 pub fn scanAndCreateExistingDevicesForSubsystem(
-    self: *@This(),
+    self: *DeviceWatcher,
     comptime subsystem: []const u8,
 ) !void {
     var subsystem_dir = std.fs.cwd().openDir(
@@ -187,7 +229,7 @@ pub fn scanAndCreateExistingDevicesForSubsystem(
     }
 }
 
-fn addDevice(self: *@This(), device: *Device) !void {
+fn addDevice(self: *DeviceWatcher, device: *Device) !void {
     if (device.node) |node| {
         const major, const minor = node;
         try self.mknod(switch (device.subsystem) {
@@ -199,7 +241,7 @@ fn addDevice(self: *@This(), device: *Device) !void {
     try Device.add(device);
 }
 
-fn removeDevice(self: *@This(), dev_name: []const u8) !void {
+fn removeDevice(self: *DeviceWatcher, dev_name: []const u8) !void {
     if (Device.findByName(dev_name)) |d| {
         defer Device.remove(d);
 
@@ -213,7 +255,7 @@ fn removeDevice(self: *@This(), dev_name: []const u8) !void {
     }
 }
 
-fn removeNode(self: *@This(), node_type: NodeType, major: u32, minor: u32) !void {
+fn removeNode(self: *DeviceWatcher, node_type: NodeType, major: u32, minor: u32) !void {
     var buf: [10]u8 = undefined;
     const device = try std.fmt.bufPrint(&buf, "{}:{}", .{ major, minor });
 
