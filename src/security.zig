@@ -4,79 +4,82 @@ const system = std.posix.system;
 
 const linux_headers = @import("linux_headers");
 
-// TODO(jared): some comptime magic to automate this
-pub const MAX_POLICY_SIZE =
-    (PROC_SUPER_MAGIC.len +
-    SYSFS_MAGIC.len +
-    DEBUGFS_MAGIC.len +
-    TMPFS_MAGIC.len +
-    DEVPTS_SUPER_MAGIC.len +
-    BINFMTFS_MAGIC.len +
-    SECURITYFS_MAGIC.len +
-    SELINUX_MAGIC.len +
-    SMACK_MAGIC.len +
-    CGROUP_SUPER_MAGIC.len +
-    CGROUP2_SUPER_MAGIC.len +
-    NSFS_MAGIC.len +
-    KEY_CHECK.len +
-    POLICY_CHECK.len +
-    KEXEC_KERNEL_CHECK.len +
-    KEXEC_INITRAMFS_CHECK.len +
-    KEXEC_CMDLINE.len +
-    KEXEC_KERNEL_CHECK_APPRAISE.len +
-    KEXEC_INITRAMFS_CHECK_APPRAISE.len) * 2; // TODO(jared): this extra space shouldn't be needed?
+const MEASURE_POLICY =
+    PROC_SUPER_MAGIC ++
+    SYSFS_MAGIC ++
+    DEBUGFS_MAGIC ++
+    TMPFS_MAGIC ++
+    DEVPTS_SUPER_MAGIC ++
+    BINFMTFS_MAGIC ++
+    SECURITYFS_MAGIC ++
+    SELINUX_MAGIC ++
+    SMACK_MAGIC ++
+    CGROUP_SUPER_MAGIC ++
+    CGROUP2_SUPER_MAGIC ++
+    NSFS_MAGIC ++
+    KEY_CHECK ++
+    POLICY_CHECK ++
+    KEXEC_KERNEL_CHECK ++
+    KEXEC_INITRAMFS_CHECK ++
+    KEXEC_CMDLINE;
 
-pub const IMA_POLICY_PATH = "/sys/kernel/security/ima/policy";
+const APPRAISE_POLICY = KEXEC_KERNEL_CHECK_APPRAISE ++ KEXEC_INITRAMFS_CHECK_APPRAISE;
+
+const MEASURE_AND_APPRAISE_POLICY = MEASURE_POLICY ++ APPRAISE_POLICY;
+
+const IMA_POLICY_PATH = "/sys/kernel/security/ima/policy";
+
+// Individual IMA policy lines below
 
 // PROC_SUPER_MAGIC = 0x9fa0
-pub const PROC_SUPER_MAGIC = withNewline("dont_measure fsmagic=0x9fa0");
+const PROC_SUPER_MAGIC = withNewline("dont_measure fsmagic=0x9fa0");
 
 // SYSFS_MAGIC = 0x62656572
-pub const SYSFS_MAGIC = withNewline("dont_measure fsmagic=0x62656572");
+const SYSFS_MAGIC = withNewline("dont_measure fsmagic=0x62656572");
 
 // DEBUGFS_MAGIC = 0x64626720
-pub const DEBUGFS_MAGIC = withNewline("dont_measure fsmagic=0x64626720");
+const DEBUGFS_MAGIC = withNewline("dont_measure fsmagic=0x64626720");
 
 // TMPFS_MAGIC = 0x01021994
-pub const TMPFS_MAGIC = withNewline("dont_measure fsmagic=0x1021994");
+const TMPFS_MAGIC = withNewline("dont_measure fsmagic=0x1021994");
 
 // DEVPTS_SUPER_MAGIC=0x1cd1
-pub const DEVPTS_SUPER_MAGIC = withNewline("dont_measure fsmagic=0x1cd1");
+const DEVPTS_SUPER_MAGIC = withNewline("dont_measure fsmagic=0x1cd1");
 
 // BINFMTFS_MAGIC=0x42494e4d
-pub const BINFMTFS_MAGIC = withNewline("dont_measure fsmagic=0x42494e4d");
+const BINFMTFS_MAGIC = withNewline("dont_measure fsmagic=0x42494e4d");
 
 // SECURITYFS_MAGIC=0x73636673
-pub const SECURITYFS_MAGIC = withNewline("dont_measure fsmagic=0x73636673");
+const SECURITYFS_MAGIC = withNewline("dont_measure fsmagic=0x73636673");
 
 // SELINUX_MAGIC=0xf97cff8c
-pub const SELINUX_MAGIC = withNewline("dont_measure fsmagic=0xf97cff8c");
+const SELINUX_MAGIC = withNewline("dont_measure fsmagic=0xf97cff8c");
 
 // SMACK_MAGIC=0x43415d53
-pub const SMACK_MAGIC = withNewline("dont_measure fsmagic=0x43415d53");
+const SMACK_MAGIC = withNewline("dont_measure fsmagic=0x43415d53");
 
 // CGROUP_SUPER_MAGIC=0x27e0eb
-pub const CGROUP_SUPER_MAGIC = withNewline("dont_measure fsmagic=0x27e0eb");
+const CGROUP_SUPER_MAGIC = withNewline("dont_measure fsmagic=0x27e0eb");
 
 // CGROUP2_SUPER_MAGIC=0x63677270
-pub const CGROUP2_SUPER_MAGIC = withNewline("dont_measure fsmagic=0x63677270");
+const CGROUP2_SUPER_MAGIC = withNewline("dont_measure fsmagic=0x63677270");
 
 // NSFS_MAGIC=0x6e736673
-pub const NSFS_MAGIC = withNewline("dont_measure fsmagic=0x6e736673");
+const NSFS_MAGIC = withNewline("dont_measure fsmagic=0x6e736673");
 
-pub const KEY_CHECK = withNewline("measure func=KEY_CHECK pcr=7");
+const KEY_CHECK = withNewline("measure func=KEY_CHECK pcr=7");
 
-pub const POLICY_CHECK = withNewline("measure func=POLICY_CHECK pcr=7");
+const POLICY_CHECK = withNewline("measure func=POLICY_CHECK pcr=7");
 
-pub const KEXEC_KERNEL_CHECK = withNewline("measure func=KEXEC_KERNEL_CHECK pcr=8");
+const KEXEC_KERNEL_CHECK = withNewline("measure func=KEXEC_KERNEL_CHECK pcr=8");
 
-pub const KEXEC_INITRAMFS_CHECK = withNewline("measure func=KEXEC_INITRAMFS_CHECK pcr=9");
+const KEXEC_INITRAMFS_CHECK = withNewline("measure func=KEXEC_INITRAMFS_CHECK pcr=9");
 
-pub const KEXEC_CMDLINE = withNewline("measure func=KEXEC_CMDLINE pcr=12");
+const KEXEC_CMDLINE = withNewline("measure func=KEXEC_CMDLINE pcr=12");
 
-pub const KEXEC_KERNEL_CHECK_APPRAISE = withNewline("appraise func=KEXEC_KERNEL_CHECK appraise_type=imasig|modsig");
+const KEXEC_KERNEL_CHECK_APPRAISE = withNewline("appraise func=KEXEC_KERNEL_CHECK appraise_type=imasig|modsig");
 
-pub const KEXEC_INITRAMFS_CHECK_APPRAISE = withNewline("appraise func=KEXEC_INITRAMFS_CHECK appraise_type=imasig|modsig");
+const KEXEC_INITRAMFS_CHECK_APPRAISE = withNewline("appraise func=KEXEC_INITRAMFS_CHECK appraise_type=imasig|modsig");
 
 fn installImaPolicy(policy: []const u8) !void {
     var policy_file = try std.fs.openFileAbsolute(IMA_POLICY_PATH, .{ .mode = .write_only });
@@ -129,42 +132,14 @@ fn loadVerificationKey() !void {
 // and persisted across kexecs, and the measurements are extended to the
 // system's TPM if one is available.
 pub fn initializeSecurity() !void {
-    var buf: [MAX_POLICY_SIZE]u8 = undefined;
-    var fba = std.heap.FixedBufferAllocator.init(&buf);
-    const allocator = fba.allocator();
-
-    var ima_policy = std.ArrayList(u8).init(allocator);
-    defer ima_policy.deinit();
-
-    try ima_policy.appendSlice(PROC_SUPER_MAGIC);
-    try ima_policy.appendSlice(SYSFS_MAGIC);
-    try ima_policy.appendSlice(DEBUGFS_MAGIC);
-    try ima_policy.appendSlice(TMPFS_MAGIC);
-    try ima_policy.appendSlice(DEVPTS_SUPER_MAGIC);
-    try ima_policy.appendSlice(BINFMTFS_MAGIC);
-    try ima_policy.appendSlice(SECURITYFS_MAGIC);
-    try ima_policy.appendSlice(SELINUX_MAGIC);
-    try ima_policy.appendSlice(SMACK_MAGIC);
-    try ima_policy.appendSlice(CGROUP_SUPER_MAGIC);
-    try ima_policy.appendSlice(CGROUP2_SUPER_MAGIC);
-    try ima_policy.appendSlice(NSFS_MAGIC);
-    try ima_policy.appendSlice(KEY_CHECK);
-    try ima_policy.appendSlice(POLICY_CHECK);
-    try ima_policy.appendSlice(KEXEC_KERNEL_CHECK);
-    try ima_policy.appendSlice(KEXEC_INITRAMFS_CHECK);
-    try ima_policy.appendSlice(KEXEC_CMDLINE);
-
-    std.log.info("boot measurement is enabled", .{});
-
     if (loadVerificationKey()) {
-        try ima_policy.appendSlice(KEXEC_KERNEL_CHECK_APPRAISE);
-        try ima_policy.appendSlice(KEXEC_INITRAMFS_CHECK_APPRAISE);
-        std.log.info("boot verification is enabled", .{});
+        try installImaPolicy(MEASURE_AND_APPRAISE_POLICY);
+        std.log.info("boot measurement and verification is enabled", .{});
     } else |err| {
         std.log.warn("failed to load verification key, cannot perform boot verification: {}", .{err});
+        try installImaPolicy(MEASURE_POLICY);
+        std.log.info("boot measurement is enabled", .{});
     }
-
-    try installImaPolicy(ima_policy.items);
 }
 
 // Each line in an IMA policy, including the last line, needs to be terminated
