@@ -217,4 +217,10 @@ pub fn main() !void {
     const reboot_cmd = try runEventLoop(&state);
 
     try posix.reboot(reboot_cmd);
+
+    // Sleep forever without hammering the CPU, waiting for the kernel to
+    // reboot.
+    var futex = std.atomic.Value(u32).init(0);
+    while (true) std.Thread.Futex.wait(&futex, 0);
+    unreachable;
 }
