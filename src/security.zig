@@ -115,8 +115,8 @@ fn loadVerificationKey() !void {
     std.log.info("added ima keyring (id=0x{x})", .{keyring_id});
 
     var buf: [8192]u8 = undefined;
-    var fba = std.heap.FixedBufferAllocator.init(&buf);
-    const keyfile_contents = try keyfile.readToEndAlloc(fba.allocator(), buf.len);
+    const n_read = try keyfile.readAll(&buf);
+    const keyfile_contents = buf[0..n_read];
 
     const key_id = try addKey(keyring_id, keyfile_contents);
     std.log.info("added verification key (id=0x{x})", .{key_id});

@@ -4,15 +4,19 @@ const path = std.fs.path;
 const system = posix.system;
 
 const Device = @import("./device.zig");
-const State = @import("../tboot-loader.zig").State;
 const kobject = @import("./kobject.zig");
-const utils = @import("../utils.zig");
+const utils = @import("./utils.zig");
 
 const linux_headers = @import("linux_headers");
 
 const DeviceWatcher = @This();
 
-pub const Event = enum { add_device, remove_device };
+pub const Event = struct {
+    action: kobject.Action,
+    device: Device,
+};
+
+const Queue = std.DoublyLinkedList(Event);
 
 fn makedev(major: u32, minor: u32) u32 {
     return std.math.shl(u32, major & 0xfffff000, 32) |
@@ -27,14 +31,24 @@ const NodeType = enum { block, char };
 const USER_RCVBUF = 3 * 1024;
 const KERN_RCVBUF = 128 * 1024 * 1024;
 
+arena: std.heap.ArenaAllocator = std.heap.ArenaAllocator.init(std.heap.page_allocator),
+
 block_dir: std.fs.Dir,
 char_dir: std.fs.Dir,
 
 /// Netlink socket fd for subscribing to new device events.
 nl_fd: posix.fd_t,
 
+/// An eventfd file descriptor used to indicate when new device events are
+/// available on the device queue.
+event: posix.fd_t,
+
+mutex: std.Thread.Mutex = .{},
+queue: Queue = .{},
+
 pub fn init() !DeviceWatcher {
-    return .{
+    var self = DeviceWatcher{
+        .event = try posix.eventfd(0, 0),
         .block_dir = try std.fs.cwd().makeOpenPath("/dev/block", .{}),
         .char_dir = try std.fs.cwd().makeOpenPath("/dev/char", .{}),
         .nl_fd = try posix.socket(
@@ -43,12 +57,13 @@ pub fn init() !DeviceWatcher {
             system.NETLINK.KOBJECT_UEVENT,
         ),
     };
+
+    try self.scanAndCreateExistingDevices();
+
+    return self;
 }
 
-// Does not exit until end of program
-pub fn watch(self: *DeviceWatcher, comm: State.DeviceWatcherIO.Inverted) !void {
-    defer Device.arena.deinit();
-
+pub fn watch(self: *DeviceWatcher, done: posix.fd_t) !void {
     defer self.deinit();
 
     try posix.setsockopt(
@@ -87,16 +102,15 @@ pub fn watch(self: *DeviceWatcher, comm: State.DeviceWatcherIO.Inverted) !void {
     try posix.epoll_ctl(
         epoll_fd,
         system.EPOLL.CTL_ADD,
-        comm.in,
+        done,
         @constCast(&.{
-            .data = .{ .fd = comm.in },
+            .data = .{ .fd = done },
             .events = system.EPOLL.IN,
         }),
     );
 
     while (true) {
-        const max_events = 8;
-        var events = [_]system.epoll_event{undefined} ** max_events;
+        var events = [_]system.epoll_event{undefined} ** (2 << 4);
 
         const n_events = posix.epoll_wait(epoll_fd, &events, -1);
 
@@ -104,51 +118,51 @@ pub fn watch(self: *DeviceWatcher, comm: State.DeviceWatcherIO.Inverted) !void {
         while (i_event < n_events) : (i_event += 1) {
             const event = events[i_event];
 
-            if (event.data.fd == comm.in) {
-                switch (try comm.read()) {
-                    .settled => {},
-                    .done => {
-                        std.log.debug("done watching devices", .{});
-                        return;
-                    },
-                    else => {},
-                }
+            if (event.data.fd == done) {
+                std.log.debug("done watching devices", .{});
+                return;
             } else if (event.data.fd == self.nl_fd) {
-                if (self.handleNewEvent()) |maybe_action| {
-                    if (maybe_action) |action| {
-                        try comm.write(switch (action) {
-                            .add => .add_device,
-                            .remove => .remove_device,
-                        });
-                    }
-                } else |err| {
+                self.handleNewEvent() catch |err| {
                     std.log.err("failed to handle new device: {}", .{err});
-                }
+                };
+            } else {
+                std.debug.panic("unknown event: {}", .{event});
             }
         }
     }
 }
 
-fn handleNewEvent(self: *DeviceWatcher) !?kobject.Action {
+fn handleNewEvent(self: *DeviceWatcher) !void {
     var recv_bytes: [USER_RCVBUF]u8 = undefined;
 
     const bytes_read = try posix.read(self.nl_fd, &recv_bytes);
 
-    const action = try kobject.parseUeventKobjectContents(
+    const event = kobject.parseUeventKobjectContents(
         recv_bytes[0..bytes_read],
-    ) orelse return null;
+    ) orelse return;
 
-    switch (action) {
-        .add => |device| try self.addDevice(device),
-        .remove => |dev_name| try self.removeDevice(dev_name),
+    switch (event.action) {
+        .add => try self.addDevice(event),
+        .remove => try self.removeDevice(event),
     }
+}
 
-    return @as(kobject.Action, action);
+pub fn nextEvent(self: *DeviceWatcher) ?Event {
+    self.mutex.lock();
+    defer self.mutex.unlock();
+
+    const node = self.queue.pop() orelse return null;
+    defer self.arena.allocator().destroy(node);
+
+    return node.data;
 }
 
 pub fn deinit(self: *DeviceWatcher) void {
+    defer self.arena.deinit();
+
     self.block_dir.close();
     self.char_dir.close();
+
     posix.close(self.nl_fd);
 }
 
@@ -199,15 +213,12 @@ pub fn scanAndCreateExistingDevicesForSubsystem(
 
     var iter = subsystem_dir.iterate();
 
-    var device_path_buf: [posix.PATH_MAX]u8 = undefined;
     while (try iter.next()) |entry| {
         // TODO(jared): Do we have any reason to believe all the files
         // won't be symlinks?
         if (entry.kind != .sym_link) {
             continue;
         }
-
-        const device_path = subsystem_dir.realpath(entry.name, &device_path_buf) catch continue;
 
         var device_dir = subsystem_dir.openDir(entry.name, .{}) catch continue;
         defer device_dir.close();
@@ -220,38 +231,60 @@ pub fn scanAndCreateExistingDevicesForSubsystem(
 
         const device = kobject.parseUeventFileContents(
             @field(Device.Subsystem, subsystem),
-            device_path,
-            entry.name,
             buf[0..n_read],
-        ) catch continue;
+        ) orelse continue;
 
-        try self.addDevice(device);
+        try self.addDevice(.{ .action = .add, .device = device });
     }
 }
 
-fn addDevice(self: *DeviceWatcher, device: *Device) !void {
-    if (device.node) |node| {
-        const major, const minor = node;
-        try self.mknod(switch (device.subsystem) {
-            .block => .block,
-            else => .char,
-        }, major, minor);
-    }
-
-    try Device.add(device);
-}
-
-fn removeDevice(self: *DeviceWatcher, dev_name: []const u8) !void {
-    if (Device.findByName(dev_name)) |d| {
-        defer Device.remove(d);
-
-        if (d.node) |node| {
+fn addDevice(self: *DeviceWatcher, event: Event) !void {
+    switch (event.device.type) {
+        .node => |node| {
             const major, const minor = node;
-            try self.removeNode(switch (d.subsystem) {
+            try self.mknod(switch (event.device.subsystem) {
                 .block => .block,
                 else => .char,
             }, major, minor);
-        }
+        },
+        else => {},
+    }
+
+    {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
+        const node = try self.arena.allocator().create(Queue.Node);
+        node.* = .{ .data = event };
+
+        self.queue.append(node);
+
+        _ = try posix.write(self.event, std.mem.asBytes(&@as(u64, 1)));
+    }
+}
+
+fn removeDevice(self: *DeviceWatcher, event: Event) !void {
+    switch (event.device.type) {
+        .node => |node| {
+            const major, const minor = node;
+            try self.removeNode(switch (event.device.subsystem) {
+                .block => .block,
+                else => .char,
+            }, major, minor);
+        },
+        else => {},
+    }
+
+    {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
+        const node = try self.arena.allocator().create(Queue.Node);
+
+        node.* = .{ .data = event };
+        self.queue.append(node);
+
+        _ = try posix.write(self.event, std.mem.asBytes(&@as(u64, 1)));
     }
 }
 

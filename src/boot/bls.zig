@@ -12,7 +12,7 @@ const Gpt = @import("../disk/partition_table.zig").Gpt;
 const GptPartitionType = @import("../disk/partition_table.zig").GptPartitionType;
 const Mbr = @import("../disk/partition_table.zig").Mbr;
 const MbrPartitionType = @import("../disk/partition_table.zig").MbrPartitionType;
-const kobject = @import("../device/kobject.zig");
+const kobject = @import("../kobject.zig");
 
 const Mount = struct {
     allocator: std.mem.Allocator,

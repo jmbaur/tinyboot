@@ -6,8 +6,7 @@ const linux_headers = @import("linux_headers");
 
 const BootEntry = @import("./boot.zig").BootEntry;
 const BootLoader = @import("./boot.zig").BootLoader;
-const Device = @import("./device/device.zig");
-const State = @import("./tboot-loader.zig").State;
+const Device = @import("./device.zig");
 const Xmodem = @import("./boot/xmodem.zig").Xmodem;
 const kexecLoad = @import("./boot.zig").kexecLoad;
 const printKernelLogs = @import("./system.zig").printKernelLogs;
@@ -35,97 +34,26 @@ const CONSOLE = "/dev/char/5:1";
 
 const IO_BUFFER_SIZE = 4096;
 
-var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+pub const IN = posix.STDIN_FILENO;
 
 var out = std.io.bufferedWriter(std.io.getStdOut().writer());
 
-comm: State.ConsoleIO.Inverted,
+arena: std.heap.ArenaAllocator = std.heap.ArenaAllocator.init(std.heap.page_allocator),
 input_cursor: u16 = 0,
 input_end: u16 = 0,
 input_buffer: [IO_BUFFER_SIZE]u8 = undefined,
 context: ?BootLoader = null,
 tty: ?system.Tty = null,
 
-pub fn input(comm: State.ConsoleIO.Inverted) !void {
-    defer arena.deinit();
-
-    // Setup stdio to point to the linux system console.
-    {
-        var dev_console = try std.fs.cwd().openFile(
-            CONSOLE,
-            .{ .mode = .read_write },
-        );
-        defer dev_console.close();
-
-        try posix.dup2(dev_console.handle, posix.STDIN_FILENO);
-        try posix.dup2(dev_console.handle, posix.STDOUT_FILENO);
-        try posix.dup2(dev_console.handle, posix.STDERR_FILENO);
-    }
-
+pub fn init() !Console {
     // Turn off local echo, making the ENTER key the only thing that shows a
     // sign of user input.
     {
-        _ = try system.setupTty(posix.STDIN_FILENO, .no_echo);
+        _ = try system.setupTty(IN, .no_echo);
         writeAllAndFlush("\npress <ENTER> to interrupt\n\n");
     }
 
-    var console = Console{ .comm = comm };
-    defer console.deinit();
-
-    const epoll_fd = try posix.epoll_create1(linux_headers.EPOLL_CLOEXEC);
-    defer posix.close(epoll_fd);
-
-    try posix.epoll_ctl(
-        epoll_fd,
-        posix.system.EPOLL.CTL_ADD,
-        comm.in,
-        @constCast(&.{
-            .data = .{ .fd = comm.in },
-            .events = posix.system.EPOLL.IN,
-        }),
-    );
-
-    try posix.epoll_ctl(
-        epoll_fd,
-        posix.system.EPOLL.CTL_ADD,
-        posix.STDIN_FILENO,
-        @constCast(&.{
-            .data = .{ .fd = posix.STDIN_FILENO },
-            .events = posix.system.EPOLL.IN,
-        }),
-    );
-
-    while (true) {
-        const max_events = 8;
-        var events = [_]posix.system.epoll_event{undefined} ** max_events;
-
-        const n_events = posix.epoll_wait(epoll_fd, &events, -1);
-
-        var i_event: usize = 0;
-        while (i_event < n_events) : (i_event += 1) {
-            const event = events[i_event];
-            if (event.data.fd == comm.in) {
-                switch (try comm.read()) {
-                    .settled => {
-                        if (console.tty == null) {
-                            var result: ?Event = null;
-                            Device.forEach(&result, autoboot);
-                            if (result) |e| {
-                                try console.comm.write(e);
-                            }
-                        }
-                    },
-                    .done => {
-                        writeAllAndFlush("\ngoodbye!\n\n");
-                        return;
-                    },
-                    else => {},
-                }
-            } else if (event.data.fd == posix.STDIN_FILENO) {
-                try console.handleStdin();
-            }
-        }
-    }
+    return .{};
 }
 
 fn autoboot(ctx: *anyopaque, device: *const Device) utils.IterResult {
@@ -222,17 +150,21 @@ fn clearScreen() void {
     out.writer().writeAll(.{esc} ++ "[0;0H") catch {};
 }
 
-fn deinit(self: *Console) void {
+pub fn deinit(self: *Console) void {
+    defer self.arena.deinit();
+
     if (self.tty) |*tty| {
         tty.reset();
     }
 }
 
-fn handleStdin(self: *Console) !void {
+pub fn handleStdin(self: *Console, devices: []const Device) !?Event {
+    _ = devices;
+
     // We may already have a prompt from a boot timeout, so don't print
     // a prompt if we already have one.
     if (self.tty == null) {
-        self.tty = try system.setupTty(posix.STDIN_FILENO, .user_input);
+        self.tty = try system.setupTty(IN, .user_input);
         std.log.debug("user presence detected", .{});
         try self.prompt();
     }
@@ -241,7 +173,7 @@ fn handleStdin(self: *Console) !void {
     // terminal in raw mode.
     var buf = [_]u8{0};
     if (try std.io.getStdIn().read(&buf) != 1) {
-        return;
+        return null;
     }
 
     const char = buf[0];
@@ -424,7 +356,7 @@ fn handleStdin(self: *Console) !void {
     if (done and self.input_end > 0) {
         defer {
             if (self.context == null) {
-                _ = arena.reset(.retain_capacity);
+                _ = self.arena.reset(.retain_capacity);
             }
         }
 
@@ -433,7 +365,7 @@ fn handleStdin(self: *Console) !void {
         self.input_end = 0;
 
         const user_input = self.input_buffer[0..end];
-        var args = try ArgsIterator.init(arena.allocator(), user_input);
+        var args = try ArgsIterator.init(self.arena.allocator(), user_input);
         defer args.deinit();
 
         const maybe_notification = self.runCommand(&args);
@@ -441,15 +373,16 @@ fn handleStdin(self: *Console) !void {
         const event = maybe_notification catch |err| {
             print("\nerror running command: {}\n", .{err});
             try self.prompt();
-            return;
+            return null;
         } orelse {
-            return try self.prompt();
+            try self.prompt();
+            return null;
         };
 
-        self.comm.write(event) catch |err| {
-            std.log.err("failed to send notification from console: {}", .{err});
-        };
+        return event;
     }
+
+    return null;
 }
 
 fn runCommand(self: *Console, args: *ArgsIterator) !?Event {
@@ -591,14 +524,14 @@ pub const Command = struct {
             \\logs 7
         ;
 
-        fn run(_: *Console, args: *ArgsIterator) !?Event {
+        fn run(console: *Console, args: *ArgsIterator) !?Event {
             const filter = if (args.next()) |filter_str|
                 try std.fmt.parseInt(u3, filter_str, 10)
             else
                 6;
 
             try printKernelLogs(
-                arena.allocator(),
+                console.arena.allocator(),
                 filter,
                 out.writer().any(),
             );
@@ -646,8 +579,8 @@ pub const Command = struct {
         }
 
         fn run(_: *Console, _: *ArgsIterator) !?Event {
-            var none = {};
-            Device.forEach(&none, printIfBootable);
+            // var none = {};
+            // Device.forEach(&none, printIfBootable);
 
             return null;
         }
@@ -692,7 +625,7 @@ pub const Command = struct {
 //     fn run(console: *Console, args: *ArgsIterator) !?Outcome {
 //         var xmodem = try Xmodem.init(console.allocator, .{
 //             .serial_name = "console-stdin",
-//             .serial_fd = posix.STDIN_FILENO,
+//             .serial_fd = IN,
 //             .skip_initrd = if (args.next()) |next|
 //                 std.mem.eql(u8, next, "-n")
 //             else
