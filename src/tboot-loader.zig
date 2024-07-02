@@ -145,7 +145,11 @@ pub fn handleDevice(self: *TbootLoader) !void {
                 // TODO(jared): make match() function return a number we can
                 // use to prioritize certain devices over others.
                 if (Disk.match(&device)) {
-                    const disk_bootloader = try BootLoader.init(Disk, device, arena.allocator());
+                    const disk_bootloader = try BootLoader.init(
+                        Disk,
+                        device,
+                        arena.allocator(),
+                    );
                     try boot_loaders.append(disk_bootloader);
                 }
             },
@@ -216,6 +220,14 @@ fn run(self: *TbootLoader) !posix.RebootCommand {
 }
 
 pub fn main() !void {
+    defer {
+        for (boot_loaders.items) |*boot_loader| {
+            boot_loader.deinit();
+        }
+        boot_loaders.deinit();
+        arena.deinit();
+    }
+
     {
         try system.mountPseudoFilesystems();
 

@@ -3,7 +3,7 @@ const posix = std.posix;
 
 const BootEntry = @import("../boot.zig").BootEntry;
 const BootDevice = @import("../boot.zig").BootDevice;
-const tmp = @import("../tmp.zig");
+const tmp = @import("../tmpdir.zig");
 const Tty = @import("../system.zig").Tty;
 const xmodemRecv = @import("../xmodem.zig").xmodemRecv;
 const setupTty = @import("../system.zig").setupTty;

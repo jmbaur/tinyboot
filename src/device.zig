@@ -10,6 +10,51 @@ type: union(enum) {
     node: struct { u32, u32 },
 },
 
+pub fn nodePath(device: *const Device, buf: []u8) ![]u8 {
+    std.debug.assert(device.type == .node);
+
+    const major, const minor = device.type.node;
+
+    return try std.fmt.bufPrint(buf, "/dev/{s}/{d}:{d}", .{
+        switch (device.subsystem) {
+            .block => "block",
+            else => "char",
+        },
+        major,
+        minor,
+    });
+}
+
+pub fn nodePathZ(device: *const Device, buf: []u8) ![:0]const u8 {
+    std.debug.assert(device.type == .node);
+
+    const major, const minor = device.type.node;
+
+    return try std.fmt.bufPrintZ(buf, "/dev/{s}/{d}:{d}", .{
+        switch (device.subsystem) {
+            .block => "block",
+            else => "char",
+        },
+        major,
+        minor,
+    });
+}
+
+pub fn nodeSysfsPath(device: *const Device, buf: []u8) ![]u8 {
+    std.debug.assert(device.type == .node);
+
+    const major, const minor = device.type.node;
+
+    return try std.fmt.bufPrint(buf, "/sys/dev/{s}/{d}:{d}", .{
+        switch (device.subsystem) {
+            .block => "block",
+            else => "char",
+        },
+        major,
+        minor,
+    });
+}
+
 pub fn format(
     self: Device,
     comptime fmt: []const u8,
