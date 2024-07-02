@@ -20,7 +20,7 @@ const Device = @import("../device.zig");
 const DiskBootLoader = @This();
 
 arena: std.heap.ArenaAllocator = std.heap.ArenaAllocator.init(std.heap.page_allocator),
-mountpoint: ?std.fs.Dir,
+mountpoint: ?std.fs.Dir = null,
 
 pub fn match(device: *const Device) bool {
     return device.subsystem == .block;
@@ -255,8 +255,8 @@ fn mount(self: *DiskBootLoader) !void {
 
 fn unmount(self: *DiskBootLoader) !void {
     if (self.mountpoint) |*mountpoint| {
-        const disk_path = try self.allocator.dupeZ(u8, self.disk_path);
-        defer self.allocator.free(disk_path);
+        const disk_path = try self.arena.allocator().dupeZ(u8, self.disk_path);
+        defer self.arena.allocator().free(disk_path);
 
         _ = system.umount2(disk_path, system.MNT.DETACH);
 
