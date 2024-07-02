@@ -5,7 +5,7 @@ const process = std.process;
 const linux_headers = @import("linux_headers");
 
 const BootEntry = @import("./boot.zig").BootEntry;
-const BootLoader = @import("./boot.zig").BootLoader;
+const BootLoader = @import("./boot/bootloader.zig");
 const Device = @import("./device.zig");
 const Xmodem = @import("./boot/xmodem.zig").Xmodem;
 const kexecLoad = @import("./boot.zig").kexecLoad;
@@ -42,7 +42,7 @@ arena: std.heap.ArenaAllocator = std.heap.ArenaAllocator.init(std.heap.page_allo
 input_cursor: u16 = 0,
 input_end: u16 = 0,
 input_buffer: [IO_BUFFER_SIZE]u8 = undefined,
-context: ?BootLoader = null,
+context: ?*BootLoader = null,
 tty: ?system.Tty = null,
 
 pub fn init() !Console {
@@ -110,7 +110,7 @@ fn writeAllAndFlush(bytes: []const u8) void {
 }
 
 fn prompt(self: *Console) !void {
-    if (self.context) |*ctx| {
+    if (self.context) |ctx| {
         try out.writer().writeAll(ctx.name());
     }
     writeAllAndFlush("> ");
@@ -158,9 +158,7 @@ pub fn deinit(self: *Console) void {
     }
 }
 
-pub fn handleStdin(self: *Console, devices: []const Device) !?Event {
-    _ = devices;
-
+pub fn handleStdin(self: *Console, boot_loaders: []BootLoader) !?Event {
     // We may already have a prompt from a boot timeout, so don't print
     // a prompt if we already have one.
     if (self.tty == null) {
@@ -368,7 +366,7 @@ pub fn handleStdin(self: *Console, devices: []const Device) !?Event {
         var args = try ArgsIterator.init(self.arena.allocator(), user_input);
         defer args.deinit();
 
-        const maybe_notification = self.runCommand(&args);
+        const maybe_notification = self.runCommand(&args, boot_loaders);
 
         const event = maybe_notification catch |err| {
             print("\nerror running command: {}\n", .{err});
@@ -385,22 +383,34 @@ pub fn handleStdin(self: *Console, devices: []const Device) !?Event {
     return null;
 }
 
-fn runCommand(self: *Console, args: *ArgsIterator) !?Event {
+fn runCommand(
+    self: *Console,
+    args: *ArgsIterator,
+    boot_loaders: []BootLoader,
+) !?Event {
     if (args.next()) |cmd| {
         if (std.mem.eql(u8, cmd, "help")) {
-            return @field(Command, "help").run(self, args);
+            return @field(Command, "help").run(self, args, boot_loaders);
         }
 
-        if (self.context) |*ctx| {
+        if (self.context) |ctx| {
             inline for (std.meta.fields(Command.Context)) |field| {
                 if (std.mem.eql(u8, field.name, cmd)) {
-                    return @field(Command, field.name).run(self, args, ctx);
+                    return @field(Command, field.name).run(
+                        self,
+                        args,
+                        ctx,
+                    );
                 }
             }
         } else {
             inline for (std.meta.fields(Command.NoContext)) |field| {
                 if (std.mem.eql(u8, field.name, cmd)) {
-                    return @field(Command, field.name).run(self, args);
+                    return @field(Command, field.name).run(
+                        self,
+                        args,
+                        boot_loaders,
+                    );
                 }
             }
         }
@@ -418,11 +428,13 @@ pub const Command = struct {
         poweroff,
         reboot,
         list,
+        select,
     };
 
     const Context = enum {
-        // exit,
-        // list,
+        exit,
+        probe,
+        boot,
     };
 
     const help = struct {
@@ -464,7 +476,7 @@ pub const Command = struct {
             print("unknown command \"{s}\"\n", .{cmd});
         }
 
-        fn run(console: *Console, args: *ArgsIterator) !?Event {
+        fn run(console: *Console, args: *ArgsIterator, _: []const BootLoader) !?Event {
             if (args.next()) |cmd| {
                 if (console.context == null) {
                     helpOne(NoContext, cmd);
@@ -492,7 +504,7 @@ pub const Command = struct {
             \\poweroff
         ;
 
-        fn run(_: *Console, _: *ArgsIterator) !?Event {
+        fn run(_: *Console, _: *ArgsIterator, _: []const BootLoader) !?Event {
             return .poweroff;
         }
     };
@@ -506,7 +518,7 @@ pub const Command = struct {
             \\reboot
         ;
 
-        fn run(_: *Console, _: *ArgsIterator) !?Event {
+        fn run(_: *Console, _: *ArgsIterator, _: []const BootLoader) !?Event {
             return .reboot;
         }
     };
@@ -524,7 +536,7 @@ pub const Command = struct {
             \\logs 7
         ;
 
-        fn run(console: *Console, args: *ArgsIterator) !?Event {
+        fn run(console: *Console, args: *ArgsIterator, _: []const BootLoader) !?Event {
             const filter = if (args.next()) |filter_str|
                 try std.fmt.parseInt(u3, filter_str, 10)
             else
@@ -549,60 +561,150 @@ pub const Command = struct {
             \\clear
         ;
 
-        fn run(_: *Console, _: *ArgsIterator) !?Event {
+        fn run(_: *Console, _: *ArgsIterator, _: []const BootLoader) !?Event {
             clearScreen();
 
             return null;
         }
     };
 
-    const list = struct {
-        const short_help = "list bootable devices";
+    const select = struct {
+        const short_help = "select boot loader";
         const long_help =
-            \\List all bootable devices.
+            \\Select a boot loader.
+            \\
+            \\Usage:
+            \\select <index>
+            \\
+            \\Example:
+            \\select 2
+        ;
+
+        fn run(console: *Console, args: *ArgsIterator, boot_loaders: []BootLoader) !?Event {
+            const want_index = try std.fmt.parseInt(
+                usize,
+                args.next() orelse return error.InvalidArgument,
+                10,
+            );
+
+            for (boot_loaders, 0..) |*boot_loader, index| {
+                if (want_index == index) {
+                    console.context = boot_loader;
+                    print(
+                        "selected boot loader: {s} ({})\n",
+                        .{ boot_loader.name(), boot_loader.device },
+                    );
+                    return null;
+                }
+            }
+
+            return error.NotFound;
+        }
+    };
+
+    const list = struct {
+        const short_help = "list boot loaders";
+        const long_help =
+            \\List all active boot loaders.
             \\
             \\Usage:
             \\list
         ;
 
-        fn printIfBootable(_: *anyopaque, d: *const Device) utils.IterResult {
-            if (d.driver) |driver| {
-                switch (driver.driver_type) {
-                    .bootloader => out.writer().print(
-                        "{s} [{s}]\n",
-                        .{ d.dev_name, d.dev_path },
-                    ) catch {},
-                }
+        fn run(_: *Console, _: *ArgsIterator, boot_loaders: []BootLoader) !?Event {
+            for (boot_loaders, 0..) |*boot_loader, index| {
+                print(
+                    "{d}\t{s} ({})\n",
+                    .{ index, boot_loader.name(), boot_loader.device },
+                );
             }
-
-            return .@"continue";
-        }
-
-        fn run(_: *Console, _: *ArgsIterator) !?Event {
-            // var none = {};
-            // Device.forEach(&none, printIfBootable);
 
             return null;
         }
     };
 
-    // const exit = struct {
-    //     const short_help = "exit context";
-    //     const long_help =
-    //         \\Exit bootloader context.
-    //         \\
-    //         \\Usage:
-    //         \\exit
-    //     ;
-    //
-    //     fn run(console: *Console, _: *ArgsIterator, boot_loader: *BootLoader) !?Notification {
-    //         defer console.context = null;
-    //
-    //         try boot_loader.deinit();
-    //
-    //         return null;
-    //     }
-    // };
+    const exit = struct {
+        const short_help = "exit context";
+        const long_help =
+            \\Exit bootloader context.
+            \\
+            \\Usage:
+            \\exit
+        ;
+
+        fn run(console: *Console, _: *ArgsIterator, _: *BootLoader) !?Event {
+            defer console.context = null;
+
+            return null;
+        }
+    };
+
+    const probe = struct {
+        const short_help = "probe for boot entries";
+        const long_help =
+            \\Probe and show all boot entries on a device.
+            \\
+            \\Usage:
+            \\probe
+        ;
+
+        fn run(_: *Console, _: *ArgsIterator, boot_loader: *BootLoader) !?Event {
+            const entries = boot_loader.probe() catch |err| {
+                print("failed to probe: {}\n", .{err});
+                return null;
+            };
+
+            for (entries, 0..) |entry, index| {
+                print("{d}\t{s}\n", .{ index, entry.linux });
+            }
+
+            return null;
+        }
+    };
+
+    const boot = struct {
+        const short_help = "boot an entry";
+        const long_help =
+            \\Boot an entry.
+            \\
+            \\Usage:
+            \\boot <index>          Default is to boot the first entry
+            \\
+            \\Example
+            \\boot 7
+        ;
+
+        fn run(_: *Console, args: *ArgsIterator, boot_loader: *BootLoader) !?Event {
+            const want_index = try std.fmt.parseInt(
+                usize,
+                args.next() orelse "0",
+                10,
+            );
+
+            const entries = boot_loader.probe() catch |err| {
+                print("failed to probe: {}\n", .{err});
+                return null;
+            };
+
+            for (entries, 0..) |entry, index| {
+                if (want_index == index) {
+                    if (boot_loader.load(entry)) {
+                        print(
+                            "selected entry: {s}\n",
+                            .{entry.linux},
+                        );
+
+                        return Event.kexec;
+                    } else |err| {
+                        print("failed to load entry: {}", .{err});
+                        return null;
+                    }
+                }
+            }
+
+            return error.NotFound;
+        }
+    };
 };
 
 // const boot_xmodem = struct {

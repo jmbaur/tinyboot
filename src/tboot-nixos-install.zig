@@ -288,7 +288,7 @@ pub fn main() !void {
     }
 
     if (res.positionals.len != 1 or res.args.@"private-key" == null or res.args.@"public-key" == null) {
-        try diag.report(stderr, error.InvalidArgs);
+        try diag.report(stderr, error.InvalidArgument);
         try clap.usage(stderr, clap.Help, &params);
         return;
     }

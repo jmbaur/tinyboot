@@ -10,6 +10,24 @@ type: union(enum) {
     node: struct { u32, u32 },
 },
 
+pub fn format(
+    self: Device,
+    comptime fmt: []const u8,
+    options: std.fmt.FormatOptions,
+    writer: anytype,
+) !void {
+    _ = fmt;
+    _ = options;
+
+    switch (self.type) {
+        .ifindex => |ifindex| try writer.print("{s} {}", .{ "ifindex", ifindex }),
+        .node => |node| {
+            const major, const minor = node;
+            try writer.print("node {}:{}", .{ major, minor });
+        },
+    }
+}
+
 // ls -1 /sys/class
 //
 /// Subsystems we care about when acting as a bootloader.

@@ -5,9 +5,11 @@ const posix = std.posix;
 const linux_headers = @import("linux_headers");
 
 const Autoboot = @import("./autoboot.zig");
+const BootLoader = @import("./boot/bootloader.zig");
 const Console = @import("./console.zig");
 const Device = @import("./device.zig");
 const DeviceWatcher = @import("./watch.zig");
+const Disk = @import("./boot/disk.zig");
 const Log = @import("./log.zig");
 const security = @import("./security.zig");
 const system = @import("./system.zig");
@@ -21,7 +23,7 @@ pub const std_options = .{
 const TbootLoader = @This();
 
 var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-var devices = std.ArrayList(Device).init(arena.allocator());
+var boot_loaders = std.ArrayList(BootLoader).init(arena.allocator());
 
 /// Master epoll file descriptor for driving the event loop.
 epoll: posix.fd_t,
@@ -103,7 +105,7 @@ pub fn handleConsole(self: *TbootLoader) !?posix.RebootCommand {
         }
     }
 
-    const outcome = try self.console.handleStdin(devices.items) orelse return null;
+    const outcome = try self.console.handleStdin(boot_loaders.items) orelse return null;
 
     switch (outcome) {
         .reboot => return posix.RebootCommand.RESTART,
@@ -131,17 +133,25 @@ pub fn handleDevice(self: *TbootLoader) !void {
     }
 
     while (self.device_watcher.nextEvent()) |event| {
+        const device = event.device;
+
         switch (event.action) {
             .add => {
-                std.log.debug("new device added {}", .{event.device.subsystem});
-                try devices.append(event.device);
+                std.log.debug(
+                    "new {s} device added",
+                    .{@tagName(event.device.subsystem)},
+                );
+
+                if (Disk.match(&device)) {
+                    const disk_bootloader = try BootLoader.init(Disk, device, arena.allocator());
+                    try boot_loaders.append(disk_bootloader);
+                }
             },
             .remove => {
-                for (devices.items, 0..) |device, index| {
-                    if (device.subsystem == event.device.subsystem) {
-                        if (std.meta.eql(device, event.device)) {
-                            _ = devices.orderedRemove(index);
-                        }
+                for (boot_loaders.items, 0..) |boot_loader, index| {
+                    if (std.meta.eql(boot_loader.device, event.device)) {
+                        var removed_boot_loader = boot_loaders.orderedRemove(index);
+                        removed_boot_loader.deinit();
                     }
                 }
             },
@@ -194,6 +204,9 @@ fn run(self: *TbootLoader) !posix.RebootCommand {
             } else if (event.data.fd == self.device_settle) {
                 try self.handleDeviceSettle();
             } else {
+                // if (self.autoboot) |autoboot| {
+                // if (event.data.fd == autoboot
+                // }
                 std.debug.panic("unknown event: {}", .{event});
             }
         }

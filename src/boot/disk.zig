@@ -15,44 +15,36 @@ const linux_headers = @import("linux_headers");
 // const kobject = @import("../device/kobject.zig");
 
 const BootLoader = @import("./bootloader.zig");
-const Device = @import("../device/device.zig");
+const Device = @import("../device.zig");
 
 const DiskBootLoader = @This();
 
 arena: std.heap.ArenaAllocator = std.heap.ArenaAllocator.init(std.heap.page_allocator),
 
-fn driver_match(device: *const Device) bool {
-    const dev_type = device.dev_type orelse return false;
-
-    return switch (dev_type) {
-        .disk => true,
-        else => false,
-    };
+pub fn match(device: *const Device) bool {
+    return device.subsystem == .block;
 }
 
-fn driver_init(self: *DiskBootLoader) anyerror!void {
+pub fn init() DiskBootLoader {
+    return .{};
+}
+
+pub fn name() []const u8 {
+    return "disk";
+}
+
+pub fn deinit(self: *DiskBootLoader) void {
+    defer self.arena.deinit();
+}
+
+pub fn probe(self: *DiskBootLoader, entries: *std.ArrayList(BootLoader.Entry)) !void {
     _ = self;
+    _ = entries;
 }
 
-fn driver_deinit(self: *DiskBootLoader) void {
-    self.arena.deinit();
-}
-
-fn probe(self: *DiskBootLoader, device: *const Device) !void {
+pub fn entryLoaded(self: *DiskBootLoader, entryContext: *anyopaque) void {
     _ = self;
-    std.log.debug("disk probe {s}", .{device.dev_name});
-}
-
-pub fn driver() Device.Driver {
-    return Device.Driver.new(
-        DiskBootLoader,
-        BootLoader.new(DiskBootLoader, .{ .probe = probe }),
-        .{
-            .match = driver_match,
-            .init = driver_init,
-            .deinit = driver_deinit,
-        },
-    );
+    _ = entryContext;
 }
 
 // const Mount = struct {
