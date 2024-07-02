@@ -142,6 +142,8 @@ pub fn handleDevice(self: *TbootLoader) !void {
                     .{@tagName(event.device.subsystem)},
                 );
 
+                // TODO(jared): make match() function return a number we can
+                // use to prioritize certain devices over others.
                 if (Disk.match(&device)) {
                     const disk_bootloader = try BootLoader.init(Disk, device, arena.allocator());
                     try boot_loaders.append(disk_bootloader);

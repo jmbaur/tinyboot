@@ -25,7 +25,7 @@ entries: std.ArrayList(Entry),
 inner: *anyopaque,
 vtable: *const struct {
     name: *const fn () []const u8,
-    probe: *const fn (*anyopaque, *std.ArrayList(Entry)) anyerror!void,
+    probe: *const fn (*anyopaque, *std.ArrayList(Entry), Device) anyerror!void,
     entryLoaded: *const fn (*anyopaque, Entry) void,
     deinit: *const fn (*anyopaque, std.mem.Allocator) void,
 },
@@ -47,10 +47,14 @@ pub fn init(
             self.deinit();
         }
 
-        pub fn probe(ctx: *anyopaque, entries: *std.ArrayList(Entry)) !void {
+        pub fn probe(
+            ctx: *anyopaque,
+            entries: *std.ArrayList(Entry),
+            d: Device,
+        ) !void {
             const self: *T = @ptrCast(@alignCast(ctx));
 
-            try self.probe(entries);
+            try self.probe(entries, d);
         }
 
         pub fn entryLoaded(ctx: *anyopaque, entry: Entry) void {
@@ -84,7 +88,7 @@ pub fn name(self: *BootLoader) []const u8 {
 
 pub fn probe(self: *BootLoader) ![]const Entry {
     if (!self.probed) {
-        try self.vtable.probe(self.inner, &self.entries);
+        try self.vtable.probe(self.inner, &self.entries, self.device);
         self.probed = true;
     }
 

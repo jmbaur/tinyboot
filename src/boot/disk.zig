@@ -20,6 +20,7 @@ const Device = @import("../device.zig");
 const DiskBootLoader = @This();
 
 arena: std.heap.ArenaAllocator = std.heap.ArenaAllocator.init(std.heap.page_allocator),
+mountpoint: ?std.fs.Dir,
 
 pub fn match(device: *const Device) bool {
     return device.subsystem == .block;
@@ -35,16 +36,236 @@ pub fn name() []const u8 {
 
 pub fn deinit(self: *DiskBootLoader) void {
     defer self.arena.deinit();
+
+    self.unmount() catch |err| {
+        std.log.err("failed to unmount: {}", .{err});
+    };
 }
 
-pub fn probe(self: *DiskBootLoader, entries: *std.ArrayList(BootLoader.Entry)) !void {
+pub fn probe(
+    self: *DiskBootLoader,
+    entries: *std.ArrayList(BootLoader.Entry),
+    device: Device,
+) !void {
     _ = self;
     _ = entries;
+    _ = device;
+
+    // std.log.debug("BLS setup", .{});
+    //
+    // var disk_alias_dir = try std.fs.cwd().openDir(
+    //     "/dev/disk",
+    //     .{},
+    // );
+    // defer disk_alias_dir.close();
+    //
+    // try std.fs.cwd().makePath("/mnt");
+    //
+    // var sysfs_block_dir = try std.fs.cwd().openDir(
+    //     "/sys/class/block",
+    //     .{ .iterate = true },
+    // );
+    // defer sysfs_block_dir.close();
+    // var it = sysfs_block_dir.iterate();
+    //
+    // while (try it.next()) |dir_entry| {
+    //     if (dir_entry.kind != .sym_link) {
+    //         continue;
+    //     }
+    //
+    //     const uevent_path = try std.fs.path.join(self.allocator, &.{ dir_entry.name, "uevent" });
+    //     var uevent_file = try sysfs_block_dir.openFile(uevent_path, .{});
+    //     defer uevent_file.close();
+    //
+    //     const max_bytes = 10 * 1024 * 1024;
+    //     const uevent_contents = try uevent_file.readToEndAlloc(self.allocator, max_bytes);
+    //
+    //     var uevent = try kobject.parseUeventFileContents(self.allocator, uevent_contents);
+    //
+    //     const devtype = uevent.get("DEVTYPE") orelse continue;
+    //
+    //     std.log.debug(
+    //         "inspecting block device {s} ({s})",
+    //         .{ dir_entry.name, devtype },
+    //     );
+    //
+    //     if (!std.mem.eql(u8, devtype, "disk")) {
+    //         continue;
+    //     }
+    //
+    //     const diskseq = uevent.get("DISKSEQ") orelse continue;
+    //     const devname = uevent.get("DEVNAME") orelse continue;
+    //
+    //     const disk_handle = disk_alias_dir.openFile(
+    //         try std.fmt.allocPrint(self.allocator, "disk{s}", .{diskseq}),
+    //         .{},
+    //     ) catch |err| {
+    //         std.log.err(
+    //             "failed to open disk alias for {s}: {}",
+    //             .{ dir_entry.name, err },
+    //         );
+    //         continue;
+    //     };
+    //
+    //     var disk_source = std.io.StreamSource{ .file = disk_handle };
+    //
+    //     // All GPTs also have an MBR, so we can invalidate the disk
+    //     // entirely if it does not have an MBR.
+    //     var mbr = Mbr.init(&disk_source) catch |err| {
+    //         std.log.err("no MBR found on disk {s}: {}", .{ devname, err });
+    //         continue;
+    //     };
+    //
+    //     const boot_partn = b: {
+    //         for (mbr.partitions(), 1..) |part, mbr_partn| {
+    //             const part_type = MbrPartitionType.fromValue(part.partType()) orelse continue;
+    //
+    //             if (part.isBootable() and
+    //                 // BootLoaderSpec uses this partition type for MBR, see
+    //                 // https://uapi-group.org/specifications/specs/boot_loader_specification/#the-partitionsl.
+    //                 (part_type == .LinuxExtendedBoot or
+    //                 // QEMU uses this partition type when using a FAT
+    //                 // emulated drive with `-drive file=fat:rw:some/directory`.
+    //                 part_type == .Fat16))
+    //             {
+    //                 break :b mbr_partn;
+    //             }
+    //
+    //             // disk has a GPT
+    //             if (!part.isBootable() and part_type == .ProtectedMbr) {
+    //                 var gpt = Gpt.init(&disk_source) catch |err| switch (err) {
+    //                     Gpt.Error.MissingMagicNumber => {
+    //                         std.log.debug("disk {s} does not contain a GUID partition table", .{devname});
+    //                         continue;
+    //                     },
+    //                     Gpt.Error.HeaderCrcFail => {
+    //                         std.log.err("disk {s} CRC integrity check failed", .{devname});
+    //                         continue;
+    //                     },
+    //                     else => {
+    //                         std.log.err("failed to read disk {s}: {}", .{ devname, err });
+    //                         continue;
+    //                     },
+    //                 };
+    //
+    //                 const partitions = try gpt.partitions(self.allocator);
+    //                 for (partitions, 1..) |partition, gpt_partn| {
+    //                     if (partition.partType() orelse continue == .EfiSystem) {
+    //                         break :b gpt_partn;
+    //                     }
+    //                 }
+    //             }
+    //         }
+    //
+    //         continue;
+    //     };
+    //
+    //     const partition_filename = try std.fmt.allocPrint(
+    //         self.allocator,
+    //         "disk{s}_part{d}",
+    //         .{ diskseq, boot_partn },
+    //     );
+    //     defer self.allocator.free(partition_filename);
+    //
+    //     std.log.info("found boot partition on disk {s} partition {d}", .{ devname, boot_partn });
+    //
+    //     var esp_handle = try disk_alias_dir.openFile(partition_filename, .{});
+    //     defer esp_handle.close();
+    //
+    //     var esp_file_source = std.io.StreamSource{ .file = esp_handle };
+    //     const fstype = try FsType.detect(&esp_file_source) orelse {
+    //         std.log.err("could not detect filesystem on EFI system partition", .{});
+    //         continue;
+    //     };
+    //
+    //     var mount = Mount.init(self.allocator, .{
+    //         .name = devname,
+    //         .disk_path = try disk_alias_dir.realpathAlloc(
+    //             self.allocator,
+    //             partition_filename,
+    //         ),
+    //         .fstype = fstype,
+    //     });
+    //
+    //     mount.mount() catch |err| {
+    //         std.log.err("failed to mount disk {s}: {}", .{ mount.name, err });
+    //         continue;
+    //     };
+    //     errdefer mount.unmount() catch {};
+    //
+    //     std.log.info("mounted disk {s}", .{mount.name});
+    //
+    //     if (diskIsRemovable(&sysfs_block_dir, devname)) {
+    //         try self.external_mounts.append(mount);
+    //     } else {
+    //         try self.internal_mounts.append(mount);
+    //     }
+    // }
 }
 
 pub fn entryLoaded(self: *DiskBootLoader, entryContext: *anyopaque) void {
     _ = self;
     _ = entryContext;
+}
+
+const random_bytes_count = 12;
+const sub_path_len = std.fs.base64_encoder.calcSize(random_bytes_count);
+
+fn mount(self: *DiskBootLoader) !void {
+    // make sure there are no current mountpoints
+    try self.unmount();
+
+    var random_bytes: [random_bytes_count]u8 = undefined;
+    std.crypto.random.bytes(&random_bytes);
+    var sub_path: [sub_path_len]u8 = undefined;
+    _ = std.fs.base64_encoder.encode(&sub_path, &random_bytes);
+
+    var parent_dir = try std.fs.cwd().openDir("/mnt", .{});
+    defer parent_dir.close();
+
+    try parent_dir.makePath(&sub_path);
+
+    const mountpoint = try parent_dir.realpathAlloc(self.allocator, &sub_path);
+    defer self.allocator.free(mountpoint);
+
+    const mountpointZ = try self.allocator.dupeZ(u8, mountpoint);
+    defer self.allocator.free(mountpointZ);
+
+    const disk_path = try self.allocator.dupeZ(u8, self.disk_path);
+    defer self.allocator.free(disk_path);
+
+    switch (posix.errno(system.mount(
+        disk_path,
+        mountpointZ,
+        switch (self.fstype) {
+            .Vfat => "vfat",
+        },
+        system.MS.NOSUID | system.MS.NODEV | system.MS.NOEXEC,
+        0,
+    ))) {
+        .SUCCESS => {},
+        else => |err| {
+            return posix.unexpectedErrno(err);
+        },
+    }
+
+    // we must open the mountpoint _after_ performing the mount
+    self.mountpoint = try parent_dir.openDir(&sub_path, .{});
+}
+
+fn unmount(self: *DiskBootLoader) !void {
+    if (self.mountpoint) |*mountpoint| {
+        const disk_path = try self.allocator.dupeZ(u8, self.disk_path);
+        defer self.allocator.free(disk_path);
+
+        _ = system.umount2(disk_path, system.MNT.DETACH);
+
+        std.log.info("unmounted disk {s}", .{self.name});
+
+        mountpoint.close();
+
+        self.mountpoint = null;
+    }
 }
 
 // const Mount = struct {
@@ -70,59 +291,6 @@ pub fn entryLoaded(self: *DiskBootLoader, entryContext: *anyopaque) void {
 //         };
 //     }
 //
-//     pub fn mount(self: *@This()) !void {
-//         var random_bytes: [random_bytes_count]u8 = undefined;
-//         std.crypto.random.bytes(&random_bytes);
-//         var sub_path: [sub_path_len]u8 = undefined;
-//         _ = std.fs.base64_encoder.encode(&sub_path, &random_bytes);
-//
-//         var parent_dir = try std.fs.cwd().openDir("/mnt", .{});
-//         defer parent_dir.close();
-//
-//         try parent_dir.makePath(&sub_path);
-//
-//         const mountpoint = try parent_dir.realpathAlloc(self.allocator, &sub_path);
-//         defer self.allocator.free(mountpoint);
-//
-//         const mountpointZ = try self.allocator.dupeZ(u8, mountpoint);
-//         defer self.allocator.free(mountpointZ);
-//
-//         const disk_path = try self.allocator.dupeZ(u8, self.disk_path);
-//         defer self.allocator.free(disk_path);
-//
-//         switch (posix.errno(system.mount(
-//             disk_path,
-//             mountpointZ,
-//             switch (self.fstype) {
-//                 .Vfat => "vfat",
-//             },
-//             system.MS.NOSUID | system.MS.NODEV | system.MS.NOEXEC,
-//             0,
-//         ))) {
-//             .SUCCESS => {},
-//             else => |err| {
-//                 return posix.unexpectedErrno(err);
-//             },
-//         }
-//
-//         // we must open the mountpoint _after_ performing the mount
-//         self.dir = try parent_dir.openDir(&sub_path, .{});
-//     }
-//
-//     pub fn unmount(self: *@This()) !void {
-//         if (self.dir) |*dir| {
-//             const disk_path = try self.allocator.dupeZ(u8, self.disk_path);
-//             defer self.allocator.free(disk_path);
-//
-//             _ = system.umount2(disk_path, system.MNT.DETACH);
-//
-//             std.log.info("unmounted disk {s}", .{self.name});
-//
-//             dir.close();
-//
-//             self.dir = null;
-//         }
-//     }
 // };
 //
 // fn diskIsRemovable(sysfs_block_dir: *std.fs.Dir, devname: []const u8) bool {
