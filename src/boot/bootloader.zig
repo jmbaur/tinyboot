@@ -18,13 +18,33 @@ pub const Entry = struct {
     cmdline: ?[]const u8 = null,
 };
 
-probed: bool = false,
-boot_attempted: bool = false,
-priority: u8,
-device: Device,
 allocator: std.mem.Allocator,
+
+/// Whether the bootloader can autoboot.
+autoboot: bool = true,
+
+/// Flag indicating if the underlying bootloader has been probed or not.
+probed: bool = false,
+
+/// Flag indicating if a boot has been attempted on this bootloader. This means
+/// load() was called at least once.
+boot_attempted: bool = false,
+
+/// The priority of the bootloader. The lowest priority bootloader will attempt
+/// to be booted first.
+priority: u8,
+
+/// The device this bootloader will operate on.
+device: Device,
+
+/// Entries obtained from the underlying bootloader on the device. Obtained
+/// after a probe().
 entries: std.ArrayList(Entry),
+
+/// The underlying bootloader.
 inner: *anyopaque,
+
+/// Operations that can be ran on the underlying bootloader.
 vtable: *const struct {
     name: *const fn () []const u8,
     probe: *const fn (*anyopaque, *std.ArrayList(Entry), Device) anyerror!void,
@@ -35,9 +55,12 @@ vtable: *const struct {
 
 pub fn init(
     comptime T: type,
-    device: Device,
-    priority: u8,
     allocator: std.mem.Allocator,
+    device: Device,
+    opts: struct {
+        priority: u8,
+        autoboot: bool,
+    },
 ) !BootLoader {
     const inner = try allocator.create(T);
 
@@ -75,7 +98,8 @@ pub fn init(
     };
 
     return .{
-        .priority = priority,
+        .autoboot = opts.autoboot,
+        .priority = opts.priority,
         .device = device,
         .allocator = allocator,
         .entries = std.ArrayList(Entry).init(allocator),

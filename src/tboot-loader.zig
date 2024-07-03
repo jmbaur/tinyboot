@@ -53,7 +53,7 @@ timer: posix.fd_t,
 /// General state of the program
 state: enum { init, autobooting, user_input } = .init,
 
-pub fn init() !TbootLoader {
+fn init() !TbootLoader {
     var self = TbootLoader{
         .epoll = try posix.epoll_create1(linux_headers.EPOLL_CLOEXEC),
         .timer = try posix.timerfd_create(posix.CLOCK.MONOTONIC, .{}),
@@ -97,12 +97,17 @@ pub fn init() !TbootLoader {
     return self;
 }
 
-pub fn handleConsole(self: *TbootLoader) !?posix.RebootCommand {
+// Since the timer is used entirely for autobooting purposes, if we ever disarm
+// the timer, we go immediately into user input mode.
+fn disarmTimer(self: *TbootLoader) !void {
+    try posix.epoll_ctl(self.epoll, posix.system.EPOLL.CTL_DEL, self.timer, null);
+    self.state = .user_input;
+}
+
+fn handleConsole(self: *TbootLoader) !?posix.RebootCommand {
     if (self.state != .user_input) {
         // disarm the timer to prevent autoboot from taking over
-        try posix.epoll_ctl(self.epoll, posix.system.EPOLL.CTL_DEL, self.timer, null);
-
-        self.state = .user_input;
+        try self.disarmTimer();
     }
 
     const outcome = try self.console.handleStdin(boot_loaders.items) orelse return null;
@@ -124,7 +129,7 @@ fn newDeviceArmTimer(self: *TbootLoader) !void {
 }
 
 const all_bootloaders = .{ DiskBootLoader, XmodemBootLoader };
-pub fn handleDevice(self: *TbootLoader) !void {
+fn handleDevice(self: *TbootLoader) !void {
     // consume eventfd value
     {
         var uevent_val: u64 = undefined;
@@ -152,9 +157,12 @@ pub fn handleDevice(self: *TbootLoader) !void {
                         const new_bootloader = try arena.allocator().create(BootLoader);
                         new_bootloader.* = try BootLoader.init(
                             bootloader_type,
-                            device,
-                            new_priority,
                             arena.allocator(),
+                            device,
+                            .{
+                                .autoboot = bootloader_type.autoboot,
+                                .priority = new_priority,
+                            },
                         );
 
                         for (boot_loaders.items, 0..) |boot_loader, index| {
@@ -207,12 +215,13 @@ fn handleTimer(self: *TbootLoader) ?posix.RebootCommand {
         }
     } else |err| {
         std.log.err("failed to run autoboot: {}", .{err});
+        self.disarmTimer() catch {};
     }
 
     return null;
 }
 
-pub fn deinit(self: *TbootLoader) void {
+fn deinit(self: *TbootLoader) void {
     // Notify all threads that we are done.
     _ = posix.write(self.done, std.mem.asBytes(&@as(u64, 1))) catch {};
 

@@ -1,18 +1,33 @@
 const std = @import("std");
 const posix = std.posix;
 
-const linux_headers = @import("linux_headers");
-
 const BootLoader = @import("./bootloader.zig");
 const Device = @import("../device.zig");
 const TmpDir = @import("../tmpdir.zig");
 const system = @import("../system.zig");
 const xmodemRecv = @import("../xmodem.zig").xmodemRecv;
 
+const linux_headers = @import("linux_headers");
+
 const XmodemBootLoader = @This();
+
+pub const autoboot = false;
 
 arena: std.heap.ArenaAllocator = std.heap.ArenaAllocator.init(std.heap.page_allocator),
 tmpdir: ?TmpDir = null,
+
+fn serialDeviceIsConnected(fd: posix.fd_t) bool {
+    var serial: c_int = 0;
+
+    if (posix.system.ioctl(
+        fd,
+        linux_headers.TIOCMGET,
+        @intFromPtr(&serial),
+    ) != 0) {
+        return false;
+    }
+    return serial & linux_headers.TIOCM_DTR == linux_headers.TIOCM_DTR;
+}
 
 pub fn match(device: *const Device) ?u8 {
     if (device.subsystem != .tty) {
@@ -23,14 +38,26 @@ pub fn match(device: *const Device) ?u8 {
         .node => |node| {
             // https://www.kernel.org/doc/Documentation/admin-guide/devices.txt
             const major, const minor = node;
-            if (major == 4 and minor >= 64) {
-                return 100;
-            } else {
+            if (major != 4 or minor < 64) {
                 return null;
             }
         },
         else => return null,
     }
+
+    var serial_path_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+    const serial_path = device.nodePath(&serial_path_buf) catch return null;
+    var serial = std.fs.cwd().openFile(
+        serial_path,
+        .{ .mode = .read_write },
+    ) catch return null;
+    defer serial.close();
+
+    if (!serialDeviceIsConnected(serial.handle)) {
+        return null;
+    }
+
+    return 100;
 }
 
 pub fn init() XmodemBootLoader {
@@ -43,6 +70,7 @@ pub fn name() []const u8 {
 
 pub fn timeout(self: *XmodemBootLoader) u8 {
     _ = self;
+
     return 0;
 }
 

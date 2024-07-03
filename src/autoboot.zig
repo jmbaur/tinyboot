@@ -50,6 +50,11 @@ pub fn run(
             return error.NoBootloaders;
         }
 
+        if (!head.autoboot) {
+            head.boot_attempted = true;
+            return null;
+        }
+
         self.boot_loader = head;
 
         const timeout = try self.boot_loader.?.timeout();

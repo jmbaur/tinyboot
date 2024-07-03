@@ -16,6 +16,8 @@ const Device = @import("../device.zig");
 
 const DiskBootLoader = @This();
 
+pub const autoboot = true;
+
 arena: std.heap.ArenaAllocator = std.heap.ArenaAllocator.init(std.heap.page_allocator),
 tmpdir: ?TmpDir = null,
 loader_timeout: u8 = 0,
