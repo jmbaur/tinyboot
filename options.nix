@@ -6,7 +6,6 @@
 }:
 let
   boardsDir = builtins.readDir ./boards;
-  tinyboot = pkgs.tinybootLoader.override { inherit (config) debug; };
   testStartupScript = pkgs.writeScript "installer-startup-script" ''
     #!/bin/sh
     mkdir -p /proc && mount -t proc proc /proc
@@ -275,7 +274,7 @@ in
     build = {
       inherit testInitrd;
       initrd = pkgs.makeInitrdNG {
-        prepend = [ "${tinyboot}/tboot-loader.cpio.xz" ];
+        prepend = [ "${pkgs.tinybootLoader}/tboot-loader.cpio.xz" ];
         compressor = "xz";
         contents = config.extraInitrdContents ++ [
           # TODO(jared): Hack making makeInitrdNG not working with contents
