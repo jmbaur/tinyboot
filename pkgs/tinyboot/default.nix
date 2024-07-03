@@ -1,5 +1,4 @@
 {
-  debug ? false,
   withLoader ? true,
   withTools ? true,
 
@@ -51,7 +50,6 @@ stdenv.mkDerivation (
     zigBuildFlags = [
       "-Dtarget=${stdenv.hostPlatform.qemuArch}-${stdenv.hostPlatform.parsed.kernel.name}-${zigLibc}"
       "-Ddynamic-linker=${stdenv.cc.bintools.dynamicLinker}"
-      "-Dloglevel=${toString (if debug then 3 else 2)}" # https://github.com/ziglang/zig/blob/084c2cd90f79d5e7edf76b7ddd390adb95a27f0c/lib/std/log.zig#L78
       "-Dloader=${lib.boolToString withLoader}"
       "-Dtools=${lib.boolToString withTools}"
       "--system"

@@ -51,7 +51,6 @@ in
     IMA_DEFAULT_HASH_SHA256 = yes;
     IMA_KEXEC = yes;
     IMA_MEASURE_ASYMMETRIC_KEYS = yes;
-    INOTIFY_USER = yes;
     INPUT = yes;
     INPUT_KEYBOARD = yes;
     INPUT_MOUSE = unset;

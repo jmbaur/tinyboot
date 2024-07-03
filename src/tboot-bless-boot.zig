@@ -2,7 +2,9 @@ const std = @import("std");
 
 const clap = @import("clap");
 
-const bls = @import("./boot/bls.zig");
+const DiskBootLoader = @import("./boot/disk.zig");
+
+const BlsEntryFile = DiskBootLoader.BlsEntryFile;
 
 const Error = error{
     InvalidAction,
@@ -31,7 +33,7 @@ fn markAsGood(
     allocator: std.mem.Allocator,
     parent_dir: std.fs.Dir,
     original_entry_filename: []const u8,
-    bls_entry_file: bls.BlsEntryFile,
+    bls_entry_file: BlsEntryFile,
 ) !void {
     if (bls_entry_file.tries_left) |tries_left| {
         _ = tries_left;
@@ -50,7 +52,7 @@ fn markAsBad(
     allocator: std.mem.Allocator,
     parent_dir: std.fs.Dir,
     original_entry_filename: []const u8,
-    bls_entry_file: bls.BlsEntryFile,
+    bls_entry_file: BlsEntryFile,
 ) !void {
     const new_filename = b: {
         if (bls_entry_file.tries_done) |tries_done| {
@@ -73,7 +75,7 @@ fn markAsBad(
 
 fn printStatus(
     original_entry_filename: []const u8,
-    bls_entry_file: bls.BlsEntryFile,
+    bls_entry_file: BlsEntryFile,
 ) !void {
     var stdout = std.io.getStdOut().writer();
 
@@ -119,7 +121,7 @@ fn findEntry(
             continue;
         }
 
-        const bls_entry = bls.BlsEntryFile.parse(dir_entry.name) catch |err| {
+        const bls_entry = BlsEntryFile.parse(dir_entry.name) catch |err| {
             std.log.debug(
                 "failed to parse boot entry {s}: {}",
                 .{ dir_entry.name, err },

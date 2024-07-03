@@ -1,210 +1,294 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const posix = std.posix;
-const system = std.posix.system;
 
 const linux_headers = @import("linux_headers");
-const log_level: std.log.Level = @enumFromInt(@import("build_options").loglevel);
 
-const Autoboot = @import("./boot.zig").Autoboot;
-const Client = @import("./client.zig").Client;
-const Server = @import("./server.zig").Server;
-const device = @import("./device.zig");
-const log = @import("./log.zig");
+const Autoboot = @import("./autoboot.zig");
+const BootLoader = @import("./boot/bootloader.zig");
+const Console = @import("./console.zig");
+const Device = @import("./device.zig");
+const DeviceWatcher = @import("./watch.zig");
+const DiskBootLoader = @import("./boot/disk.zig");
+const Log = @import("./log.zig");
+const XmodemBootLoader = @import("./boot/xmodem.zig");
 const security = @import("./security.zig");
-const setupSystem = @import("./system.zig").setupSystem;
-const setupTty = @import("./system.zig").setupTty;
+const system = @import("./system.zig");
+const utils = @import("./utils.zig");
 
 pub const std_options = .{
-    .logFn = log.logFn,
-    .log_level = log_level,
+    .logFn = Log.logFn,
+    .log_level = .debug, // let the kernel do our filtering for us
 };
 
-const State = struct {
-    /// Master epoll file descriptor for driving the event loop.
-    epoll_fd: posix.fd_t,
+const TbootLoader = @This();
 
-    /// All children processes managed by us.
-    children: std.ArrayList(posix.pid_t),
+var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+var boot_loaders = std.ArrayList(*BootLoader).init(arena.allocator());
 
-    pub fn init(allocator: std.mem.Allocator) !@This() {
-        return @This(){
-            .epoll_fd = try posix.epoll_create1(linux_headers.EPOLL_CLOEXEC),
-            .children = std.ArrayList(posix.fd_t).init(allocator),
-        };
+/// Master epoll file descriptor for driving the event loop.
+epoll: posix.fd_t,
+
+/// An eventfd file descriptor used to indicate to other threads the
+/// program is done.
+done: posix.fd_t,
+
+/// DeviceWatcher instance used to handle events of devices being added or
+/// removed from the system.
+device_watcher: DeviceWatcher,
+
+/// Console instance used to handle user input.
+console: Console,
+
+autoboot: Autoboot = Autoboot.init(),
+
+/// A timerfd file descriptor that is re-used for a few different purposes (of
+/// which these purposes do not have overlapping time windows):
+/// 1. Indication that some period of time has elapsed and we have not seen any
+///    new devices show up.
+/// 2. A bootloader-configured timeout, usually to allow the user to interfere
+///    with the boot process.
+timer: posix.fd_t,
+
+/// General state of the program
+state: enum { init, autobooting, user_input } = .init,
+
+pub fn init() !TbootLoader {
+    var self = TbootLoader{
+        .epoll = try posix.epoll_create1(linux_headers.EPOLL_CLOEXEC),
+        .timer = try posix.timerfd_create(posix.CLOCK.MONOTONIC, .{}),
+        .device_watcher = try DeviceWatcher.init(),
+        .done = try posix.eventfd(0, 0),
+        .console = try Console.init(),
+    };
+
+    try posix.epoll_ctl(
+        self.epoll,
+        posix.system.EPOLL.CTL_ADD,
+        self.timer,
+        @constCast(&.{
+            .data = .{ .fd = self.timer },
+            .events = posix.system.EPOLL.IN,
+        }),
+    );
+
+    try posix.epoll_ctl(
+        self.epoll,
+        posix.system.EPOLL.CTL_ADD,
+        self.device_watcher.event,
+        @constCast(&.{
+            .data = .{ .fd = self.device_watcher.event },
+            .events = posix.system.EPOLL.IN,
+        }),
+    );
+
+    try posix.epoll_ctl(
+        self.epoll,
+        posix.system.EPOLL.CTL_ADD,
+        Console.IN,
+        @constCast(&.{
+            .data = .{ .fd = Console.IN },
+            .events = posix.system.EPOLL.IN,
+        }),
+    );
+
+    try self.newDeviceArmTimer();
+
+    return self;
+}
+
+pub fn handleConsole(self: *TbootLoader) !?posix.RebootCommand {
+    if (self.state != .user_input) {
+        // disarm the timer to prevent autoboot from taking over
+        try posix.epoll_ctl(self.epoll, posix.system.EPOLL.CTL_DEL, self.timer, null);
+
+        self.state = .user_input;
     }
 
-    pub fn deinit(self: *@This()) void {
-        defer self.children.deinit();
+    const outcome = try self.console.handleStdin(boot_loaders.items) orelse return null;
 
-        for (self.children.items) |child| {
-            _ = posix.waitpid(child, 0);
-        }
-
-        posix.close(self.epoll_fd);
+    switch (outcome) {
+        .reboot => return posix.RebootCommand.RESTART,
+        .poweroff => return posix.RebootCommand.POWER_OFF,
+        .kexec => return posix.RebootCommand.KEXEC,
     }
-};
+}
 
-fn runEventLoop(allocator: std.mem.Allocator) !posix.RebootCommand {
-    var state = try State.init(allocator);
-    defer state.deinit();
+fn newDeviceArmTimer(self: *TbootLoader) !void {
+    try posix.timerfd_settime(self.timer, .{}, &.{
+        // oneshot
+        .it_interval = .{ .tv_sec = 0, .tv_nsec = 0 },
+        // consider settled after 2 seconds without any new events
+        .it_value = .{ .tv_sec = 2, .tv_nsec = 0 },
+    }, null);
+}
 
-    var device_watcher = try device.DeviceWatcher.init();
-    try device_watcher.register(state.epoll_fd);
-    defer device_watcher.deinit();
-
-    var server = try Server.init(allocator);
-    try server.registerSelf(state.epoll_fd);
-    // NOTE: This must be _after_ state.deinit() so that we are ensured that
-    // the server is deinitialized _before_ state deinit is called, since state
-    // deinit waits for all children to exit, which will only succeed after the
-    // server's connections to each client has been closed.
-    //
-    // TODO(jared): Just put the server
-    // on the state instance so we can encode this ordering properly in a
-    // single function.
-    defer server.deinit();
-
-    const active_consoles = try device.findActiveConsoles(allocator);
-    defer allocator.free(active_consoles);
-
-    // Spawn off clients
+const all_bootloaders = .{ DiskBootLoader, XmodemBootLoader };
+pub fn handleDevice(self: *TbootLoader) !void {
+    // consume eventfd value
     {
-        const argv_buf = try allocator.allocSentinel(?[*:0]const u8, 1, null);
-        defer allocator.free(argv_buf);
-        const argv0 = try allocator.dupeZ(u8, "/proc/self/exe");
-        defer allocator.free(argv0);
-        argv_buf[0] = argv0.ptr;
-        const envp_buf = try allocator.allocSentinel(?[*:0]u8, 0, null);
-        defer allocator.free(envp_buf);
+        var uevent_val: u64 = undefined;
+        _ = try posix.read(self.device_watcher.event, std.mem.asBytes(&uevent_val));
+    }
 
-        std.log.debug("using {} console(s)", .{active_consoles.len});
-        for (active_consoles) |fd| {
-            const pid = try posix.fork();
-            if (pid == 0) {
-                try posix.dup2(fd, posix.STDIN_FILENO);
-                try posix.dup2(fd, posix.STDOUT_FILENO);
-                try posix.dup2(fd, posix.STDERR_FILENO);
+    o: while (self.device_watcher.nextEvent()) |event| {
+        const device = event.device;
 
-                const err = posix.execveZ(argv_buf.ptr[0].?, argv_buf.ptr, envp_buf);
-                std.log.err("failed to spawn console process: {}", .{err});
-            } else {
-                try state.children.append(pid);
+        switch (event.action) {
+            .add => {
+                std.log.debug(
+                    "new {s} device added",
+                    .{@tagName(event.device.subsystem)},
+                );
+
+                inline for (all_bootloaders) |bootloader_type| {
+                    // If match() returns null, the device is not a match for
+                    // that specific boot loader. If match() returns a non-null
+                    // value, the device is a match with that values priority,
+                    // where a lower number is a higher priority.
+                    const priority: ?u8 = bootloader_type.match(&device);
+
+                    if (priority) |new_priority| {
+                        const new_bootloader = try arena.allocator().create(BootLoader);
+                        new_bootloader.* = try BootLoader.init(
+                            bootloader_type,
+                            device,
+                            new_priority,
+                            arena.allocator(),
+                        );
+
+                        for (boot_loaders.items, 0..) |boot_loader, index| {
+                            if (new_bootloader.priority < boot_loader.priority) {
+                                try boot_loaders.insert(index, new_bootloader);
+                                continue :o;
+                            }
+                        }
+
+                        // Append to the end if we did not find an appropriate
+                        // place to insert the bootloader prior to the end.
+                        try boot_loaders.append(new_bootloader);
+                    }
+                }
+            },
+            .remove => {
+                for (boot_loaders.items, 0..) |boot_loader, index| {
+                    if (std.meta.eql(boot_loader.device, event.device)) {
+                        var removed_boot_loader = boot_loaders.orderedRemove(index);
+                        removed_boot_loader.deinit();
+                    }
+                }
+            },
+        }
+    }
+
+    if (self.state == .init) {
+        try self.newDeviceArmTimer();
+    }
+}
+
+fn handleTimer(self: *TbootLoader) ?posix.RebootCommand {
+    if (self.state == .init) {
+        std.log.info("devices settled", .{});
+
+        self.state = .autobooting;
+    } else {
+        std.debug.assert(self.state == .autobooting);
+
+        std.log.debug("autoboot timeout", .{});
+    }
+
+    if (self.autoboot.run(&boot_loaders, self.timer)) |maybe_event| {
+        if (maybe_event) |outcome| {
+            switch (outcome) {
+                .reboot => return posix.RebootCommand.RESTART,
+                .poweroff => return posix.RebootCommand.POWER_OFF,
+                .kexec => return posix.RebootCommand.KEXEC,
             }
         }
+    } else |err| {
+        std.log.err("failed to run autoboot: {}", .{err});
     }
 
-    var autoboot = try Autoboot.init();
-    try autoboot.register(state.epoll_fd);
-    defer autoboot.deinit();
+    return null;
+}
 
-    try device_watcher.startSettleTimer();
+pub fn deinit(self: *TbootLoader) void {
+    // Notify all threads that we are done.
+    _ = posix.write(self.done, std.mem.asBytes(&@as(u64, 1))) catch {};
 
-    var user_presence = false;
+    self.console.deinit();
 
-    // main event loop
+    self.device_watcher.deinit();
+
+    posix.close(self.timer);
+    posix.close(self.done);
+    posix.close(self.epoll);
+}
+
+fn run(self: *TbootLoader) !posix.RebootCommand {
     while (true) {
-        const max_events = 8;
-        var events = [_]system.epoll_event{undefined} ** max_events;
+        var events = [_]posix.system.epoll_event{undefined} ** (2 << 4);
 
-        const n_events = posix.epoll_wait(state.epoll_fd, &events, -1);
+        const n_events = posix.epoll_wait(self.epoll, &events, -1);
 
         var i_event: usize = 0;
         while (i_event < n_events) : (i_event += 1) {
             const event = events[i_event];
 
-            if (event.data.fd == device_watcher.settle_fd) {
-                std.log.info("devices settled", .{});
-                if (!user_presence) {
-                    try autoboot.start();
-                }
-            } else if (event.data.fd == autoboot.ready_fd) {
-                try autoboot.deregister(state.epoll_fd);
-                if (try autoboot.finish()) |outcome| {
+            if (event.data.fd == Console.IN) {
+                if (try self.handleConsole()) |outcome| {
                     return outcome;
-                } else {
-                    std.log.info("nothing to boot", .{});
-                    server.forceShell();
                 }
-            } else if (event.data.fd == device_watcher.nl_fd) {
-                device_watcher.handleNewEvent() catch |err| {
-                    std.log.err("failed to handle new device: {}", .{err});
-                };
-            } else if (event.data.fd == server.inner.stream.handle) {
-                const conn = try server.inner.accept();
-                std.log.debug("new client connected", .{});
-                try server.registerClient(state.epoll_fd, conn.stream);
+            } else if (event.data.fd == self.device_watcher.event) {
+                try self.handleDevice();
+            } else if (event.data.fd == self.timer) {
+                if (self.handleTimer()) |outcome| {
+                    return outcome;
+                }
             } else {
-                if (!user_presence) {
-                    autoboot.stop();
-                    user_presence = true;
-                    std.log.info("user presence detected", .{});
-                }
-
-                if (try server.handleNewEvent(event)) |outcome| {
-                    std.log.debug("got outcome {}", .{outcome});
-                    return outcome;
-                }
+                std.debug.panic("unknown event: {}", .{event});
             }
         }
     }
 }
 
-fn consoleClient() !void {
-    var tty = try setupTty(posix.STDIN_FILENO, .user_input);
-    defer tty.reset();
-
-    try log.initLogger(.Client);
-    defer log.deinitLogger();
-
-    var client = try Client.init();
-    defer client.deinit();
-
-    try client.run();
-}
-
-fn pid1() !void {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-
-    try setupSystem();
-
-    try log.initLogger(.Server);
-    defer log.deinitLogger();
-
-    const cmdline = cmdline: {
-        var cmdline_file = try std.fs.cwd().openFile("/proc/self/cmdline", .{ .mode = .read_only });
-        defer cmdline_file.close();
-        const cmdline_raw = try cmdline_file.readToEndAlloc(allocator, 2048);
-        defer allocator.free(cmdline_raw);
-        const buf = try allocator.dupe(u8, cmdline_raw);
-        _ = std.mem.replace(u8, cmdline_raw, &.{0}, " ", buf);
-        break :cmdline buf;
-    };
-    defer allocator.free(cmdline);
-    std.log.info("{s}", .{cmdline});
-
-    std.log.info("tinyboot started", .{});
-
-    security.initializeSecurity(allocator) catch |err| {
-        std.log.warn("failed to initialize secure boot: {}", .{err});
-    };
-
-    const reboot_cmd = try runEventLoop(allocator);
-
-    try posix.reboot(reboot_cmd);
-}
-
 pub fn main() !void {
-    switch (system.getpid()) {
-        1 => {
-            pid1() catch |err| {
-                std.log.err("failed to boot: {any}\n", .{err});
-            };
-
-            std.debug.panic("epic failure :/", .{});
-        },
-        else => try consoleClient(),
+    defer {
+        for (boot_loaders.items) |boot_loader| {
+            boot_loader.deinit();
+        }
+        arena.deinit();
     }
+
+    {
+        try system.mountPseudoFilesystems();
+
+        var tboot_loader = try TbootLoader.init();
+        defer tboot_loader.deinit();
+
+        // We should be able to log right after we've initialized the device
+        // watcher.
+        try Log.init();
+        defer Log.deinit();
+
+        var device_watch_thread = try std.Thread.spawn(.{}, DeviceWatcher.watch, .{
+            &tboot_loader.device_watcher,
+            tboot_loader.done,
+        });
+        defer device_watch_thread.join();
+
+        std.log.info("tinyboot started", .{});
+
+        try security.initializeSecurity();
+
+        const reboot_cmd = try tboot_loader.run();
+
+        try posix.reboot(reboot_cmd);
+    }
+
+    // Sleep forever without hammering the CPU, waiting for the kernel to
+    // reboot.
+    var futex = std.atomic.Value(u32).init(0);
+    while (true) std.Thread.Futex.wait(&futex, 0);
+    unreachable;
 }

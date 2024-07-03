@@ -1,49 +1,39 @@
 const std = @import("std");
-const fs = std.fs;
 const posix = std.posix;
 const system = std.posix.system;
 
 const linux_headers = @import("linux_headers");
 
-const MountError = error{
-    Todo,
-};
-
 fn mountPseudoFs(
     path: [*:0]const u8,
     fstype: [*:0]const u8,
     flags: u32,
-) MountError!void {
+) !void {
     const rc = system.mount("", path, fstype, flags, 0);
 
     switch (posix.errno(rc)) {
         .SUCCESS => {},
-        // TODO(jared): parse errno
-        else => return MountError.Todo,
+        else => |err| return posix.unexpectedErrno(err),
     }
 }
 
-/// Does initial system setup and mounts basic psuedo-filesystems.
-pub fn setupSystem() !void {
-    try fs.makeDirAbsolute("/proc");
+/// Mounts basic psuedo-filesystems (/dev, /proc, /sys, etc.).
+pub fn mountPseudoFilesystems() !void {
+    try std.fs.cwd().makePath("/proc");
     try mountPseudoFs("/proc", "proc", system.MS.NOSUID | system.MS.NODEV | system.MS.NOEXEC);
 
-    try fs.makeDirAbsolute("/sys");
+    try std.fs.cwd().makePath("/sys");
     try mountPseudoFs("/sys", "sysfs", system.MS.NOSUID | system.MS.NODEV | system.MS.NOEXEC | system.MS.RELATIME);
     try mountPseudoFs("/sys/kernel/security", "securityfs", system.MS.NOSUID | system.MS.NODEV | system.MS.NOEXEC | system.MS.RELATIME);
     try mountPseudoFs("/sys/kernel/debug", "debugfs", system.MS.NOSUID | system.MS.NODEV | system.MS.NOEXEC | system.MS.RELATIME);
 
-    // we use CONFIG_DEVTMPFS, so we don't need to create /dev
+    try std.fs.cwd().makePath("/dev");
     try mountPseudoFs("/dev", "devtmpfs", system.MS.SILENT | system.MS.NOSUID | system.MS.NOEXEC);
 
-    try fs.makeDirAbsolute("/run");
+    try std.fs.cwd().makePath("/run");
     try mountPseudoFs("/run", "tmpfs", system.MS.NOSUID | system.MS.NODEV);
 
-    try fs.makeDirAbsolute("/mnt");
-
-    try fs.symLinkAbsolute("/proc/self/fd/0", "/dev/stdin", .{});
-    try fs.symLinkAbsolute("/proc/self/fd/1", "/dev/stdout", .{});
-    try fs.symLinkAbsolute("/proc/self/fd/2", "/dev/stderr", .{});
+    try std.fs.cwd().makePath("/mnt");
 }
 
 const TCFLSH = linux_headers.TCFLSH;
@@ -88,6 +78,7 @@ fn cfmakeraw(t: *posix.termios) void {
 }
 
 pub const TtyMode = enum {
+    no_echo,
     user_input,
     file_transfer_recv,
     file_transfer_send,
@@ -97,7 +88,7 @@ pub const Tty = struct {
     fd: posix.fd_t,
     original: posix.termios,
 
-    pub fn reset(self: *const @This()) void {
+    pub fn reset(self: *@This()) void {
         // wait until everything is sent
         _ = system.tcdrain(self.fd);
 
@@ -120,6 +111,9 @@ pub fn setupTty(fd: posix.fd_t, mode: TtyMode) !Tty {
     var termios = orig.original;
 
     switch (mode) {
+        .no_echo => {
+            termios.lflag.ECHO = false;
+        },
         .user_input => {
             termios.cc[VINTR] = 3; // C-c
             termios.cc[VQUIT] = 28; // C-\
@@ -203,7 +197,11 @@ const SYSLOG_ACTION_UNREAD = 9;
 
 /// Read kernel logs (AKA syslog/dmesg). Caller is responsible for returned
 /// slice.
-pub fn kernelLogs(allocator: std.mem.Allocator, filter: u8) ![]const u8 {
+pub fn printKernelLogs(
+    allocator: std.mem.Allocator,
+    filter: u3,
+    writer: std.io.AnyWriter,
+) !void {
     const bytes_available = system.syscall3(system.SYS.syslog, SYSLOG_ACTION_UNREAD, 0, 0);
     const buf = try allocator.alloc(u8, bytes_available);
     defer allocator.free(buf);
@@ -221,19 +219,18 @@ pub fn kernelLogs(allocator: std.mem.Allocator, filter: u8) ![]const u8 {
         else => |err| return posix.unexpectedErrno(err),
     }
 
-    var logs = std.ArrayList(u8).init(allocator);
     var split = std.mem.splitScalar(u8, buf, '\n');
     while (split.next()) |line| {
-        if (line.len <= 2) {
+        if (line.len <= 2 or line[0] != '<') {
             break;
         }
 
-        const log_level = try std.fmt.parseInt(u8, line[1..2], 10);
-        if (log_level <= filter) {
-            try logs.appendSlice(line[3..]);
-            try logs.append('\n');
+        if (std.mem.indexOf(u8, line[0..5], ">")) |right_chevron_index| {
+            const syslog_prefix = try std.fmt.parseInt(u32, line[1..right_chevron_index], 10);
+            const log_level = 0x7 & syslog_prefix; // lower 3 bits
+            if (log_level <= filter) {
+                try writer.print("{s}\n", .{line[right_chevron_index + 1 ..]});
+            }
         }
     }
-
-    return logs.toOwnedSlice();
 }

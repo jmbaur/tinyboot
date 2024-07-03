@@ -14,12 +14,6 @@ pub fn build(b: *std.Build) !void {
     const with_loader = b.option(bool, "loader", "With boot loader") orelse true;
     const with_tools = b.option(bool, "tools", "With tools") orelse true;
 
-    const loglevel = b.option(
-        u8,
-        "loglevel",
-        "Log level",
-    ) orelse @intFromEnum(std.log.Level.debug);
-
     const clap = b.dependency("clap", .{});
 
     const linux_headers_translated = b.addTranslateC(.{
@@ -30,9 +24,6 @@ pub fn build(b: *std.Build) !void {
     });
     const linux_headers_module = linux_headers_translated.addModule("linux_headers");
 
-    const tboot_loader_options = b.addOptions();
-    tboot_loader_options.addOption(u8, "loglevel", loglevel);
-
     if (with_loader) {
         const tboot_loader = b.addExecutable(.{
             .name = "tboot-loader",
@@ -41,7 +32,6 @@ pub fn build(b: *std.Build) !void {
             .optimize = tboot_loader_optimize,
             .strip = optimize != std.builtin.OptimizeMode.Debug,
         });
-        tboot_loader.root_module.addOptions("build_options", tboot_loader_options);
         tboot_loader.root_module.addAnonymousImport("test_key", .{
             .root_source_file = b.path("test/keys/tboot/key.der"),
         });
@@ -148,7 +138,6 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
     });
 
-    unit_tests.root_module.addOptions("build_options", tboot_loader_options);
     unit_tests.root_module.addImport("linux_headers", linux_headers_module);
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&b.addRunArtifact(unit_tests).step);

@@ -3,10 +3,12 @@ const path = std.fs.path;
 
 const clap = @import("clap");
 
-const bls = @import("./boot/bls.zig");
+const DiskBootLoader = @import("./boot/disk.zig");
 const signFile = @import("./tboot-sign.zig").signFile;
 const BootSpecV1 = @import("./bootspec.zig").BootSpecV1;
 const BootJson = @import("./bootspec.zig").BootJson;
+
+const BlsEntryFile = DiskBootLoader.BlsEntryFile;
 
 fn ensureFilesystemState(
     esp: std.fs.Dir,
@@ -180,7 +182,7 @@ fn installGeneration(
             continue;
         }
 
-        const existing_entry = bls.BlsEntryFile.parse(dir_entry.name) catch continue;
+        const existing_entry = BlsEntryFile.parse(dir_entry.name) catch continue;
 
         if (std.mem.eql(u8, existing_entry.name, entry_name)) {
             std.log.debug("entry {s} already installed", .{entry_name});
@@ -288,7 +290,7 @@ pub fn main() !void {
     }
 
     if (res.positionals.len != 1 or res.args.@"private-key" == null or res.args.@"public-key" == null) {
-        try diag.report(stderr, error.InvalidArgs);
+        try diag.report(stderr, error.InvalidArgument);
         try clap.usage(stderr, clap.Help, &params);
         return;
     }

@@ -4,98 +4,277 @@ const system = std.posix.system;
 
 const linux_headers = @import("linux_headers");
 
-const BootDevice = @import("../boot.zig").BootDevice;
-const BootEntry = @import("../boot.zig").BootEntry;
 const FsType = @import("../disk/filesystem.zig").FsType;
 const Gpt = @import("../disk/partition_table.zig").Gpt;
 const GptPartitionType = @import("../disk/partition_table.zig").GptPartitionType;
 const Mbr = @import("../disk/partition_table.zig").Mbr;
 const MbrPartitionType = @import("../disk/partition_table.zig").MbrPartitionType;
-const device = @import("../device.zig");
+const TmpDir = @import("../tmpdir.zig");
 
-const Mount = struct {
-    dir: *std.fs.Dir,
-    disk_name: []const u8,
-};
+const BootLoader = @import("./bootloader.zig");
+const Device = @import("../device.zig");
 
-fn diskIsRemovable(allocator: std.mem.Allocator, devname: []const u8) bool {
-    const removable_path = std.fs.path.join(allocator, &.{
-        std.fs.path.sep_str,
-        "sys",
-        "class",
-        "block",
-        devname,
-        "removable",
-    }) catch return false;
-    defer allocator.free(removable_path);
+const DiskBootLoader = @This();
 
-    const removable_file = std.fs.openFileAbsolute(removable_path, .{}) catch return false;
+arena: std.heap.ArenaAllocator = std.heap.ArenaAllocator.init(std.heap.page_allocator),
+tmpdir: ?TmpDir = null,
+loader_timeout: u8 = 0,
+
+pub fn match(device: *const Device) ?u8 {
+    if (device.subsystem != .block) {
+        return null;
+    }
+
+    var sysfs_disk_path_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+    const sysfs_disk_path = device.nodeSysfsPath(&sysfs_disk_path_buf) catch return null;
+
+    var sysfs_dir = std.fs.cwd().openDir(sysfs_disk_path, .{}) catch return null;
+    defer sysfs_dir.close();
+
+    // Disk block devices have a "removable" file in their sysfs directory,
+    // partitions do not.
+    var removable_file = sysfs_dir.openFile("removable", .{}) catch return null;
     defer removable_file.close();
 
     var buf: [1]u8 = undefined;
-    if ((removable_file.read(&buf) catch return false) != 1) {
-        return false;
+    if ((removable_file.read(&buf) catch return null) != 1) {
+        return null;
     }
 
-    return std.mem.eql(u8, &buf, "1");
+    // Prioritize removable devices over non-removable. This allows for
+    // plugging in a USB-stick and having it "just work".
+    if (std.mem.eql(u8, &buf, "1")) {
+        return 50;
+    } else {
+        return 55;
+    }
 }
 
-/// Caller is responsible for the returned value.
-fn diskName(allocator: std.mem.Allocator, devname: []const u8) ![]const u8 {
-    var name = std.ArrayList(u8).init(allocator);
+pub fn init() DiskBootLoader {
+    return .{};
+}
 
-    const vendor = b: {
-        const path = std.fs.path.join(allocator, &.{
-            std.fs.path.sep_str,
-            "sys",
-            "class",
-            "block",
-            devname,
-            "device",
-            "vendor",
-        }) catch break :b null;
-        defer allocator.free(path);
+pub fn name() []const u8 {
+    return "disk";
+}
 
-        const file = std.fs.openFileAbsolute(path, .{}) catch break :b null;
-        defer file.close();
+pub fn timeout(self: *DiskBootLoader) u8 {
+    return self.loader_timeout;
+}
 
-        var buf: [1024]u8 = undefined;
-        const bytes_read = file.readAll(&buf) catch break :b null;
-        break :b std.mem.trim(u8, buf[0..bytes_read], "\n ");
+pub fn deinit(self: *DiskBootLoader) void {
+    defer self.arena.deinit();
+
+    self.unmount() catch |err| {
+        std.log.err("failed to unmount: {}", .{err});
+    };
+}
+
+pub fn probe(
+    self: *DiskBootLoader,
+    entries: *std.ArrayList(BootLoader.Entry),
+    disk_device: Device,
+) !void {
+    var disk_path_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+    const disk_path = try disk_device.nodePath(&disk_path_buf);
+
+    var sysfs_disk_path_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+    const sysfs_disk_path = try disk_device.nodeSysfsPath(&sysfs_disk_path_buf);
+
+    var sysfs_disk_dir = try std.fs.cwd().openDir(sysfs_disk_path, .{});
+    defer sysfs_disk_dir.close();
+
+    var disk = try std.fs.cwd().openFile(disk_path, .{});
+    defer disk.close();
+
+    var disk_source = std.io.StreamSource{ .file = disk };
+    // All GPTs also have an MBR, so we can invalidate the disk
+    // entirely if it does not have an MBR.
+    var mbr = Mbr.init(&disk_source) catch |err| {
+        std.log.err("no MBR found on disk {s}: {}", .{ disk_device, err });
+        return;
     };
 
-    const model = b: {
-        const path = std.fs.path.join(allocator, &.{
-            std.fs.path.sep_str,
-            "sys",
-            "class",
-            "block",
-            devname,
-            "device",
-            "model",
-        }) catch break :b null;
-        defer allocator.free(path);
+    const boot_partn = b: {
+        for (mbr.partitions(), 1..) |part, mbr_partn| {
+            const part_type = MbrPartitionType.fromValue(part.partType()) orelse continue;
 
-        const file = std.fs.openFileAbsolute(path, .{}) catch break :b null;
-        defer file.close();
+            if (part.isBootable() and
+                // BootLoaderSpec uses this partition type for MBR, see
+                // https://uapi-group.org/specifications/specs/boot_loader_specification/#the-partitionsl.
+                (part_type == .LinuxExtendedBoot or
+                // QEMU uses this partition type when using a FAT
+                // emulated drive with `-drive file=fat:rw:some/directory`.
+                part_type == .Fat16))
+            {
+                break :b mbr_partn;
+            }
 
-        var buf: [1024]u8 = undefined;
-        const bytes_read = file.readAll(&buf) catch break :b null;
-        break :b std.mem.trim(u8, buf[0..bytes_read], "\n ");
-    };
+            // disk has a GPT
+            if (!part.isBootable() and part_type == .ProtectedMbr) {
+                var gpt = Gpt.init(&disk_source) catch |err| switch (err) {
+                    Gpt.Error.MissingMagicNumber => {
+                        std.log.debug("disk {s} does not contain a GUID partition table", .{disk_device});
+                        continue;
+                    },
+                    Gpt.Error.HeaderCrcFail => {
+                        std.log.err("disk {s} CRC integrity check failed", .{disk_device});
+                        continue;
+                    },
+                    else => {
+                        std.log.err("failed to read disk {s}: {}", .{ disk_device, err });
+                        continue;
+                    },
+                };
 
-    if (vendor) |_vendor| {
-        try name.appendSlice(_vendor);
-    }
-
-    if (model) |_model| {
-        if (vendor != null) {
-            try name.append(' ');
+                const partitions = try gpt.partitions(self.arena.allocator());
+                for (partitions, 1..) |partition, gpt_partn| {
+                    if (partition.partType() orelse continue == .EfiSystem) {
+                        break :b gpt_partn;
+                    }
+                }
+            }
         }
-        try name.appendSlice(_model);
+
+        return;
+    };
+
+    const disk_major, const disk_minor = disk_device.type.node;
+
+    // Construct a new Device for the partition, which will have the same major
+    // number and a minor number equalling the minor number of the disk plus
+    // the number of the partition in the disk.
+    const boot_partition = Device{
+        .subsystem = disk_device.subsystem,
+        .type = .{
+            .node = .{
+                disk_major, disk_minor + @as(u32, @intCast(boot_partn)),
+            },
+        },
+    };
+
+    std.log.info("found boot partition on disk {s} partition {d}", .{ disk_device, boot_partition });
+
+    var partition_path_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+    const partition_path = try boot_partition.nodePath(&partition_path_buf);
+
+    var partition = try std.fs.cwd().openFile(partition_path, .{});
+    defer partition.close();
+
+    var esp_file_source = std.io.StreamSource{ .file = partition };
+    const fstype = try FsType.detect(&esp_file_source) orelse {
+        std.log.err("could not detect filesystem on boot partition {}", .{boot_partition});
+        return;
+    };
+
+    try self.mount(fstype, partition_path);
+
+    try self.searchForEntries(disk_device, entries);
+}
+
+pub fn entryLoaded(self: *DiskBootLoader, ctx: *anyopaque) void {
+    self._entryLoaded(ctx) catch |err| {
+        std.log.err(
+            "failed to finalize BLS boot counter for chosen entry: {}",
+            .{err},
+        );
+    };
+}
+
+fn _entryLoaded(self: *@This(), ctx: *anyopaque) !void {
+    var bls_entry_file: *BlsEntryFile = @ptrCast(@alignCast(ctx));
+
+    var tmpdir = self.tmpdir orelse return;
+
+    const allocator = self.arena.allocator();
+
+    const original_name = try bls_entry_file.toFilename(allocator);
+    defer allocator.free(original_name);
+
+    if (bls_entry_file.tries_done) |*done| done.* +|= 1;
+    if (bls_entry_file.tries_left) |*left| left.* -|= 1;
+
+    if (bls_entry_file.tries_left) |tries_left| {
+        std.log.info(
+            "{} {s} remaining for entry \"{s}\"",
+            .{
+                tries_left,
+                if (tries_left == 1) "try" else "tries",
+                bls_entry_file.name,
+            },
+        );
     }
 
-    return name.toOwnedSlice();
+    const new_name = try bls_entry_file.toFilename(allocator);
+    defer allocator.free(new_name);
+
+    if (!std.mem.eql(u8, original_name, new_name)) {
+        var mount_dir = try tmpdir.dir.openDir(mountpath, .{});
+        defer mount_dir.close();
+
+        var entries_dir = try mount_dir.openDir("loader/entries", .{});
+        defer entries_dir.close();
+
+        try entries_dir.rename(original_name, new_name);
+        posix.sync();
+
+        std.log.debug("entry renamed to {s}", .{new_name});
+    }
+}
+
+const random_bytes_count = 12;
+const sub_path_len = std.fs.base64_encoder.calcSize(random_bytes_count);
+
+const mountpath = "mount";
+
+fn mount(self: *DiskBootLoader, fstype: FsType, path: []const u8) !void {
+    // make sure there are no current mountpoints
+    try self.unmount();
+
+    const tmpdir = try TmpDir.create(.{});
+
+    try tmpdir.dir.makePath(mountpath);
+
+    var where_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+    const tmp_where = try tmpdir.dir.realpath(mountpath, &where_buf);
+    const where = try self.arena.allocator().dupeZ(u8, tmp_where);
+    defer self.arena.allocator().free(where);
+
+    var what_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+    const tmp_what = try std.fs.cwd().realpath(path, &what_buf);
+    const what = try self.arena.allocator().dupeZ(u8, tmp_what);
+    defer self.arena.allocator().free(what);
+
+    switch (posix.errno(system.mount(
+        what,
+        where,
+        switch (fstype) {
+            .Vfat => "vfat",
+        },
+        system.MS.NOSUID | system.MS.NODEV | system.MS.NOEXEC,
+        0,
+    ))) {
+        .SUCCESS => {},
+        else => |err| {
+            return posix.unexpectedErrno(err);
+        },
+    }
+
+    self.tmpdir = tmpdir;
+}
+
+fn unmount(self: *DiskBootLoader) !void {
+    if (self.tmpdir) |*tmpdir| {
+        var buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+        const mountpoint = try tmpdir.dir.realpathZ(mountpath, &buf);
+
+        _ = system.umount2(@ptrCast(mountpoint.ptr), system.MNT.DETACH);
+
+        std.log.info("unmounted disk from {s}", .{mountpoint});
+
+        tmpdir.cleanup();
+        self.tmpdir = null;
+    }
 }
 
 fn versionInId(id: []const u8) ?std.SemanticVersion {
@@ -319,469 +498,156 @@ test "boot entry sorting" {
     ));
 }
 
-pub const BootLoaderSpec = struct {
-    const EntryContext = struct {
-        bls_entry_file: *BlsEntryFile,
-        parent_dir: []const u8,
+fn searchForEntries(
+    self: *DiskBootLoader,
+    disk_device: Device,
+    entries: *std.ArrayList(BootLoader.Entry),
+) !void {
+    const allocator = self.arena.allocator();
+
+    var tmpdir = self.tmpdir.?;
+    var mount_dir = try tmpdir.dir.openDir(mountpath, .{});
+    defer mount_dir.close();
+
+    var entries_dir = try mount_dir.openDir(
+        "loader/entries",
+        .{ .iterate = true },
+    );
+    defer entries_dir.close();
+
+    var bls_entries = std.ArrayList(BlsEntry).init(allocator);
+    defer bls_entries.deinit();
+
+    const loader_conf: LoaderConf = b: {
+        var file = mount_dir.openFile("loader/loader.conf", .{}) catch {
+            std.log.debug("no loader.conf found on {s}, using defaults", .{disk_device});
+            break :b .{};
+        };
+        defer file.close();
+
+        std.log.debug("found loader.conf on {s}", .{disk_device});
+
+        const contents = try file.readToEndAlloc(allocator, 4096);
+
+        break :b LoaderConf.parse(contents);
     };
 
-    arena: std.heap.ArenaAllocator,
+    self.loader_timeout = loader_conf.timeout;
 
-    /// Mounts to block devices that are non-removable (i.e. "internal" to the
-    /// system).
-    internal_mounts: []Mount,
+    var it = entries_dir.iterate();
+    while (try it.next()) |dir_entry| {
+        if (dir_entry.kind != .file) {
+            continue;
+        }
 
-    /// Mounts to block devices that are removable (i.e. "external" to the
-    /// system). This includes USB mass-storage devices, SD cards, etc.
-    external_mounts: []Mount,
-
-    pub fn init() @This() {
-        return .{
-            .arena = std.heap.ArenaAllocator.init(std.heap.page_allocator),
-            .internal_mounts = &.{},
-            .external_mounts = &.{},
+        const bls_entry_file = BlsEntryFile.parse(dir_entry.name) catch |err| {
+            std.log.err("invalid entry filename for {s}: {}", .{ dir_entry.name, err });
+            continue;
         };
-    }
-
-    pub fn setup(self: *@This()) !void {
-        std.log.debug("BLS setup", .{});
-
-        const allocator = self.arena.allocator();
-
-        var internal_mounts = std.ArrayList(Mount).init(allocator);
-        var external_mounts = std.ArrayList(Mount).init(allocator);
-
-        var dev_disk_alias = try std.fs.cwd().openDir(
-            "/dev/disk",
-            .{},
-        );
-        defer dev_disk_alias.close();
-
-        var mountpoint_dir = try std.fs.cwd().openDir(
-            "/mnt",
-            .{},
-        );
-        defer mountpoint_dir.close();
-
-        var sysfs_block = try std.fs.cwd().openDir(
-            "/sys/class/block",
-            .{ .iterate = true },
-        );
-        defer sysfs_block.close();
-        var it = sysfs_block.iterate();
-
-        while (try it.next()) |dir_entry| {
-            if (dir_entry.kind != .sym_link) {
-                continue;
-            }
-
-            const uevent_path = try std.fs.path.join(allocator, &.{ dir_entry.name, "uevent" });
-            var uevent_file = try sysfs_block.openFile(uevent_path, .{});
-            defer uevent_file.close();
-
-            const max_bytes = 10 * 1024 * 1024;
-            const uevent_contents = try uevent_file.readToEndAlloc(allocator, max_bytes);
-
-            var uevent = try device.parseUeventFileContents(allocator, uevent_contents);
-
-            const devtype = uevent.get("DEVTYPE") orelse continue;
-
-            std.log.debug(
-                "inspecting block device {s} ({s})",
-                .{ dir_entry.name, devtype },
-            );
-
-            if (!std.mem.eql(u8, devtype, "disk")) {
-                continue;
-            }
-
-            const diskseq = uevent.get("DISKSEQ") orelse continue;
-            const devname = uevent.get("DEVNAME") orelse continue;
-
-            const disk_handle = dev_disk_alias.openFile(
-                try std.fmt.allocPrint(allocator, "disk{s}", .{diskseq}),
-                .{},
-            ) catch |err| {
-                std.log.err(
-                    "failed to open disk alias for {s}: {}",
-                    .{ dir_entry.name, err },
-                );
-                continue;
-            };
-
-            var disk_source = std.io.StreamSource{ .file = disk_handle };
-
-            // All GPTs also have an MBR, so we can invalidate the disk
-            // entirely if it does not have an MBR.
-            var mbr = Mbr.init(&disk_source) catch |err| {
-                std.log.err("no MBR found on disk {s}: {}", .{ devname, err });
-                continue;
-            };
-
-            const boot_partn = b: {
-                for (mbr.partitions(), 1..) |part, mbr_partn| {
-                    const part_type = MbrPartitionType.fromValue(part.partType()) orelse continue;
-
-                    if (part.isBootable() and
-                        // BootLoaderSpec uses this partition type for MBR, see
-                        // https://uapi-group.org/specifications/specs/boot_loader_specification/#the-partitionsl.
-                        (part_type == .LinuxExtendedBoot or
-                        // QEMU uses this partition type when using a FAT
-                        // emulated drive with `-drive file=fat:rw:some/directory`.
-                        part_type == .Fat16))
-                    {
-                        break :b mbr_partn;
-                    }
-
-                    // disk is GPT partitioned
-                    if (!part.isBootable() and part_type == .ProtectedMbr) {
-                        var gpt = Gpt.init(&disk_source) catch |err| switch (err) {
-                            Gpt.Error.MissingMagicNumber => {
-                                std.log.debug("disk {s} does not contain a GUID partition table", .{devname});
-                                continue;
-                            },
-                            Gpt.Error.HeaderCrcFail => {
-                                std.log.err("disk {s} CRC integrity check failed", .{devname});
-                                continue;
-                            },
-                            else => {
-                                std.log.err("failed to read disk {s}: {}", .{ devname, err });
-                                continue;
-                            },
-                        };
-
-                        const partitions = try gpt.partitions(allocator);
-                        for (partitions, 1..) |partition, gpt_partn| {
-                            if (partition.partType() orelse continue == .EfiSystem) {
-                                break :b gpt_partn;
-                            }
-                        }
-                    }
-                }
-
-                continue;
-            };
-
-            const partition_filename = try std.fmt.allocPrint(
-                allocator,
-                "disk{s}_part{d}",
-                .{ diskseq, boot_partn },
-            );
-
-            std.log.info("found boot partition on disk {s} partition {d}", .{ devname, boot_partn });
-
-            var esp_handle = try dev_disk_alias.openFile(partition_filename, .{});
-            defer esp_handle.close();
-
-            var esp_file_source = std.io.StreamSource{ .file = esp_handle };
-            const fstype = try FsType.detect(&esp_file_source) orelse {
-                std.log.err("could not detect filesystem on EFI system partition", .{});
-                continue;
-            };
-
-            mountpoint_dir.makePath(partition_filename) catch |err| {
-                std.log.err("failed to create mountpoint: {}", .{err});
-                continue;
-            };
-
-            const mountpoint = try mountpoint_dir.realpathAlloc(allocator, partition_filename);
-
-            switch (posix.errno(system.mount(
-                try allocator.dupeZ(u8, try dev_disk_alias.realpathAlloc(allocator, partition_filename)),
-                try allocator.dupeZ(u8, mountpoint),
-                switch (fstype) {
-                    .Vfat => "vfat",
-                },
-                system.MS.NOSUID | system.MS.NODEV | system.MS.NOEXEC,
-                0,
-            ))) {
-                .SUCCESS => {},
-                else => |err| {
-                    std.log.err("failed to mount disk {s} partition {d}: {}", .{ devname, boot_partn, err });
-                    continue;
-                },
-            }
-
-            std.log.info("mounted disk \"{s}\"", .{devname});
-
-            const dir = try allocator.create(std.fs.Dir);
-            dir.* = try mountpoint_dir.openDir(partition_filename, .{});
-
-            const mount = Mount{
-                .disk_name = try diskName(allocator, devname),
-                .dir = dir,
-            };
-
-            if (diskIsRemovable(allocator, devname)) {
-                try external_mounts.append(mount);
-            } else {
-                try internal_mounts.append(mount);
-            }
-        }
-
-        self.internal_mounts = try internal_mounts.toOwnedSlice();
-        self.external_mounts = try external_mounts.toOwnedSlice();
-    }
-
-    fn searchForEntries(self: *@This(), mount: Mount) !BootDevice {
-        const allocator = self.arena.allocator();
-
-        var entries = std.ArrayList(BootEntry).init(allocator);
-        errdefer entries.deinit();
-
-        var bls_entries = std.ArrayList(BlsEntry).init(allocator);
-
-        const loader_conf: LoaderConf = b: {
-            var file = mount.dir.openFile("loader/loader.conf", .{}) catch {
-                std.log.debug("no loader.conf found on {s}, using defaults", .{mount.disk_name});
-                break :b .{};
-            };
-            defer file.close();
-            std.log.debug("found loader.conf on \"{s}\"", .{mount.disk_name});
-            const contents = try file.readToEndAlloc(allocator, 4096);
-            break :b LoaderConf.parse(contents);
-        };
-
-        var entries_dir = try mount.dir.openDir(
-            "loader/entries",
-            .{ .iterate = true },
-        );
-        defer entries_dir.close();
-
-        var it = entries_dir.iterate();
-        while (try it.next()) |dir_entry| {
-            if (dir_entry.kind != .file) {
-                continue;
-            }
-
-            const bls_entry_file = BlsEntryFile.parse(dir_entry.name) catch |err| {
-                std.log.err("invalid entry filename for {s}: {}", .{ dir_entry.name, err });
-                continue;
-            };
-
-            if (bls_entry_file.tries_left) |tries_left| {
-                if (tries_left == 0) {
-                    std.log.warn(
-                        "skipping entry {s} because all tries have been exhausted",
-                        .{dir_entry.name},
-                    );
-                    continue;
-                }
-            }
-
-            var entry_file = entries_dir.openFile(dir_entry.name, .{}) catch continue;
-            defer entry_file.close();
-
-            std.log.debug("inspecting BLS entry {s} on \"{s}\"", .{ dir_entry.name, mount.disk_name });
-
-            // We should definitely not get any boot entry files larger than this.
-            const entry_contents = try entry_file.readToEndAlloc(allocator, 1 << 16);
-            var type1_entry = BlsEntry.parse(allocator, bls_entry_file, entry_contents) catch |err| {
-                std.log.err("failed to parse {s} as BLS type 1 entry: {}", .{ dir_entry.name, err });
-                continue;
-            };
-            errdefer type1_entry.deinit();
-
-            try bls_entries.append(type1_entry);
-        }
-
-        std.log.debug("sorting BLS entries", .{});
-        std.mem.sort(BlsEntry, bls_entries.items, {}, blsEntryLessThan);
-
-        for (bls_entries.items) |entry| {
-            const linux = mount.dir.realpathAlloc(allocator, entry.linux orelse {
-                std.log.err("missing linux kernel in entry {s}", .{entry.id});
-                continue;
-            }) catch |err| switch (err) {
-                error.OutOfMemory => return err,
-                else => {
-                    std.log.err("linux kernel \"{?s}\" not found on \"{s}\"", .{ entry.linux, mount.disk_name });
-                    continue;
-                },
-            };
-            errdefer allocator.free(linux);
-
-            // NOTE: Multiple initrds won't work if we have IMA appraisal
-            // of signed initrds, so we can only load one.
-            //
-            // TODO(jared): If IMA appraisal is disabled, we can
-            // concatenate all the initrds together.
-            var initrd: ?[]const u8 = null;
-            if (entry.initrd) |_initrd| {
-                if (_initrd.len > 0) {
-                    initrd = mount.dir.realpathAlloc(allocator, _initrd[0]) catch |err| switch (err) {
-                        error.OutOfMemory => return err,
-                        else => {
-                            std.log.err("initrd \"{s}\" not found on \"{s}\"", .{ _initrd[0], mount.disk_name });
-                            continue;
-                        },
-                    };
-                }
-
-                if (_initrd.len > 1) {
-                    std.log.warn("cannot verify more than 1 initrd, using first initrd", .{});
-                }
-            }
-            errdefer {
-                if (initrd) |_initrd| {
-                    allocator.free(_initrd);
-                }
-            }
-
-            // TODO(jared): Make it nicer to continue appending kernel
-            // params...perhaps keep the ArrayList so we still get to
-            // `.append()`.
-            var options_with_bls_entry: [linux_headers.COMMAND_LINE_SIZE]u8 = undefined;
-            const options = b: {
-                if (entry.options) |opts| {
-                    const orig = try std.mem.join(allocator, " ", opts);
-                    break :b try std.fmt.bufPrint(&options_with_bls_entry, "{s} tboot.bls-entry={s}", .{ orig, entry.id });
-                } else {
-                    break :b try std.fmt.bufPrint(&options_with_bls_entry, "tboot.bls-entry={s}", .{entry.id});
-                }
-            };
-
-            const final_options = try allocator.dupe(u8, options);
-            errdefer allocator.free(options);
-
-            const context = try allocator.create(EntryContext);
-            errdefer allocator.destroy(context);
-
-            const bls_entry_file = try allocator.create(BlsEntryFile);
-            errdefer allocator.destroy(bls_entry_file);
-
-            bls_entry_file.* = BlsEntryFile.init(entry.id, .{
-                .tries_left = entry.tries_left,
-                .tries_done = entry.tries_done,
-            });
-
-            context.* = .{
-                .parent_dir = try mount.dir.realpathAlloc(allocator, "loader/entries"),
-                .bls_entry_file = bls_entry_file,
-            };
-
-            try entries.append(
-                .{
-                    .context = context,
-                    .cmdline = final_options,
-                    .initrd = initrd,
-                    .linux = linux,
-                },
-            );
-        }
-
-        return .{
-            .name = try allocator.dupe(u8, mount.disk_name),
-            .timeout = loader_conf.timeout,
-            .entries = try entries.toOwnedSlice(),
-        };
-    }
-
-    /// Caller is responsible for the returned slice.
-    pub fn probe(self: *@This()) ![]const BootDevice {
-        std.log.debug("BLS probe start", .{});
-        var devices = std.ArrayList(BootDevice).init(self.arena.allocator());
-
-        // Mounts of external devices are ordered before external mounts so
-        // they are prioritized in the boot process.
-        std.log.debug("BLS probe found {} external device(s)", .{self.external_mounts.len});
-        for (self.external_mounts) |mount| {
-            try devices.append(self.searchForEntries(mount) catch |err| {
-                std.log.err(
-                    "failed to search for entries on \"{s}\": {}",
-                    .{ mount.disk_name, err },
-                );
-                continue;
-            });
-        }
-
-        std.log.debug("BLS probe found {} internal device(s)", .{self.internal_mounts.len});
-        for (self.internal_mounts) |mount| {
-            try devices.append(self.searchForEntries(mount) catch |err| {
-                std.log.err(
-                    "failed to search for entries on \"{s}\": {}",
-                    .{ mount.disk_name, err },
-                );
-                continue;
-            });
-        }
-
-        std.log.debug(
-            "BLS probe found {} device(s) with BLS entries",
-            .{devices.items.len},
-        );
-        return try devices.toOwnedSlice();
-    }
-
-    pub fn entryLoaded(self: *@This(), ctx: *anyopaque) void {
-        self._entryLoaded(ctx) catch |err| {
-            std.log.err(
-                "failed to finalize BLS boot counter for chosen entry: {}",
-                .{err},
-            );
-        };
-    }
-
-    fn _entryLoaded(self: *@This(), ctx: *anyopaque) !void {
-        const context: *EntryContext = @ptrCast(@alignCast(ctx));
-
-        const original_name = try context.bls_entry_file.toFilename(self.arena.allocator());
-
-        var bls_entry_file = context.bls_entry_file;
-
-        if (bls_entry_file.tries_done) |*done| done.* +|= 1;
-        if (bls_entry_file.tries_left) |*left| left.* -|= 1;
 
         if (bls_entry_file.tries_left) |tries_left| {
-            std.log.info(
-                "{} {s} remaining for entry \"{s}\"",
-                .{
-                    tries_left,
-                    if (tries_left == 1) "try" else "tries",
-                    bls_entry_file.name,
-                },
-            );
+            if (tries_left == 0) {
+                std.log.warn(
+                    "skipping entry {s} because all tries have been exhausted",
+                    .{dir_entry.name},
+                );
+                continue;
+            }
         }
 
-        const new_name = try bls_entry_file.toFilename(self.arena.allocator());
+        var entry_file = entries_dir.openFile(dir_entry.name, .{}) catch continue;
+        defer entry_file.close();
 
-        if (!std.mem.eql(u8, original_name, new_name)) {
-            var dir = try std.fs.cwd().openDir(context.parent_dir, .{});
-            defer dir.close();
+        std.log.debug("inspecting BLS entry {s} on {s}", .{ dir_entry.name, disk_device });
 
-            try dir.rename(original_name, new_name);
-            posix.sync();
+        // We should definitely not get any boot entry files larger than this.
+        const entry_contents = try entry_file.readToEndAlloc(allocator, 1 << 16);
+        var type1_entry = BlsEntry.parse(allocator, bls_entry_file, entry_contents) catch |err| {
+            std.log.err("failed to parse {s} as BLS type 1 entry: {}", .{ dir_entry.name, err });
+            continue;
+        };
+        errdefer type1_entry.deinit();
 
-            std.log.debug("entry renamed to {s}", .{new_name});
-        }
+        try bls_entries.append(type1_entry);
     }
 
-    pub fn teardown(self: *@This()) !void {
-        std.log.debug("BLS teardown", .{});
+    std.log.debug("sorting BLS entries", .{});
+    std.mem.sort(BlsEntry, bls_entries.items, {}, blsEntryLessThan);
 
-        defer self.arena.deinit();
+    for (bls_entries.items) |entry| {
+        const linux = mount_dir.realpathAlloc(allocator, entry.linux orelse {
+            std.log.err("missing linux kernel in entry {s}", .{entry.id});
+            continue;
+        }) catch |err| switch (err) {
+            error.OutOfMemory => return err,
+            else => {
+                std.log.err("linux kernel \"{?s}\" not found on {s}", .{ entry.linux, disk_device });
+                continue;
+            },
+        };
+        errdefer allocator.free(linux);
 
-        var buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+        // NOTE: Multiple initrds won't work if we have IMA appraisal
+        // of signed initrds, so we can only load one.
+        //
+        // TODO(jared): If IMA appraisal is disabled, we can
+        // concatenate all the initrds together.
+        var initrd: ?[]const u8 = null;
+        if (entry.initrd) |_initrd| {
+            if (_initrd.len > 0) {
+                initrd = mount_dir.realpathAlloc(allocator, _initrd[0]) catch |err| switch (err) {
+                    error.OutOfMemory => return err,
+                    else => {
+                        std.log.err("initrd \"{s}\" not found on {s}", .{ _initrd[0], disk_device });
+                        continue;
+                    },
+                };
+            }
 
-        for (self.external_mounts) |mount| {
-            std.log.info("unmounted disk \"{s}\"", .{mount.disk_name});
-            _ = system.umount2(
-                try self.arena.allocator().dupeZ(u8, try mount.dir.realpath(".", &buf)),
-                system.MNT.DETACH,
-            );
-            mount.dir.close();
+            if (_initrd.len > 1) {
+                std.log.warn("cannot verify more than 1 initrd, using first initrd", .{});
+            }
+        }
+        errdefer {
+            if (initrd) |_initrd| {
+                allocator.free(_initrd);
+            }
         }
 
-        for (self.internal_mounts) |mount| {
-            std.log.info("unmounted disk \"{s}\"", .{mount.disk_name});
-            _ = system.umount2(
-                try self.arena.allocator().dupeZ(u8, try mount.dir.realpath(".", &buf)),
-                system.MNT.DETACH,
-            );
-            mount.dir.close();
-        }
+        // TODO(jared): Make it nicer to continue appending kernel
+        // params...perhaps keep the ArrayList so we still get to
+        // `.append()`.
+        var options_with_bls_entry: [linux_headers.COMMAND_LINE_SIZE]u8 = undefined;
+        const options = b: {
+            if (entry.options) |opts| {
+                const orig = try std.mem.join(allocator, " ", opts);
+                break :b try std.fmt.bufPrint(&options_with_bls_entry, "{s} tboot.bls-entry={s}", .{ orig, entry.id });
+            } else {
+                break :b try std.fmt.bufPrint(&options_with_bls_entry, "tboot.bls-entry={s}", .{entry.id});
+            }
+        };
+
+        const final_options = try allocator.dupe(u8, options);
+        errdefer allocator.free(options);
+
+        const context = try allocator.create(BlsEntryFile);
+        errdefer allocator.destroy(context);
+
+        context.* = BlsEntryFile.init(entry.id, .{
+            .tries_left = entry.tries_left,
+            .tries_done = entry.tries_done,
+        });
+
+        try entries.append(
+            .{
+                .context = context,
+                .cmdline = final_options,
+                .initrd = initrd,
+                .linux = linux,
+            },
+        );
     }
-};
+}
 
 pub const BlsEntryFile = struct {
     name: []const u8,
@@ -817,12 +683,12 @@ pub const BlsEntryFile = struct {
         return filename.toOwnedSlice();
     }
 
-    pub fn init(name: []const u8, opts: struct {
+    pub fn init(entry_name: []const u8, opts: struct {
         tries_left: ?u8 = null,
         tries_done: ?u8 = null,
     }) @This() {
         return .{
-            .name = name,
+            .name = entry_name,
             .tries_left = opts.tries_left,
             .tries_done = opts.tries_done,
         };
@@ -837,7 +703,7 @@ pub const BlsEntryFile = struct {
 
         var plus_split = std.mem.splitSequence(u8, stem, "+");
 
-        const name = plus_split.next().?;
+        const entry_name = plus_split.next().?;
 
         if (plus_split.next()) |counter_info| {
             var minus_split = std.mem.splitSequence(u8, counter_info, "-");
@@ -851,17 +717,17 @@ pub const BlsEntryFile = struct {
                 const tries_done = std.fmt.parseInt(u8, minus_info, 10) catch {
                     return Error.InvalidTriesSyntax;
                 };
-                return @This().init(name, .{
+                return @This().init(entry_name, .{
                     .tries_left = tries_left,
                     .tries_done = tries_done,
                 });
             } else {
-                return @This().init(name, .{
+                return @This().init(entry_name, .{
                     .tries_left = tries_left,
                 });
             }
         } else {
-            return @This().init(name, .{});
+            return @This().init(entry_name, .{});
         }
     }
 };

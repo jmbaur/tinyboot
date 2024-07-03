@@ -217,7 +217,10 @@ in
     linux.kconfig.CMDLINE = lib.kernel.freeform (
       toString (
         lib.optionals config.video [ "fbcon=logo-count:1" ]
-        ++ [ (if config.debug then "debug" else "quiet") ]
+        ++ [
+          "printk.devkmsg=on"
+          "loglevel=${if config.debug then "8" else "5"}"
+        ]
         ++ map (c: "console=${c}") config.linux.consoles
       )
     );

@@ -4,62 +4,84 @@ const system = std.posix.system;
 
 const linux_headers = @import("linux_headers");
 
-pub const IMA_POLICY_PATH = "/sys/kernel/security/ima/policy";
+const MEASURE_POLICY =
+    PROC_SUPER_MAGIC ++
+    SYSFS_MAGIC ++
+    DEBUGFS_MAGIC ++
+    TMPFS_MAGIC ++
+    DEVPTS_SUPER_MAGIC ++
+    BINFMTFS_MAGIC ++
+    SECURITYFS_MAGIC ++
+    SELINUX_MAGIC ++
+    SMACK_MAGIC ++
+    CGROUP_SUPER_MAGIC ++
+    CGROUP2_SUPER_MAGIC ++
+    NSFS_MAGIC ++
+    KEY_CHECK ++
+    POLICY_CHECK ++
+    KEXEC_KERNEL_CHECK ++
+    KEXEC_INITRAMFS_CHECK ++
+    KEXEC_CMDLINE;
+
+const APPRAISE_POLICY = KEXEC_KERNEL_CHECK_APPRAISE ++ KEXEC_INITRAMFS_CHECK_APPRAISE;
+
+const MEASURE_AND_APPRAISE_POLICY = MEASURE_POLICY ++ APPRAISE_POLICY;
+
+const IMA_POLICY_PATH = "/sys/kernel/security/ima/policy";
+
+// Individual IMA policy lines below
 
 // PROC_SUPER_MAGIC = 0x9fa0
-pub const PROC_SUPER_MAGIC = withNewline("dont_measure fsmagic=0x9fa0");
+const PROC_SUPER_MAGIC = withNewline("dont_measure fsmagic=0x9fa0");
 
 // SYSFS_MAGIC = 0x62656572
-pub const SYSFS_MAGIC = withNewline("dont_measure fsmagic=0x62656572");
+const SYSFS_MAGIC = withNewline("dont_measure fsmagic=0x62656572");
 
 // DEBUGFS_MAGIC = 0x64626720
-pub const DEBUGFS_MAGIC = withNewline("dont_measure fsmagic=0x64626720");
+const DEBUGFS_MAGIC = withNewline("dont_measure fsmagic=0x64626720");
 
 // TMPFS_MAGIC = 0x01021994
-pub const TMPFS_MAGIC = withNewline("dont_measure fsmagic=0x1021994");
+const TMPFS_MAGIC = withNewline("dont_measure fsmagic=0x1021994");
 
 // DEVPTS_SUPER_MAGIC=0x1cd1
-pub const DEVPTS_SUPER_MAGIC = withNewline("dont_measure fsmagic=0x1cd1");
+const DEVPTS_SUPER_MAGIC = withNewline("dont_measure fsmagic=0x1cd1");
 
 // BINFMTFS_MAGIC=0x42494e4d
-pub const BINFMTFS_MAGIC = withNewline("dont_measure fsmagic=0x42494e4d");
+const BINFMTFS_MAGIC = withNewline("dont_measure fsmagic=0x42494e4d");
 
 // SECURITYFS_MAGIC=0x73636673
-pub const SECURITYFS_MAGIC = withNewline("dont_measure fsmagic=0x73636673");
+const SECURITYFS_MAGIC = withNewline("dont_measure fsmagic=0x73636673");
 
 // SELINUX_MAGIC=0xf97cff8c
-pub const SELINUX_MAGIC = withNewline("dont_measure fsmagic=0xf97cff8c");
+const SELINUX_MAGIC = withNewline("dont_measure fsmagic=0xf97cff8c");
 
 // SMACK_MAGIC=0x43415d53
-pub const SMACK_MAGIC = withNewline("dont_measure fsmagic=0x43415d53");
+const SMACK_MAGIC = withNewline("dont_measure fsmagic=0x43415d53");
 
 // CGROUP_SUPER_MAGIC=0x27e0eb
-pub const CGROUP_SUPER_MAGIC = withNewline("dont_measure fsmagic=0x27e0eb");
+const CGROUP_SUPER_MAGIC = withNewline("dont_measure fsmagic=0x27e0eb");
 
 // CGROUP2_SUPER_MAGIC=0x63677270
-pub const CGROUP2_SUPER_MAGIC = withNewline("dont_measure fsmagic=0x63677270");
+const CGROUP2_SUPER_MAGIC = withNewline("dont_measure fsmagic=0x63677270");
 
 // NSFS_MAGIC=0x6e736673
-pub const NSFS_MAGIC = withNewline("dont_measure fsmagic=0x6e736673");
+const NSFS_MAGIC = withNewline("dont_measure fsmagic=0x6e736673");
 
-pub const KEY_CHECK = withNewline("measure func=KEY_CHECK pcr=7");
+const KEY_CHECK = withNewline("measure func=KEY_CHECK pcr=7");
 
-pub const POLICY_CHECK = withNewline("measure func=POLICY_CHECK pcr=7");
+const POLICY_CHECK = withNewline("measure func=POLICY_CHECK pcr=7");
 
-pub const KEXEC_KERNEL_CHECK = withNewline("measure func=KEXEC_KERNEL_CHECK pcr=8");
+const KEXEC_KERNEL_CHECK = withNewline("measure func=KEXEC_KERNEL_CHECK pcr=8");
 
-pub const KEXEC_INITRAMFS_CHECK = withNewline("measure func=KEXEC_INITRAMFS_CHECK pcr=9");
+const KEXEC_INITRAMFS_CHECK = withNewline("measure func=KEXEC_INITRAMFS_CHECK pcr=9");
 
-pub const KEXEC_CMDLINE = withNewline("measure func=KEXEC_CMDLINE pcr=12");
+const KEXEC_CMDLINE = withNewline("measure func=KEXEC_CMDLINE pcr=12");
 
-pub const KEXEC_KERNEL_CHECK_APPRAISE = withNewline("appraise func=KEXEC_KERNEL_CHECK appraise_type=imasig|modsig");
+const KEXEC_KERNEL_CHECK_APPRAISE = withNewline("appraise func=KEXEC_KERNEL_CHECK appraise_type=imasig|modsig");
 
-pub const KEXEC_INITRAMFS_CHECK_APPRAISE = withNewline("appraise func=KEXEC_INITRAMFS_CHECK appraise_type=imasig|modsig");
+const KEXEC_INITRAMFS_CHECK_APPRAISE = withNewline("appraise func=KEXEC_INITRAMFS_CHECK appraise_type=imasig|modsig");
 
-fn installImaPolicy(allocator: std.mem.Allocator, policy_entries: []const []const u8) !void {
-    const policy = try std.mem.join(allocator, "", policy_entries);
-    defer allocator.free(policy);
-
+fn installImaPolicy(policy: []const u8) !void {
     var policy_file = try std.fs.openFileAbsolute(IMA_POLICY_PATH, .{ .mode = .write_only });
     defer policy_file.close();
 
@@ -71,7 +93,7 @@ fn installImaPolicy(allocator: std.mem.Allocator, policy_entries: []const []cons
 const TEST_KEY = @embedFile("test_key");
 
 // https://github.com/torvalds/linux/blob/3b517966c5616ac011081153482a5ba0e91b17ff/security/integrity/digsig.c#L193
-fn loadVerificationKey(allocator: std.mem.Allocator) !void {
+fn loadVerificationKey() !void {
     const keyfile: std.fs.File = b: {
         inline for (.{ VPD_KEY, FW_CFG_KEY }) |keypath| {
             if (std.fs.cwd().openFile(keypath, .{})) |file| {
@@ -90,13 +112,14 @@ fn loadVerificationKey(allocator: std.mem.Allocator) !void {
     defer keyfile.close();
 
     const keyring_id = try addKeyring(IMA_KEYRING_NAME, KeySerial.User);
-    std.log.info("added ima keyring (id 0x{x})", .{keyring_id});
+    std.log.info("added ima keyring (id=0x{x})", .{keyring_id});
 
-    const keyfile_contents = try keyfile.readToEndAlloc(allocator, 8192);
-    defer allocator.free(keyfile_contents);
+    var buf: [8192]u8 = undefined;
+    const n_read = try keyfile.readAll(&buf);
+    const keyfile_contents = buf[0..n_read];
 
     const key_id = try addKey(keyring_id, keyfile_contents);
-    std.log.info("added verification key (id 0x{x})", .{key_id});
+    std.log.info("added verification key (id=0x{x})", .{key_id});
 
     if (std.mem.eql(u8, keyfile_contents, TEST_KEY)) {
         std.log.warn("test key in use!", .{});
@@ -108,49 +131,14 @@ fn loadVerificationKey(allocator: std.mem.Allocator) !void {
 // with IMA since we basically get it for free; measurements are held in memory
 // and persisted across kexecs, and the measurements are extended to the
 // system's TPM if one is available.
-pub fn initializeSecurity(allocator: std.mem.Allocator) !void {
-    var ima_policy = std.ArrayList([]const u8).init(allocator);
-    defer ima_policy.deinit();
-
-    try ima_policy.appendSlice(&.{
-        PROC_SUPER_MAGIC,
-        SYSFS_MAGIC,
-        DEBUGFS_MAGIC,
-        TMPFS_MAGIC,
-        DEVPTS_SUPER_MAGIC,
-        BINFMTFS_MAGIC,
-        SECURITYFS_MAGIC,
-        SELINUX_MAGIC,
-        SMACK_MAGIC,
-        CGROUP_SUPER_MAGIC,
-        CGROUP2_SUPER_MAGIC,
-        NSFS_MAGIC,
-        KEY_CHECK,
-        POLICY_CHECK,
-        KEXEC_KERNEL_CHECK,
-        KEXEC_INITRAMFS_CHECK,
-        KEXEC_CMDLINE,
-    });
-
-    var do_verified_boot = true;
-    loadVerificationKey(allocator) catch |err| {
+pub fn initializeSecurity() !void {
+    if (loadVerificationKey()) {
+        try installImaPolicy(MEASURE_AND_APPRAISE_POLICY);
+        std.log.info("boot measurement and verification is enabled", .{});
+    } else |err| {
         std.log.warn("failed to load verification key, cannot perform boot verification: {}", .{err});
-        do_verified_boot = false;
-    };
-
-    if (do_verified_boot) {
-        try ima_policy.appendSlice(&.{
-            KEXEC_KERNEL_CHECK_APPRAISE,
-            KEXEC_INITRAMFS_CHECK_APPRAISE,
-        });
-    }
-
-    try installImaPolicy(allocator, ima_policy.items);
-
-    std.log.info("boot measurement is enabled", .{});
-
-    if (do_verified_boot) {
-        std.log.info("boot verification is enabled", .{});
+        try installImaPolicy(MEASURE_POLICY);
+        std.log.info("boot measurement is enabled", .{});
     }
 }
 
