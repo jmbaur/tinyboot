@@ -86,96 +86,86 @@ pub fn parseUeventKobjectContents(contents: []const u8) ?DeviceWatcher.Event {
     };
 }
 
-// test "uevent file content parsing" {
-//     const test_partition =
-//         \\MAJOR=259
-//         \\MINOR=1
-//         \\DEVNAME=nvme0n1p1
-//         \\DEVTYPE=partition
-//         \\DISKSEQ=1
-//         \\PARTN=1
-//     ;
-//
-//     var partition_uevent = try parseUeventFileContents(std.testing.allocator, test_partition);
-//     defer partition_uevent.deinit();
-//
-//     try std.testing.expectEqualStrings("259", partition_uevent.get("MAJOR").?);
-//     try std.testing.expectEqualStrings("partition", partition_uevent.get("DEVTYPE").?);
-//     try std.testing.expectEqualStrings("1", partition_uevent.get("DISKSEQ").?);
-//     try std.testing.expectEqualStrings("1", partition_uevent.get("PARTN").?);
-//
-//     const test_disk =
-//         \\MAJOR=259
-//         \\MINOR=0
-//         \\DEVNAME=nvme0n1
-//         \\DEVTYPE=disk
-//         \\DISKSEQ=1
-//     ;
-//
-//     var disk_uevent = try parseUeventFileContents(std.testing.allocator, test_disk);
-//     defer disk_uevent.deinit();
-//
-//     try std.testing.expectEqualStrings("259", disk_uevent.get("MAJOR").?);
-//     try std.testing.expectEqualStrings("disk", disk_uevent.get("DEVTYPE").?);
-//     try std.testing.expectEqualStrings("1", disk_uevent.get("DISKSEQ").?);
-//
-//     const test_tpm =
-//         \\MAJOR=10
-//         \\MINOR=224
-//         \\DEVNAME=tpm0
-//     ;
-//
-//     var tpm_uevent = try parseUeventFileContents(std.testing.allocator, test_tpm);
-//     defer tpm_uevent.deinit();
-//
-//     try std.testing.expectEqualStrings("10", tpm_uevent.get("MAJOR").?);
-//     try std.testing.expectEqualStrings("224", tpm_uevent.get("MINOR").?);
-//     try std.testing.expectEqualStrings("tpm0", tpm_uevent.get("DEVNAME").?);
-// }
+test "uevent file content parsing" {
+    const test_partition =
+        \\MAJOR=259
+        \\MINOR=1
+        \\DEVNAME=nvme0n1p1
+        \\DEVTYPE=partition
+        \\DISKSEQ=1
+        \\PARTN=1
+    ;
 
-// test "uevent kobject add chardev parsing" {
-//     const content = try std.mem.join(std.testing.allocator, &.{0}, &.{
-//         "add@/devices/platform/serial8250/tty/ttyS6",
-//         "ACTION=add",
-//         "DEVPATH=/devices/platform/serial8250/tty/ttyS6",
-//         "SUBSYSTEM=tty",
-//         "SYNTH_UUID=0",
-//         "MAJOR=4",
-//         "MINOR=70",
-//         "DEVNAME=ttyS6",
-//         "SEQNUM=3469",
-//     });
-//     defer std.testing.allocator.free(content);
-//
-//     var kobject = try parseUeventKobjectContents(std.testing.allocator, content) orelse unreachable;
-//     defer kobject.deinit();
-//
-//     try std.testing.expectEqual(Action.add, kobject.action);
-//     try std.testing.expectEqualStrings("/devices/platform/serial8250/tty/ttyS6", kobject.device_path);
-//     try std.testing.expectEqualStrings("0", kobject.uevent.get("SYNTH_UUID").?);
-// }
+    try std.testing.expectEqualDeep(
+        Device{ .subsystem = .block, .type = .{ .node = .{ 259, 1 } } },
+        parseUeventFileContents(.block, test_partition) orelse unreachable,
+    );
 
-// test "uevent kobject remove chardev parsing" {
-//     const content = try std.mem.join(std.testing.allocator, &.{0}, &.{
-//         "remove@/devices/platform/serial8250/tty/ttyS6",
-//         "ACTION=remove",
-//         "DEVPATH=/devices/platform/serial8250/tty/ttyS6",
-//         "SUBSYSTEM=tty",
-//         "SYNTH_UUID=0",
-//         "MAJOR=4",
-//         "MINOR=70",
-//         "DEVNAME=ttyS6",
-//         "SEQNUM=3471",
-//     });
-//     defer std.testing.allocator.free(content);
-//
-//     var kobject = try parseUeventKobjectContents(std.testing.allocator, content) orelse unreachable;
-//     defer kobject.deinit();
-//
-//     try std.testing.expectEqual(Action.remove, kobject.action);
-//     try std.testing.expectEqualStrings("/devices/platform/serial8250/tty/ttyS6", kobject.device_path);
-//     try std.testing.expectEqualStrings("3471", kobject.uevent.get("SEQNUM").?);
-// }
+    const test_disk =
+        \\MAJOR=259
+        \\MINOR=0
+        \\DEVNAME=nvme0n1
+        \\DEVTYPE=disk
+        \\DISKSEQ=1
+    ;
+
+    try std.testing.expectEqualDeep(
+        Device{ .subsystem = .block, .type = .{ .node = .{ 259, 0 } } },
+        parseUeventFileContents(.block, test_disk) orelse unreachable,
+    );
+}
+
+test "uevent kobject add chardev parsing" {
+    const content = try std.mem.join(std.testing.allocator, &.{0}, &.{
+        "add@/devices/platform/serial8250/tty/ttyS6",
+        "ACTION=add",
+        "DEVPATH=/devices/platform/serial8250/tty/ttyS6",
+        "SUBSYSTEM=tty",
+        "SYNTH_UUID=0",
+        "MAJOR=4",
+        "MINOR=70",
+        "DEVNAME=ttyS6",
+        "SEQNUM=3469",
+    });
+    defer std.testing.allocator.free(content);
+
+    try std.testing.expectEqual(
+        DeviceWatcher.Event{
+            .action = .add,
+            .device = .{
+                .subsystem = .tty,
+                .type = .{ .node = .{ 4, 70 } },
+            },
+        },
+        parseUeventKobjectContents(content) orelse unreachable,
+    );
+}
+
+test "uevent kobject remove chardev parsing" {
+    const content = try std.mem.join(std.testing.allocator, &.{0}, &.{
+        "remove@/devices/platform/serial8250/tty/ttyS6",
+        "ACTION=remove",
+        "DEVPATH=/devices/platform/serial8250/tty/ttyS6",
+        "SUBSYSTEM=tty",
+        "SYNTH_UUID=0",
+        "MAJOR=4",
+        "MINOR=70",
+        "DEVNAME=ttyS6",
+        "SEQNUM=3471",
+    });
+    defer std.testing.allocator.free(content);
+
+    try std.testing.expectEqual(
+        DeviceWatcher.Event{
+            .action = .remove,
+            .device = .{
+                .subsystem = .tty,
+                .type = .{ .node = .{ 4, 70 } },
+            },
+        },
+        parseUeventKobjectContents(content) orelse unreachable,
+    );
+}
 
 // https://github.com/torvalds/linux/blob/afcd48134c58d6af45fb3fdb648f1260b20f2326/lib/kobject_uevent.c#L50
 pub const Action = union(enum) {
