@@ -1,6 +1,8 @@
 const std = @import("std");
 
-pub const FsType = enum {
+const Filesystem = @This();
+
+pub const Type = enum {
     Vfat,
 
     const vfat_signature_offset = 510;
@@ -126,11 +128,17 @@ test "vfat filesystem detection" {
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x55, 0xaa,
     };
 
-    var fat32_source = std.io.StreamSource{ .const_buffer = std.io.fixedBufferStream(FAT32_FILESYSTEM) };
-    var fat16_source = std.io.StreamSource{ .const_buffer = std.io.fixedBufferStream(FAT16_FILESYSTEM) };
-    var fat12_source = std.io.StreamSource{ .const_buffer = std.io.fixedBufferStream(FAT12_FILESYSTEM) };
+    var fat32_source = std.io.StreamSource{
+        .const_buffer = std.io.fixedBufferStream(FAT32_FILESYSTEM),
+    };
+    var fat16_source = std.io.StreamSource{
+        .const_buffer = std.io.fixedBufferStream(FAT16_FILESYSTEM),
+    };
+    var fat12_source = std.io.StreamSource{
+        .const_buffer = std.io.fixedBufferStream(FAT12_FILESYSTEM),
+    };
 
-    try std.testing.expectEqual(try FsType.detect(&fat32_source), FsType.Vfat);
-    try std.testing.expectEqual(try FsType.detect(&fat16_source), FsType.Vfat);
-    try std.testing.expectEqual(try FsType.detect(&fat12_source), FsType.Vfat);
+    try std.testing.expectEqual(try Filesystem.Type.detect(&fat32_source), .Vfat);
+    try std.testing.expectEqual(try Filesystem.Type.detect(&fat16_source), .Vfat);
+    try std.testing.expectEqual(try Filesystem.Type.detect(&fat12_source), .Vfat);
 }

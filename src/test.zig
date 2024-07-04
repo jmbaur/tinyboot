@@ -8,7 +8,8 @@ test {
     _ = @import("./cpio/main.zig");
     _ = @import("./device.zig");
     _ = @import("./disk/filesystem.zig");
-    _ = @import("./disk/partition_table.zig");
+    _ = @import("./disk/gpt.zig");
+    _ = @import("./disk/mbr.zig");
     _ = @import("./kobject.zig");
     _ = @import("./log.zig");
     _ = @import("./runner.zig");

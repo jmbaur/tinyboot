@@ -4,15 +4,12 @@ const system = std.posix.system;
 
 const linux_headers = @import("linux_headers");
 
-const FsType = @import("../disk/filesystem.zig").FsType;
-const Gpt = @import("../disk/partition_table.zig").Gpt;
-const GptPartitionType = @import("../disk/partition_table.zig").GptPartitionType;
-const Mbr = @import("../disk/partition_table.zig").Mbr;
-const MbrPartitionType = @import("../disk/partition_table.zig").MbrPartitionType;
-const TmpDir = @import("../tmpdir.zig");
-
 const BootLoader = @import("./bootloader.zig");
 const Device = @import("../device.zig");
+const Filesystem = @import("../disk/filesystem.zig");
+const Gpt = @import("../disk/gpt.zig");
+const Mbr = @import("../disk/mbr.zig");
+const TmpDir = @import("../tmpdir.zig");
 
 const DiskBootLoader = @This();
 
@@ -99,7 +96,7 @@ pub fn probe(
 
     const boot_partn = b: {
         for (mbr.partitions(), 1..) |part, mbr_partn| {
-            const part_type = MbrPartitionType.fromValue(part.partType()) orelse continue;
+            const part_type = Mbr.PartitionType.fromValue(part.partType()) orelse continue;
 
             if ((part.isBootable() and
                 // BootLoaderSpec uses this partition type for MBR, see
@@ -167,7 +164,7 @@ pub fn probe(
     defer partition.close();
 
     var esp_file_source = std.io.StreamSource{ .file = partition };
-    const fstype = try FsType.detect(&esp_file_source) orelse {
+    const fstype = try Filesystem.Type.detect(&esp_file_source) orelse {
         std.log.err("could not detect filesystem on boot partition {}", .{boot_partition});
         return;
     };
@@ -232,7 +229,7 @@ const sub_path_len = std.fs.base64_encoder.calcSize(random_bytes_count);
 
 const mountpath = "mount";
 
-fn mount(self: *DiskBootLoader, fstype: FsType, path: []const u8) !void {
+fn mount(self: *DiskBootLoader, fstype: Filesystem.Type, path: []const u8) !void {
     // make sure there are no current mountpoints
     try self.unmount();
 
