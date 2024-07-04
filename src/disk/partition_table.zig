@@ -959,12 +959,14 @@ pub const MbrPartitionType = enum {
     Fat16,
     ProtectedMbr,
     LinuxExtendedBoot,
+    EfiSystemPartition,
 
     pub fn fromValue(val: u8) ?@This() {
         return switch (val) {
             0x06 => .Fat16,
             0xea => .LinuxExtendedBoot,
             0xee => .ProtectedMbr,
+            0xef => .EfiSystemPartition,
             else => return null,
         };
     }

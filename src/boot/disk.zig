@@ -101,13 +101,16 @@ pub fn probe(
         for (mbr.partitions(), 1..) |part, mbr_partn| {
             const part_type = MbrPartitionType.fromValue(part.partType()) orelse continue;
 
-            if (part.isBootable() and
+            if ((part.isBootable() and
                 // BootLoaderSpec uses this partition type for MBR, see
                 // https://uapi-group.org/specifications/specs/boot_loader_specification/#the-partitionsl.
                 (part_type == .LinuxExtendedBoot or
                 // QEMU uses this partition type when using a FAT
                 // emulated drive with `-drive file=fat:rw:some/directory`.
-                part_type == .Fat16))
+                part_type == .Fat16)) or
+                // Many ISOs have this MBR table setup where the partition type
+                // is ESP and it is marked as non-bootable.
+                part_type == .EfiSystemPartition)
             {
                 break :b mbr_partn;
             }
