@@ -293,8 +293,12 @@ fn versionInId(id: []const u8) ?std.SemanticVersion {
 /// Follows logic outlined by Boot Loader Specification sorting (described at https://uapi-group.org/specifications/specs/boot_loader_specification/#sorting).
 ///
 /// Version comparisons are done by parsing version fields using semantic versioning.
-fn blsEntryLessThan(context: void, a: BlsEntry, b: BlsEntry) bool {
-    _ = context;
+fn blsEntryLessThan(default_entry: ?[]const u8, a: BlsEntry, b: BlsEntry) bool {
+    if (default_entry) |default_title| {
+        if (std.mem.eql(u8, a.id, default_title)) {
+            return true;
+        }
+    }
 
     // Order entries that have no tries left to the end of the list.
     if (a.tries_left != null and b.tries_left != null) {
@@ -383,9 +387,22 @@ fn blsEntryLessThan(context: void, a: BlsEntry, b: BlsEntry) bool {
 }
 
 test "boot entry sorting" {
+    // default entry set
+    try std.testing.expect(blsEntryLessThan(
+        "zzz",
+        BlsEntry{
+            .allocator = std.testing.allocator,
+            .id = "zzz",
+        },
+        BlsEntry{
+            .allocator = std.testing.allocator,
+            .id = "aaa",
+        },
+    ));
+
     // no tries left is always ordered less than some tries left
     try std.testing.expect(blsEntryLessThan(
-        {},
+        null,
         BlsEntry{
             .allocator = std.testing.allocator,
             .id = "foo",
@@ -400,7 +417,7 @@ test "boot entry sorting" {
 
     // entries with sort keys are ordered before entries without sort keys
     try std.testing.expect(blsEntryLessThan(
-        {},
+        null,
         BlsEntry{
             .allocator = std.testing.allocator,
             .id = "foo",
@@ -415,7 +432,7 @@ test "boot entry sorting" {
 
     // entries with different sort keys are sorted based on the sort key
     try std.testing.expect(blsEntryLessThan(
-        {},
+        null,
         BlsEntry{
             .allocator = std.testing.allocator,
             .id = "foo",
@@ -431,7 +448,7 @@ test "boot entry sorting" {
     // entries with the same sort key and different machine IDs are sorted
     // based on the machine ID
     try std.testing.expect(blsEntryLessThan(
-        {},
+        null,
         BlsEntry{
             .allocator = std.testing.allocator,
             .id = "foo",
@@ -449,7 +466,7 @@ test "boot entry sorting" {
     // entries with the same sort key and same machine IDs are sorted
     // based on the version
     try std.testing.expect(blsEntryLessThan(
-        {},
+        null,
         BlsEntry{
             .allocator = std.testing.allocator,
             .id = "foo",
@@ -469,7 +486,7 @@ test "boot entry sorting" {
     // entries without sort keys are sorted based on the version potentially
     // embedded in the filename
     try std.testing.expect(blsEntryLessThan(
-        {},
+        null,
         BlsEntry{
             .allocator = std.testing.allocator,
             .id = "foo-0.0.2",
@@ -484,7 +501,7 @@ test "boot entry sorting" {
     // same number of tries left are sorted based on which entry has less tries
     // done
     try std.testing.expect(blsEntryLessThan(
-        {},
+        null,
         BlsEntry{
             .allocator = std.testing.allocator,
             .id = "foo",
@@ -574,7 +591,7 @@ fn searchForEntries(
     }
 
     std.log.debug("sorting BLS entries", .{});
-    std.mem.sort(BlsEntry, bls_entries.items, {}, blsEntryLessThan);
+    std.mem.sort(BlsEntry, bls_entries.items, loader_conf.default_entry, blsEntryLessThan);
 
     for (bls_entries.items) |entry| {
         const linux = mount_dir.realpathAlloc(allocator, entry.linux orelse {
