@@ -13,6 +13,13 @@ const PRINTKRB_RECORD_MAX = 1024;
 var mutex = std.Thread.Mutex{};
 var kmsg: ?std.fs.File = null;
 
+// The Zig string formatter can make many individual writes to our
+// writer depending on the format string, so we do all the formatting
+// ahead of time here so we can perform the write all at once when the
+// log line goes to the kernel.
+var log_buf: [PRINTKRB_RECORD_MAX]u8 = undefined;
+var stream = std.io.fixedBufferStream(&log_buf);
+
 pub fn init() !void {
     kmsg = try std.fs.cwd().openFile(KMSG, .{ .mode = .write_only });
 }
@@ -61,15 +68,12 @@ pub fn logFn(
     mutex.lock();
     defer mutex.unlock();
 
-    // The Zig string formatter can make many individual writes to our
-    // writer depending on the format string, so we do all the formatting
-    // ahead of time here so we can perform the write all at once when the
-    // log line goes to the kernel.
-    var buf: [PRINTKRB_RECORD_MAX]u8 = undefined;
-    var stream = std.io.fixedBufferStream(&buf);
+    stream.reset();
+
     stream.writer().print(
         "<" ++ syslog_prefix ++ ">" ++ LOG_PREFIX ++ ": " ++ format,
         args,
     ) catch {};
-    file.writeAll(buf[0..stream.pos]) catch {};
+
+    file.writeAll(log_buf[0..stream.pos]) catch {};
 }
