@@ -71,5 +71,5 @@ pub fn logFn(
         "<" ++ syslog_prefix ++ ">" ++ LOG_PREFIX ++ ": " ++ format,
         args,
     ) catch {};
-    _ = file.write(buf[0..stream.pos]) catch {};
+    file.writeAll(buf[0..stream.pos]) catch {};
 }

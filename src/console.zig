@@ -568,6 +568,8 @@ pub const Command = struct {
         ;
 
         fn run(_: *Console, _: *ArgsIterator, boot_loaders: []*BootLoader) !?Event {
+            writeAll("\n");
+
             for (boot_loaders, 0..) |boot_loader, index| {
                 print(
                     "{d}\t{s} ({})\n",
@@ -609,6 +611,8 @@ pub const Command = struct {
                 print("failed to probe: {}\n", .{err});
                 return null;
             };
+
+            writeAll("\n");
 
             for (entries, 0..) |entry, index| {
                 print("{d}\t{s}\n", .{ index, entry.linux });
