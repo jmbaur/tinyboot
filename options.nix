@@ -112,7 +112,7 @@ in
       };
     };
     flashrom = {
-      package = mkPackageOptionMD pkgs "flashrom-cros" { };
+      package = mkPackageOption pkgs "flashrom-cros" { };
       programmer = mkOption {
         type = types.str;
         default = "internal";
