@@ -112,22 +112,13 @@ in
         };
 
         boot.kernelPackages = lib.mkDefault (pkgs.linuxPackagesFor cfg.linux.package);
-        boot.kernelPatches =
-          with lib.kernel;
-          with (whenHelpers config.boot.kernelPackages.kernel.version);
-          [
-            {
-              name = "enable-coreboot";
-              patch = null;
-              extraStructuredConfig = {
-                GOOGLE_CBMEM = whenAtLeast "6.2" yes;
-                GOOGLE_COREBOOT_TABLE = yes;
-                GOOGLE_FIRMWARE = yes;
-                GOOGLE_MEMCONSOLE_COREBOOT = yes;
-                GOOGLE_VPD = yes;
-              };
-            }
-          ];
+        boot.kernelPatches = [
+          {
+            name = "enable-coreboot";
+            patch = null;
+            extraStructuredConfig.GOOGLE_FIRMWARE = lib.kernel.yes;
+          }
+        ];
       })
     ]
   );
