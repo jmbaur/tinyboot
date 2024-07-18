@@ -73,38 +73,15 @@
           qemu
           zon2nix
         ];
+        # https://github.com/NixOS/nixpkgs/issues/270415
         shellHook = ''
           unset ZIG_GLOBAL_CACHE_DIR
         '';
         env.TINYBOOT_KERNEL = ''${pkgs."tinyboot-qemu-${pkgs.stdenv.hostPlatform.qemuArch}".linux}/kernel'';
       };
     }) inputs.self.legacyPackages;
-    apps = inputs.nixpkgs.lib.mapAttrs (
-      system: pkgs:
-      (
-        let
-          nixosSystem = inputs.nixpkgs.lib.nixosSystem {
-            modules = [
-              inputs.self.nixosModules.default
-              ./test/module.nix
-              ({ nixpkgs.hostPlatform = system; })
-            ];
-          };
-        in
-        {
-          "${system}-disk" = {
-            type = "app";
-            program = toString (
-              pkgs.writeShellScript "make-disk-image" ''
-                dd status=progress if=${nixosSystem.config.system.build.qcow2}/nixos.qcow2 of=nixos-${system}.qcow2
-              ''
-            );
-          };
-        }
-      )
-      // {
-        default = inputs.self.apps.${system}."${system}-disk";
-      }
-    ) inputs.self.legacyPackages;
+    checks = inputs.nixpkgs.lib.mapAttrs (_: pkgs: {
+      simple = pkgs.callPackage ./tests/simple { };
+    }) inputs.self.legacyPackages;
   };
 }

@@ -30,7 +30,7 @@ stdenv.mkDerivation (
         ../../build.zig
         ../../build.zig.zon
         ../../src
-        ../../test/keys/tboot/key.der
+        ../../tests/keys/tboot/key.der
       ];
     };
 

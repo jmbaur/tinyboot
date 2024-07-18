@@ -22,7 +22,7 @@ pub fn main() !void {
     const kernel = args.next().?;
 
     // get path to tboot key before changing directory
-    const tboot_key = try std.fs.cwd().realpathAlloc(allocator, "test/keys/tboot/key.der");
+    const tboot_key = try std.fs.cwd().realpathAlloc(allocator, "tests/keys/tboot/key.der");
 
     try std.posix.chdir(tmpdir);
 

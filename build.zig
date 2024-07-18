@@ -33,7 +33,7 @@ pub fn build(b: *std.Build) !void {
             .strip = optimize != std.builtin.OptimizeMode.Debug,
         });
         tboot_loader.root_module.addAnonymousImport("test_key", .{
-            .root_source_file = b.path("test/keys/tboot/key.der"),
+            .root_source_file = b.path("tests/keys/tboot/key.der"),
         });
         tboot_loader.root_module.addImport("linux_headers", linux_headers_module);
 

@@ -179,27 +179,27 @@ in
       };
       tbootPublicCertificate = mkOption {
         type = types.path;
-        default = ./test/keys/tboot/key.der;
+        default = ./tests/keys/tboot/key.der;
       };
       tbootPrivateKey = mkOption {
         type = types.path;
-        default = ./test/keys/tboot/key.pem;
+        default = ./tests/keys/tboot/key.pem;
       };
       vbootRootKey = mkOption {
         type = types.path;
-        default = ./test/keys/root/key.vbpubk;
+        default = ./tests/keys/root/key.vbpubk;
       };
       vbootFirmwarePrivkey = mkOption {
         type = types.path;
-        default = ./test/keys/firmware/key.vbprivk;
+        default = ./tests/keys/firmware/key.vbprivk;
       };
       vbootFirmwareKey = mkOption {
         type = types.path;
-        default = ./test/keys/firmware/key.vbpubk;
+        default = ./tests/keys/firmware/key.vbpubk;
       };
       vbootKeyblock = mkOption {
         type = types.path;
-        default = ./test/keys/firmware/key.keyblock;
+        default = ./tests/keys/firmware/key.keyblock;
       };
     };
     extraInitrdContents = mkOption {
