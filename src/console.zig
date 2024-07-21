@@ -35,8 +35,8 @@ const NON_WORD_CHARS = std.ascii.whitespace ++ [_]u8{ '.', ';', ',' };
 var out = std.io.bufferedWriter(std.io.getStdOut().writer());
 
 arena: std.heap.ArenaAllocator = std.heap.ArenaAllocator.init(std.heap.page_allocator),
-input_cursor: u9 = 0,
-input_end: u9 = 0,
+input_cursor: usize = 0,
+input_end: usize = 0,
 input_buffer: [std.math.maxInt(u9)]u8 = undefined,
 context: ?*BootLoader = null,
 tty: ?system.Tty = null,
@@ -76,6 +76,19 @@ fn prompt(self: *Console) !void {
         try out.writer().writeAll(ctx.name());
     }
     writeAllAndFlush("> ");
+}
+
+/// Caller required to flush
+fn eraseInputAndUpdateCursor(input: []u8, start: usize, end: *usize, n: usize) void {
+    std.mem.copyForwards(
+        u8,
+        input[start..end.* -| n],
+        input[start +| n..end.*],
+    );
+    end.* -|= n;
+    writeAll(input[start..end.*]);
+    eraseToEndOfLine();
+    cursorLeft(end.* -| start);
 }
 
 /// Caller required to flush
@@ -165,15 +178,7 @@ pub fn handleStdin(self: *Console, boot_loaders: []*BootLoader) !?Event {
         // C-d
         0x04 => b: {
             if (self.input_cursor < self.input_end) {
-                std.mem.copyForwards(
-                    u8,
-                    self.input_buffer[self.input_cursor .. self.input_end - 1],
-                    self.input_buffer[self.input_cursor + 1 .. self.input_end],
-                );
-                self.input_end -|= 1;
-                writeAll(self.input_buffer[self.input_cursor..self.input_end]);
-                eraseToEndOfLine();
-                cursorLeft(self.input_end - self.input_cursor);
+                eraseInputAndUpdateCursor(&self.input_buffer, self.input_cursor, &self.input_end, 1);
                 break :b true;
             }
 
@@ -182,7 +187,7 @@ pub fn handleStdin(self: *Console, boot_loaders: []*BootLoader) !?Event {
         // C-e
         0x05 => b: {
             if (self.input_cursor < self.input_end) {
-                cursorRight(self.input_end - self.input_cursor);
+                cursorRight(self.input_end -| self.input_cursor);
                 self.input_cursor = self.input_end;
                 break :b true;
             }
@@ -206,7 +211,7 @@ pub fn handleStdin(self: *Console, boot_loaders: []*BootLoader) !?Event {
             if (self.input_cursor > 0) {
                 std.mem.copyForwards(
                     u8,
-                    self.input_buffer[self.input_cursor - 1 .. self.input_end - 1],
+                    self.input_buffer[self.input_cursor -| 1..self.input_end -| 1],
                     self.input_buffer[self.input_cursor..self.input_end],
                 );
                 self.input_cursor -|= 1;
@@ -214,7 +219,7 @@ pub fn handleStdin(self: *Console, boot_loaders: []*BootLoader) !?Event {
                 cursorLeft(1);
                 writeAll(self.input_buffer[self.input_cursor..self.input_end]);
                 eraseToEndOfLine();
-                cursorLeft(self.input_end - self.input_cursor);
+                cursorLeft(self.input_end -| self.input_cursor);
                 break :b true;
             }
 
@@ -227,7 +232,7 @@ pub fn handleStdin(self: *Console, boot_loaders: []*BootLoader) !?Event {
             clearScreen();
             try self.prompt();
             writeAll(self.input_buffer[0..self.input_end]);
-            cursorLeft(self.input_end - self.input_cursor);
+            cursorLeft(self.input_end -| self.input_cursor);
             break :b true;
         },
         // \r, \n; \n is also known as C-j
@@ -251,12 +256,12 @@ pub fn handleStdin(self: *Console, boot_loaders: []*BootLoader) !?Event {
             if (0 < self.input_cursor and self.input_cursor < self.input_end) {
                 std.mem.swap(
                     u8,
-                    &self.input_buffer[self.input_cursor - 1],
+                    &self.input_buffer[self.input_cursor -| 1],
                     &self.input_buffer[self.input_cursor],
                 );
                 cursorLeft(1);
                 self.input_cursor +|= 1;
-                writeAll(self.input_buffer[self.input_cursor - 2 .. self.input_cursor]);
+                writeAll(self.input_buffer[self.input_cursor -| 2..self.input_cursor]);
                 break :b true;
             }
 
@@ -268,7 +273,7 @@ pub fn handleStdin(self: *Console, boot_loaders: []*BootLoader) !?Event {
                 cursorLeft(self.input_cursor);
                 writeAll(self.input_buffer[self.input_cursor..self.input_end]);
                 eraseToEndOfLine();
-                self.input_end = self.input_end - self.input_cursor;
+                self.input_end = self.input_end -| self.input_cursor;
                 self.input_cursor = 0;
                 cursorLeft(self.input_end);
                 break :b true;
@@ -281,17 +286,17 @@ pub fn handleStdin(self: *Console, boot_loaders: []*BootLoader) !?Event {
         // Space...~
         0x20...0x7e => b: {
             // make sure we have room for another character
-            if (self.input_end + 1 < self.input_buffer.len) {
+            if (self.input_end +| 1 < self.input_buffer.len) {
                 std.mem.copyBackwards(
                     u8,
-                    self.input_buffer[self.input_cursor + 1 .. self.input_end + 1],
+                    self.input_buffer[self.input_cursor +| 1..self.input_end +| 1],
                     self.input_buffer[self.input_cursor..self.input_end],
                 );
                 self.input_buffer[self.input_cursor] = char;
                 self.input_end +|= 1;
                 writeAll(self.input_buffer[self.input_cursor..self.input_end]);
                 self.input_cursor +|= 1;
-                cursorLeft(self.input_end - self.input_cursor);
+                cursorLeft(self.input_end -| self.input_cursor);
                 break :b true;
             }
 
@@ -304,33 +309,104 @@ pub fn handleStdin(self: *Console, boot_loaders: []*BootLoader) !?Event {
                 0x62 => {
                     if (self.input_cursor > 0) {
                         const old_cursor = self.input_cursor;
-                        const last_word = std.mem.lastIndexOfNone(u8, self.input_buffer[0..self.input_cursor], &NON_WORD_CHARS) orelse 0;
+
+                        const last_word = std.mem.lastIndexOfNone(
+                            u8,
+                            self.input_buffer[0..self.input_cursor],
+                            &NON_WORD_CHARS,
+                        ) orelse 0;
+
                         self.input_cursor = @intCast(last_word);
-                        const last_non_word = std.mem.lastIndexOfAny(u8, self.input_buffer[0..self.input_cursor], &NON_WORD_CHARS) orelse 0;
+
+                        const last_non_word = std.mem.lastIndexOfAny(
+                            u8,
+                            self.input_buffer[0..self.input_cursor],
+                            &NON_WORD_CHARS,
+                        ) orelse 0;
+
                         self.input_cursor = @intCast(last_non_word);
+
                         if (self.input_cursor > 0) {
-                            const first_word = std.mem.indexOfNone(u8, self.input_buffer[self.input_cursor..], &NON_WORD_CHARS) orelse 0;
+                            const first_word = std.mem.indexOfNone(
+                                u8,
+                                self.input_buffer[self.input_cursor..self.input_end],
+                                &NON_WORD_CHARS,
+                            ) orelse 0;
                             self.input_cursor +|= @intCast(first_word);
                         }
 
-                        cursorLeft(old_cursor - self.input_cursor);
+                        cursorLeft(old_cursor -| self.input_cursor);
 
                         break :b true;
                     }
                 },
                 // d
-                0x64 => {},
+                0x64 => {
+                    std.debug.assert(self.input_cursor <= self.input_end);
+                    if (self.input_cursor < self.input_end) {
+                        var cursor = self.input_cursor;
+
+                        const first_word = std.mem.indexOfNone(
+                            u8,
+                            self.input_buffer[cursor..self.input_end],
+                            &NON_WORD_CHARS,
+                        ) orelse self.input_end -| cursor;
+
+                        cursor +|= first_word;
+
+                        const first_non_word = std.mem.indexOfAny(
+                            u8,
+                            self.input_buffer[cursor..self.input_end],
+                            &NON_WORD_CHARS,
+                        ) orelse self.input_end -| cursor;
+
+                        cursor +|= first_non_word;
+
+                        const next_word = std.mem.indexOfNone(
+                            u8,
+                            self.input_buffer[cursor..self.input_end],
+                            &NON_WORD_CHARS,
+                        );
+
+                        const end = if (next_word == null)
+                            // erase to end else
+                            self.input_end -| self.input_cursor
+                        else
+                            first_word + first_non_word;
+
+                        eraseInputAndUpdateCursor(
+                            &self.input_buffer,
+                            self.input_cursor,
+                            &self.input_end,
+                            end,
+                        );
+
+                        break :b true;
+                    }
+                },
                 // f
                 0x66 => {
                     std.debug.assert(self.input_cursor <= self.input_end);
                     if (self.input_cursor < self.input_end) {
                         const old_cursor = self.input_cursor;
-                        const first_non_word = std.mem.indexOfAny(u8, self.input_buffer[self.input_cursor..], &NON_WORD_CHARS) orelse self.input_end - self.input_cursor;
+
+                        const first_non_word = std.mem.indexOfAny(
+                            u8,
+                            self.input_buffer[self.input_cursor..self.input_end],
+                            &NON_WORD_CHARS,
+                        ) orelse self.input_end -| self.input_cursor;
+
                         self.input_cursor +|= @intCast(first_non_word);
-                        const first_word = std.mem.indexOfNone(u8, self.input_buffer[self.input_cursor..], &NON_WORD_CHARS) orelse self.input_end - self.input_cursor;
+
+                        const first_word = std.mem.indexOfNone(
+                            u8,
+                            self.input_buffer[self.input_cursor..self.input_end],
+                            &NON_WORD_CHARS,
+                        ) orelse self.input_end -| self.input_cursor;
+
                         self.input_cursor +|= @intCast(first_word);
 
-                        cursorRight(self.input_cursor - old_cursor);
+                        cursorRight(self.input_cursor -| old_cursor);
 
                         break :b true;
                     }
