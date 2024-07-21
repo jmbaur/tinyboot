@@ -30,6 +30,8 @@ const CONSOLE = "/dev/char/5:1";
 
 pub const IN = posix.STDIN_FILENO;
 
+const NON_WORD_CHARS = std.ascii.whitespace ++ [_]u8{ '.', ';', ',' };
+
 var out = std.io.bufferedWriter(std.io.getStdOut().writer());
 
 arena: std.heap.ArenaAllocator = std.heap.ArenaAllocator.init(std.heap.page_allocator),
@@ -77,14 +79,14 @@ fn prompt(self: *Console) !void {
 }
 
 /// Caller required to flush
-fn cursorLeft(n: u16) void {
+fn cursorLeft(n: usize) void {
     if (n > 0) {
         out.writer().print(.{esc} ++ "[{d:0>5}D", .{n}) catch {};
     }
 }
 
 /// Caller required to flush
-fn cursorRight(n: u16) void {
+fn cursorRight(n: usize) void {
     if (n > 0) {
         out.writer().print(.{esc} ++ "[{d}C", .{n}) catch {};
     }
@@ -120,7 +122,8 @@ pub fn handleStdin(self: *Console, boot_loaders: []*BootLoader) !?Event {
         try self.prompt();
     }
 
-    const char = try std.io.getStdIn().reader().readByte();
+    var stdin_reader = std.io.getStdIn().reader();
+    const char = try stdin_reader.readByte();
 
     var done = false;
 
@@ -196,6 +199,8 @@ pub fn handleStdin(self: *Console, boot_loaders: []*BootLoader) !?Event {
 
             break :b false;
         },
+        // Bell
+        0x07 => false,
         // C-h, Backspace
         0x08, 0x7f => b: {
             if (self.input_cursor > 0) {
@@ -215,6 +220,8 @@ pub fn handleStdin(self: *Console, boot_loaders: []*BootLoader) !?Event {
 
             break :b false;
         },
+        // Tab
+        0x09 => false,
         // C-l
         0x0c => b: {
             clearScreen();
@@ -290,7 +297,52 @@ pub fn handleStdin(self: *Console, boot_loaders: []*BootLoader) !?Event {
 
             break :b false;
         },
-        else => false,
+        // Escape sequence
+        0x1b => b: {
+            switch (try stdin_reader.readByte()) {
+                // b
+                0x62 => {
+                    if (self.input_cursor > 0) {
+                        if (std.mem.lastIndexOfAny(u8, self.input_buffer[0 .. self.input_cursor - 1], &NON_WORD_CHARS)) |next_idx| {
+                            const old_cursor = self.input_cursor;
+                            self.input_cursor = @as(u9, @intCast(next_idx)) + 1;
+                            cursorLeft(old_cursor - self.input_cursor);
+                        } else {
+                            cursorLeft(self.input_cursor);
+                            self.input_cursor = 0;
+                        }
+
+                        break :b true;
+                    }
+                },
+                // d
+                0x64 => {},
+                // f
+                0x66 => {
+                    if (self.input_cursor <= self.input_end) {
+                        if (std.mem.indexOfAny(u8, self.input_buffer[self.input_cursor..], &NON_WORD_CHARS)) |next_idx| {
+                            const old_cursor = self.input_cursor;
+                            self.input_cursor +|= @intCast(next_idx + 1);
+                            cursorRight(self.input_cursor - old_cursor);
+                        } else {
+                            cursorRight(self.input_end - self.input_cursor);
+                            self.input_cursor = self.input_end;
+                        }
+
+                        break :b true;
+                    }
+                },
+                else => |next_char| {
+                    std.log.debug("unknown escape sequence input character 0x{x}", .{next_char});
+                },
+            }
+
+            break :b false;
+        },
+        else => b: {
+            std.log.debug("unknown input character 0x{x}", .{char});
+            break :b false;
+        },
     };
 
     if (needs_flush) {
