@@ -28,16 +28,14 @@ const Console = @This();
 
 const CONSOLE = "/dev/char/5:1";
 
-const IO_BUFFER_SIZE = 4096;
-
 pub const IN = posix.STDIN_FILENO;
 
 var out = std.io.bufferedWriter(std.io.getStdOut().writer());
 
 arena: std.heap.ArenaAllocator = std.heap.ArenaAllocator.init(std.heap.page_allocator),
-input_cursor: u16 = 0,
-input_end: u16 = 0,
-input_buffer: [IO_BUFFER_SIZE]u8 = undefined,
+input_cursor: u9 = 0,
+input_end: u9 = 0,
+input_buffer: [std.math.maxInt(u9)]u8 = undefined,
 context: ?*BootLoader = null,
 tty: ?system.Tty = null,
 
@@ -122,14 +120,7 @@ pub fn handleStdin(self: *Console, boot_loaders: []*BootLoader) !?Event {
         try self.prompt();
     }
 
-    // We should only ever get 1 byte of data from stdin since we put the
-    // terminal in raw mode.
-    var buf = [_]u8{0};
-    if (try std.io.getStdIn().read(&buf) != 1) {
-        return null;
-    }
-
-    const char = buf[0];
+    const char = try std.io.getStdIn().reader().readByte();
 
     var done = false;
 
@@ -154,7 +145,7 @@ pub fn handleStdin(self: *Console, boot_loaders: []*BootLoader) !?Event {
         0x02 => b: {
             if (self.input_cursor > 0) {
                 cursorLeft(1);
-                self.input_cursor -= 1;
+                self.input_cursor -|= 1;
                 break :b true;
             }
 
@@ -176,7 +167,7 @@ pub fn handleStdin(self: *Console, boot_loaders: []*BootLoader) !?Event {
                     self.input_buffer[self.input_cursor .. self.input_end - 1],
                     self.input_buffer[self.input_cursor + 1 .. self.input_end],
                 );
-                self.input_end -= 1;
+                self.input_end -|= 1;
                 writeAll(self.input_buffer[self.input_cursor..self.input_end]);
                 eraseToEndOfLine();
                 cursorLeft(self.input_end - self.input_cursor);
@@ -199,7 +190,7 @@ pub fn handleStdin(self: *Console, boot_loaders: []*BootLoader) !?Event {
         0x06 => b: {
             if (self.input_cursor < self.input_end) {
                 cursorRight(1);
-                self.input_cursor += 1;
+                self.input_cursor +|= 1;
                 break :b true;
             }
 
@@ -213,8 +204,8 @@ pub fn handleStdin(self: *Console, boot_loaders: []*BootLoader) !?Event {
                     self.input_buffer[self.input_cursor - 1 .. self.input_end - 1],
                     self.input_buffer[self.input_cursor..self.input_end],
                 );
-                self.input_cursor -= 1;
-                self.input_end -= 1;
+                self.input_cursor -|= 1;
+                self.input_end -|= 1;
                 cursorLeft(1);
                 writeAll(self.input_buffer[self.input_cursor..self.input_end]);
                 eraseToEndOfLine();
@@ -257,7 +248,7 @@ pub fn handleStdin(self: *Console, boot_loaders: []*BootLoader) !?Event {
                     &self.input_buffer[self.input_cursor],
                 );
                 cursorLeft(1);
-                self.input_cursor += 1;
+                self.input_cursor +|= 1;
                 writeAll(self.input_buffer[self.input_cursor - 2 .. self.input_cursor]);
                 break :b true;
             }
@@ -290,9 +281,9 @@ pub fn handleStdin(self: *Console, boot_loaders: []*BootLoader) !?Event {
                     self.input_buffer[self.input_cursor..self.input_end],
                 );
                 self.input_buffer[self.input_cursor] = char;
-                self.input_end += 1;
+                self.input_end +|= 1;
                 writeAll(self.input_buffer[self.input_cursor..self.input_end]);
-                self.input_cursor += 1;
+                self.input_cursor +|= 1;
                 cursorLeft(self.input_end - self.input_cursor);
                 break :b true;
             }
