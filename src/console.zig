@@ -303,14 +303,17 @@ pub fn handleStdin(self: *Console, boot_loaders: []*BootLoader) !?Event {
                 // b
                 0x62 => {
                     if (self.input_cursor > 0) {
-                        if (std.mem.lastIndexOfAny(u8, self.input_buffer[0 .. self.input_cursor - 1], &NON_WORD_CHARS)) |next_idx| {
-                            const old_cursor = self.input_cursor;
-                            self.input_cursor = @as(u9, @intCast(next_idx)) + 1;
-                            cursorLeft(old_cursor - self.input_cursor);
-                        } else {
-                            cursorLeft(self.input_cursor);
-                            self.input_cursor = 0;
+                        const old_cursor = self.input_cursor;
+                        const last_word = std.mem.lastIndexOfNone(u8, self.input_buffer[0..self.input_cursor], &NON_WORD_CHARS) orelse 0;
+                        self.input_cursor = @intCast(last_word);
+                        const last_non_word = std.mem.lastIndexOfAny(u8, self.input_buffer[0..self.input_cursor], &NON_WORD_CHARS) orelse 0;
+                        self.input_cursor = @intCast(last_non_word);
+                        if (self.input_cursor > 0) {
+                            const first_word = std.mem.indexOfNone(u8, self.input_buffer[self.input_cursor..], &NON_WORD_CHARS) orelse 0;
+                            self.input_cursor +|= @intCast(first_word);
                         }
+
+                        cursorLeft(old_cursor - self.input_cursor);
 
                         break :b true;
                     }
@@ -319,22 +322,20 @@ pub fn handleStdin(self: *Console, boot_loaders: []*BootLoader) !?Event {
                 0x64 => {},
                 // f
                 0x66 => {
-                    if (self.input_cursor <= self.input_end) {
-                        if (std.mem.indexOfAny(u8, self.input_buffer[self.input_cursor..], &NON_WORD_CHARS)) |next_idx| {
-                            const old_cursor = self.input_cursor;
-                            self.input_cursor +|= @intCast(next_idx + 1);
-                            cursorRight(self.input_cursor - old_cursor);
-                        } else {
-                            cursorRight(self.input_end - self.input_cursor);
-                            self.input_cursor = self.input_end;
-                        }
+                    std.debug.assert(self.input_cursor <= self.input_end);
+                    if (self.input_cursor < self.input_end) {
+                        const old_cursor = self.input_cursor;
+                        const first_non_word = std.mem.indexOfAny(u8, self.input_buffer[self.input_cursor..], &NON_WORD_CHARS) orelse self.input_end - self.input_cursor;
+                        self.input_cursor +|= @intCast(first_non_word);
+                        const first_word = std.mem.indexOfNone(u8, self.input_buffer[self.input_cursor..], &NON_WORD_CHARS) orelse self.input_end - self.input_cursor;
+                        self.input_cursor +|= @intCast(first_word);
+
+                        cursorRight(self.input_cursor - old_cursor);
 
                         break :b true;
                     }
                 },
-                else => |next_char| {
-                    std.log.debug("unknown escape sequence input character 0x{x}", .{next_char});
-                },
+                else => {},
             }
 
             break :b false;
