@@ -132,10 +132,10 @@ pub fn timeout(self: *BootLoader) !u8 {
 
 pub fn probe(self: *BootLoader) ![]const Entry {
     if (!self.probed) {
-        std.log.debug("bootloader not yet probed", .{});
+        std.log.debug("bootloader not yet probed on {}", .{self.device});
         try self.vtable.probe(self.inner, &self.entries, self.device);
         self.probed = true;
-        std.log.debug("bootloader probed", .{});
+        std.log.debug("bootloader probed on {}", .{self.device});
     }
 
     return self.entries.items;
