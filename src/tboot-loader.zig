@@ -11,7 +11,7 @@ const Device = @import("./device.zig");
 const DeviceWatcher = @import("./watch.zig");
 const DiskBootLoader = @import("./boot/disk.zig");
 const Log = @import("./log.zig");
-const XmodemBootLoader = @import("./boot/xmodem.zig");
+const YmodemBootLoader = @import("./boot/ymodem.zig");
 const security = @import("./security.zig");
 const system = @import("./system.zig");
 const utils = @import("./utils.zig");
@@ -128,7 +128,7 @@ fn newDeviceArmTimer(self: *TbootLoader) !void {
     }, null);
 }
 
-const all_bootloaders = .{ DiskBootLoader, XmodemBootLoader };
+const all_bootloaders = .{ DiskBootLoader, YmodemBootLoader };
 fn handleDevice(self: *TbootLoader) !void {
     // consume eventfd value
     {
@@ -141,11 +141,6 @@ fn handleDevice(self: *TbootLoader) !void {
 
         switch (event.action) {
             .add => {
-                std.log.debug(
-                    "new {s} device added",
-                    .{@tagName(event.device.subsystem)},
-                );
-
                 inline for (all_bootloaders) |bootloader_type| {
                     // If match() returns null, the device is not a match for
                     // that specific boot loader. If match() returns a non-null
@@ -154,6 +149,11 @@ fn handleDevice(self: *TbootLoader) !void {
                     const priority: ?u8 = bootloader_type.match(&device);
 
                     if (priority) |new_priority| {
+                        std.log.debug(
+                            "new {s} device matched bootloader {s}",
+                            .{ @tagName(event.device.subsystem), bootloader_type.name() },
+                        );
+
                         const new_bootloader = try arena.allocator().create(BootLoader);
                         new_bootloader.* = try BootLoader.init(
                             bootloader_type,

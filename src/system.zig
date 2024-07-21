@@ -77,16 +77,43 @@ fn cfmakeraw(t: *posix.termios) void {
     t.cc[VTIME] = 0;
 }
 
-pub const TtyMode = enum {
-    no_echo,
-    user_input,
-    file_transfer_recv,
-    file_transfer_send,
-};
-
 pub const Tty = struct {
     fd: posix.fd_t,
     original: posix.termios,
+
+    pub const Mode = enum {
+        no_echo,
+        user_input,
+        file_transfer,
+    };
+
+    pub const ReadError = error{Timeout} || posix.ReadError;
+    pub const Reader = std.io.GenericReader(*@This(), ReadError, read);
+
+    pub fn read(self: *@This(), buffer: []u8) ReadError!usize {
+        const n_read = try posix.read(self.fd, buffer);
+
+        if (n_read == 0) {
+            return ReadError.Timeout;
+        }
+
+        return n_read;
+    }
+
+    pub fn reader(self: *@This()) Reader {
+        return .{ .context = self };
+    }
+
+    pub const WriteError = posix.WriteError;
+    pub const Writer = std.io.GenericWriter(*@This(), WriteError, write);
+
+    pub fn write(self: *@This(), bytes: []const u8) WriteError!usize {
+        return try posix.write(self.fd, bytes);
+    }
+
+    pub fn writer(self: *@This()) Writer {
+        return .{ .context = self };
+    }
 
     pub fn reset(self: *@This()) void {
         // wait until everything is sent
@@ -102,7 +129,7 @@ pub const Tty = struct {
     }
 };
 
-pub fn setupTty(fd: posix.fd_t, mode: TtyMode) !Tty {
+pub fn setupTty(fd: posix.fd_t, mode: Tty.Mode) !Tty {
     const orig = Tty{
         .fd = fd,
         .original = try posix.tcgetattr(fd),
@@ -153,7 +180,7 @@ pub fn setupTty(fd: posix.fd_t, mode: TtyMode) !Tty {
 
             setBaudRate(&termios, posix.speed_t.B115200);
         },
-        .file_transfer_recv, .file_transfer_send => {
+        .file_transfer => {
             termios.iflag = .{
                 .IGNBRK = true,
                 .IXOFF = true,
@@ -170,7 +197,9 @@ pub fn setupTty(fd: posix.fd_t, mode: TtyMode) !Tty {
             termios.cflag.CSIZE = .CS8;
             termios.cflag.CREAD = true;
             termios.cflag.CLOCAL = true;
-            termios.cc[VMIN] = if (mode == .file_transfer_recv) 0 else 1;
+
+            // http://www.unixwiz.net/techtips/termios-vmin-vtime.html
+            termios.cc[VMIN] = 0;
             termios.cc[VTIME] = 50;
 
             setBaudRate(&termios, posix.speed_t.B3000000);
@@ -193,6 +222,8 @@ pub fn setupTty(fd: posix.fd_t, mode: TtyMode) !Tty {
 
 // These aren't defined in the UAPI linux headers for some odd reason.
 const SYSLOG_ACTION_READ_ALL = 3;
+const SYSLOG_ACTION_CONSOLE_OFF = 6;
+const SYSLOG_ACTION_CONSOLE_ON = 7;
 const SYSLOG_ACTION_UNREAD = 9;
 
 /// Read kernel logs (AKA syslog/dmesg). Caller is responsible for returned
@@ -232,5 +263,21 @@ pub fn printKernelLogs(
                 try writer.print("{s}\n", .{line[right_chevron_index + 1 ..]});
             }
         }
+    }
+}
+
+pub fn toggleConsole(toggle: enum { on, off }) !void {
+    switch (posix.errno(system.syscall3(
+        system.SYS.syslog,
+        switch (toggle) {
+            .on => SYSLOG_ACTION_CONSOLE_ON,
+            .off => SYSLOG_ACTION_CONSOLE_OFF,
+        },
+        0, // ignored
+        0, // ignored
+    ))) {
+        .SUCCESS => {},
+        .PERM => return error.PermissionDenied,
+        else => |err| return posix.unexpectedErrno(err),
     }
 }

@@ -2,7 +2,7 @@ test {
     _ = @import("./autoboot.zig");
     _ = @import("./boot/bootloader.zig");
     _ = @import("./boot/disk.zig");
-    _ = @import("./boot/xmodem.zig");
+    _ = @import("./boot/ymodem.zig");
     _ = @import("./bootspec.zig");
     _ = @import("./console.zig");
     _ = @import("./cpio/main.zig");
@@ -24,5 +24,5 @@ test {
     _ = @import("./tmpdir.zig");
     _ = @import("./utils.zig");
     _ = @import("./watch.zig");
-    _ = @import("./xmodem.zig");
+    _ = @import("./ymodem.zig");
 }

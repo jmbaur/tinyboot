@@ -154,35 +154,29 @@ const KEXEC_LOADED = "/sys/kernel/kexec_loaded";
 fn kexecIsLoaded(f: std.fs.File) bool {
     f.seekTo(0) catch return false;
 
-    var is_loaded: u8 = 0;
-    const bytes_read = f.read(std.mem.asBytes(&is_loaded)) catch return false;
-
-    if (bytes_read != 1) {
-        return false;
-    }
-
-    return is_loaded == '1';
+    return (f.reader().readByte() catch return false) == '1';
 }
 
 fn kexecLoad(
     allocator: std.mem.Allocator,
-    linux: []const u8,
-    initrd: ?[]const u8,
+    linux_filepath: []const u8,
+    initrd_filepath: ?[]const u8,
     cmdline: ?[]const u8,
 ) !void {
     std.log.info("preparing kexec", .{});
-    std.log.info("loading linux {s}", .{linux});
-    std.log.info("loading initrd {s}", .{initrd orelse "<none>"});
+    std.log.info("loading linux {s}", .{linux_filepath});
+    std.log.info("loading initrd {s}", .{initrd_filepath orelse "<none>"});
     std.log.info("loading params {s}", .{cmdline orelse "<none>"});
 
-    const _linux = try std.fs.cwd().openFile(linux, .{});
-    defer _linux.close();
+    const linux = try std.fs.cwd().openFile(linux_filepath, .{});
+    defer linux.close();
 
-    const linux_fd = @as(usize, @bitCast(@as(isize, _linux.handle)));
+    const linux_fd = @as(usize, @bitCast(@as(isize, linux.handle)));
 
     const initrd_fd = b: {
-        if (initrd) |_initrd| {
-            const file = try std.fs.cwd().openFile(_initrd, .{});
+        if (initrd_filepath) |initrd| {
+            const file = try std.fs.cwd().openFile(initrd, .{});
+
             break :b file.handle;
         } else {
             break :b 0;
@@ -196,7 +190,7 @@ fn kexecLoad(
     }
 
     var flags: usize = 0;
-    if (initrd == null) {
+    if (initrd_filepath == null) {
         flags |= linux_headers.KEXEC_FILE_NO_INITRAMFS;
     }
 

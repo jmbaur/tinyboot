@@ -120,16 +120,16 @@ pub fn build(b: *std.Build) !void {
         tboot_nixos_install.root_module.addImport("clap", clap.module("clap"));
         b.installArtifact(tboot_nixos_install);
 
-        const modem_tool = b.addExecutable(.{
-            .name = "xmodem",
-            .root_source_file = b.path("src/xmodem.zig"),
+        const tboot_ymodem = b.addExecutable(.{
+            .name = "tboot-ymodem",
+            .root_source_file = b.path("src/ymodem.zig"),
             .target = target,
             .optimize = optimize,
             .strip = optimize != std.builtin.OptimizeMode.Debug,
         });
-        modem_tool.root_module.addImport("linux_headers", linux_headers_module);
-        modem_tool.root_module.addImport("clap", clap.module("clap"));
-        b.installArtifact(modem_tool);
+        tboot_ymodem.root_module.addImport("linux_headers", linux_headers_module);
+        tboot_ymodem.root_module.addImport("clap", clap.module("clap"));
+        b.installArtifact(tboot_ymodem);
     }
 
     const unit_tests = b.addTest(.{

@@ -6,7 +6,6 @@ const linux_headers = @import("linux_headers");
 
 const BootLoader = @import("./boot/bootloader.zig");
 const Device = @import("./device.zig");
-const Xmodem = @import("./boot/xmodem.zig").Xmodem;
 const system = @import("./system.zig");
 const utils = @import("./utils.zig");
 
@@ -47,7 +46,7 @@ pub fn init() !Console {
     // sign of user input.
     {
         _ = try system.setupTty(IN, .no_echo);
-        writeAllAndFlush("\npress <ENTER> to interrupt\n\n");
+        writeAllAndFlush("\npress ENTER to interrupt\n\n");
     }
 
     return .{};
@@ -656,7 +655,7 @@ pub const Command = struct {
 
                         return Event.kexec;
                     } else |err| {
-                        print("failed to load entry: {}", .{err});
+                        print("failed to load entry: {}\n", .{err});
                         return null;
                     }
                 }

@@ -5,11 +5,11 @@ const BootLoader = @import("./bootloader.zig");
 const Device = @import("../device.zig");
 const TmpDir = @import("../tmpdir.zig");
 const system = @import("../system.zig");
-const xmodemRecv = @import("../xmodem.zig").xmodemRecv;
+const ymodem = @import("../ymodem.zig");
 
 const linux_headers = @import("linux_headers");
 
-const XmodemBootLoader = @This();
+const YmodemBootLoader = @This();
 
 pub const autoboot = false;
 
@@ -60,21 +60,21 @@ pub fn match(device: *const Device) ?u8 {
     return 100;
 }
 
-pub fn init() XmodemBootLoader {
+pub fn init() YmodemBootLoader {
     return .{};
 }
 
 pub fn name() []const u8 {
-    return "xmodem";
+    return "ymodem";
 }
 
-pub fn timeout(self: *XmodemBootLoader) u8 {
+pub fn timeout(self: *YmodemBootLoader) u8 {
     _ = self;
 
     return 0;
 }
 
-pub fn probe(self: *XmodemBootLoader, entries: *std.ArrayList(BootLoader.Entry), device: Device) !void {
+pub fn probe(self: *YmodemBootLoader, entries: *std.ArrayList(BootLoader.Entry), device: Device) !void {
     const allocator = self.arena.allocator();
 
     var serial_path_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
@@ -83,62 +83,59 @@ pub fn probe(self: *XmodemBootLoader, entries: *std.ArrayList(BootLoader.Entry),
     var serial = try std.fs.cwd().openFile(serial_path, .{ .mode = .read_write });
     defer serial.close();
 
-    var original_serial = try system.setupTty(serial.handle, .file_transfer_recv);
-    defer original_serial.reset();
+    var tty = try system.setupTty(serial.handle, .file_transfer);
+    defer tty.reset();
 
     self.tmpdir = try TmpDir.create(.{});
 
     var tmpdir = self.tmpdir.?;
 
-    var linux = try tmpdir.dir.createFile("linux", .{});
-    defer linux.close();
+    {
+        // Temporarily turn off the system console so that no kernel logs are
+        // printed during the file transfer process.
+        system.toggleConsole(.off) catch {};
+        defer system.toggleConsole(.on) catch {};
 
-    try xmodemRecv(serial.handle, linux.writer());
+        try ymodem.recv(&tty, tmpdir.dir);
+    }
 
-    var initrd = try tmpdir.dir.createFile("initrd", .{});
-    defer initrd.close();
-
-    try xmodemRecv(serial.handle, initrd.writer());
-
-    var params_file = try tmpdir.dir.createFile("params", .{
-        .read = true,
-    });
+    var params_file = try tmpdir.dir.openFile("params", .{});
     defer params_file.close();
 
-    try xmodemRecv(
-        serial.handle,
-        params_file.writer(),
-    );
-
-    try params_file.seekTo(0);
     const kernel_params_bytes = try params_file.readToEndAlloc(
         allocator,
         linux_headers.COMMAND_LINE_SIZE,
     );
 
-    // trim out whitespace characters
-    const kernel_params = std.mem.trim(u8, kernel_params_bytes, " \t\n");
+    const kernel_params = std.mem.trim(u8, kernel_params_bytes, &std.ascii.whitespace);
+
+    const linux = try tmpdir.dir.realpathAlloc(allocator, "linux");
+    const initrd = b: {
+        if (tmpdir.dir.realpathAlloc(allocator, "initrd")) |initrd| {
+            break :b initrd;
+        } else |err| {
+            if (err == error.FileNotFound) {
+                break :b null;
+            } else {
+                return err;
+            }
+        }
+    };
 
     try entries.append(.{
         .context = try allocator.create(struct {}),
+        .linux = linux,
+        .initrd = initrd,
         .cmdline = if (kernel_params.len > 0) kernel_params else null,
-        .initrd = try tmpdir.dir.realpathAlloc(
-            allocator,
-            "initrd",
-        ),
-        .linux = try tmpdir.dir.realpathAlloc(
-            allocator,
-            "linux",
-        ),
     });
 }
 
-pub fn entryLoaded(self: *XmodemBootLoader, ctx: *anyopaque) void {
+pub fn entryLoaded(self: *YmodemBootLoader, ctx: *anyopaque) void {
     _ = self;
     _ = ctx;
 }
 
-pub fn deinit(self: *XmodemBootLoader) void {
+pub fn deinit(self: *YmodemBootLoader) void {
     self.arena.deinit();
 
     if (self.tmpdir) |*tmpdir| {

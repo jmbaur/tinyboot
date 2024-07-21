@@ -81,7 +81,8 @@
       };
     }) inputs.self.legacyPackages;
     checks = inputs.nixpkgs.lib.mapAttrs (_: pkgs: {
-      simple = pkgs.callPackage ./tests/simple { };
+      disk = pkgs.callPackage ./tests/disk { };
+      # ymodem = pkgs.callPackage ./tests/ymodem { };
     }) inputs.self.legacyPackages;
   };
 }
