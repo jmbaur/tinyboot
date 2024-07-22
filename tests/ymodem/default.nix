@@ -1,20 +1,24 @@
 {
-  testers,
   lib,
   lrzsz,
+  testers,
+  tinybootTools,
 }:
 
 testers.runNixOSTest {
   name = "ymodem";
   extraBaseModules.imports = [ ../module.nix ];
   nodes.machine = { };
+  skipTypeCheck = true; # TODO(jared): delete this
   testScript =
     { nodes, ... }:
     ''
       import os
+      import re
       import shutil
-      import tempfile
       import subprocess
+      import tempfile
+      import time
 
       host_boot_dir = tempfile.TemporaryDirectory()
 
@@ -28,14 +32,25 @@ testers.runNixOSTest {
           f.write("init=${nodes.machine.system.build.toplevel}/init ${toString nodes.machine.boot.kernelParams}")
 
       machine.start()
+      chardev = machine.send_monitor_command("chardev-add pty,id=ymodem")
+      machine.send_monitor_command("device_add virtconsole,chardev=ymodem")
       machine.wait_for_console_text("press ENTER to interrupt")
       machine.send_console("\n")  # interrupt boot process
-      machine.send_console("list\n")  # show boot loaders
-      machine.send_console("select 1\n")  # show boot loaders
-      machine.send_console("probe\n")  # show boot loaders
+      time.sleep(1)
+      machine.send_console("list\n")
+      machine.send_console("select 2\n")  # TODO(jared): make this selection less vague
+      time.sleep(1)
+      machine.send_console("probe\n")
 
-      assert machine.process is not None
-      subprocess.run(["${lib.getExe' lrzsz "sx"}", "--ymodem", "-kb", linux, initrd, params], stdin=machine.process.stdin, stdout=machine.process.stdin)
+      pty = re.findall(r"/dev/pts/[0-9]+", chardev)[0]
+      print(f"using pty {pty}")
+
+      subprocess.run(["${lib.getExe' tinybootTools "tboot-ymodem"}", "send", "--tty", pty, "--dir", host_boot_dir.name])
+      # with open(pty, "r+b") as f:
+      #     TODO(jared): make this work with stdin/stdout
+      #     subprocess.run(["${lib.getExe' lrzsz "sx"}", "--ymodem", "-kb", linux, initrd, params], stdin=f, stdout=f, text=False)
+
+      machine.send_console("boot\n")
 
       machine.wait_for_unit("multi-user.target")
     '';

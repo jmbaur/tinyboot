@@ -26,6 +26,7 @@ fn serialDeviceIsConnected(fd: posix.fd_t) bool {
     ) != 0) {
         return false;
     }
+
     return serial & linux_headers.TIOCM_DTR == linux_headers.TIOCM_DTR;
 }
 
@@ -36,9 +37,17 @@ pub fn match(device: *const Device) ?u8 {
 
     switch (device.type) {
         .node => |node| {
-            // https://www.kernel.org/doc/Documentation/admin-guide/devices.txt
             const major, const minor = node;
-            if (major != 4 or minor < 64) {
+
+            // https://www.kernel.org/doc/Documentation/admin-guide/devices.txt
+            const nodeMatch = switch (major) {
+                4 => minor >= 64,
+                204 => minor >= 64,
+                229 => true,
+                else => false,
+            };
+
+            if (!nodeMatch) {
                 return null;
             }
         },
@@ -50,11 +59,15 @@ pub fn match(device: *const Device) ?u8 {
     var serial = std.fs.cwd().openFile(
         serial_path,
         .{ .mode = .read_write },
-    ) catch return null;
+    ) catch |err| {
+        std.log.err("failed to open {}: {}", .{ device, err });
+        return null;
+    };
     defer serial.close();
 
+    // Prioritize serial devices that are already connected.
     if (!serialDeviceIsConnected(serial.handle)) {
-        return null;
+        return 105;
     }
 
     return 100;

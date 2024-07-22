@@ -140,6 +140,8 @@ fn handleDevice(self: *TbootLoader) !void {
 
         switch (event.action) {
             .add => {
+                std.log.debug("new device {} added", .{device});
+
                 inline for (all_bootloaders) |bootloader_type| {
                     // If match() returns null, the device is not a match for
                     // that specific boot loader. If match() returns a non-null
@@ -148,9 +150,9 @@ fn handleDevice(self: *TbootLoader) !void {
                     const priority: ?u8 = bootloader_type.match(&device);
 
                     if (priority) |new_priority| {
-                        std.log.debug(
-                            "new {s} device matched bootloader {s}",
-                            .{ @tagName(event.device.subsystem), bootloader_type.name() },
+                        std.log.info(
+                            "new device {} matched bootloader {s}",
+                            .{ device, bootloader_type.name() },
                         );
 
                         const new_bootloader = try arena.allocator().create(BootLoader);
@@ -159,7 +161,7 @@ fn handleDevice(self: *TbootLoader) !void {
                             arena.allocator(),
                             device,
                             .{
-                                .autoboot = bootloader_type.autoboot,
+                                .autoboot = @field(bootloader_type, "autoboot"),
                                 .priority = new_priority,
                             },
                         );
@@ -178,6 +180,8 @@ fn handleDevice(self: *TbootLoader) !void {
                 }
             },
             .remove => {
+                std.log.debug("existing device {} removed", .{device});
+
                 for (boot_loaders.items, 0..) |boot_loader, index| {
                     if (std.meta.eql(boot_loader.device, event.device)) {
                         var removed_boot_loader = boot_loaders.orderedRemove(index);
