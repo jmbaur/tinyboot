@@ -1,3 +1,4 @@
+const builtin = @import("builtin");
 const std = @import("std");
 const posix = std.posix;
 const process = std.process;
@@ -58,8 +59,8 @@ fn flush() void {
 
 /// Flushes occur transparently. Do not use if control over when flushes occur
 /// is needed.
-fn print(comptime format: []const u8, args: anytype) void {
-    out.writer().print(format, args) catch {};
+fn print(comptime fmt: []const u8, args: anytype) void {
+    out.writer().print(fmt, args) catch {};
 }
 
 fn writeAll(bytes: []const u8) void {
@@ -71,14 +72,14 @@ fn writeAllAndFlush(bytes: []const u8) void {
     flush();
 }
 
-fn prompt(self: *Console) !void {
+fn prompt(self: *Console) void {
     if (self.context) |ctx| {
-        try out.writer().writeAll(ctx.name());
+        writeAll(ctx.name());
     }
     writeAllAndFlush("> ");
 }
 
-/// Caller required to flush
+/// Assumes cursor is already located at `start`.
 fn eraseInputAndUpdateCursor(input: []u8, start: usize, end: *usize, n: usize) void {
     std.mem.copyForwards(
         u8,
@@ -86,7 +87,8 @@ fn eraseInputAndUpdateCursor(input: []u8, start: usize, end: *usize, n: usize) v
         input[start +| n..end.*],
     );
     end.* -|= n;
-    writeAll(input[start..end.*]);
+    cursorLeft(start);
+    writeAll(input[0..end.*]);
     eraseToEndOfLine();
     cursorLeft(end.* -| start);
 }
@@ -107,7 +109,12 @@ fn cursorRight(n: usize) void {
 
 /// Caller required to flush
 fn eraseToEndOfLine() void {
-    out.writer().writeAll(.{esc} ++ "[K") catch {};
+    out.writer().writeAll(.{esc} ++ "[0K") catch {};
+}
+
+/// Caller required to flush
+fn eraseToCursor() void {
+    out.writer().writeAll(.{esc} ++ "[1K") catch {};
 }
 
 /// Empties the display and moves the cursor to absolute position 0, 0.
@@ -127,12 +134,14 @@ pub fn deinit(self: *Console) void {
 }
 
 pub fn handleStdin(self: *Console, boot_loaders: []*BootLoader) !?Event {
+    std.debug.assert(self.input_cursor <= self.input_end);
+
     // We may already have a prompt from a boot timeout, so don't print
     // a prompt if we already have one.
     if (self.tty == null) {
         self.tty = try system.setupTty(IN, .user_input);
         std.log.debug("user presence detected", .{});
-        try self.prompt();
+        self.prompt();
     }
 
     var stdin_reader = std.io.getStdIn().reader();
@@ -172,8 +181,8 @@ pub fn handleStdin(self: *Console, boot_loaders: []*BootLoader) !?Event {
             writeAll("\n");
             self.input_cursor = 0;
             self.input_end = 0;
-            try self.prompt();
-            break :b false;
+            done = true;
+            break :b true;
         },
         // C-d
         0x04 => b: {
@@ -230,7 +239,7 @@ pub fn handleStdin(self: *Console, boot_loaders: []*BootLoader) !?Event {
         // C-l
         0x0c => b: {
             clearScreen();
-            try self.prompt();
+            self.prompt();
             writeAll(self.input_buffer[0..self.input_end]);
             cursorLeft(self.input_end -| self.input_cursor);
             break :b true;
@@ -238,11 +247,7 @@ pub fn handleStdin(self: *Console, boot_loaders: []*BootLoader) !?Event {
         // \r, \n; \n is also known as C-j
         0x0d, 0x0a => b: {
             writeAll("\n");
-            if (self.input_cursor == 0) {
-                try self.prompt();
-            } else {
-                done = true;
-            }
+            done = true;
             break :b true;
         },
         // C-n
@@ -282,11 +287,57 @@ pub fn handleStdin(self: *Console, boot_loaders: []*BootLoader) !?Event {
             break :b false;
         },
         // C-w
-        0x17 => false,
+        0x17 => b: {
+            if (self.input_cursor > 0) {
+                const old_cursor = self.input_cursor;
+
+                const last_word = std.mem.lastIndexOfNone(
+                    u8,
+                    self.input_buffer[0..self.input_cursor],
+                    &NON_WORD_CHARS,
+                ) orelse 0;
+
+                self.input_cursor = @intCast(last_word);
+
+                const last_non_word = std.mem.lastIndexOfAny(
+                    u8,
+                    self.input_buffer[0..self.input_cursor],
+                    &NON_WORD_CHARS,
+                ) orelse 0;
+
+                self.input_cursor = @intCast(last_non_word);
+
+                if (self.input_cursor > 0) {
+                    const first_word = std.mem.indexOfNone(
+                        u8,
+                        self.input_buffer[self.input_cursor..self.input_end],
+                        &NON_WORD_CHARS,
+                    ) orelse 0;
+                    self.input_cursor +|= @intCast(first_word);
+                }
+
+                cursorLeft(old_cursor - self.input_cursor);
+                eraseInputAndUpdateCursor(
+                    &self.input_buffer,
+                    self.input_cursor,
+                    &self.input_end,
+                    old_cursor - self.input_cursor,
+                );
+
+                break :b true;
+            }
+
+            break :b false;
+        },
         // Space...~
         0x20...0x7e => b: {
+            if (builtin.mode == .Debug and char == '?') {
+                print("\n{}\n", .{self});
+                break :b true;
+            } else if
+
             // make sure we have room for another character
-            if (self.input_end +| 1 < self.input_buffer.len) {
+            (self.input_end +| 1 < self.input_buffer.len) {
                 std.mem.copyBackwards(
                     u8,
                     self.input_buffer[self.input_cursor +| 1..self.input_end +| 1],
@@ -305,7 +356,7 @@ pub fn handleStdin(self: *Console, boot_loaders: []*BootLoader) !?Event {
         // Escape sequence
         0x1b => b: {
             switch (try stdin_reader.readByte()) {
-                // b
+                // M-b
                 0x62 => {
                     if (self.input_cursor > 0) {
                         const old_cursor = self.input_cursor;
@@ -340,9 +391,8 @@ pub fn handleStdin(self: *Console, boot_loaders: []*BootLoader) !?Event {
                         break :b true;
                     }
                 },
-                // d
+                // M-d
                 0x64 => {
-                    std.debug.assert(self.input_cursor <= self.input_end);
                     if (self.input_cursor < self.input_end) {
                         var cursor = self.input_cursor;
 
@@ -384,9 +434,8 @@ pub fn handleStdin(self: *Console, boot_loaders: []*BootLoader) !?Event {
                         break :b true;
                     }
                 },
-                // f
+                // M-f
                 0x66 => {
-                    std.debug.assert(self.input_cursor <= self.input_end);
                     if (self.input_cursor < self.input_end) {
                         const old_cursor = self.input_cursor;
 
@@ -426,7 +475,15 @@ pub fn handleStdin(self: *Console, boot_loaders: []*BootLoader) !?Event {
         flush();
     }
 
-    if (done and self.input_end > 0) {
+    if (!done) {
+        return null;
+    }
+
+    if (self.input_end == 0) {
+        self.prompt();
+
+        return null;
+    } else {
         defer {
             if (self.context == null) {
                 _ = self.arena.reset(.retain_capacity);
@@ -445,17 +502,36 @@ pub fn handleStdin(self: *Console, boot_loaders: []*BootLoader) !?Event {
 
         const event = maybe_notification catch |err| {
             print("\nerror running command: {}\n", .{err});
-            try self.prompt();
+            self.prompt();
+
             return null;
         } orelse {
-            try self.prompt();
+            self.prompt();
+
             return null;
         };
 
         return event;
     }
+}
 
-    return null;
+pub fn format(
+    self: Console,
+    comptime fmt: []const u8,
+    options: std.fmt.FormatOptions,
+    writer: anytype,
+) !void {
+    _ = fmt;
+    _ = options;
+
+    try writer.print(
+        "input_cursor={}" ++ "\n" ++ "input_end={}" ++ "\n" ++ "input_buffer={any}",
+        .{
+            self.input_cursor,
+            self.input_end,
+            self.input_buffer[0..self.input_end],
+        },
+    );
 }
 
 fn runCommand(
@@ -465,7 +541,7 @@ fn runCommand(
 ) !?Event {
     if (args.next()) |cmd| {
         if (std.mem.eql(u8, cmd, "help")) {
-            return @field(Command, "help").run(self, args, boot_loaders);
+            return Command.help.run(self, args, boot_loaders);
         }
 
         if (self.context) |ctx| {

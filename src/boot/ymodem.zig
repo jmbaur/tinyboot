@@ -84,7 +84,13 @@ pub fn probe(self: *YmodemBootLoader, entries: *std.ArrayList(BootLoader.Entry),
     defer serial.close();
 
     var tty = try system.setupTty(serial.handle, .file_transfer);
-    defer tty.reset();
+    defer {
+        tty.reset();
+
+        // If the TTY is being used for user input, this will allow for the
+        // next message printed to the TTY to be legible.
+        tty.writer().writeByte('\n') catch {};
+    }
 
     self.tmpdir = try TmpDir.create(.{});
 
