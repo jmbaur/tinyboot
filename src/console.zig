@@ -725,27 +725,56 @@ pub const Command = struct {
             \\Select a boot loader.
             \\
             \\Usage:
-            \\select <index>
+            \\select <selection-parameter>
+            \\
+            \\Where the selection parameter can either be the boot loader index
+            \\or the device's major & minor numbers (in the form "major:minor").
             \\
             \\Example:
-            \\select 2
+            \\select 2          Selects the second boot loader in the list
+            \\
+            \\select 8:1        Selects the boot loader attached to device 8:1
         ;
 
         fn run(console: *Console, args: *ArgsIterator, boot_loaders: []*BootLoader) !?Event {
-            const want_index = try std.fmt.parseInt(
-                usize,
-                args.next() orelse return error.InvalidArgument,
-                10,
-            );
+            const select_arg = args.next() orelse return error.InvalidArgument;
 
-            for (boot_loaders, 0..) |boot_loader, index| {
-                if (want_index == index) {
-                    console.context = boot_loader;
-                    print(
-                        "selected boot loader: {s} ({})\n",
-                        .{ boot_loader.name(), boot_loader.device },
-                    );
-                    return null;
+            var split = std.mem.splitScalar(u8, select_arg, ':');
+            const first = split.next() orelse return error.InvalidArgument;
+            const second = split.next();
+
+            if (second) |minor_str| {
+                const major = try std.fmt.parseInt(u32, first, 10);
+                const minor = try std.fmt.parseInt(u32, minor_str, 10);
+
+                for (boot_loaders) |boot_loader| {
+                    switch (boot_loader.device.type) {
+                        .node => |node| {
+                            const have_major, const have_minor = node;
+                            if (have_major == major and have_minor == minor) {
+                                console.context = boot_loader;
+                                print(
+                                    "selected boot loader: {s} ({})\n",
+                                    .{ boot_loader.name(), boot_loader.device },
+                                );
+                                return null;
+                            }
+                        },
+                        .ifindex => continue,
+                    }
+                }
+            } else {
+                const want_index = try std.fmt.parseInt(usize, first, 10);
+
+                for (boot_loaders, 0..) |boot_loader, index| {
+                    if (want_index == index) {
+                        console.context = boot_loader;
+                        print(
+                            "selected boot loader: {s} ({})\n",
+                            .{ boot_loader.name(), boot_loader.device },
+                        );
+                        return null;
+                    }
                 }
             }
 

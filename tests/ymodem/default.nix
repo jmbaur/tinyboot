@@ -45,7 +45,7 @@ testers.runNixOSTest {
           machine.send_console("\n")  # interrupt boot process
           time.sleep(1)
           machine.send_console("list\n")
-          machine.send_console("select 2\n")  # TODO(jared): make this selection less vague
+          machine.send_console("select 229:1\n")  # /dev/hvc1 has major:minor of 229:1
           time.sleep(1)
           machine.send_console("probe\n")
 
