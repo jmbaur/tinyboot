@@ -18,7 +18,11 @@ pub fn run(
     timerfd: posix.fd_t,
 ) !?Console.Event {
     if (self.boot_loader) |boot_loader| {
+        // After we attempt to boot with this boot loader, we unset it from the
+        // autoboot structure so re-entry into this function does not attempt
+        // to use it again.
         defer {
+            boot_loader.boot_attempted = true;
             self.boot_loader = null;
         }
 
@@ -34,6 +38,7 @@ pub fn run(
                 );
                 continue;
             };
+
             return .kexec;
         }
     } else {
@@ -42,29 +47,36 @@ pub fn run(
         }
 
         const head = boot_loaders.orderedRemove(0);
-        try boot_loaders.append(head);
 
         // If we've already tried this boot loader, this means we've gone full
-        // circle back to the first bootloader, so we are done.
+        // circle back to the first bootloader, so we are done. We insert it
+        // back to the beginning to not mess with the original order.
         if (head.boot_attempted) {
+            try boot_loaders.insert(0, head);
+
             return error.NoBootloaders;
         }
 
+        try boot_loaders.append(head);
+
         if (!head.autoboot) {
             head.boot_attempted = true;
+
             return null;
         }
 
         self.boot_loader = head;
 
+        std.debug.assert(self.boot_loader != null);
         const timeout = try self.boot_loader.?.timeout();
+
         if (timeout == 0) {
             return self.run(boot_loaders, timerfd);
         } else {
             try posix.timerfd_settime(timerfd, .{}, &.{
                 // oneshot
                 .it_interval = .{ .tv_sec = 0, .tv_nsec = 0 },
-                // consider settled after N seconds without any new events
+                // wait for `timeout` seconds before continuing to boot
                 .it_value = .{ .tv_sec = timeout, .tv_nsec = 0 },
             }, null);
 

@@ -15,10 +15,10 @@ const security = @import("./security.zig");
 const system = @import("./system.zig");
 const utils = @import("./utils.zig");
 
-pub const std_options = .{
-    .logFn = Log.logFn,
-    .log_level = .debug, // let the kernel do our filtering for us
-};
+// Since we log to /dev/kmsg, we inherit the kernel's log level, so we should
+// make sure we don't do any filtering on our side of log messages that get
+// sent to the kernel.
+pub const std_options = .{ .logFn = Log.logFn, .log_level = .debug };
 
 const TbootLoader = @This();
 
@@ -118,6 +118,9 @@ fn handleConsole(self: *TbootLoader) !?posix.RebootCommand {
     }
 }
 
+// For every new device we get, this will trigger an iteration through our
+// event loop to make an attempt at autobooting the boot loader attached to the
+// device (assuming a boot attempt has not already been made for this device).
 fn newDeviceArmTimer(self: *TbootLoader) !void {
     try posix.timerfd_settime(self.timer, .{}, &.{
         // oneshot
@@ -127,7 +130,8 @@ fn newDeviceArmTimer(self: *TbootLoader) !void {
     }, null);
 }
 
-const all_bootloaders = .{ DiskBootLoader, YmodemBootLoader };
+const ALL_BOOTLOADERS = .{ DiskBootLoader, YmodemBootLoader };
+
 fn handleDevice(self: *TbootLoader) !void {
     // consume eventfd value
     {
@@ -142,7 +146,7 @@ fn handleDevice(self: *TbootLoader) !void {
             .add => {
                 std.log.debug("new device {} added", .{device});
 
-                inline for (all_bootloaders) |bootloader_type| {
+                inline for (ALL_BOOTLOADERS) |bootloader_type| {
                     // If match() returns null, the device is not a match for
                     // that specific boot loader. If match() returns a non-null
                     // value, the device is a match with that values priority,
@@ -192,6 +196,8 @@ fn handleDevice(self: *TbootLoader) !void {
         }
     }
 
+    // Don't arm the timer if we aren't in the `init` state since we don't want
+    // to trigger any autoboot functionality otherwise.
     if (self.state == .init) {
         try self.newDeviceArmTimer();
     }

@@ -84,7 +84,6 @@ pub fn send(
     }
 
     std.debug.assert(opts != null);
-
     const file = opts.?.file;
     const filename = opts.?.filename;
 
