@@ -4,6 +4,7 @@
 const std = @import("std");
 const posix = std.posix;
 const Crc16Xmodem = std.hash.crc.Crc16Xmodem;
+const Progress = std.Progress;
 
 const linux_headers = @import("linux_headers");
 const system = @import("./system.zig");
@@ -50,10 +51,14 @@ fn finalizeAndWriteChunk(comptime chunk_type: type, chunk: *chunk_type, tty: *sy
     return error.InvalidArgument;
 }
 
-pub fn send(tty: *system.Tty, opts: ?struct {
-    filename: []const u8,
-    file: std.fs.File,
-}) !void {
+pub fn send(
+    parent_node: *Progress.Node,
+    tty: *system.Tty,
+    opts: ?struct {
+        filename: []const u8,
+        file: std.fs.File,
+    },
+) !void {
     var reader = tty.reader();
 
     std.log.debug("waiting for receiver ping", .{});
@@ -84,6 +89,10 @@ pub fn send(tty: *system.Tty, opts: ?struct {
     const filename = opts.?.filename;
 
     const stat = try file.stat();
+
+    var file_node = parent_node.start(filename, stat.size / 1024);
+    defer file_node.end();
+
     var buf: []align(std.mem.page_size) u8 = if (stat.size > 0)
         try posix.mmap(
             null,
@@ -140,6 +149,8 @@ pub fn send(tty: *system.Tty, opts: ?struct {
 
         unsent_bytes -= chunk_len;
         buf_index += chunk_len;
+
+        file_node.completeOne();
     }
 
     try tty.writer().writeByte(EOF);
@@ -423,6 +434,9 @@ pub fn main() !void {
 
     switch (res.positionals[0]) {
         .send => {
+            var progress = Progress.start(.{ .root_name = "ymodem" });
+            defer progress.end();
+
             const files_to_send = [_][]const u8{ "linux", "initrd", "params" };
             for (files_to_send) |filename| {
                 var file = dir.openFile(filename, .{}) catch |err| {
@@ -436,13 +450,17 @@ pub fn main() !void {
 
                 std.log.debug("sending file '{s}'", .{filename});
 
-                try send(&tty, .{
-                    .filename = filename,
-                    .file = file,
-                });
+                try send(
+                    &progress,
+                    &tty,
+                    .{
+                        .filename = filename,
+                        .file = file,
+                    },
+                );
             }
 
-            try send(&tty, null);
+            try send(&progress, &tty, null);
         },
         .recv => {
             try recv(&tty, dir);
