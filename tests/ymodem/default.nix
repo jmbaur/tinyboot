@@ -9,7 +9,6 @@ testers.runNixOSTest {
   name = "ymodem";
   extraBaseModules.imports = [ ../module.nix ];
   nodes.machine = { };
-  skipTypeCheck = true; # TODO(jared): delete this
   testScript =
     { nodes, ... }:
     ''

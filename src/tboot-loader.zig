@@ -208,11 +208,9 @@ fn handleTimer(self: *TbootLoader) ?posix.RebootCommand {
         std.log.info("devices settled", .{});
 
         self.state = .autobooting;
-    } else {
-        std.debug.assert(self.state == .autobooting);
-
-        std.log.debug("autoboot timeout", .{});
     }
+
+    std.debug.assert(self.state == .autobooting);
 
     if (self.autoboot.run(&boot_loaders, self.timer)) |maybe_event| {
         if (maybe_event) |outcome| {

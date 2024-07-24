@@ -35,10 +35,510 @@ const NON_WORD_CHARS = std.ascii.whitespace ++ [_]u8{ '.', ';', ',' };
 
 var out = std.io.bufferedWriter(std.io.getStdOut().writer());
 
+const Shell = struct {
+    input_cursor: usize = 0,
+    input_end: usize = 0,
+    stdin: std.fs.File.Reader = std.io.getStdIn().reader(),
+    input_buffer: [std.math.maxInt(u9)]u8 = undefined,
+    history: History(10) = .{},
+
+    pub fn deinit(self: *@This()) void {
+        self.history.deinit();
+    }
+
+    pub fn prompt(self: *@This(), context: ?*BootLoader) void {
+        _ = self;
+
+        if (context) |ctx| {
+            writeAll(ctx.name());
+        }
+        writeAllAndFlush("> ");
+    }
+
+    pub fn handleInput(self: *@This(), context: ?*BootLoader) !?[]const u8 {
+        std.debug.assert(self.input_cursor <= self.input_end);
+
+        var done = false;
+
+        const char = try self.stdin.readByte();
+
+        const needs_flush = switch (char) {
+            // C-k
+            0x0b => b: {
+                eraseToEndOfLine();
+                self.input_end = self.input_cursor;
+                break :b true;
+            },
+            // C-a
+            0x01 => b: {
+                if (self.input_cursor > 0) {
+                    cursorLeft(self.input_cursor);
+                    self.input_cursor = 0;
+                    break :b true;
+                }
+
+                break :b false;
+            },
+            // C-b
+            0x02 => b: {
+                if (self.input_cursor > 0) {
+                    cursorLeft(1);
+                    self.input_cursor -|= 1;
+                    break :b true;
+                }
+
+                break :b false;
+            },
+            // C-c
+            0x03 => b: {
+                writeAll("\n");
+                self.input_cursor = 0;
+                self.input_end = 0;
+                done = true;
+                break :b true;
+            },
+            // C-d
+            0x04 => b: {
+                if (self.input_cursor < self.input_end) {
+                    eraseInputAndUpdateCursor(&self.input_buffer, self.input_cursor, &self.input_end, 1);
+                    break :b true;
+                }
+
+                break :b false;
+            },
+            // C-e
+            0x05 => b: {
+                if (self.input_cursor < self.input_end) {
+                    cursorRight(self.input_end -| self.input_cursor);
+                    self.input_cursor = self.input_end;
+                    break :b true;
+                }
+
+                break :b false;
+            },
+            // C-f
+            0x06 => b: {
+                if (self.input_cursor < self.input_end) {
+                    cursorRight(1);
+                    self.input_cursor +|= 1;
+                    break :b true;
+                }
+
+                break :b false;
+            },
+            // Bell
+            0x07 => false,
+            // C-h, Backspace
+            0x08, 0x7f => b: {
+                if (self.input_cursor > 0) {
+                    std.mem.copyForwards(
+                        u8,
+                        self.input_buffer[self.input_cursor -| 1..self.input_end -| 1],
+                        self.input_buffer[self.input_cursor..self.input_end],
+                    );
+                    self.input_cursor -|= 1;
+                    self.input_end -|= 1;
+                    cursorLeft(1);
+                    writeAll(self.input_buffer[self.input_cursor..self.input_end]);
+                    eraseToEndOfLine();
+                    cursorLeft(self.input_end -| self.input_cursor);
+                    break :b true;
+                }
+
+                break :b false;
+            },
+            // Tab
+            0x09 => false,
+            // C-l
+            0x0c => b: {
+                clearScreen();
+                self.prompt(context);
+                writeAll(self.input_buffer[0..self.input_end]);
+                cursorLeft(self.input_end -| self.input_cursor);
+                break :b true;
+            },
+            // \r, \n; \n is also known as C-j
+            0x0d, 0x0a => b: {
+                writeAll("\n");
+                done = true;
+                break :b true;
+            },
+            // C-n
+            0x0e => b: {
+                if (self.history.next()) |next| {
+                    @memcpy(self.input_buffer[0..next.len], next);
+                    const old_end = self.input_end;
+
+                    self.input_end = next.len;
+                    self.input_cursor = next.len;
+
+                    cursorLeft(old_end);
+                    writeAll(self.input_buffer[0..self.input_end]);
+                    eraseToEndOfLine();
+
+                    break :b true;
+                } else {
+                    // We are back out of scrolling through history, start from
+                    // a clean slate.
+                    cursorLeft(self.input_end);
+
+                    self.input_end = 0;
+                    self.input_cursor = 0;
+
+                    eraseToEndOfLine();
+
+                    break :b true;
+                }
+
+                break :b false;
+            },
+            // C-p
+            0x10 => b: {
+                if (self.history.prev()) |prev| {
+                    @memcpy(self.input_buffer[0..prev.len], prev);
+                    const old_end = self.input_end;
+
+                    self.input_end = prev.len;
+                    self.input_cursor = prev.len;
+
+                    cursorLeft(old_end);
+                    writeAll(self.input_buffer[0..self.input_end]);
+                    eraseToEndOfLine();
+
+                    break :b true;
+                }
+
+                break :b false;
+            },
+            // C-r
+            0x12 => false,
+            // C-t
+            0x14 => b: {
+                if (0 < self.input_cursor and self.input_cursor < self.input_end) {
+                    std.mem.swap(
+                        u8,
+                        &self.input_buffer[self.input_cursor -| 1],
+                        &self.input_buffer[self.input_cursor],
+                    );
+                    cursorLeft(1);
+                    self.input_cursor +|= 1;
+                    writeAll(self.input_buffer[self.input_cursor -| 2..self.input_cursor]);
+                    break :b true;
+                }
+
+                break :b false;
+            },
+            // C-u
+            0x15 => b: {
+                if (self.input_cursor > 0) {
+                    cursorLeft(self.input_cursor);
+                    writeAll(self.input_buffer[self.input_cursor..self.input_end]);
+                    eraseToEndOfLine();
+                    self.input_end = self.input_end -| self.input_cursor;
+                    self.input_cursor = 0;
+                    cursorLeft(self.input_end);
+                    break :b true;
+                }
+
+                break :b false;
+            },
+            // C-w
+            0x17 => b: {
+                if (self.input_cursor > 0) {
+                    const old_cursor = self.input_cursor;
+
+                    const last_word = std.mem.lastIndexOfNone(
+                        u8,
+                        self.input_buffer[0..self.input_cursor],
+                        &NON_WORD_CHARS,
+                    ) orelse 0;
+
+                    self.input_cursor = @intCast(last_word);
+
+                    const last_non_word = std.mem.lastIndexOfAny(
+                        u8,
+                        self.input_buffer[0..self.input_cursor],
+                        &NON_WORD_CHARS,
+                    ) orelse 0;
+
+                    self.input_cursor = @intCast(last_non_word);
+
+                    if (self.input_cursor > 0) {
+                        const first_word = std.mem.indexOfNone(
+                            u8,
+                            self.input_buffer[self.input_cursor..self.input_end],
+                            &NON_WORD_CHARS,
+                        ) orelse 0;
+                        self.input_cursor +|= @intCast(first_word);
+                    }
+
+                    cursorLeft(old_cursor - self.input_cursor);
+                    eraseInputAndUpdateCursor(
+                        &self.input_buffer,
+                        self.input_cursor,
+                        &self.input_end,
+                        old_cursor - self.input_cursor,
+                    );
+
+                    break :b true;
+                }
+
+                break :b false;
+            },
+            // Space...~
+            0x20...0x7e => b: {
+                if (builtin.mode == .Debug and char == '?') {
+                    print("\n{}\n", .{self});
+                    break :b true;
+                } else if
+
+                // make sure we have room for another character
+                (self.input_end +| 1 < self.input_buffer.len) {
+                    std.mem.copyBackwards(
+                        u8,
+                        self.input_buffer[self.input_cursor +| 1..self.input_end +| 1],
+                        self.input_buffer[self.input_cursor..self.input_end],
+                    );
+                    self.input_buffer[self.input_cursor] = char;
+                    self.input_end +|= 1;
+                    writeAll(self.input_buffer[self.input_cursor..self.input_end]);
+                    self.input_cursor +|= 1;
+                    cursorLeft(self.input_end -| self.input_cursor);
+                    break :b true;
+                }
+
+                break :b false;
+            },
+            // Escape sequence
+            0x1b => b: {
+                switch (try self.stdin.readByte()) {
+                    0x5b => {
+                        // TODO(jared): handle these
+                        switch (try self.stdin.readByte()) {
+                            // Up arrow
+                            0x41 => {},
+                            // Down arrow
+                            0x42 => {},
+                            // Right arrow
+                            0x43 => {},
+                            // Left arrow
+                            0x44 => {},
+                            else => {},
+                        }
+                    },
+                    // M-b
+                    0x62 => {
+                        if (self.input_cursor > 0) {
+                            const old_cursor = self.input_cursor;
+
+                            const last_word = std.mem.lastIndexOfNone(
+                                u8,
+                                self.input_buffer[0..self.input_cursor],
+                                &NON_WORD_CHARS,
+                            ) orelse 0;
+
+                            self.input_cursor = @intCast(last_word);
+
+                            const last_non_word = std.mem.lastIndexOfAny(
+                                u8,
+                                self.input_buffer[0..self.input_cursor],
+                                &NON_WORD_CHARS,
+                            ) orelse 0;
+
+                            self.input_cursor = @intCast(last_non_word);
+
+                            if (self.input_cursor > 0) {
+                                const first_word = std.mem.indexOfNone(
+                                    u8,
+                                    self.input_buffer[self.input_cursor..self.input_end],
+                                    &NON_WORD_CHARS,
+                                ) orelse 0;
+                                self.input_cursor +|= @intCast(first_word);
+                            }
+
+                            cursorLeft(old_cursor -| self.input_cursor);
+
+                            break :b true;
+                        }
+                    },
+                    // M-d
+                    0x64 => {
+                        if (self.input_cursor < self.input_end) {
+                            var cursor = self.input_cursor;
+
+                            const first_word = std.mem.indexOfNone(
+                                u8,
+                                self.input_buffer[cursor..self.input_end],
+                                &NON_WORD_CHARS,
+                            ) orelse self.input_end -| cursor;
+
+                            cursor +|= first_word;
+
+                            const first_non_word = std.mem.indexOfAny(
+                                u8,
+                                self.input_buffer[cursor..self.input_end],
+                                &NON_WORD_CHARS,
+                            ) orelse self.input_end -| cursor;
+
+                            cursor +|= first_non_word;
+
+                            const next_word = std.mem.indexOfNone(
+                                u8,
+                                self.input_buffer[cursor..self.input_end],
+                                &NON_WORD_CHARS,
+                            );
+
+                            const end = if (next_word == null)
+                                // erase to end else
+                                self.input_end -| self.input_cursor
+                            else
+                                first_word + first_non_word;
+
+                            eraseInputAndUpdateCursor(
+                                &self.input_buffer,
+                                self.input_cursor,
+                                &self.input_end,
+                                end,
+                            );
+
+                            break :b true;
+                        }
+                    },
+                    // M-f
+                    0x66 => {
+                        if (self.input_cursor < self.input_end) {
+                            const old_cursor = self.input_cursor;
+
+                            const first_non_word = std.mem.indexOfAny(
+                                u8,
+                                self.input_buffer[self.input_cursor..self.input_end],
+                                &NON_WORD_CHARS,
+                            ) orelse self.input_end -| self.input_cursor;
+
+                            self.input_cursor +|= @intCast(first_non_word);
+
+                            const first_word = std.mem.indexOfNone(
+                                u8,
+                                self.input_buffer[self.input_cursor..self.input_end],
+                                &NON_WORD_CHARS,
+                            ) orelse self.input_end -| self.input_cursor;
+
+                            self.input_cursor +|= @intCast(first_word);
+
+                            cursorRight(self.input_cursor -| old_cursor);
+
+                            break :b true;
+                        }
+                    },
+                    else => {},
+                }
+
+                break :b false;
+            },
+            else => b: {
+                std.log.debug("unknown input character 0x{x}", .{char});
+                break :b false;
+            },
+        };
+
+        if (needs_flush) {
+            flush();
+        }
+
+        if (done) {
+            self.history.resetIndex();
+
+            const input = self.input_buffer[0..self.input_end];
+
+            self.input_cursor = 0;
+            self.input_end = 0;
+
+            if (input.len > 0) {
+                // Caller responsible for spawning new prompt when done
+                // printing to screen.
+                return input;
+            } else {
+                self.prompt(context);
+            }
+        }
+
+        return null;
+    }
+
+    fn History(comptime size: u8) type {
+        return struct {
+            arena: std.heap.ArenaAllocator = std.heap.ArenaAllocator.init(std.heap.page_allocator),
+
+            index: ?usize = null,
+            items: [size]?[]const u8 = undefined,
+
+            pub fn deinit(self: *@This()) void {
+                self.arena.deinit();
+            }
+
+            pub fn resetIndex(self: *@This()) void {
+                self.index = null;
+            }
+
+            pub fn push(self: *@This(), value: []const u8) !void {
+                for (1..self.items.len) |i| {
+                    const index = self.items.len - i;
+
+                    const old = self.items[index];
+                    const new = self.items[index - 1];
+
+                    // free the last element
+                    if (index == self.items.len - 1) {
+                        if (old) |_old| {
+                            self.arena.allocator().free(_old);
+                        }
+                    }
+
+                    self.items[index] = new;
+                }
+
+                // set new first item
+                self.items[0] = try self.arena.allocator().dupe(u8, value);
+            }
+
+            pub fn prev(self: *@This()) ?[]const u8 {
+                const new_index = if (self.index) |index| index +| 1 else 0;
+
+                if (new_index >= size) {
+                    return null;
+                }
+
+                std.debug.assert(new_index < size);
+                if (self.items[new_index]) |item| {
+                    self.index = new_index;
+                    return item;
+                }
+
+                return null;
+            }
+
+            pub fn next(self: *@This()) ?[]const u8 {
+                const new_index = (self.index orelse return null) -| 1;
+
+                if (self.index == 0) {
+                    self.resetIndex();
+                    return null;
+                }
+
+                std.debug.assert(new_index < size);
+                if (self.items[new_index]) |item| {
+                    self.index = new_index;
+                    return item;
+                }
+
+                return null;
+            }
+        };
+    }
+};
+
 arena: std.heap.ArenaAllocator = std.heap.ArenaAllocator.init(std.heap.page_allocator),
-input_cursor: usize = 0,
-input_end: usize = 0,
-input_buffer: [std.math.maxInt(u9)]u8 = undefined,
+shell: Shell = .{},
 context: ?*BootLoader = null,
 tty: ?system.Tty = null,
 
@@ -70,13 +570,6 @@ fn writeAll(bytes: []const u8) void {
 fn writeAllAndFlush(bytes: []const u8) void {
     writeAll(bytes);
     flush();
-}
-
-fn prompt(self: *Console) void {
-    if (self.context) |ctx| {
-        writeAll(ctx.name());
-    }
-    writeAllAndFlush("> ");
 }
 
 /// Assumes cursor is already located at `start`.
@@ -128,391 +621,47 @@ fn clearScreen() void {
 pub fn deinit(self: *Console) void {
     defer self.arena.deinit();
 
+    self.shell.deinit();
+
     if (self.tty) |*tty| {
         tty.reset();
     }
 }
 
 pub fn handleStdin(self: *Console, boot_loaders: []*BootLoader) !?Event {
-    std.debug.assert(self.input_cursor <= self.input_end);
-
     // We may already have a prompt from a boot timeout, so don't print
     // a prompt if we already have one.
     if (self.tty == null) {
         self.tty = try system.setupTty(IN, .user_input);
         std.log.debug("user presence detected", .{});
-        self.prompt();
+        self.shell.prompt(self.context);
     }
 
-    var stdin_reader = std.io.getStdIn().reader();
-    const char = try stdin_reader.readByte();
+    const maybe_input = try self.shell.handleInput(self.context);
 
-    var done = false;
-
-    const needs_flush = switch (char) {
-        // C-k
-        0x0b => b: {
-            eraseToEndOfLine();
-            self.input_end = self.input_cursor;
-            break :b true;
-        },
-        // C-a
-        0x01 => b: {
-            if (self.input_cursor > 0) {
-                cursorLeft(self.input_cursor);
-                self.input_cursor = 0;
-                break :b true;
-            }
-
-            break :b false;
-        },
-        // C-b
-        0x02 => b: {
-            if (self.input_cursor > 0) {
-                cursorLeft(1);
-                self.input_cursor -|= 1;
-                break :b true;
-            }
-
-            break :b false;
-        },
-        // C-c
-        0x03 => b: {
-            writeAll("\n");
-            self.input_cursor = 0;
-            self.input_end = 0;
-            done = true;
-            break :b true;
-        },
-        // C-d
-        0x04 => b: {
-            if (self.input_cursor < self.input_end) {
-                eraseInputAndUpdateCursor(&self.input_buffer, self.input_cursor, &self.input_end, 1);
-                break :b true;
-            }
-
-            break :b false;
-        },
-        // C-e
-        0x05 => b: {
-            if (self.input_cursor < self.input_end) {
-                cursorRight(self.input_end -| self.input_cursor);
-                self.input_cursor = self.input_end;
-                break :b true;
-            }
-
-            break :b false;
-        },
-        // C-f
-        0x06 => b: {
-            if (self.input_cursor < self.input_end) {
-                cursorRight(1);
-                self.input_cursor +|= 1;
-                break :b true;
-            }
-
-            break :b false;
-        },
-        // Bell
-        0x07 => false,
-        // C-h, Backspace
-        0x08, 0x7f => b: {
-            if (self.input_cursor > 0) {
-                std.mem.copyForwards(
-                    u8,
-                    self.input_buffer[self.input_cursor -| 1..self.input_end -| 1],
-                    self.input_buffer[self.input_cursor..self.input_end],
-                );
-                self.input_cursor -|= 1;
-                self.input_end -|= 1;
-                cursorLeft(1);
-                writeAll(self.input_buffer[self.input_cursor..self.input_end]);
-                eraseToEndOfLine();
-                cursorLeft(self.input_end -| self.input_cursor);
-                break :b true;
-            }
-
-            break :b false;
-        },
-        // Tab
-        0x09 => false,
-        // C-l
-        0x0c => b: {
-            clearScreen();
-            self.prompt();
-            writeAll(self.input_buffer[0..self.input_end]);
-            cursorLeft(self.input_end -| self.input_cursor);
-            break :b true;
-        },
-        // \r, \n; \n is also known as C-j
-        0x0d, 0x0a => b: {
-            writeAll("\n");
-            done = true;
-            break :b true;
-        },
-        // C-n
-        0x0e => false,
-        // C-p
-        0x10 => false,
-        // C-r
-        0x12 => false,
-        // C-t
-        0x14 => b: {
-            if (0 < self.input_cursor and self.input_cursor < self.input_end) {
-                std.mem.swap(
-                    u8,
-                    &self.input_buffer[self.input_cursor -| 1],
-                    &self.input_buffer[self.input_cursor],
-                );
-                cursorLeft(1);
-                self.input_cursor +|= 1;
-                writeAll(self.input_buffer[self.input_cursor -| 2..self.input_cursor]);
-                break :b true;
-            }
-
-            break :b false;
-        },
-        // C-u
-        0x15 => b: {
-            if (self.input_cursor > 0) {
-                cursorLeft(self.input_cursor);
-                writeAll(self.input_buffer[self.input_cursor..self.input_end]);
-                eraseToEndOfLine();
-                self.input_end = self.input_end -| self.input_cursor;
-                self.input_cursor = 0;
-                cursorLeft(self.input_end);
-                break :b true;
-            }
-
-            break :b false;
-        },
-        // C-w
-        0x17 => b: {
-            if (self.input_cursor > 0) {
-                const old_cursor = self.input_cursor;
-
-                const last_word = std.mem.lastIndexOfNone(
-                    u8,
-                    self.input_buffer[0..self.input_cursor],
-                    &NON_WORD_CHARS,
-                ) orelse 0;
-
-                self.input_cursor = @intCast(last_word);
-
-                const last_non_word = std.mem.lastIndexOfAny(
-                    u8,
-                    self.input_buffer[0..self.input_cursor],
-                    &NON_WORD_CHARS,
-                ) orelse 0;
-
-                self.input_cursor = @intCast(last_non_word);
-
-                if (self.input_cursor > 0) {
-                    const first_word = std.mem.indexOfNone(
-                        u8,
-                        self.input_buffer[self.input_cursor..self.input_end],
-                        &NON_WORD_CHARS,
-                    ) orelse 0;
-                    self.input_cursor +|= @intCast(first_word);
-                }
-
-                cursorLeft(old_cursor - self.input_cursor);
-                eraseInputAndUpdateCursor(
-                    &self.input_buffer,
-                    self.input_cursor,
-                    &self.input_end,
-                    old_cursor - self.input_cursor,
-                );
-
-                break :b true;
-            }
-
-            break :b false;
-        },
-        // Space...~
-        0x20...0x7e => b: {
-            if (builtin.mode == .Debug and char == '?') {
-                print("\n{}\n", .{self});
-                break :b true;
-            } else if
-
-            // make sure we have room for another character
-            (self.input_end +| 1 < self.input_buffer.len) {
-                std.mem.copyBackwards(
-                    u8,
-                    self.input_buffer[self.input_cursor +| 1..self.input_end +| 1],
-                    self.input_buffer[self.input_cursor..self.input_end],
-                );
-                self.input_buffer[self.input_cursor] = char;
-                self.input_end +|= 1;
-                writeAll(self.input_buffer[self.input_cursor..self.input_end]);
-                self.input_cursor +|= 1;
-                cursorLeft(self.input_end -| self.input_cursor);
-                break :b true;
-            }
-
-            break :b false;
-        },
-        // Escape sequence
-        0x1b => b: {
-            switch (try stdin_reader.readByte()) {
-                // M-b
-                0x62 => {
-                    if (self.input_cursor > 0) {
-                        const old_cursor = self.input_cursor;
-
-                        const last_word = std.mem.lastIndexOfNone(
-                            u8,
-                            self.input_buffer[0..self.input_cursor],
-                            &NON_WORD_CHARS,
-                        ) orelse 0;
-
-                        self.input_cursor = @intCast(last_word);
-
-                        const last_non_word = std.mem.lastIndexOfAny(
-                            u8,
-                            self.input_buffer[0..self.input_cursor],
-                            &NON_WORD_CHARS,
-                        ) orelse 0;
-
-                        self.input_cursor = @intCast(last_non_word);
-
-                        if (self.input_cursor > 0) {
-                            const first_word = std.mem.indexOfNone(
-                                u8,
-                                self.input_buffer[self.input_cursor..self.input_end],
-                                &NON_WORD_CHARS,
-                            ) orelse 0;
-                            self.input_cursor +|= @intCast(first_word);
-                        }
-
-                        cursorLeft(old_cursor -| self.input_cursor);
-
-                        break :b true;
-                    }
-                },
-                // M-d
-                0x64 => {
-                    if (self.input_cursor < self.input_end) {
-                        var cursor = self.input_cursor;
-
-                        const first_word = std.mem.indexOfNone(
-                            u8,
-                            self.input_buffer[cursor..self.input_end],
-                            &NON_WORD_CHARS,
-                        ) orelse self.input_end -| cursor;
-
-                        cursor +|= first_word;
-
-                        const first_non_word = std.mem.indexOfAny(
-                            u8,
-                            self.input_buffer[cursor..self.input_end],
-                            &NON_WORD_CHARS,
-                        ) orelse self.input_end -| cursor;
-
-                        cursor +|= first_non_word;
-
-                        const next_word = std.mem.indexOfNone(
-                            u8,
-                            self.input_buffer[cursor..self.input_end],
-                            &NON_WORD_CHARS,
-                        );
-
-                        const end = if (next_word == null)
-                            // erase to end else
-                            self.input_end -| self.input_cursor
-                        else
-                            first_word + first_non_word;
-
-                        eraseInputAndUpdateCursor(
-                            &self.input_buffer,
-                            self.input_cursor,
-                            &self.input_end,
-                            end,
-                        );
-
-                        break :b true;
-                    }
-                },
-                // M-f
-                0x66 => {
-                    if (self.input_cursor < self.input_end) {
-                        const old_cursor = self.input_cursor;
-
-                        const first_non_word = std.mem.indexOfAny(
-                            u8,
-                            self.input_buffer[self.input_cursor..self.input_end],
-                            &NON_WORD_CHARS,
-                        ) orelse self.input_end -| self.input_cursor;
-
-                        self.input_cursor +|= @intCast(first_non_word);
-
-                        const first_word = std.mem.indexOfNone(
-                            u8,
-                            self.input_buffer[self.input_cursor..self.input_end],
-                            &NON_WORD_CHARS,
-                        ) orelse self.input_end -| self.input_cursor;
-
-                        self.input_cursor +|= @intCast(first_word);
-
-                        cursorRight(self.input_cursor -| old_cursor);
-
-                        break :b true;
-                    }
-                },
-                else => {},
-            }
-
-            break :b false;
-        },
-        else => b: {
-            std.log.debug("unknown input character 0x{x}", .{char});
-            break :b false;
-        },
-    };
-
-    if (needs_flush) {
-        flush();
-    }
-
-    if (!done) {
-        return null;
-    }
-
-    if (self.input_end == 0) {
-        self.prompt();
-
-        return null;
-    } else {
+    if (maybe_input) |user_input| {
         defer {
             if (self.context == null) {
                 _ = self.arena.reset(.retain_capacity);
             }
         }
 
-        const end = self.input_end;
-        self.input_cursor = 0;
-        self.input_end = 0;
-
-        const user_input = self.input_buffer[0..end];
         var args = try ArgsIterator.init(self.arena.allocator(), user_input);
         defer args.deinit();
 
-        const maybe_notification = self.runCommand(&args, boot_loaders);
-
-        const event = maybe_notification catch |err| {
+        if (self.runCommand(&args, boot_loaders)) |maybe_event| {
+            if (maybe_event) |event| {
+                return event;
+            }
+        } else |err| {
             print("\nerror running command: {}\n", .{err});
-            self.prompt();
+        }
 
-            return null;
-        } orelse {
-            self.prompt();
-
-            return null;
-        };
-
-        return event;
+        self.shell.prompt(self.context);
+        try self.shell.history.push(user_input);
     }
+
+    return null;
 }
 
 pub fn format(
@@ -566,7 +715,7 @@ fn runCommand(
             }
         }
 
-        print("unknown command \"{s}\"\n", .{cmd});
+        print("\nunknown command \"{s}\"\n", .{cmd});
     }
 
     return null;
@@ -575,17 +724,18 @@ fn runCommand(
 pub const Command = struct {
     const NoContext = enum {
         clear,
+        history,
+        list,
         logs,
         poweroff,
         reboot,
-        list,
         select,
     };
 
     const Context = enum {
+        boot,
         exit,
         probe,
-        boot,
     };
 
     const help = struct {
@@ -698,6 +848,30 @@ pub const Command = struct {
                 filter,
                 out.writer().any(),
             );
+
+            return null;
+        }
+    };
+
+    const history = struct {
+        const short_help = "show shell history";
+        const long_help =
+            \\Show shell history.
+            \\
+            \\Usage:
+            \\history
+        ;
+
+        fn run(console: *Console, _: *ArgsIterator, _: []*const BootLoader) !?Event {
+            writeAll("\n");
+            const len = console.shell.history.items.len;
+            for (0..len) |i| {
+                const index = len - 1 - i;
+                const item = console.shell.history.items[index];
+                if (item) |_item| {
+                    print("{d:0>2} {s}\n", .{ index, _item });
+                }
+            }
 
             return null;
         }
