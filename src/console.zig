@@ -478,7 +478,8 @@ const Shell = struct {
         const size = 10;
 
         index: ?usize = null,
-        items: [size]?[]const u8 = undefined,
+
+        items: [size]?[]const u8 = [_]?[]const u8{null} ** size,
 
         pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
             for (self.items) |item| {
