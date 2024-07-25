@@ -36,14 +36,17 @@ const NON_WORD_CHARS = std.ascii.whitespace ++ [_]u8{ '.', ';', ',' };
 var out = std.io.bufferedWriter(std.io.getStdOut().writer());
 
 const Shell = struct {
+    arena: std.heap.ArenaAllocator = std.heap.ArenaAllocator.init(std.heap.page_allocator),
     input_cursor: usize = 0,
     input_end: usize = 0,
     stdin: std.fs.File.Reader = std.io.getStdIn().reader(),
     input_buffer: [std.math.maxInt(u9)]u8 = undefined,
-    history: History(10) = .{},
+    history: History = .{},
 
     pub fn deinit(self: *@This()) void {
-        self.history.deinit();
+        defer self.arena.deinit();
+
+        self.history.deinit(self.arena.allocator());
     }
 
     pub fn prompt(self: *@This(), context: ?*BootLoader) void {
@@ -53,6 +56,73 @@ const Shell = struct {
             writeAll(ctx.name());
         }
         writeAllAndFlush("> ");
+    }
+
+    fn historyPrev(self: *@This()) bool {
+        if (self.history.prev()) |prev| {
+            @memcpy(self.input_buffer[0..prev.len], prev);
+            const old_end = self.input_end;
+
+            self.input_end = prev.len;
+            self.input_cursor = prev.len;
+
+            cursorLeft(old_end);
+            writeAll(self.input_buffer[0..self.input_end]);
+            eraseToEndOfLine();
+
+            return true;
+        }
+
+        return false;
+    }
+
+    fn historyNext(self: *@This()) bool {
+        if (self.history.next()) |next| {
+            @memcpy(self.input_buffer[0..next.len], next);
+            const old_end = self.input_end;
+
+            self.input_end = next.len;
+            self.input_cursor = next.len;
+
+            cursorLeft(old_end);
+            writeAll(self.input_buffer[0..self.input_end]);
+            eraseToEndOfLine();
+
+            return true;
+        } else {
+            // We are back out of scrolling through history, start from
+            // a clean slate.
+            cursorLeft(self.input_end);
+
+            self.input_end = 0;
+            self.input_cursor = 0;
+
+            eraseToEndOfLine();
+
+            return true;
+        }
+
+        return false;
+    }
+
+    fn moveLeft(self: *@This()) bool {
+        if (self.input_cursor > 0) {
+            cursorLeft(1);
+            self.input_cursor -|= 1;
+            return true;
+        }
+
+        return false;
+    }
+
+    fn moveRight(self: *@This()) bool {
+        if (self.input_cursor < self.input_end) {
+            cursorRight(1);
+            self.input_cursor +|= 1;
+            return true;
+        }
+
+        return false;
     }
 
     pub fn handleInput(self: *@This(), context: ?*BootLoader) !?[]const u8 {
@@ -80,15 +150,7 @@ const Shell = struct {
                 break :b false;
             },
             // C-b
-            0x02 => b: {
-                if (self.input_cursor > 0) {
-                    cursorLeft(1);
-                    self.input_cursor -|= 1;
-                    break :b true;
-                }
-
-                break :b false;
-            },
+            0x02 => self.moveLeft(),
             // C-c
             0x03 => b: {
                 writeAll("\n");
@@ -117,15 +179,7 @@ const Shell = struct {
                 break :b false;
             },
             // C-f
-            0x06 => b: {
-                if (self.input_cursor < self.input_end) {
-                    cursorRight(1);
-                    self.input_cursor +|= 1;
-                    break :b true;
-                }
-
-                break :b false;
-            },
+            0x06 => self.moveRight(),
             // Bell
             0x07 => false,
             // C-h, Backspace
@@ -164,52 +218,9 @@ const Shell = struct {
                 break :b true;
             },
             // C-n
-            0x0e => b: {
-                if (self.history.next()) |next| {
-                    @memcpy(self.input_buffer[0..next.len], next);
-                    const old_end = self.input_end;
-
-                    self.input_end = next.len;
-                    self.input_cursor = next.len;
-
-                    cursorLeft(old_end);
-                    writeAll(self.input_buffer[0..self.input_end]);
-                    eraseToEndOfLine();
-
-                    break :b true;
-                } else {
-                    // We are back out of scrolling through history, start from
-                    // a clean slate.
-                    cursorLeft(self.input_end);
-
-                    self.input_end = 0;
-                    self.input_cursor = 0;
-
-                    eraseToEndOfLine();
-
-                    break :b true;
-                }
-
-                break :b false;
-            },
+            0x0e => self.historyNext(),
             // C-p
-            0x10 => b: {
-                if (self.history.prev()) |prev| {
-                    @memcpy(self.input_buffer[0..prev.len], prev);
-                    const old_end = self.input_end;
-
-                    self.input_end = prev.len;
-                    self.input_cursor = prev.len;
-
-                    cursorLeft(old_end);
-                    writeAll(self.input_buffer[0..self.input_end]);
-                    eraseToEndOfLine();
-
-                    break :b true;
-                }
-
-                break :b false;
-            },
+            0x10 => self.historyPrev(),
             // C-r
             0x12 => false,
             // C-t
@@ -316,13 +327,13 @@ const Shell = struct {
                         // TODO(jared): handle these
                         switch (try self.stdin.readByte()) {
                             // Up arrow
-                            0x41 => {},
+                            0x41 => break :b self.historyPrev(),
                             // Down arrow
-                            0x42 => {},
+                            0x42 => break :b self.historyNext(),
                             // Right arrow
-                            0x43 => {},
+                            0x43 => break :b self.moveRight(),
                             // Left arrow
-                            0x44 => {},
+                            0x44 => break :b self.moveLeft(),
                             else => {},
                         }
                     },
@@ -446,8 +457,6 @@ const Shell = struct {
         }
 
         if (done) {
-            self.history.resetIndex();
-
             const input = self.input_buffer[0..self.input_end];
 
             self.input_cursor = 0;
@@ -465,77 +474,100 @@ const Shell = struct {
         return null;
     }
 
-    fn History(comptime size: u8) type {
-        return struct {
-            arena: std.heap.ArenaAllocator = std.heap.ArenaAllocator.init(std.heap.page_allocator),
+    const History = struct {
+        const size = 10;
 
-            index: ?usize = null,
-            items: [size]?[]const u8 = undefined,
+        index: ?usize = null,
+        items: [size]?[]const u8 = undefined,
 
-            pub fn deinit(self: *@This()) void {
-                self.arena.deinit();
+        pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+            for (self.items) |item| {
+                if (item) |_item| {
+                    allocator.free(_item);
+                }
             }
+        }
 
-            pub fn resetIndex(self: *@This()) void {
-                self.index = null;
-            }
+        pub fn resetIndex(self: *@This()) void {
+            self.index = null;
+        }
 
-            pub fn push(self: *@This(), value: []const u8) !void {
-                for (1..self.items.len) |i| {
-                    const index = self.items.len - i;
+        pub fn push(
+            self: *@This(),
+            value: []const u8,
+            allocator: std.mem.Allocator,
+        ) !void {
+            for (1..self.items.len) |i| {
+                const index = self.items.len - i;
 
-                    const old = self.items[index];
-                    const new = self.items[index - 1];
+                const old = self.items[index];
+                const new = self.items[index - 1];
 
-                    // free the last element
-                    if (index == self.items.len - 1) {
-                        if (old) |_old| {
-                            self.arena.allocator().free(_old);
-                        }
+                // free the last element
+                if (index == self.items.len - 1) {
+                    if (old) |_old| {
+                        allocator.free(_old);
                     }
-
-                    self.items[index] = new;
                 }
 
-                // set new first item
-                self.items[0] = try self.arena.allocator().dupe(u8, value);
+                self.items[index] = new;
             }
 
-            pub fn prev(self: *@This()) ?[]const u8 {
-                const new_index = if (self.index) |index| index +| 1 else 0;
+            // set new first item
+            self.items[0] = try allocator.dupe(u8, value);
+            self.resetIndex();
+        }
 
-                if (new_index >= size) {
-                    return null;
-                }
+        pub fn prev(self: *@This()) ?[]const u8 {
+            const new_index = if (self.index) |index| index +| 1 else 0;
 
-                std.debug.assert(new_index < size);
-                if (self.items[new_index]) |item| {
-                    self.index = new_index;
-                    return item;
-                }
-
+            if (new_index >= size) {
                 return null;
             }
 
-            pub fn next(self: *@This()) ?[]const u8 {
-                const new_index = (self.index orelse return null) -| 1;
+            std.debug.assert(new_index < size);
+            if (self.items[new_index]) |item| {
+                self.index = new_index;
+                return item;
+            }
 
-                if (self.index == 0) {
-                    self.resetIndex();
-                    return null;
-                }
+            return null;
+        }
 
-                std.debug.assert(new_index < size);
-                if (self.items[new_index]) |item| {
-                    self.index = new_index;
-                    return item;
-                }
+        pub fn next(self: *@This()) ?[]const u8 {
+            const new_index = (self.index orelse return null) -| 1;
 
+            if (self.index == 0) {
+                self.resetIndex();
                 return null;
             }
-        };
-    }
+
+            std.debug.assert(new_index < size);
+            if (self.items[new_index]) |item| {
+                self.index = new_index;
+                return item;
+            }
+
+            return null;
+        }
+    };
 };
+
+test "shell history" {
+    var history = Shell.History{};
+    defer history.deinit(std.testing.allocator);
+
+    try std.testing.expect(history.prev() == null);
+    try std.testing.expect(history.next() == null);
+    history.push("foo", std.testing.allocator) catch unreachable;
+    try std.testing.expectEqualStrings("foo", history.prev() orelse unreachable);
+    try std.testing.expect(history.prev() == null);
+    history.push("bar", std.testing.allocator) catch unreachable;
+    try std.testing.expectEqualStrings("bar", history.prev() orelse unreachable);
+    try std.testing.expectEqualStrings("foo", history.prev() orelse unreachable);
+    try std.testing.expectEqualStrings("bar", history.next() orelse unreachable);
+    try std.testing.expect(history.next() == null);
+}
 
 arena: std.heap.ArenaAllocator = std.heap.ArenaAllocator.init(std.heap.page_allocator),
 shell: Shell = .{},
@@ -658,7 +690,7 @@ pub fn handleStdin(self: *Console, boot_loaders: []*BootLoader) !?Event {
         }
 
         self.shell.prompt(self.context);
-        try self.shell.history.push(user_input);
+        try self.shell.history.push(user_input, self.shell.arena.allocator());
     }
 
     return null;
