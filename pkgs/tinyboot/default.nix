@@ -54,8 +54,6 @@ stdenv.mkDerivation (
       "-Dtools=${lib.boolToString withTools}"
       "--system"
       "${finalAttrs.deps}"
-      "--color"
-      "off"
     ];
 
     # TODO(jared): The checkPhase should already include the zigBuildFlags,
