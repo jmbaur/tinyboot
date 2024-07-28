@@ -67,7 +67,7 @@ cat <<EOF
             os = "linux";
             compression = "none";
             hash-1 {
-                algo = "sha1";
+                algo = "crc32";
             };
         };
 EOF
