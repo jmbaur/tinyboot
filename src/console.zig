@@ -993,7 +993,7 @@ pub const Command = struct {
     const list = struct {
         const short_help = "list boot loaders";
         const long_help =
-            \\List all active boot loaders.
+            \\List all known boot loaders.
             \\
             \\Usage:
             \\list
@@ -1002,10 +1002,15 @@ pub const Command = struct {
         fn run(_: *Console, _: *ArgsIterator, boot_loaders: []*BootLoader) !?Event {
             writeAll("\n");
 
-            for (boot_loaders, 0..) |boot_loader, index| {
+            for (boot_loaders, 0..) |bl, index| {
                 print(
-                    "{d}\t{s} ({})\n",
-                    .{ index, boot_loader.name(), boot_loader.device },
+                    "{d}\t{s}\t{}{s}\n",
+                    .{
+                        index,
+                        bl.name(),
+                        bl.device,
+                        if (bl.autoboot) "\tautoboot" else "",
+                    },
                 );
             }
 
@@ -1108,9 +1113,29 @@ pub const Command = struct {
             \\autoboot
         ;
 
-        fn run(_: *Console, _: *ArgsIterator, _: []*BootLoader) !?Event {
-            // TODO(jared):
+        fn run(_: *Console, _: *ArgsIterator, boot_loaders: []*BootLoader) !?Event {
+            for (boot_loaders) |bl| {
+                if (bl.autoboot) {
+                    const entries = bl.probe() catch |err| {
+                        std.log.err(
+                            "failed to probe {}: {}",
+                            .{ bl.device, err },
+                        );
+                        continue;
+                    };
 
+                    for (entries) |entry| {
+                        if (bl.load(entry)) {
+                            break;
+                        } else |err| {
+                            std.log.err(
+                                "failed to probe {}: {}",
+                                .{ bl.device, err },
+                            );
+                        }
+                    }
+                }
+            }
             return null;
         }
     };
