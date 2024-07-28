@@ -756,6 +756,7 @@ fn runCommand(
 
 pub const Command = struct {
     const NoContext = enum {
+        autoboot,
         clear,
         history,
         list,
@@ -1094,6 +1095,23 @@ pub const Command = struct {
             }
 
             return error.NotFound;
+        }
+    };
+
+    const autoboot = struct {
+        const short_help = "autoboot from all bootloaders";
+        const long_help =
+            \\Autoboot from all bootloaders currently available. Bootloaders
+            \\that don't support autobooting will be skipped.
+            \\
+            \\Usage:
+            \\autoboot
+        ;
+
+        fn run(_: *Console, _: *ArgsIterator, _: []*BootLoader) !?Event {
+            // TODO(jared):
+
+            return null;
         }
     };
 };

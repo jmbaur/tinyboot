@@ -346,7 +346,7 @@ in
               "ttyO0"
               "ttySAC2"
             ])
-            ++ [ "tty1" ]
+            ++ [ "tty0" ]
           );
         in
         pkgs.writeShellScriptBin "tboot-test" ''

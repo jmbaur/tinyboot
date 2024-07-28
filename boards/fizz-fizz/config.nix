@@ -19,6 +19,8 @@
     coreboot.kconfig = with lib.kernel; {
       BOARD_GOOGLE_FIZZ = yes;
       FMDFILE = freeform ./layout.fmd;
+      GENERIC_LINEAR_FRAMEBUFFER = yes;
+      RUN_FSP_GOP = yes;
       VENDOR_GOOGLE = yes;
     };
   };

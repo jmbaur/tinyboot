@@ -15,8 +15,11 @@
       CRYPTO_SHA256_SSSE3 = yes;
       CRYPTO_SHA512_SSSE3 = yes;
       DMA_ACPI = yes;
+      DMI = yes;
       DW_DMAC = yes;
       GPIO_ACPI = yes;
+      INTEL_IOMMU = yes;
+      INTEL_IOMMU_DEFAULT_ON = yes;
       IRQ_REMAP = yes;
       KERNEL_BZIP2 = unset;
       KERNEL_GZIP = unset;
@@ -24,6 +27,7 @@
       KERNEL_LZMA = unset;
       KERNEL_LZO = unset;
       KERNEL_XZ = yes;
+      KEYBOARD_ATKBD = yes;
       MFD_INTEL_LPSS_ACPI = yes;
       MFD_INTEL_LPSS_PCI = yes;
       MITIGATION_RETHUNK = yes;
@@ -32,6 +36,7 @@
       MTRR = yes;
       PCI_MSI = yes;
       PNP = yes;
+      PNPACPI = yes;
       PREEMPT_VOLUNTARY = yes;
       RTC_DRV_CMOS = yes;
       SERIAL_8250 = yes;
@@ -52,7 +57,6 @@
       SPI_MEM = yes;
       SPI_PXA2XX = yes;
       SPI_PXA2XX_PCI = yes;
-      SYSFB_SIMPLEFB = yes;
       UNIX98_PTYS = yes;
       UNWINDER_FRAME_POINTER = unset;
       UNWINDER_GUESS = yes;

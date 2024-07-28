@@ -63,7 +63,6 @@ in
     JUMP_LABEL = yes;
     KEXEC = yes;
     KEXEC_FILE = yes;
-    KEYBOARD_ATKBD = yes;
     KEYS = yes;
     LSM = freeform "integrity";
     LTO_NONE = yes;

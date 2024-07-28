@@ -24,12 +24,12 @@ stdenv.mkDerivation {
   passAsFile = [ "kconfig" ];
   postConfigure = ''
     cat $kconfigPath $extraConfigPath > all.config
-    make ARCH=${stdenv.hostPlatform.linuxArch} KCONFIG_ALLCONFIG=1 allnoconfig
+    make -j$NIX_BUILD_CORES ARCH=${stdenv.hostPlatform.linuxArch} KCONFIG_ALLCONFIG=1 allnoconfig
     bash ${./check_config.bash} all.config .config
   '';
   buildFlags = [
     "DTC_FLAGS=-@"
-    "KBUILD_BUILD_VERSION=1-TinyBoot"
+    "KBUILD_BUILD_VERSION=1-tinyboot"
   ];
   installFlags =
     [ "INSTALL_PATH=$(out)" ]

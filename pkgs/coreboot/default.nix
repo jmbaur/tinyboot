@@ -52,7 +52,7 @@ stdenvNoCC.mkDerivation (finalAttrs: {
   configurePhase = ''
     runHook preConfigure
     cat $kconfigPath > .config
-    make olddefconfig
+    make -j$NIX_BUILD_CORES olddefconfig
     runHook postConfigure
   '';
   makeFlags = [
