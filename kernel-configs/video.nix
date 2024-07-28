@@ -11,7 +11,10 @@
       with lib.kernel;
       lib.mkMerge [
         {
+          BACKLIGHT_CLASS_DEVICE = yes;
           CONSOLE_TRANSLATIONS = yes;
+          DRM = yes;
+          DRM_FBDEV_EMULATION = yes;
           DUMMY_CONSOLE = yes;
           FB = yes;
           FONTS = yes;
@@ -26,19 +29,20 @@
           VT_CONSOLE = yes;
         }
         (lib.mkIf pkgs.stdenv.hostPlatform.isx86_64 {
-          # TODO(jared): make this work with GOP so we can turn off i915
+          # TODO(jared): make this work with GOP so we can turn off the need
+          # for DRM
           # depends on coreboot linux_trampoline
           EFI = yes;
           FB_EFI = yes;
 
           ACPI_VIDEO = yes;
-          BACKLIGHT_CLASS_DEVICE = yes;
-          DRM = yes;
-          DRM_FBDEV_EMULATION = yes;
           DRM_I915 = yes;
           VGA_CONSOLE = yes;
         })
-        (lib.mkIf pkgs.stdenv.hostPlatform.isAarch64 { GOOGLE_FRAMEBUFFER_COREBOOT = yes; })
+        (lib.mkIf pkgs.stdenv.hostPlatform.isAarch64 {
+          DRM_SIMPLEDRM = yes;
+          GOOGLE_FRAMEBUFFER_COREBOOT = yes;
+        })
       ];
   };
 }

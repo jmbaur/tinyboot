@@ -145,6 +145,7 @@
       "mediatek" = {
         ARCH_MEDIATEK = yes;
         ARM_MEDIATEK_CPUFREQ_HW = yes;
+        BACKLIGHT_CLASS_DEVICE = yes;
         BACKLIGHT_MT6370 = yes;
         COMMON_CLK_MT8183 = yes;
         COMMON_CLK_MT8183_AUDIOSYS = yes;
@@ -158,6 +159,7 @@
         COMMON_CLK_MT8183_MMSYS = yes;
         COMMON_CLK_MT8183_VDECSYS = yes;
         COMMON_CLK_MT8183_VENCSYS = yes;
+        COMMON_CLK_MT8192 = yes;
         COMMON_CLK_MT8192_AUDSYS = yes;
         COMMON_CLK_MT8192_CAMSYS = yes;
         COMMON_CLK_MT8192_IMGSYS = yes;
@@ -172,10 +174,9 @@
         I2C_MT65XX = yes;
         KEYBOARD_MT6779 = yes;
         MEDIATEK_WATCHDOG = yes;
+        MFD_MT6370 = yes;
         MFD_MT6397 = yes;
         MMC_MTK = yes;
-        MFD_MT6370 = yes;
-        COMMON_CLK_MT8192 = yes;
         MTD_SPI_NOR = yes;
         MTK_CMDQ_MBOX = yes;
         MTK_IOMMU = yes;
