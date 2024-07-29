@@ -273,6 +273,7 @@ pub fn main() !void {
         for (boot_loaders.items) |boot_loader| {
             boot_loader.deinit();
         }
+
         arena.deinit();
     }
 
@@ -295,7 +296,7 @@ pub fn main() !void {
 
         std.log.info("tinyboot started", .{});
 
-        try security.initializeSecurity();
+        try security.initializeSecurity(arena.allocator());
 
         const reboot_cmd = try tboot_loader.run();
 

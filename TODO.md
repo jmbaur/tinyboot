@@ -3,4 +3,3 @@
 - network booting
 - use non-volatile storage for configuration of boot order, etc.
 - use CONFIG_MFD_CROS_EC_DEV & CONFIG_CROS_EC_VBC in linux
-- key obtained from VPD needs to be base64 decoded

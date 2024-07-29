@@ -1,4 +1,5 @@
 const std = @import("std");
+const base64 = std.base64.standard;
 const posix = std.posix;
 const system = std.posix.system;
 
@@ -82,7 +83,7 @@ const KEXEC_KERNEL_CHECK_APPRAISE = withNewline("appraise func=KEXEC_KERNEL_CHEC
 const KEXEC_INITRAMFS_CHECK_APPRAISE = withNewline("appraise func=KEXEC_INITRAMFS_CHECK appraise_type=imasig|modsig");
 
 fn installImaPolicy(policy: []const u8) !void {
-    var policy_file = try std.fs.openFileAbsolute(IMA_POLICY_PATH, .{ .mode = .write_only });
+    var policy_file = try std.fs.cwd().openFile(IMA_POLICY_PATH, .{ .mode = .write_only });
     defer policy_file.close();
 
     std.log.debug("writing IMA policy", .{});
@@ -92,38 +93,72 @@ fn installImaPolicy(policy: []const u8) !void {
 
 const TEST_KEY = @embedFile("test_key");
 
+const MAX_KEY_SIZE = 8192;
+
+// The public key is held in VPD as a base64 encoded string.
+// https://github.com/torvalds/linux/blob/master/drivers/firmware/google/vpd.c#L193
+const VPD_KEY = "/sys/firmware/vpd/ro/pubkey";
+
+fn loadVpdKey(allocator: std.mem.Allocator) ![]const u8 {
+    const vpd_key = std.fs.cwd().openFile(
+        VPD_KEY,
+        .{},
+    ) catch |err| switch (err) {
+        error.FileNotFound => return error.MissingKey,
+        else => return err,
+    };
+    defer vpd_key.close();
+
+    const contents = try vpd_key.readToEndAlloc(allocator, MAX_KEY_SIZE);
+    defer allocator.free(contents);
+    const out_size = try base64.Decoder.calcSizeForSlice(contents);
+    var out_buf = try allocator.alloc(u8, out_size);
+
+    try base64.Decoder.decode(out_buf[0..], contents);
+    return out_buf;
+}
+
+// https://qemu-project.gitlab.io/qemu/specs/fw_cfg.html
+const QEMU_FW_CFG_KEY = "/sys/firmware/qemu_fw_cfg/by_name/opt/org.tboot/pubkey/raw";
+
+fn loadQemuFwCfgKey(allocator: std.mem.Allocator) ![]const u8 {
+    const fw_cfg_key = std.fs.cwd().openFile(
+        QEMU_FW_CFG_KEY,
+        .{},
+    ) catch |err| switch (err) {
+        error.FileNotFound => return error.MissingKey,
+        else => return err,
+    };
+    defer fw_cfg_key.close();
+
+    return try fw_cfg_key.readToEndAlloc(allocator, MAX_KEY_SIZE);
+}
+
 // https://github.com/torvalds/linux/blob/3b517966c5616ac011081153482a5ba0e91b17ff/security/integrity/digsig.c#L193
-fn loadVerificationKey() !void {
-    const keyfile: std.fs.File = b: {
-        inline for (.{ VPD_KEY, QEMU_FW_CFG_KEY }) |keypath| {
-            if (std.fs.cwd().openFile(keypath, .{})) |file| {
-                break :b file;
-            } else |err| {
-                switch (err) {
-                    error.FileNotFound => {},
-                    else => return err,
-                }
-            }
-        }
-
-        break :b null;
-    } orelse return error.MissingKey;
-
-    defer keyfile.close();
-
+fn loadVerificationKey(allocator: std.mem.Allocator) !void {
     const keyring_id = try addKeyring(IMA_KEYRING_NAME, KeySerial.User);
     std.log.info("added ima keyring (id=0x{x})", .{keyring_id});
 
-    var buf: [8192]u8 = undefined;
-    const n_read = try keyfile.readAll(&buf);
-    const keyfile_contents = buf[0..n_read];
+    inline for (.{ loadVpdKey, loadQemuFwCfgKey }) |load_key_fn| {
+        if (load_key_fn(allocator)) |pubkey| {
+            defer allocator.free(pubkey);
 
-    const key_id = try addKey(keyring_id, keyfile_contents);
-    std.log.info("added verification key (id=0x{x})", .{key_id});
+            const key_id = try addKey(keyring_id, pubkey);
 
-    if (std.mem.eql(u8, keyfile_contents, TEST_KEY)) {
-        std.log.warn("test key in use!", .{});
+            std.log.info("added verification key (id=0x{x})", .{key_id});
+
+            if (std.mem.eql(u8, pubkey, TEST_KEY)) {
+                std.log.warn("test key in use!", .{});
+            }
+
+            return;
+        } else |err| switch (err) {
+            error.MissingKey => {},
+            else => return err,
+        }
     }
+
+    return error.MissingKey;
 }
 
 // Initialize the IMA subsystem in linux to perform measurements and optionally
@@ -131,8 +166,8 @@ fn loadVerificationKey() !void {
 // with IMA since we basically get it for free; measurements are held in memory
 // and persisted across kexecs, and the measurements are extended to the
 // system's TPM if one is available.
-pub fn initializeSecurity() !void {
-    if (loadVerificationKey()) {
+pub fn initializeSecurity(allocator: std.mem.Allocator) !void {
+    if (loadVerificationKey(allocator)) {
         try installImaPolicy(MEASURE_AND_APPRAISE_POLICY);
         std.log.info("boot measurement and verification is enabled", .{});
     } else |err| {
@@ -147,13 +182,6 @@ pub fn initializeSecurity() !void {
 fn withNewline(comptime line: []const u8) []const u8 {
     return line ++ "\n";
 }
-
-// https://qemu-project.gitlab.io/qemu/specs/fw_cfg.html
-const QEMU_FW_CFG_KEY = "/sys/firmware/qemu_fw_cfg/by_name/opt/org.tboot/pubkey/raw";
-
-// The public key is held in VPD as a base64 encoded string.
-// https://github.com/torvalds/linux/blob/master/drivers/firmware/google/vpd.c#L193
-const VPD_KEY = "/sys/firmware/vpd/ro/pubkey";
 
 // We are using the "_ima" keyring and not the ".ima" keyring since we do not use
 // CONFIG_INTEGRITY_TRUSTED_KEYRING=y in our kernel config.
