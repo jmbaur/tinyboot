@@ -23,6 +23,7 @@ test {
     _ = @import("./test.zig");
     _ = @import("./tmpdir.zig");
     _ = @import("./utils.zig");
+    _ = @import("./vpd.zig");
     _ = @import("./watch.zig");
     _ = @import("./ymodem.zig");
 }

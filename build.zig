@@ -130,6 +130,17 @@ pub fn build(b: *std.Build) !void {
         tboot_ymodem.root_module.addImport("linux_headers", linux_headers_module);
         tboot_ymodem.root_module.addImport("clap", clap.module("clap"));
         b.installArtifact(tboot_ymodem);
+
+        const tboot_vpd = b.addExecutable(.{
+            .name = "tboot-vpd",
+            .root_source_file = b.path("src/vpd.zig"),
+            .target = target,
+            .optimize = optimize,
+            .strip = optimize != std.builtin.OptimizeMode.Debug,
+        });
+        tboot_vpd.root_module.addImport("linux_headers", linux_headers_module);
+        tboot_vpd.root_module.addImport("clap", clap.module("clap"));
+        b.installArtifact(tboot_vpd);
     }
 
     const unit_tests = b.addTest(.{
