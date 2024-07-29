@@ -16,8 +16,21 @@ pub fn build(b: *std.Build) !void {
 
     const clap = b.dependency("clap", .{});
 
+    const linux_h = b.addWriteFile("linux.h",
+        \\#include <asm-generic/setup.h>
+        \\#include <linux/kexec.h>
+        \\#include <linux/keyctl.h>
+        \\#include <linux/major.h>
+        \\#include <sys/epoll.h>
+        \\#include <sys/ioctl.h>
+        \\#include <termios.h>
+    );
+
     const linux_headers_translated = b.addTranslateC(.{
-        .root_source_file = b.path("src/linux.h"),
+        .root_source_file = .{ .generated = .{
+            .file = &linux_h.generated_directory,
+            .sub_path = "linux.h",
+        } },
         .target = target,
         // TODO(jared): how much does optimization do for the translate-c stuff?
         .optimize = tboot_loader_optimize,

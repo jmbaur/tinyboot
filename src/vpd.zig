@@ -1,4 +1,5 @@
 const std = @import("std");
+const base64 = std.base64.standard;
 
 const clap = @import("clap");
 
@@ -44,7 +45,7 @@ const GoogleVpdInfo = extern struct {
     size: u32,
 };
 
-const VpdList = std.ArrayList(struct { []u8, []u8 });
+const VpdList = std.ArrayList(struct { []const u8, []const u8 });
 
 fn writeVpd(vpd_list: VpdList, file: std.fs.File) !void {
     const stat = try file.stat();
@@ -56,13 +57,15 @@ fn writeVpd(vpd_list: VpdList, file: std.fs.File) !void {
     for (vpd_list.items) |vpd_item| {
         const key, const value = vpd_item;
 
-        std.log.debug("writing {s}={s}", .{ key, value });
+        std.log.debug("writing {s}({})={s}({})", .{ key, key.len, value, value.len });
 
         try writer.writeByte(VPD_TYPE_STRING);
         var vpd_len_buf = [_]u8{0} ** 64;
-        try writer.writeAll(vpdValueLength(key.len, &vpd_len_buf));
+        const key_len_bytes = vpdValueLength(key.len, &vpd_len_buf);
+        try writer.writeAll(key_len_bytes);
         try writer.writeAll(key);
-        try writer.writeAll(vpdValueLength(value.len, &vpd_len_buf));
+        const value_len_bytes = vpdValueLength(value.len, &vpd_len_buf);
+        try writer.writeAll(value_len_bytes);
         try writer.writeAll(value);
     }
 
@@ -114,19 +117,23 @@ fn vpdValueLength(size: usize, buf: []u8) []u8 {
 }
 
 test "calculate vpd value length" {
-    {
-        var buf = [_]u8{0} ** 64;
-        try std.testing.expectEqualSlices(u8, &.{0x01}, vpdValueLength(1, &buf));
-    }
+    var buf = [_]u8{0} ** 64;
 
-    {
-        var buf = [_]u8{0} ** 64;
-        try std.testing.expectEqualSlices(u8, &.{
-            0b10000100,
-            0b10000010,
-            0b00000001,
-        }, vpdValueLength(65793, &buf));
-    }
+    try std.testing.expectEqualSlices(u8, &.{0b0000001}, vpdValueLength(1, &buf));
+
+    try std.testing.expectEqualSlices(u8, &.{0b1111111}, vpdValueLength(127, &buf));
+
+    try std.testing.expectEqualSlices(u8, &.{
+        0b10000001,
+        0b00000000,
+    }, vpdValueLength(128, &buf));
+
+    // Example from https://chromium.googlesource.com/chromiumos/platform/vpd
+    try std.testing.expectEqualSlices(u8, &.{
+        0b10000100,
+        0b10000010,
+        0b00000001,
+    }, vpdValueLength(65793, &buf));
 }
 
 fn collectVpd(allocator: std.mem.Allocator, file: std.fs.File) !VpdList {
@@ -188,10 +195,10 @@ fn readLength(reader: std.fs.File.Reader) !u64 {
     while (true) {
         const byte = try reader.readByte();
 
-        const more = byte & 0x80 == 1;
+        const more = byte & 0x80 == 0x80;
         const val = byte & 0x7f;
 
-        total = total << 8;
+        total = total << 7;
         total +|= val;
 
         if (!more) {
@@ -199,7 +206,7 @@ fn readLength(reader: std.fs.File.Reader) !u64 {
         }
     }
 
-    return total;
+    return std.mem.littleToNative(@TypeOf(total), total);
 }
 
 pub fn main() !void {
@@ -207,11 +214,12 @@ pub fn main() !void {
     defer arena.deinit();
 
     const params = comptime clap.parseParamsComptime(
-        \\-h, --help           Display this help and exit.
-        \\-f, --file <FILE>    File to operate on.
-        \\-k, --key <str>      Key to get, set, or delete.
-        \\-v, --value <str>    Value to set.
-        \\<ACTION>             list, get, set, or delete
+        \\-h, --help                     Display this help and exit.
+        \\-f, --file <FILE>              File to operate on.
+        \\-k, --key <str>                Key to get, set, or delete.
+        \\-v, --value <str>              Value to set.
+        \\-V, --value-from-file <str>    Value to set from file (written value will be base64-encoded).
+        \\<ACTION>                       list, get, set, or delete
         \\
     );
 
@@ -254,7 +262,7 @@ pub fn main() !void {
     const action = res.positionals[0];
     switch (action) {
         .get, .set, .delete => {
-            if (res.args.key == null or (action == .set and res.args.value == null)) {
+            if (res.args.key == null or (action == .set and res.args.value == null and res.args.@"value-from-file" == null)) {
                 try diag.report(stderr, error.InvalidArgument);
                 try clap.usage(std.io.getStdErr().writer(), clap.Help, &params);
                 return;
@@ -292,27 +300,33 @@ pub fn main() !void {
             }
         },
         .set => {
-            const found = b: {
+            const value = if (res.args.value) |value| try arena.allocator().dupe(u8, value) else b: {
+                const value_file = res.args.@"value-from-file".?;
+                const file_contents = try std.fs.cwd().readFileAlloc(arena.allocator(), value_file, 8192);
+                const encoded_size = base64.Encoder.calcSize(file_contents.len);
+                var dest = try arena.allocator().alloc(u8, encoded_size);
+                break :b base64.Encoder.encode(dest[0..], file_contents);
+            };
+
+            o: {
                 for (vpd_list.items) |*vpd_item| {
                     const key, _ = vpd_item.*;
 
+                    // Update existing key if there is one
                     if (std.mem.eql(u8, key, res.args.key.?)) {
                         vpd_item.* = .{
                             key,
-                            try arena.allocator().dupe(u8, res.args.value.?),
+                            value,
                         };
-                        break :b true;
+                        break :o;
                     }
                 }
 
-                break :b false;
-            };
-
-            if (found) {
-                try writeVpd(vpd_list, file);
-            } else {
-                std.debug.print("Key '{s}' not found\n", .{res.args.key.?});
+                // Otherwise, we add a new key/value
+                try vpd_list.append(.{ res.args.key.?, value });
             }
+
+            try writeVpd(vpd_list, file);
         },
         .delete => {
             const found = b: {
@@ -331,7 +345,7 @@ pub fn main() !void {
             if (found) {
                 try writeVpd(vpd_list, file);
             } else {
-                std.debug.print("Key '{s}' not found\n", .{res.args.key.?});
+                std.debug.print("key '{s}' not found\n", .{res.args.key.?});
             }
         },
     }

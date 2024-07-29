@@ -9,6 +9,7 @@
         NET_VENDOR_REALTEK = yes;
         R8169 = yes;
       };
+      # https://github.com/torvalds/linux/blob/8400291e289ee6b2bf9779ff1c83a291501f017b/drivers/net/ethernet/realtek/r8169_main.c#L38
       firmware = [
         {
           dir = "rtl_nic";

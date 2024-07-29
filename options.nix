@@ -155,7 +155,10 @@ in
       firmware = mkOption {
         type = types.listOf (
           types.submodule {
-            options.dir = mkOption { type = types.str; };
+            options.dir = mkOption {
+              type = types.str;
+              default = ".";
+            };
             options.pattern = mkOption { type = types.str; };
           }
         );
@@ -226,8 +229,7 @@ in
     extraInitrdContents = lib.optional (config.linux.firmware != [ ]) {
       symlink = "/lib/firmware";
       object = pkgs.buildPackages.runCommand "linux-firmware" { } (
-        "mkdir -p $out;"
-        + lib.concatLines (
+        lib.concatLines (
           map (
             { dir, pattern }:
             ''

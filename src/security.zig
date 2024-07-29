@@ -95,7 +95,7 @@ const TEST_KEY = @embedFile("test_key");
 // https://github.com/torvalds/linux/blob/3b517966c5616ac011081153482a5ba0e91b17ff/security/integrity/digsig.c#L193
 fn loadVerificationKey() !void {
     const keyfile: std.fs.File = b: {
-        inline for (.{ VPD_KEY, FW_CFG_KEY }) |keypath| {
+        inline for (.{ VPD_KEY, QEMU_FW_CFG_KEY }) |keypath| {
             if (std.fs.cwd().openFile(keypath, .{})) |file| {
                 break :b file;
             } else |err| {
@@ -149,7 +149,7 @@ fn withNewline(comptime line: []const u8) []const u8 {
 }
 
 // https://qemu-project.gitlab.io/qemu/specs/fw_cfg.html
-const FW_CFG_KEY = "/sys/firmware/qemu_fw_cfg/by_name/opt/org.tboot/pubkey/raw";
+const QEMU_FW_CFG_KEY = "/sys/firmware/qemu_fw_cfg/by_name/opt/org.tboot/pubkey/raw";
 
 // The public key is held in VPD as a base64 encoded string.
 // https://github.com/torvalds/linux/blob/master/drivers/firmware/google/vpd.c#L193
