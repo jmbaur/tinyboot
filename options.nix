@@ -31,20 +31,20 @@ let
     compressor = "xz";
     contents = [
       {
-        object = "${pkgs.busybox}/bin/busybox";
-        symlink = "/init";
+        source = "${pkgs.busybox}/bin/busybox";
+        target = "/init";
       }
       {
-        object = "${pkgs.busybox}/bin";
-        symlink = "/bin";
+        source = "${pkgs.busybox}/bin";
+        target = "/bin";
       }
       {
-        object = testStartupScript;
-        symlink = "/etc/init.d/rcS";
+        source = testStartupScript;
+        target = "/etc/init.d/rcS";
       }
       {
-        object = testInittab;
-        symlink = "/etc/inittab";
+        source = testInittab;
+        target = "/etc/inittab";
       }
     ] ++ config.extraInitrdContents;
   };
@@ -208,8 +208,8 @@ in
     extraInitrdContents = mkOption {
       type = types.listOf (
         types.submodule {
-          options.object = mkOption { type = types.path; };
-          options.symlink = mkOption { type = types.str; };
+          options.source = mkOption { type = types.path; };
+          options.target = mkOption { type = types.str; };
         }
       );
       default = [ ];
@@ -227,8 +227,8 @@ in
       )
     );
     extraInitrdContents = lib.optional (config.linux.firmware != [ ]) {
-      symlink = "/lib/firmware";
-      object = pkgs.buildPackages.runCommand "linux-firmware" { } (
+      target = "/lib/firmware";
+      source = pkgs.buildPackages.runCommand "linux-firmware" { } (
         lib.concatLines (
           map (
             { dir, pattern }:
@@ -282,8 +282,8 @@ in
           # TODO(jared): Hack making makeInitrdNG not working with contents
           # being an empty list.
           {
-            symlink = "/empty";
-            object = pkgs.emptyFile;
+            target = "/empty";
+            source = pkgs.emptyFile;
           }
         ];
       };
