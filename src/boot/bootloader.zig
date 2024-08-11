@@ -168,14 +168,31 @@ fn kexecLoad(
     std.log.info("loading initrd {s}", .{initrd_filepath orelse "<none>"});
     std.log.info("loading params {s}", .{cmdline orelse "<none>"});
 
-    const linux = try std.fs.cwd().openFile(linux_filepath, .{});
+    // Use a constant path for the kernel and initrd so that the IMA events
+    // don't have differing random temporary paths each boot.
+    std.fs.cwd().makeDir("/tinyboot") catch |err| switch (err) {
+        error.PathAlreadyExists => {},
+        else => return err,
+    };
+    var boot_dir = try std.fs.cwd().openDir("/tinyboot", .{});
+    defer {
+        boot_dir.close();
+        std.fs.cwd().deleteTree("/tinyboot") catch {};
+    }
+
+    try std.fs.cwd().copyFile(linux_filepath, std.fs.cwd(), "/tinyboot/kernel", .{});
+    if (initrd_filepath) |initrd| {
+        try std.fs.cwd().copyFile(initrd, std.fs.cwd(), "/tinyboot/initrd", .{});
+    }
+
+    const linux = try std.fs.cwd().openFile("/tinyboot/kernel", .{});
     defer linux.close();
 
     const linux_fd = @as(usize, @bitCast(@as(isize, linux.handle)));
 
     const initrd_fd = b: {
-        if (initrd_filepath) |initrd| {
-            const file = try std.fs.cwd().openFile(initrd, .{});
+        if (initrd_filepath != null) {
+            const file = try std.fs.cwd().openFile("/tinyboot/initrd", .{});
 
             break :b file.handle;
         } else {
