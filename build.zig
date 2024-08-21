@@ -21,6 +21,7 @@ pub fn build(b: *std.Build) !void {
         \\#include <linux/kexec.h>
         \\#include <linux/keyctl.h>
         \\#include <linux/major.h>
+        \\#include <linux/netlink.h>
         \\#include <sys/epoll.h>
         \\#include <sys/ioctl.h>
         \\#include <termios.h>
@@ -154,6 +155,20 @@ pub fn build(b: *std.Build) !void {
         tboot_vpd.root_module.addImport("linux_headers", linux_headers_module);
         tboot_vpd.root_module.addImport("clap", clap.module("clap"));
         b.installArtifact(tboot_vpd);
+
+        ////////////////////////////////////////////////////////////////////////
+        // TODO(jared): delete this
+        ////////////////////////////////////////////////////////////////////////
+        const tboot_rtnetlink = b.addExecutable(.{
+            .name = "tboot-rtnetlink",
+            .root_source_file = b.path("src/rtnetlink.zig"),
+            .target = target,
+            .optimize = optimize,
+            .strip = optimize != std.builtin.OptimizeMode.Debug,
+        });
+        tboot_rtnetlink.root_module.addImport("linux_headers", linux_headers_module);
+        b.installArtifact(tboot_rtnetlink);
+        ////////////////////////////////////////////////////////////////////////
     }
 
     const unit_tests = b.addTest(.{
