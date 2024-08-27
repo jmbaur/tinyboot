@@ -3,17 +3,17 @@
     "coreboot": {
       "flake": false,
       "locked": {
-        "lastModified": 1715724830,
-        "narHash": "sha256-PIxiLcirJESkm8gEj8BFWep40rO6F9iDHYIvoOhKajs=",
-        "ref": "refs/tags/24.05",
-        "rev": "695a79fdb4627439c19eaa790fee6849cfec0abd",
-        "revCount": 56550,
+        "lastModified": 1724442579,
+        "narHash": "sha256-l+TPBcAsbzYZgsLOPX30ZpgHINAByIIwRHzvjeirIvY=",
+        "ref": "refs/tags/24.08",
+        "rev": "9352d38a43a6d2297201e108a3391fe99543f70b",
+        "revCount": 57447,
         "submodules": true,
         "type": "git",
         "url": "https://github.com/coreboot/coreboot"
       },
       "original": {
-        "ref": "refs/tags/24.05",
+        "ref": "refs/tags/24.08",
         "submodules": true,
         "type": "git",
         "url": "https://github.com/coreboot/coreboot"
@@ -21,11 +21,11 @@
     },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1723991338,
-        "narHash": "sha256-Grh5PF0+gootJfOJFenTTxDTYPidA3V28dqJ/WV7iis=",
+        "lastModified": 1724479785,
+        "narHash": "sha256-pP3Azj5d6M5nmG68Fu4JqZmdGt4S4vqI5f8te+E/FTw=",
         "owner": "nixos",
         "repo": "nixpkgs",
-        "rev": "8a3354191c0d7144db9756a74755672387b702ba",
+        "rev": "d0e1602ddde669d5beb01aec49d71a51937ed7be",
         "type": "github"
       },
       "original": {

@@ -2,7 +2,7 @@
   description = "A small linuxboot payload for coreboot";
   inputs = {
     coreboot.flake = false;
-    coreboot.url = "git+https://github.com/coreboot/coreboot?ref=refs/tags/24.05&submodules=1";
+    coreboot.url = "git+https://github.com/coreboot/coreboot?ref=refs/tags/24.08&submodules=1";
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
   };
   outputs = inputs: {
@@ -17,7 +17,7 @@
         {
           buildCoreboot = import ./pkgs/coreboot {
             corebootSrc = inputs.coreboot.outPath;
-            version = "24.05";
+            version = "24.08";
           };
           tinybootLoader = prev.callPackage ./pkgs/tinyboot {
             withLoader = true;

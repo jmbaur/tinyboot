@@ -1,4 +1,4 @@
-From 9bb6b834273324c806f04a2dc607daf0bcc092f6 Mon Sep 17 00:00:00 2001
+From 1b5d47d43e0f965c14856983c5bf3a0de1961b7f Mon Sep 17 00:00:00 2001
 From: Jared Baur <jaredbaur@fastmail.com>
 Date: Sat, 18 Nov 2023 09:04:25 -0800
 Subject: [PATCH 2/3] Fix build for brya
@@ -8,18 +8,18 @@ Subject: [PATCH 2/3] Fix build for brya
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/src/mainboard/google/brya/Kconfig b/src/mainboard/google/brya/Kconfig
-index 4a38af5f2c..9bbdade7a6 100644
+index 5ad0a3f612..5a7fdb916e 100644
 --- a/src/mainboard/google/brya/Kconfig
 +++ b/src/mainboard/google/brya/Kconfig
-@@ -730,7 +730,7 @@ config VARIANT_DIR
+@@ -955,7 +955,7 @@ config VARIANT_DIR
  
  config VBOOT
- 	select VBOOT_EARLY_EC_SYNC if !BOARD_GOOGLE_BASEBOARD_NISSA
+ 	select VBOOT_EARLY_EC_SYNC if !(BOARD_GOOGLE_BASEBOARD_NISSA || BOARD_GOOGLE_BASEBOARD_TRULO)
 -	select VBOOT_LID_SWITCH
 +	select VBOOT_LID_SWITCH if CHROMEOS
  
- config DIMM_SPD_SIZE
- 	default 512
+ config UART_FOR_CONSOLE
+ 	int
 -- 
-2.43.1
+2.45.2
 

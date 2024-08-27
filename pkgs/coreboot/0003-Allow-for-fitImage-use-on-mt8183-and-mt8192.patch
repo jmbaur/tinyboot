@@ -1,4 +1,4 @@
-From 7ddc61f490410c7b3e89aded8791a54d70a1252b Mon Sep 17 00:00:00 2001
+From eaf2944e216475045c8a7cc34c33fcadd4ff564c Mon Sep 17 00:00:00 2001
 From: Jared Baur <jaredbaur@fastmail.com>
 Date: Sat, 3 Feb 2024 23:10:51 -0800
 Subject: [PATCH 3/3] Allow for fitImage use on mt8183 and mt8192
@@ -9,10 +9,10 @@ Subject: [PATCH 3/3] Allow for fitImage use on mt8183 and mt8192
  2 files changed, 4 insertions(+), 4 deletions(-)
 
 diff --git a/src/soc/mediatek/mt8183/memlayout.ld b/src/soc/mediatek/mt8183/memlayout.ld
-index c5d9d08324..e1d9780c75 100644
+index b1b9027798..710d207e8d 100644
 --- a/src/soc/mediatek/mt8183/memlayout.ld
 +++ b/src/soc/mediatek/mt8183/memlayout.ld
-@@ -43,8 +43,8 @@ SECTIONS
+@@ -26,8 +26,8 @@ SECTIONS
  
  	DRAM_START(0x40000000)
  	DRAM_DMA(0x40000000, 1M)
@@ -39,5 +39,5 @@ index b1beef0970..b131b8ef08 100644
  	BL31(0x54600000, 0x60000)
  }
 -- 
-2.43.1
+2.45.2
 
