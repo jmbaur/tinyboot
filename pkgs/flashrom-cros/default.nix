@@ -11,16 +11,15 @@
   pkg-config,
   sphinx,
   bash-completion,
-  ...
 }:
 stdenv.mkDerivation (finalAttrs: {
   pname = "flashrom-cros";
   version = "unstable-${builtins.substring 0 7 finalAttrs.src.rev}";
   src = fetchgit {
     url = "https://chromium.googlesource.com/chromiumos/third_party/flashrom";
-    branchName = "release-R128-15964.B";
-    rev = "f102ba8191fcc77328189067a5b9f537849df070";
-    hash = "sha256-3UDy6ocgQ93dTPP2EF4HYnhh0JUmZRv+DbLI6in00PM=";
+    branchName = "release-R129-16002.B";
+    rev = "a3b1a83d2b09eb5051b183e7c9b853fd16847905";
+    hash = "sha256-pA+b0XPXgtTSnyfX7Je2Sy1YlY627nvyG8Y45btAuew=";
   };
   patches = [ ./power-management.patch ];
   outputs = [

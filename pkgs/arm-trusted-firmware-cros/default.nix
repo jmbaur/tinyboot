@@ -8,12 +8,15 @@ buildArmTrustedFirmware {
   version = "2.10.0";
   src = fetchgit {
     url = "https://chromium.googlesource.com/chromiumos/third_party/arm-trusted-firmware";
-    branchName = "release-R128-15964.B";
-    rev = "c0d660ac2911453c21d4868e46af714f508f2c19";
-    hash = "sha256-7Ew6zm1pAb608sVBKWGeTnNZ2z07nE/xWcwQrnvW5yU=";
+    branchName = "release-R129-16002.B";
+    rev = "9877b6ef1ee1cb8ab72a6611c37ffa589ce50f18";
+    hash = "sha256-t17BGsAyUeGLWHpNkCxSUYdahWRZNP2m42TpLYOdRfo=";
   };
   filesToInstall = [ "build/${platform}/release/bl31/bl31.elf" ];
-  extraMakeFlags = [ "DISABLE_BIN_GENERATION=1" "COREBOOT=1" ];
+  extraMakeFlags = [
+    "DISABLE_BIN_GENERATION=1"
+    "COREBOOT=1"
+  ];
   dontStrip = false;
   patches = [ ./toolchain.patch ];
   postInstall = ''
