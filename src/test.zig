@@ -12,6 +12,7 @@ test {
     _ = @import("./disk/mbr.zig");
     _ = @import("./kobject.zig");
     _ = @import("./log.zig");
+    _ = @import("./rtnetlink.zig");
     _ = @import("./runner.zig");
     _ = @import("./security.zig");
     _ = @import("./system.zig");

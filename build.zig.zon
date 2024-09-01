@@ -1,13 +1,15 @@
 .{
     .name = "tinyboot",
     .version = "0.0.1",
-
-    .paths = .{ "build.zig", "build.zig.zon", "src" },
-
+    .paths = .{""},
     .dependencies = .{
         .clap = .{
             .url = "https://github.com/Hejsil/zig-clap/archive/c0193e9247335a6c1688b946325060289405de2a.tar.gz",
             .hash = "12207ee987ce045596cb992cfb15b0d6d9456e50d4721c3061c69dabc2962053644d",
+        },
+        .netlink = .{
+            .url = "https://git.0x1b.me/netlink/archive/0.1.0.tar.gz",
+            .hash = "12207e75a7bcb3e8ebff0c69c04a68143579c2099af46f2553ae867505c4cedc4405",
         },
     },
 }

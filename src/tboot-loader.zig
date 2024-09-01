@@ -10,7 +10,6 @@ const Device = @import("./device.zig");
 const DeviceWatcher = @import("./watch.zig");
 const DiskBootLoader = @import("./boot/disk.zig");
 const Log = @import("./log.zig");
-const RtNetlink = @import("./rtnetlink.zig");
 const YmodemBootLoader = @import("./boot/ymodem.zig");
 const security = @import("./security.zig");
 const system = @import("./system.zig");
@@ -270,10 +269,6 @@ fn run(self: *TbootLoader) !posix.RebootCommand {
 }
 
 pub fn main() !void {
-    var rtnetlink = try RtNetlink.init();
-    std.log.debug("{any}", .{try rtnetlink.get_links()});
-    rtnetlink.deinit();
-
     defer {
         for (boot_loaders.items) |boot_loader| {
             boot_loader.deinit();

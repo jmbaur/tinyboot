@@ -15,6 +15,7 @@ pub fn build(b: *std.Build) !void {
     const with_tools = b.option(bool, "tools", "With tools") orelse true;
 
     const clap = b.dependency("clap", .{});
+    const netlink = b.dependency("netlink", .{});
 
     const linux_h = b.addWriteFile("linux.h",
         \\#include <asm-generic/setup.h>
@@ -22,6 +23,7 @@ pub fn build(b: *std.Build) !void {
         \\#include <linux/keyctl.h>
         \\#include <linux/major.h>
         \\#include <linux/netlink.h>
+        \\#include <linux/rtnetlink.h>
         \\#include <sys/epoll.h>
         \\#include <sys/ioctl.h>
         \\#include <termios.h>
@@ -50,6 +52,7 @@ pub fn build(b: *std.Build) !void {
             .root_source_file = b.path("tests/keys/tboot/key.der"),
         });
         tboot_loader.root_module.addImport("linux_headers", linux_headers_module);
+        tboot_loader.root_module.addImport("netlink", netlink.module("netlink"));
 
         const cpio_tool = b.addRunArtifact(b.addExecutable(.{
             .name = "cpio",
@@ -167,6 +170,7 @@ pub fn build(b: *std.Build) !void {
             .strip = optimize != std.builtin.OptimizeMode.Debug,
         });
         tboot_rtnetlink.root_module.addImport("linux_headers", linux_headers_module);
+        tboot_rtnetlink.root_module.addImport("netlink", netlink.module("netlink"));
         b.installArtifact(tboot_rtnetlink);
         ////////////////////////////////////////////////////////////////////////
     }
