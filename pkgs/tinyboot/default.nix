@@ -7,6 +7,8 @@
   openssl,
   pkg-config,
   pkgsBuildBuild,
+  pkgsBuildHost,
+  runCommand,
   stdenv,
   xz,
 }:
@@ -38,10 +40,14 @@ stdenv.mkDerivation (
 
     nativeBuildInputs = [
       pkg-config
+      # Can remove when https://github.com/ziglang/zig/commit/d263f1ec0eb988f0e4ed1859351f5040f590996b is included in a release.
+      (runCommand "pkg-config-for-zig" { } ''
+        mkdir -p $out/bin; ln -s ${pkgsBuildHost.pkg-config}/bin/${stdenv.cc.targetPrefix}pkg-config $out/bin/pkg-config
+      '')
       pkgsBuildBuild.zig_0_13.hook
       xz
     ];
-    buildInputs = [ openssl ];
+    buildInputs = lib.optionals withTools [ openssl ];
 
     doCheck = true;
 
