@@ -49,14 +49,46 @@ pub fn get_links(self: *RtNetlink) !void {
 }
 
 const AddressListRequest = nl.message.Request(posix.system.NetlinkMessageType.RTM_GETADDR, linux_headers.ifaddrmsg);
-const AddressResponse = nl.message.Response(posix.system.NetlinkMessageType.RTM_NEWADDR, linux_headers.ifaddrmsg);
+const NewAddressResponse = nl.message.Response(posix.system.NetlinkMessageType.RTM_NEWADDR, linux_headers.ifaddrmsg);
+const NewAddressRequest = nl.message.Request(posix.system.NetlinkMessageType.RTM_NEWADDR, linux_headers.ifaddrmsg);
+const DeleteAddressRequest = nl.message.Request(posix.system.NetlinkMessageType.RTM_DELADDR, linux_headers.ifaddrmsg);
+const DeleteAddressResponse = nl.message.Request(posix.system.NetlinkMessageType.RTM_DELADDR, linux_headers.ifaddrmsg);
 
 fn get_addresses(self: *RtNetlink) !void {
     const req = try self.nl_handle.new_req(AddressListRequest);
     req.nlh.*.flags |= posix.system.NLM_F_DUMP;
     try self.nl_handle.send(req);
 
-    var res = self.nl_handle.recv_all(AddressResponse);
+    var res = self.nl_handle.recv_all(NewAddressResponse);
+    while (try res.next()) |*payload| {
+        std.debug.print("{}\n", .{payload.value});
+        std.debug.print("{any}\n", .{payload.attrs});
+        // std.debug.print("{any}\n", .{try payload.next()});
+    }
+}
+
+fn new_address(self: *RtNetlink) !void {
+    const req = try self.nl_handle.new_req(NewAddressRequest);
+    req.nlh.flags |= posix.system.NLM_F_CREATE;
+    req.hdr.ifa_family = posix.AF.INET6;
+    req.hdr.ifa_flags = 0;
+    req.hdr.ifa_index = 3;
+    req.hdr.ifa_prefixlen = 128;
+    req.hdr.ifa_scope = linux_headers.RT_SCOPE_UNIVERSE;
+
+    try self.nl_handle.send(req);
+
+    var res = self.nl_handle.recv_all(NewAddressResponse);
+    while (try res.next()) |payload| {
+        std.debug.print("{}\n", .{payload.value});
+    }
+}
+
+fn delete_address(self: *RtNetlink) !void {
+    const req = self.nl_handle.new_req(DeleteAddressRequest);
+    try self.nl_handle.send(req);
+
+    var res = self.nl_handle.recv_all(NewAddressResponse);
     while (try res.next()) |payload| {
         std.debug.print("{}\n", .{payload.value});
     }
