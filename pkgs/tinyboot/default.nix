@@ -39,15 +39,15 @@ stdenv.mkDerivation (
     strictDeps = true;
 
     nativeBuildInputs = [
+      pkgsBuildBuild.zig_0_13.hook
+      xz
       pkg-config
       # Can remove when https://github.com/ziglang/zig/commit/d263f1ec0eb988f0e4ed1859351f5040f590996b is included in a release.
       (runCommand "pkg-config-for-zig" { } ''
         mkdir -p $out/bin; ln -s ${pkgsBuildHost.pkg-config}/bin/${stdenv.cc.targetPrefix}pkg-config $out/bin/pkg-config
       '')
-      pkgsBuildBuild.zig_0_13.hook
-      xz
     ];
-    buildInputs = lib.optionals withTools [ openssl ];
+    buildInputs = [ openssl ];
 
     doCheck = true;
 
@@ -67,7 +67,7 @@ stdenv.mkDerivation (
     zigCheckFlags = finalAttrs.zigBuildFlags;
 
     postInstall = lib.optionalString withLoader ''
-      xz --check=crc32 --lzma2=dict=512KiB $out/tboot-loader.cpio
+      xz --threads=$NIX_BUILD_CORES --check=crc32 --lzma2=dict=512KiB $out/tboot-loader.cpio
     '';
 
     meta.platforms = lib.platforms.linux;
