@@ -5,10 +5,10 @@
 }:
 buildArmTrustedFirmware {
   inherit platform;
-  version = "2.10.0";
+  version = "2.11.0";
   src = fetchgit {
     url = "https://chromium.googlesource.com/chromiumos/third_party/arm-trusted-firmware";
-    branchName = "release-R129-16002.B";
+    branchName = "release-R130-16033.B";
     rev = "9877b6ef1ee1cb8ab72a6611c37ffa589ce50f18";
     hash = "sha256-t17BGsAyUeGLWHpNkCxSUYdahWRZNP2m42TpLYOdRfo=";
   };

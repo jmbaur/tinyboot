@@ -14,12 +14,12 @@
 }:
 stdenv.mkDerivation (finalAttrs: {
   pname = "flashrom-cros";
-  version = "unstable-${builtins.substring 0 7 finalAttrs.src.rev}";
+  version = "1.5.0-devel";
   src = fetchgit {
     url = "https://chromium.googlesource.com/chromiumos/third_party/flashrom";
-    branchName = "release-R129-16002.B";
-    rev = "a3b1a83d2b09eb5051b183e7c9b853fd16847905";
-    hash = "sha256-pA+b0XPXgtTSnyfX7Je2Sy1YlY627nvyG8Y45btAuew=";
+    branchName = "release-R130-16033.B";
+    rev = "c1ab7468d28d164a30d598eb3e42a5febaf73bbc";
+    hash = "sha256-0bUEsFOhwWahjkk+m+PmjOVD2dOk1S2dZTfpENRwgzg=";
   };
   patches = [ ./power-management.patch ];
   outputs = [
