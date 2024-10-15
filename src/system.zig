@@ -9,7 +9,7 @@ fn mountPseudoFs(
     fstype: [*:0]const u8,
     flags: u32,
 ) !void {
-    const rc = system.mount("", path, fstype, flags, 0);
+    const rc = system.mount(fstype, path, fstype, flags, 0);
 
     switch (posix.errno(rc)) {
         .SUCCESS => {},
