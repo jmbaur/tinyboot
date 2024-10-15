@@ -1,9 +1,7 @@
-{ corebootSrc, version }:
 {
   board,
   fetchgit,
   kconfig ? "",
-  lib,
   nss,
   openssl,
   pkg-config,
@@ -28,8 +26,18 @@ let
 in
 stdenvNoCC.mkDerivation (finalAttrs: {
   pname = "coreboot-${board}";
-  inherit version;
-  src = corebootSrc;
+  version = "24.08";
+  src =
+    (fetchgit {
+      url = "https://github.com/coreboot/coreboot";
+      rev = "24.08";
+      hash = "sha256-l+TPBcAsbzYZgsLOPX30ZpgHINAByIIwRHzvjeirIvY=";
+      fetchSubmodules = true;
+    }).overrideAttrs
+      (_: {
+        # https://github.com/nixos/nixpkgs/blob/4c62505847d88f16df11eff3c81bf9a453a4979e/pkgs/build-support/fetchgit/nix-prefetch-git#L328
+        NIX_PREFETCH_GIT_CHECKOUT_HOOK = ''clean_git -C "$dir" submodule update --init --recursive --checkout -j ''${NIX_BUILD_CORES:-1} --progress'';
+      });
   patches = [
     ./0001-Add-Kconfig-VBOOT_SIGN-option.patch
     ./0002-Fix-build-for-brya.patch

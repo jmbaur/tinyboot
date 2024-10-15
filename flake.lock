@@ -1,24 +1,5 @@
 {
   "nodes": {
-    "coreboot": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1724442579,
-        "narHash": "sha256-l+TPBcAsbzYZgsLOPX30ZpgHINAByIIwRHzvjeirIvY=",
-        "ref": "refs/tags/24.08",
-        "rev": "9352d38a43a6d2297201e108a3391fe99543f70b",
-        "revCount": 57447,
-        "submodules": true,
-        "type": "git",
-        "url": "https://github.com/coreboot/coreboot"
-      },
-      "original": {
-        "ref": "refs/tags/24.08",
-        "submodules": true,
-        "type": "git",
-        "url": "https://github.com/coreboot/coreboot"
-      }
-    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1727802920,
@@ -37,7 +18,6 @@
     },
     "root": {
       "inputs": {
-        "coreboot": "coreboot",
         "nixpkgs": "nixpkgs"
       }
     }

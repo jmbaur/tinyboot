@@ -298,7 +298,7 @@ in
         inherit (config.build) linux initrd;
         inherit (config.linux) dtb dtbPattern;
       };
-      coreboot = pkgs.callPackage pkgs.buildCoreboot {
+      coreboot = pkgs.callPackage ./pkgs/coreboot {
         inherit (config) board;
         inherit (config.coreboot) kconfig;
       };
