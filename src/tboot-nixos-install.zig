@@ -50,6 +50,8 @@ fn installGeneration(
     esp: std.fs.Dir,
     args: *const Args,
 ) !void {
+    var entry_contents_list = std.ArrayList(u8).init(allocator);
+
     const linux_target_filename = try std.fmt.allocPrint(
         allocator,
         "{s}-{s}",
@@ -85,39 +87,47 @@ fn installGeneration(
 
     // TODO(jared): NixOS always has an initrd, but we should still
     // handle the case where it does not exist.
-    const initrd_target_filename = try std.fmt.allocPrint(
-        allocator,
-        "{s}-{s}",
-        .{ path.basename(path.dirname(spec.initrd.?).?), path.basename(spec.initrd.?) },
-    );
-
-    const initrd_target = try path.join(allocator, &.{
-        "EFI",
-        "nixos",
-        initrd_target_filename,
-    });
-
-    const full_initrd_path = try path.join(allocator, &.{
-        path.sep_str,
-        args.efi_sys_mount_point,
-        initrd_target,
-    });
-
-    if (!pathExists(esp, initrd_target)) {
-        if (!args.dry_run) {
-            try signFile(
+    const initrd_target = b: {
+        if (spec.initrd) |initrd| {
+            const initrd_target_filename = try std.fmt.allocPrint(
                 allocator,
-                args.private_key,
-                args.public_key,
-                spec.initrd.?,
-                full_initrd_path,
+                "{s}-{s}",
+                .{ path.basename(path.dirname(initrd).?), path.basename(initrd) },
             );
-            std.log.info("signed {s}", .{full_initrd_path});
-        }
-        std.log.info("installed {s}", .{full_initrd_path});
-    }
 
-    try known_files.put(full_initrd_path, {});
+            const initrd_target = try path.join(allocator, &.{
+                "EFI",
+                "nixos",
+                initrd_target_filename,
+            });
+
+            const full_initrd_path = try path.join(allocator, &.{
+                path.sep_str,
+                args.efi_sys_mount_point,
+                initrd_target,
+            });
+
+            if (!pathExists(esp, initrd_target)) {
+                if (!args.dry_run) {
+                    try signFile(
+                        allocator,
+                        args.private_key,
+                        args.public_key,
+                        spec.initrd.?,
+                        full_initrd_path,
+                    );
+                    std.log.info("signed {s}", .{full_initrd_path});
+                }
+                std.log.info("installed {s}", .{full_initrd_path});
+            }
+
+            try known_files.put(full_initrd_path, {});
+
+            break :b initrd_target;
+        } else {
+            break :b null;
+        }
+    };
 
     const kernel_params_without_init = try std.mem.join(allocator, " ", spec.kernel_params);
 
@@ -132,20 +142,14 @@ fn installGeneration(
     else
         try allocator.alloc(u8, 0);
 
-    const entry_contents = try std.fmt.allocPrint(allocator,
-        \\title {s}{s}
-        \\version {s}
-        \\linux {s}
-        \\initrd {s}
-        \\options {s}
-    , .{
-        spec.label,
-        sub_name,
-        spec.label,
-        linux_target,
-        initrd_target,
-        kernel_params,
-    });
+    try entry_contents_list.writer().print("title {s}{s}\n", .{ spec.label, sub_name });
+    try entry_contents_list.writer().print("version {s}\n", .{spec.label});
+    try entry_contents_list.writer().print("linux {s}\n", .{linux_target});
+    if (initrd_target) |_initrd_target| {
+        try entry_contents_list.writer().print("initrd {s}\n", .{_initrd_target});
+    }
+    try entry_contents_list.writer().print("options {s}\n", .{kernel_params});
+    const entry_contents = try entry_contents_list.toOwnedSlice();
 
     const sub_entry_name = if (spec.name) |name|
         try std.fmt.allocPrint(allocator, "-specialisation-{s}", .{name})
