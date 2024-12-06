@@ -324,7 +324,6 @@ const Shell = struct {
             0x1b => b: {
                 switch (try self.stdin.readByte()) {
                     0x5b => {
-                        // TODO(jared): handle these
                         switch (try self.stdin.readByte()) {
                             // Up arrow
                             0x41 => break :b self.historyPrev(),
