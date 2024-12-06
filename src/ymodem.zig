@@ -306,7 +306,7 @@ pub fn recv(tty: *system.Tty, dir: std.fs.Dir) !void {
                         filesize = try std.fmt.parseInt(usize, filesize_str, 10);
 
                         out_file = try dir.createFile(std.fs.path.basename(filename), .{});
-                        std.log.info("fetching {} bytes to '{s}'", .{ std.fmt.fmtIntSizeBin(filesize), filename });
+                        std.log.info("fetching {} to '{s}'", .{ std.fmt.fmtIntSizeBin(filesize), filename });
                     },
                     .data => {
                         std.debug.assert(filesize > bytes_written);
