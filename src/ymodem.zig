@@ -277,8 +277,15 @@ pub fn recv(tty: *system.Tty, dir: std.fs.Dir) !void {
 
                         const filename = filename_buf[0 .. payload_index - 1];
 
-                        // TODO(jared): 16 digits is an arbitrary maximum.
-                        var filesize_buf: [16]u8 = undefined;
+                        // Number of digits in base-10 needed for maximum file
+                        // size of 4GiB, which is likely much larger than
+                        // any file that would be transferred over the ymodem
+                        // protocol.
+                        const max_digits = comptime @ceil(
+                            @log10(@as(f32, 4 * 1024 * 1024 * 1024)),
+                        );
+
+                        var filesize_buf: [max_digits]u8 = undefined;
                         for (chunk.payload[payload_index..], 0..) |byte, i| {
                             payload_index += 1;
 
@@ -299,7 +306,7 @@ pub fn recv(tty: *system.Tty, dir: std.fs.Dir) !void {
                         filesize = try std.fmt.parseInt(usize, filesize_str, 10);
 
                         out_file = try dir.createFile(std.fs.path.basename(filename), .{});
-                        std.log.info("fetching {} to '{s}'", .{ std.fmt.fmtIntSizeBin(filesize), filename });
+                        std.log.info("fetching {} bytes to '{s}'", .{ std.fmt.fmtIntSizeBin(filesize), filename });
                     },
                     .data => {
                         std.debug.assert(filesize > bytes_written);
