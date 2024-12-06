@@ -85,8 +85,6 @@ fn installGeneration(
 
     try known_files.put(full_linux_path, {});
 
-    // TODO(jared): NixOS always has an initrd, but we should still
-    // handle the case where it does not exist.
     const initrd_target = b: {
         if (spec.initrd) |initrd| {
             const initrd_target_filename = try std.fmt.allocPrint(

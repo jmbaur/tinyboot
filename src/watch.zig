@@ -213,8 +213,8 @@ pub fn scanAndCreateExistingDevicesForSubsystem(
     var iter = subsystem_dir.iterate();
 
     while (try iter.next()) |entry| {
-        // TODO(jared): Do we have any reason to believe all the files
-        // won't be symlinks?
+        // We expect all files in every directory under /sys/class to be a
+        // symlink.
         if (entry.kind != .sym_link) {
             continue;
         }
