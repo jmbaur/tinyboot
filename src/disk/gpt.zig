@@ -713,12 +713,12 @@ const magic = "EFI PART";
 
 sector_size: u16,
 source: *io.StreamSource,
-header: *Header,
+header: Header,
 
 /// Caller is responsible for source.
 pub fn init(source: *io.StreamSource) !Gpt {
-    for ([_]u16{ 512, 1024, 2048, 4096 }) |ss| {
-        try source.seekTo(ss * 1); // LBA1
+    for ([_]u16{ 512, 1024, 2048, 4096 }) |sector_size| {
+        try source.seekTo(sector_size * 1); // LBA1
         var header_bytes: [@sizeOf(Header)]u8 = undefined;
         const bytes_read = try source.reader().readAll(&header_bytes);
         if (bytes_read != @sizeOf(Header)) {
@@ -729,6 +729,11 @@ pub fn init(source: *io.StreamSource) !Gpt {
         const header: *Header = @ptrCast(aligned_buf);
         if (!mem.eql(u8, &header.signature, magic)) {
             continue;
+        }
+
+        const partition_entry_size = mem.littleToNative(@TypeOf(header.partition_entry_size), header.partition_entry_size);
+        if (partition_entry_size != @sizeOf(PartitionRecord)) {
+            return Error.UnknownPartitionEntrySize;
         }
 
         const calculated_crc = b: {
@@ -751,9 +756,25 @@ pub fn init(source: *io.StreamSource) !Gpt {
         }
 
         return .{
-            .sector_size = ss,
+            .sector_size = sector_size,
             .source = source,
-            .header = header,
+            .header = Header{
+                .signature = header.signature,
+                .revision = header.revision,
+                .header_size = header.header_size,
+                .header_crc32 = header.header_crc32,
+                .reserved = header.reserved,
+                .current_lba = header.current_lba,
+                .backup_lba = header.backup_lba,
+                .first_usable_lba = header.first_usable_lba,
+                .last_usable_lba = header.last_usable_lba,
+                .disk_guid = header.disk_guid,
+                .starting_partition_entry_lba = header.starting_partition_entry_lba,
+                .num_partition_entries = header.num_partition_entries,
+                .partition_entry_size = header.partition_entry_size,
+                .partition_entries_crc32 = header.partition_entries_crc32,
+                .unused_reserved = header.unused_reserved,
+            },
         };
     }
 
@@ -765,22 +786,13 @@ pub fn partitions(self: *Gpt, allocator: std.mem.Allocator) ![]PartitionRecord {
     var p = std.ArrayList(PartitionRecord).init(allocator);
     errdefer p.deinit();
 
-    const partition_entry_size = mem.littleToNative(@TypeOf(self.header.partition_entry_size), self.header.partition_entry_size);
-    if (partition_entry_size != @sizeOf(PartitionRecord)) {
-        return Error.UnknownPartitionEntrySize;
-    }
-
     var partition_offset = mem.littleToNative(@TypeOf(self.header.starting_partition_entry_lba), self.header.starting_partition_entry_lba) * self.sector_size;
     const partition_end =
         mem.littleToNative(@TypeOf(self.header.num_partition_entries), self.header.num_partition_entries) *
-        partition_entry_size +
+        @sizeOf(PartitionRecord) +
         partition_offset;
 
-    // TODO(jared): Initial seek here seems to be necessary, even though we
-    // seek as soon as we iterate to the first partition offset.
-    try self.source.seekTo(partition_offset);
-
-    while (partition_offset <= partition_end) : (partition_offset += partition_entry_size) {
+    while (partition_offset <= partition_end) : (partition_offset += @sizeOf(PartitionRecord)) {
         try self.source.seekTo(partition_offset);
 
         var part_bytes: [@sizeOf(PartitionRecord)]u8 = undefined;
