@@ -758,23 +758,7 @@ pub fn init(source: *io.StreamSource) !Gpt {
         return .{
             .sector_size = sector_size,
             .source = source,
-            .header = Header{
-                .signature = header.signature,
-                .revision = header.revision,
-                .header_size = header.header_size,
-                .header_crc32 = header.header_crc32,
-                .reserved = header.reserved,
-                .current_lba = header.current_lba,
-                .backup_lba = header.backup_lba,
-                .first_usable_lba = header.first_usable_lba,
-                .last_usable_lba = header.last_usable_lba,
-                .disk_guid = header.disk_guid,
-                .starting_partition_entry_lba = header.starting_partition_entry_lba,
-                .num_partition_entries = header.num_partition_entries,
-                .partition_entry_size = header.partition_entry_size,
-                .partition_entries_crc32 = header.partition_entries_crc32,
-                .unused_reserved = header.unused_reserved,
-            },
+            .header = header.*,
         };
     }
 
