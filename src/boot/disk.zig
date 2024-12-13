@@ -633,21 +633,22 @@ fn searchForEntries(
             }
         }
 
-        // TODO(jared): Make it nicer to continue appending kernel
-        // params...perhaps keep the ArrayList so we still get to
-        // `.append()`.
-        var options_with_bls_entry: [linux_headers.COMMAND_LINE_SIZE]u8 = undefined;
-        const options = b: {
+        const cmdline = b: {
+            var final_cmdline = std.ArrayList(u8).init(allocator);
+
             if (entry.options) |opts| {
-                const orig = try std.mem.join(allocator, " ", opts);
-                break :b try std.fmt.bufPrint(&options_with_bls_entry, "{s} tboot.bls-entry={s}", .{ orig, entry.id });
-            } else {
-                break :b try std.fmt.bufPrint(&options_with_bls_entry, "tboot.bls-entry={s}", .{entry.id});
+                for (opts) |opt| {
+                    try final_cmdline.appendSlice(opt);
+                    try final_cmdline.append(' ');
+                }
             }
+
+            try final_cmdline.writer().print("tboot.bls-entry={s}", .{entry.id});
+
+            break :b try final_cmdline.toOwnedSlice();
         };
 
-        const final_options = try allocator.dupe(u8, options);
-        errdefer allocator.free(options);
+        errdefer allocator.free(cmdline);
 
         const context = try allocator.create(BlsEntryFile);
         errdefer allocator.destroy(context);
@@ -660,7 +661,7 @@ fn searchForEntries(
         try entries.append(
             .{
                 .context = context,
-                .cmdline = final_options,
+                .cmdline = cmdline,
                 .initrd = initrd,
                 .linux = linux,
             },
