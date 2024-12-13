@@ -612,24 +612,24 @@ fn searchForEntries(
         // TODO(jared): If IMA appraisal is disabled, we can
         // concatenate all the initrds together.
         var initrd: ?[]const u8 = null;
-        if (entry.initrd) |_initrd| {
-            if (_initrd.len > 0) {
-                initrd = mount_dir.realpathAlloc(allocator, _initrd[0]) catch |err| switch (err) {
+        if (entry.initrd) |initrd_| {
+            if (initrd_.len > 0) {
+                initrd = mount_dir.realpathAlloc(allocator, initrd_[0]) catch |err| switch (err) {
                     error.OutOfMemory => return err,
                     else => {
-                        std.log.err("initrd \"{s}\" not found on {s}", .{ _initrd[0], disk_device });
+                        std.log.err("initrd \"{s}\" not found on {s}", .{ initrd_[0], disk_device });
                         continue;
                     },
                 };
             }
 
-            if (_initrd.len > 1) {
+            if (initrd_.len > 1) {
                 std.log.warn("cannot verify more than 1 initrd, using first initrd", .{});
             }
         }
         errdefer {
-            if (initrd) |_initrd| {
-                allocator.free(_initrd);
+            if (initrd) |initrd_| {
+                allocator.free(initrd_);
             }
         }
 

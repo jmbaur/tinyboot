@@ -58,8 +58,6 @@ pub fn parseUeventKobjectContents(contents: []const u8) ?DeviceWatcher.Event {
         const key = split.next() orelse continue;
         const value = split.next() orelse continue;
 
-        // TODO(jared): The net subsystem (possibly) doesn't set DEVNAME, but
-        // rather INTERFACE.
         if (std.mem.eql(u8, key, "SUBSYSTEM")) {
             subsystem = Device.Subsystem.fromStr(value) catch return null;
         } else if (std.mem.eql(u8, key, "IFINDEX")) {
@@ -71,17 +69,29 @@ pub fn parseUeventKobjectContents(contents: []const u8) ?DeviceWatcher.Event {
         }
     }
 
+    const subsystem_ = subsystem orelse return null;
+
     return .{
         .action = action,
         .device = .{
-            .subsystem = subsystem orelse return null,
-            .type = if (ifindex) |ifidx|
-                .{ .ifindex = ifidx }
-            else
-                .{ .node = .{
-                    major orelse return null,
-                    minor orelse return null,
-                } },
+            .subsystem = subsystem_,
+            .type = b: {
+                if (subsystem_ == .net) {
+                    // We expect IFINDEX to be set for the net subsystem.
+                    if (ifindex) |ifidx| {
+                        break :b .{ .ifindex = ifidx };
+                    } else {
+                        return null;
+                    }
+                } else {
+                    break :b .{
+                        .node = .{
+                            major orelse return null,
+                            minor orelse return null,
+                        },
+                    };
+                }
+            },
         },
     };
 }

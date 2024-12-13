@@ -695,8 +695,8 @@ const Header = extern struct {
 };
 
 /// A read-only GUID partition table
-// TODO(jared):
-// - Parse recovery header
+//
+// TODO(jared): parse recovery header
 const Gpt = @This();
 
 pub const Error = error{

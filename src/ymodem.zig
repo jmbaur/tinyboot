@@ -43,12 +43,11 @@ fn finalizeAndWriteChunk(comptime chunk_type: type, chunk: *chunk_type, tty: *sy
         switch (try tty.reader().readByte()) {
             NAK => continue,
             ACK => return,
-            else => return error.InvalidArgument,
+            else => return error.IllegalByte,
         }
     }
 
-    // TODO(jared): use different error
-    return error.InvalidArgument;
+    return error.TooManyNaks;
 }
 
 pub fn send(
@@ -67,7 +66,7 @@ pub fn send(
         if (try reader.readByte() == CRC) {
             break;
         } else {
-            return error.InvalidArgument;
+            return error.IllegalByte;
         }
     }
 
@@ -126,7 +125,7 @@ pub fn send(
         try finalizeAndWriteChunk(Chunk128, &chunk, tty);
 
         if (try reader.readByte() != CRC) {
-            return error.InvalidArgument;
+            return error.IllegalByte;
         }
     }
 
@@ -155,7 +154,7 @@ pub fn send(
     try tty.writer().writeByte(EOF);
 
     if (try reader.readByte() != ACK) {
-        return error.InvalidArgument;
+        return error.IllegalByte;
     }
 }
 
@@ -163,7 +162,7 @@ const RecvState = enum { filename, data };
 
 fn processBlock(comptime chunk_type: type, chunk: *const chunk_type, block_index: *u8) !void {
     if (block_index.* != chunk.block) {
-        return error.InvalidArgument;
+        return error.InvalidBlockIndex;
     } else {
         block_index.* +%= 1;
     }
@@ -234,11 +233,11 @@ pub fn recv(tty: *system.Tty, dir: std.fs.Dir) !void {
                 };
 
                 if (state == .filename and chunk.block > 0) {
-                    return error.InvalidArgument;
+                    return error.InvalidState;
                 }
 
                 if (state == .data and chunk.block == 0) {
-                    return error.InvalidArgument;
+                    return error.InvalidState;
                 }
 
                 processBlock(Chunk128, &chunk, &block_index) catch {
@@ -311,7 +310,7 @@ pub fn recv(tty: *system.Tty, dir: std.fs.Dir) !void {
                     .data => {
                         std.debug.assert(filesize > bytes_written);
                         const bytes_to_write = @min(filesize - bytes_written, chunk.payload.len);
-                        var file = out_file orelse return error.InvalidArgument;
+                        var file = out_file orelse return error.MissingFile;
                         try file.writer().writeAll(chunk.payload[0..bytes_to_write]);
                         bytes_written += bytes_to_write;
                         try ack(tty.writer());
@@ -320,7 +319,7 @@ pub fn recv(tty: *system.Tty, dir: std.fs.Dir) !void {
             },
             STX => {
                 if (state != .data) {
-                    return error.InvalidArgument;
+                    return error.InvalidState;
                 }
 
                 const chunk: Chunk1K = b: {
@@ -348,14 +347,14 @@ pub fn recv(tty: *system.Tty, dir: std.fs.Dir) !void {
 
                 std.debug.assert(filesize > bytes_written);
                 const bytes_to_write = @min(filesize - bytes_written, chunk.payload.len);
-                var file = out_file orelse return error.InvalidArgument;
+                var file = out_file orelse return error.MissingFile;
                 try file.writer().writeAll(chunk.payload[0..bytes_to_write]);
                 bytes_written += bytes_to_write;
                 try ack(tty.writer());
             },
             EOF => {
                 if (bytes_written != filesize) {
-                    return error.InvalidArgument;
+                    return error.InvalidFilesize;
                 }
 
                 try ack(tty.writer());
@@ -364,7 +363,7 @@ pub fn recv(tty: *system.Tty, dir: std.fs.Dir) !void {
             },
             else => {
                 std.log.err("unknown header start: 0x{x}", .{start});
-                return error.InvalidArgument;
+                return error.IllegalByte;
             },
         }
     }

@@ -44,7 +44,6 @@ pub fn main() !void {
         else => @compileError("don't know how to run qemu on build system"),
     } });
 
-    // TODO(jared): "-drive", "if=virtio,file=TODO.raw,format=raw,media=disk"
     try qemu_args.appendSlice(&.{
         "-display",
         "none",
