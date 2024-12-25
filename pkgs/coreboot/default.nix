@@ -26,12 +26,12 @@ let
 in
 stdenvNoCC.mkDerivation (finalAttrs: {
   pname = "coreboot-${board}";
-  version = "24.08";
+  version = "24.12";
   src =
     (fetchgit {
       url = "https://github.com/coreboot/coreboot";
-      rev = "24.08";
-      hash = "sha256-l+TPBcAsbzYZgsLOPX30ZpgHINAByIIwRHzvjeirIvY=";
+      rev = finalAttrs.version;
+      hash = "sha256-mdxYxE3JiHFDaftNVckeQTVOlF8sWccm74MrpgWtXb4=";
       fetchSubmodules = true;
     }).overrideAttrs
       (_: {
