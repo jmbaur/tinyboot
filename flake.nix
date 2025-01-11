@@ -60,10 +60,9 @@
           pkgs.tinybootLoader
           pkgs.tinybootTools
         ];
-        packages = with pkgs; [
-          swtpm
-          qemu
-          zon2nix
+        packages = [
+          pkgs.swtpm
+          pkgs.qemu
         ];
         # https://github.com/NixOS/nixpkgs/issues/270415
         shellHook = ''
