@@ -14,6 +14,7 @@ let
     isString
     kernel
     mapAttrsToList
+    mkDefault
     mkEnableOption
     mkOption
     mkPackageOption
@@ -261,33 +262,32 @@ in
     coreboot.vpd.ro.pubkey = config.verifiedBoot.tbootPublicCertificate;
 
     coreboot.kconfig =
-      with kernel;
       {
-        "DEFAULT_CONSOLE_LOGLEVEL_${if config.debug then "7" else "6"}" = yes;
-        PAYLOAD_NONE = unset;
-        VBOOT = yes;
-        VBOOT_ALWAYS_ENABLE_DISPLAY = yes;
-        VBOOT_FIRMWARE_PRIVKEY = freeform config.verifiedBoot.vbootFirmwarePrivkey;
-        VBOOT_KERNEL_KEY = freeform config.verifiedBoot.vbootFirmwareKey;
-        VBOOT_KEYBLOCK = freeform config.verifiedBoot.vbootKeyblock;
-        VBOOT_RECOVERY_KEY = freeform config.verifiedBoot.vbootFirmwareKey;
-        VBOOT_ROOT_KEY = freeform config.verifiedBoot.vbootRootKey;
-        VBOOT_SIGN = unset; # don't sign during build
-        VPD = yes;
+        "DEFAULT_CONSOLE_LOGLEVEL_${if config.debug then "7" else "6"}" = kernel.yes;
+        PAYLOAD_NONE = kernel.unset;
+        VBOOT = kernel.yes;
+        VBOOT_ALWAYS_ENABLE_DISPLAY = kernel.yes;
+        VBOOT_FIRMWARE_PRIVKEY = kernel.freeform config.verifiedBoot.vbootFirmwarePrivkey;
+        VBOOT_KERNEL_KEY = kernel.freeform config.verifiedBoot.vbootFirmwareKey;
+        VBOOT_KEYBLOCK = kernel.freeform config.verifiedBoot.vbootKeyblock;
+        VBOOT_RECOVERY_KEY = kernel.freeform config.verifiedBoot.vbootFirmwareKey;
+        VBOOT_ROOT_KEY = kernel.freeform config.verifiedBoot.vbootRootKey;
+        VBOOT_SIGN = kernel.unset; # don't sign during build
+        VPD = kernel.yes;
       }
       // optionalAttrs pkgs.hostPlatform.isx86_64 {
-        LINUX_INITRD = freeform "${config.build.initrd}/${config.build.initrd.initrdPath}";
-        PAYLOAD_FILE = freeform "${config.build.linux}/${pkgs.stdenv.hostPlatform.linux-kernel.target}";
-        PAYLOAD_LINUX = yes;
-        VBOOT_SLOTS_RW_AB = mkDefault yes; # x86_64 spi flash is usually large enough for 3 vboot slots
-        VBOOT_X86_SHA256_ACCELERATION = yes;
+        LINUX_INITRD = kernel.freeform "${config.build.initrd}/${config.build.initrd.initrdPath}";
+        PAYLOAD_FILE = kernel.freeform "${config.build.linux}/${pkgs.stdenv.hostPlatform.linux-kernel.target}";
+        PAYLOAD_LINUX = kernel.yes;
+        VBOOT_SLOTS_RW_AB = mkDefault kernel.yes; # x86_64 spi flash is usually large enough for 3 vboot slots
+        VBOOT_X86_SHA256_ACCELERATION = kernel.yes;
       }
       // optionalAttrs pkgs.hostPlatform.isAarch64 {
-        PAYLOAD_FILE = freeform "${config.build.fitImage}/uImage";
-        PAYLOAD_FIT = yes;
-        PAYLOAD_FIT_SUPPORT = yes;
-        VBOOT_ARMV8_CE_SHA256_ACCELERATION = yes;
-        VBOOT_SLOTS_RW_A = mkDefault yes; # spi flash on aarch64 chromebooks is usually not large enough for 3 vboot slots
+        PAYLOAD_FILE = kernel.freeform "${config.build.fitImage}/uImage";
+        PAYLOAD_FIT = kernel.yes;
+        PAYLOAD_FIT_SUPPORT = kernel.yes;
+        VBOOT_ARMV8_CE_SHA256_ACCELERATION = kernel.yes;
+        VBOOT_SLOTS_RW_A = mkDefault kernel.yes; # spi flash on aarch64 chromebooks is usually not large enough for 3 vboot slots
       };
 
     build = {
