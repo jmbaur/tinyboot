@@ -4,7 +4,9 @@ const builtin = @import("builtin");
 
 pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(
-        .{ .default_target = .{ .cpu_model = .baseline } },
+        .{
+            .default_target = .{ .cpu_model = .baseline, .abi = .musl },
+        },
     );
 
     const optimize = b.standardOptimizeOption(.{});
