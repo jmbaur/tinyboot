@@ -384,10 +384,10 @@ pub fn main() !void {
     defer arena.deinit();
 
     const params = comptime clap.parseParamsComptime(
-        \\-h, --help           Display this help and exit.
-        \\-t, --tty <FILE>     TTY to send/receive on.
-        \\-d, --dir <DIR>      Directory to send/receive files from/to.
-        \\<ACTION>             send or recv
+        \\-h, --help                 Display this help and exit.
+        \\-t, --tty       <FILE>     TTY to send/receive on.
+        \\-d, --directory <DIR>      Directory to send/receive files from/to.
+        \\<ACTION>                   Action to take ("send" or "recv").
         \\
     );
 
@@ -419,7 +419,7 @@ pub fn main() !void {
         return clap.help(std.io.getStdErr().writer(), clap.Help, &params, .{});
     }
 
-    if (res.positionals.len != 1 or res.args.dir == null or res.args.tty == null) {
+    if (res.positionals.len != 1 or res.args.directory == null or res.args.tty == null) {
         try diag.report(stderr, error.InvalidArgument);
         try clap.usage(std.io.getStdErr().writer(), clap.Help, &params);
         return;
@@ -434,7 +434,7 @@ pub fn main() !void {
     var tty = try system.setupTty(tty_file.handle, .file_transfer);
     defer tty.reset();
 
-    var dir = try std.fs.cwd().openDir(res.args.dir.?, .{});
+    var dir = try std.fs.cwd().openDir(res.args.directory.?, .{});
     defer dir.close();
 
     switch (res.positionals[0]) {
