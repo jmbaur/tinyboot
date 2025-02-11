@@ -482,8 +482,8 @@ const Shell = struct {
 
         pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
             for (self.items) |item| {
-                if (item) |_item| {
-                    allocator.free(_item);
+                if (item) |item_| {
+                    allocator.free(item_);
                 }
             }
         }
@@ -505,8 +505,8 @@ const Shell = struct {
 
                 // free the last element
                 if (index == self.items.len - 1) {
-                    if (old) |_old| {
-                        allocator.free(_old);
+                    if (old) |old_| {
+                        allocator.free(old_);
                     }
                 }
 
@@ -810,7 +810,7 @@ pub const Command = struct {
             print("unknown command \"{s}\"\n", .{cmd});
         }
 
-        fn run(console: *Console, args: *ArgsIterator, _: []*const BootLoader) !?Event {
+        fn run(console: *Console, args: *ArgsIterator, _: []*BootLoader) !?Event {
             if (args.next()) |cmd| {
                 if (console.context == null) {
                     helpOne(NoContext, cmd);
@@ -838,7 +838,7 @@ pub const Command = struct {
             \\poweroff
         ;
 
-        fn run(_: *Console, _: *ArgsIterator, _: []*const BootLoader) !?Event {
+        fn run(_: *Console, _: *ArgsIterator, _: []*BootLoader) !?Event {
             return .poweroff;
         }
     };
@@ -852,7 +852,7 @@ pub const Command = struct {
             \\reboot
         ;
 
-        fn run(_: *Console, _: *ArgsIterator, _: []*const BootLoader) !?Event {
+        fn run(_: *Console, _: *ArgsIterator, _: []*BootLoader) !?Event {
             return .reboot;
         }
     };
@@ -870,7 +870,7 @@ pub const Command = struct {
             \\logs 7
         ;
 
-        fn run(console: *Console, args: *ArgsIterator, _: []*const BootLoader) !?Event {
+        fn run(console: *Console, args: *ArgsIterator, _: []*BootLoader) !?Event {
             const filter = if (args.next()) |filter_str|
                 try std.fmt.parseInt(u3, filter_str, 10)
             else
@@ -895,14 +895,14 @@ pub const Command = struct {
             \\history
         ;
 
-        fn run(console: *Console, _: *ArgsIterator, _: []*const BootLoader) !?Event {
+        fn run(console: *Console, _: *ArgsIterator, _: []*BootLoader) !?Event {
             writeAll("\n");
             const len = console.shell.history.items.len;
             for (0..len) |i| {
                 const index = len - 1 - i;
                 const item = console.shell.history.items[index];
-                if (item) |_item| {
-                    print("{d:0>2} {s}\n", .{ index, _item });
+                if (item) |item_| {
+                    print("{d:0>2} {s}\n", .{ index, item_ });
                 }
             }
 
@@ -919,7 +919,7 @@ pub const Command = struct {
             \\clear
         ;
 
-        fn run(_: *Console, _: *ArgsIterator, _: []*const BootLoader) !?Event {
+        fn run(_: *Console, _: *ArgsIterator, _: []*BootLoader) !?Event {
             clearScreen();
 
             return null;

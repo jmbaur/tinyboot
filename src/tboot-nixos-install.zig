@@ -143,8 +143,8 @@ fn installGeneration(
     try entry_contents_list.writer().print("title {s}{s}\n", .{ spec.label, sub_name });
     try entry_contents_list.writer().print("version {s}\n", .{spec.label});
     try entry_contents_list.writer().print("linux {s}\n", .{linux_target});
-    if (initrd_target) |_initrd_target| {
-        try entry_contents_list.writer().print("initrd {s}\n", .{_initrd_target});
+    if (initrd_target) |initrd_target_| {
+        try entry_contents_list.writer().print("initrd {s}\n", .{initrd_target_});
     }
     try entry_contents_list.writer().print("options {s}\n", .{kernel_params});
     const entry_contents = try entry_contents_list.toOwnedSlice();
@@ -298,7 +298,7 @@ pub fn main() !void {
     }
 
     var args = Args{
-        .default_nixos_system_closure = res.positionals[0],
+        .default_nixos_system_closure = res.positionals[0].?,
         .private_key = res.args.@"private-key".?,
         .public_key = res.args.@"public-key".?,
     };

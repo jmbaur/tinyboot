@@ -1,6 +1,7 @@
 const std = @import("std");
 const posix = std.posix;
 const path = std.fs.path;
+const epoll_event = std.os.linux.epoll_event;
 
 const Device = @import("./device.zig");
 const kobject = @import("./kobject.zig");
@@ -53,7 +54,7 @@ pub fn init() !DeviceWatcher {
         .nl_fd = try posix.socket(
             posix.system.AF.NETLINK,
             posix.system.SOCK.DGRAM,
-            posix.system.NETLINK.KOBJECT_UEVENT,
+            std.os.linux.NETLINK.KOBJECT_UEVENT,
         ),
     };
 
@@ -88,24 +89,28 @@ pub fn watch(self: *DeviceWatcher, done: posix.fd_t) !void {
     const epoll_fd = try posix.epoll_create1(linux_headers.EPOLL_CLOEXEC);
     defer posix.close(epoll_fd);
 
-    try posix.epoll_ctl(
-        epoll_fd,
-        posix.system.EPOLL.CTL_ADD,
-        self.nl_fd,
-        @constCast(&.{
-            .data = .{ .fd = self.nl_fd },
-            .events = posix.system.EPOLL.IN,
-        }),
-    );
+    var netlink_event = epoll_event{
+        .data = .{ .fd = self.nl_fd },
+        .events = std.os.linux.EPOLL.IN,
+    };
 
     try posix.epoll_ctl(
         epoll_fd,
-        posix.system.EPOLL.CTL_ADD,
+        std.os.linux.EPOLL.CTL_ADD,
+        self.nl_fd,
+        &netlink_event,
+    );
+
+    var done_event = epoll_event{
+        .data = .{ .fd = done },
+        .events = std.os.linux.EPOLL.IN,
+    };
+
+    try posix.epoll_ctl(
+        epoll_fd,
+        std.os.linux.EPOLL.CTL_ADD,
         done,
-        @constCast(&.{
-            .data = .{ .fd = done },
-            .events = posix.system.EPOLL.IN,
-        }),
+        &done_event,
     );
 
     while (true) {
@@ -169,7 +174,7 @@ fn mknod(self: *DeviceWatcher, node_type: NodeType, major: u32, minor: u32) !voi
     var buf: [10]u8 = undefined;
     const device = try std.fmt.bufPrintZ(&buf, "{}:{}", .{ major, minor });
 
-    const rc = posix.system.mknodat(
+    const rc = std.os.linux.mknodat(
         switch (node_type) {
             .block => self.block_dir.fd,
             .char => self.char_dir.fd,

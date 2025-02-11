@@ -310,8 +310,8 @@ pub fn main() !void {
         return;
     }
 
-    const in_file = res.positionals[0];
-    const out_file = res.positionals[1];
+    const in_file = res.positionals[0].?;
+    const out_file = res.positionals[1].?;
     const private_key_filepath = res.args.@"private-key".?;
     const public_key_filepath = res.args.@"public-key".?;
 

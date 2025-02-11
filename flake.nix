@@ -1,6 +1,12 @@
 {
   description = "A small linuxboot payload for coreboot";
-  inputs.nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
+
+  inputs = {
+    nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
+    zig-overlay.url = "github:mitchellh/zig-overlay";
+    zig-overlay.inputs.nixpkgs.follows = "nixpkgs";
+  };
+
   outputs = inputs: {
     formatter = inputs.nixpkgs.lib.mapAttrs (_: pkgs: pkgs.nixfmt-rfc-style) inputs.self.legacyPackages;
     nixosModules.default = {
@@ -11,6 +17,7 @@
       final: prev:
       (
         {
+          zigForTinyboot = inputs.zig-overlay.packages.${final.stdenv.buildPlatform.system}.master;
           tinybootLoader = prev.callPackage ./pkgs/tinyboot {
             withLoader = true;
             withTools = false;

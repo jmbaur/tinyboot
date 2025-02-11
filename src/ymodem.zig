@@ -91,7 +91,7 @@ pub fn send(
     var file_node = parent_node.start(filename, stat.size / 1024);
     defer file_node.end();
 
-    var buf: []align(std.mem.page_size) u8 = if (stat.size > 0)
+    var buf: []align(std.heap.pageSize()) u8 = if (stat.size > 0)
         try posix.mmap(
             null,
             stat.size,
@@ -437,7 +437,9 @@ pub fn main() !void {
     var dir = try std.fs.cwd().openDir(res.args.directory.?, .{});
     defer dir.close();
 
-    switch (res.positionals[0]) {
+    const action = res.positionals[0].?;
+
+    switch (action) {
         .send => {
             var progress = Progress.start(.{ .root_name = "ymodem" });
             defer progress.end();

@@ -205,7 +205,7 @@ fn addKeyring(name: [*:0]const u8, key_serial: KeySerial) !usize {
 
     const key_content: ?[*:0]const u8 = null;
 
-    const rc = system.syscall5(
+    const rc = std.os.linux.syscall5(
         system.SYS.add_key,
         @intFromPtr(key_type),
         @intFromPtr(name),
@@ -230,7 +230,7 @@ fn addKey(keyring_id: usize, key_content: []const u8) !usize {
     const key_desc: ?[*:0]const u8 = null;
 
     // see https://github.com/torvalds/linux/blob/59f3fd30af355dc893e6df9ccb43ace0b9033faa/security/keys/keyctl.c#L74
-    const rc = system.syscall5(
+    const rc = std.os.linux.syscall5(
         system.SYS.add_key,
         @intFromPtr(key_type),
         @intFromPtr(key_desc),

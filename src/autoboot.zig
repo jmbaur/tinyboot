@@ -75,9 +75,9 @@ pub fn run(
         } else {
             try posix.timerfd_settime(timerfd, .{}, &.{
                 // oneshot
-                .it_interval = .{ .tv_sec = 0, .tv_nsec = 0 },
+                .it_interval = .{ .sec = 0, .nsec = 0 },
                 // wait for `timeout` seconds before continuing to boot
-                .it_value = .{ .tv_sec = timeout, .tv_nsec = 0 },
+                .it_value = .{ .sec = timeout, .nsec = 0 },
             }, null);
 
             std.log.info(

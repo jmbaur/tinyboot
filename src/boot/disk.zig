@@ -1,6 +1,7 @@
 const std = @import("std");
 const posix = std.posix;
 const system = std.posix.system;
+const MS = std.os.linux.MS;
 
 const linux_headers = @import("linux_headers");
 
@@ -24,7 +25,7 @@ pub fn match(device: *const Device) ?u8 {
         return null;
     }
 
-    var sysfs_disk_path_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+    var sysfs_disk_path_buf: [std.fs.max_path_bytes]u8 = undefined;
     const sysfs_disk_path = device.nodeSysfsPath(&sysfs_disk_path_buf) catch return null;
 
     var sysfs_dir = std.fs.cwd().openDir(sysfs_disk_path, .{}) catch return null;
@@ -74,10 +75,10 @@ pub fn probe(
     entries: *std.ArrayList(BootLoader.Entry),
     disk_device: Device,
 ) !void {
-    var disk_path_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+    var disk_path_buf: [std.fs.max_path_bytes]u8 = undefined;
     const disk_path = try disk_device.nodePath(&disk_path_buf);
 
-    var sysfs_disk_path_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+    var sysfs_disk_path_buf: [std.fs.max_path_bytes]u8 = undefined;
     const sysfs_disk_path = try disk_device.nodeSysfsPath(&sysfs_disk_path_buf);
 
     var sysfs_disk_dir = try std.fs.cwd().openDir(sysfs_disk_path, .{});
@@ -157,7 +158,7 @@ pub fn probe(
 
     std.log.info("found boot partition on disk {s} partition {d}", .{ disk_device, boot_partition });
 
-    var partition_path_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+    var partition_path_buf: [std.fs.max_path_bytes]u8 = undefined;
     const partition_path = try boot_partition.nodePath(&partition_path_buf);
 
     var partition = try std.fs.cwd().openFile(partition_path, .{});
@@ -237,23 +238,23 @@ fn mount(self: *DiskBootLoader, fstype: Filesystem.Type, path: []const u8) !void
 
     try tmpdir.dir.makePath(mountpath);
 
-    var where_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+    var where_buf: [std.fs.max_path_bytes]u8 = undefined;
     const tmp_where = try tmpdir.dir.realpath(mountpath, &where_buf);
     const where = try self.arena.allocator().dupeZ(u8, tmp_where);
     defer self.arena.allocator().free(where);
 
-    var what_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+    var what_buf: [std.fs.max_path_bytes]u8 = undefined;
     const tmp_what = try std.fs.cwd().realpath(path, &what_buf);
     const what = try self.arena.allocator().dupeZ(u8, tmp_what);
     defer self.arena.allocator().free(what);
 
-    switch (posix.errno(system.mount(
+    switch (posix.errno(std.os.linux.mount(
         what,
         where,
         switch (fstype) {
             .Vfat => "vfat",
         },
-        system.MS.NOSUID | system.MS.NODEV | system.MS.NOEXEC,
+        MS.NOSUID | MS.NODEV | MS.NOEXEC,
         0,
     ))) {
         .SUCCESS => {},
@@ -267,10 +268,10 @@ fn mount(self: *DiskBootLoader, fstype: Filesystem.Type, path: []const u8) !void
 
 fn unmount(self: *DiskBootLoader) !void {
     if (self.tmpdir) |*tmpdir| {
-        var buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+        var buf: [std.fs.max_path_bytes]u8 = undefined;
         const mountpoint = try tmpdir.dir.realpathZ(mountpath, &buf);
 
-        _ = system.umount2(@ptrCast(mountpoint.ptr), system.MNT.DETACH);
+        _ = std.os.linux.umount2(@ptrCast(mountpoint.ptr), std.os.linux.MNT.DETACH);
 
         std.log.info("unmounted disk from {s}", .{mountpoint});
 
@@ -1192,37 +1193,45 @@ const BlsEntry = struct {
 
         if (self.initrd) |initrd| {
             defer self.allocator.free(initrd);
-            for (initrd) |_initrd| {
-                self.allocator.free(_initrd);
+            for (initrd) |initrd_| {
+                self.allocator.free(initrd_);
             }
         }
+
         if (self.options) |options| {
             defer self.allocator.free(options);
             for (options) |option| {
                 self.allocator.free(option);
             }
         }
+
         if (self.devicetree_overlay) |dt_overlay| {
             defer self.allocator.free(dt_overlay);
             for (dt_overlay) |dt| {
                 self.allocator.free(dt);
             }
         }
+
         if (self.linux) |linux| {
             self.allocator.free(linux);
         }
+
         if (self.title) |title| {
             self.allocator.free(title);
         }
+
         if (self.version) |version| {
             self.allocator.free(version);
         }
+
         if (self.machine_id) |machine_id| {
             self.allocator.free(machine_id);
         }
+
         if (self.sort_key) |sort_key| {
             self.allocator.free(sort_key);
         }
+
         if (self.efi) |efi| {
             self.allocator.free(efi);
         }

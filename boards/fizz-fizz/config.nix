@@ -1,4 +1,9 @@
-{ config, lib, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
 {
   config = lib.mkIf (config.board == "fizz-fizz") {
     network = true;
@@ -9,12 +14,10 @@
         NET_VENDOR_REALTEK = yes;
         R8169 = yes;
       };
-      # https://github.com/torvalds/linux/blob/8400291e289ee6b2bf9779ff1c83a291501f017b/drivers/net/ethernet/realtek/r8169_main.c#L38
       firmware = [
-        {
-          dir = "rtl_nic";
-          pattern = "rtl8168*";
-        }
+        (pkgs.runCommand "rtl-nic-firmware" { } ''
+          mkdir -p $out/lib/firmware && cp -r ${pkgs.linux-firmware}/lib/firmware/rtl_nic $out/lib/firmware
+        '')
       ];
     };
     coreboot.kconfig = with lib.kernel; {

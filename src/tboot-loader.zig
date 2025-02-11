@@ -1,5 +1,6 @@
 const std = @import("std");
 const posix = std.posix;
+const epoll_event = std.os.linux.epoll_event;
 
 const linux_headers = @import("linux_headers");
 
@@ -18,7 +19,7 @@ const utils = @import("./utils.zig");
 // Since we log to /dev/kmsg, we inherit the kernel's log level, so we should
 // make sure we don't do any filtering on our side of log messages that get
 // sent to the kernel.
-pub const std_options = .{ .logFn = Log.logFn, .log_level = .debug };
+pub const std_options = std.Options{ .logFn = Log.logFn, .log_level = .debug };
 
 const TbootLoader = @This();
 
@@ -55,40 +56,46 @@ state: enum { init, autobooting, user_input } = .init,
 fn init() !TbootLoader {
     var self = TbootLoader{
         .epoll = try posix.epoll_create1(linux_headers.EPOLL_CLOEXEC),
-        .timer = try posix.timerfd_create(posix.CLOCK.MONOTONIC, .{}),
+        .timer = try posix.timerfd_create(posix.timerfd_clockid_t.MONOTONIC, .{}),
         .device_watcher = try DeviceWatcher.init(),
         .done = try posix.eventfd(0, 0),
         .console = try Console.init(),
     };
 
+    var timer_event = epoll_event{
+        .data = .{ .fd = self.timer },
+        .events = std.os.linux.EPOLL.IN,
+    };
+
     try posix.epoll_ctl(
         self.epoll,
-        posix.system.EPOLL.CTL_ADD,
+        std.os.linux.EPOLL.CTL_ADD,
         self.timer,
-        @constCast(&.{
-            .data = .{ .fd = self.timer },
-            .events = posix.system.EPOLL.IN,
-        }),
+        &timer_event,
     );
+
+    var device_watcher_event = epoll_event{
+        .data = .{ .fd = self.device_watcher.event },
+        .events = std.os.linux.EPOLL.IN,
+    };
 
     try posix.epoll_ctl(
         self.epoll,
-        posix.system.EPOLL.CTL_ADD,
+        std.os.linux.EPOLL.CTL_ADD,
         self.device_watcher.event,
-        @constCast(&.{
-            .data = .{ .fd = self.device_watcher.event },
-            .events = posix.system.EPOLL.IN,
-        }),
+        &device_watcher_event,
     );
+
+    var console_event = epoll_event{
+        .data = .{ .fd = Console.IN },
+        .events = std.os.linux.EPOLL.IN,
+    };
 
     try posix.epoll_ctl(
         self.epoll,
-        posix.system.EPOLL.CTL_ADD,
+        std.os.linux.EPOLL.CTL_ADD,
         Console.IN,
-        @constCast(&.{
-            .data = .{ .fd = Console.IN },
-            .events = posix.system.EPOLL.IN,
-        }),
+        &console_event,
     );
 
     try self.newDeviceArmTimer();
@@ -99,7 +106,7 @@ fn init() !TbootLoader {
 // Since the timer is used entirely for autobooting purposes, if we ever disarm
 // the timer, we go immediately into user input mode.
 fn disarmTimer(self: *TbootLoader) !void {
-    try posix.epoll_ctl(self.epoll, posix.system.EPOLL.CTL_DEL, self.timer, null);
+    try posix.epoll_ctl(self.epoll, std.os.linux.EPOLL.CTL_DEL, self.timer, null);
     self.state = .user_input;
 }
 
@@ -124,9 +131,9 @@ fn handleConsole(self: *TbootLoader) !?posix.RebootCommand {
 fn newDeviceArmTimer(self: *TbootLoader) !void {
     try posix.timerfd_settime(self.timer, .{}, &.{
         // oneshot
-        .it_interval = .{ .tv_sec = 0, .tv_nsec = 0 },
+        .it_interval = .{ .sec = 0, .nsec = 0 },
         // consider settled after 2 seconds without any new events
-        .it_value = .{ .tv_sec = 2, .tv_nsec = 0 },
+        .it_value = .{ .sec = 2, .nsec = 0 },
     }, null);
 }
 

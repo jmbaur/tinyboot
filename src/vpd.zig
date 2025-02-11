@@ -259,7 +259,7 @@ pub fn main() !void {
         return;
     }
 
-    const action = res.positionals[0];
+    const action = res.positionals[0].?;
     switch (action) {
         .get, .set, .delete => {
             if (res.args.key == null or (action == .set and res.args.value == null and res.args.@"value-from-file" == null)) {

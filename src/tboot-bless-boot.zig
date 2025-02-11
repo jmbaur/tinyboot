@@ -176,7 +176,7 @@ pub fn main() !void {
     }
 
     const esp_mnt = res.args.@"esp-mnt" orelse std.fs.path.sep_str ++ "boot";
-    const action = if (res.positionals.len > 0) try Action.fromStr(res.positionals[0]) else Action.status;
+    const action = if (res.positionals.len > 0) try Action.fromStr(res.positionals[0].?) else Action.status;
 
     const kernel_cmdline_file = try std.fs.cwd().openFile("/proc/cmdline", .{});
     defer kernel_cmdline_file.close();

@@ -1,6 +1,7 @@
 {
   withLoader ? true,
   withTools ? true,
+  firmwareDirectory ? null,
 
   callPackage,
   lib,
@@ -11,7 +12,9 @@
   runCommand,
   stdenv,
   xz,
+  zigForTinyboot,
 }:
+
 stdenv.mkDerivation (
   finalAttrs:
   let
@@ -39,7 +42,7 @@ stdenv.mkDerivation (
     strictDeps = true;
 
     nativeBuildInputs = [
-      pkgsBuildBuild.zig_0_13.hook
+      zigForTinyboot
       xz
       pkg-config
       # Can remove when https://github.com/ziglang/zig/commit/d263f1ec0eb988f0e4ed1859351f5040f590996b is included in a release.
@@ -53,14 +56,20 @@ stdenv.mkDerivation (
 
     deps = callPackage ../../build.zig.zon.nix { };
 
-    zigBuildFlags = [
-      "-Dtarget=${stdenv.hostPlatform.qemuArch}-${stdenv.hostPlatform.parsed.kernel.name}-${zigLibc}"
-      "-Ddynamic-linker=${stdenv.cc.bintools.dynamicLinker}"
-      "-Dloader=${lib.boolToString withLoader}"
-      "-Dtools=${lib.boolToString withTools}"
-      "--system"
-      "${finalAttrs.deps}"
-    ];
+    zigBuildFlags =
+      [
+        "-Dtarget=${stdenv.hostPlatform.qemuArch}-${stdenv.hostPlatform.parsed.kernel.name}-${zigLibc}"
+        "-Ddynamic-linker=${stdenv.cc.bintools.dynamicLinker}"
+        "-Dloader=${lib.boolToString withLoader}"
+        "-Dtools=${lib.boolToString withTools}"
+      ]
+      ++ lib.optionals (firmwareDirectory != null) [
+        "-Dfirmware-directory=${firmwareDirectory}"
+      ]
+      ++ [
+        "--system"
+        "${finalAttrs.deps}"
+      ];
 
     # TODO(jared): The checkPhase should already include the zigBuildFlags,
     # probably a nixpkgs bug.
@@ -70,6 +79,7 @@ stdenv.mkDerivation (
       xz --threads=$NIX_BUILD_CORES --check=crc32 --lzma2=dict=512KiB $out/tboot-loader.cpio
     '';
 
+    passthru = lib.optionalAttrs withLoader { initrdPath = "tboot-loader.cpio.xz"; };
     meta.platforms = lib.platforms.linux;
   }
 )

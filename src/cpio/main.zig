@@ -11,11 +11,7 @@ const CpioHeader = struct {
     uid: u32 = 0,
     gid: u32 = 0,
     nlink: u32,
-    // Zero by default for reproducibility, plus it's probably best to not
-    // meaningfully use this field. The new ascii cpio format suffers from the
-    // year 2038 problem with only being able to store 32 bits of time
-    // information.
-    mtime: u32 = 0,
+    mtime: u32,
     filesize: u32 = 0,
     devmajor: u32 = 0,
     devminor: u32 = 0,
@@ -77,9 +73,18 @@ pub const CpioArchive = struct {
             }
         };
 
-        // add null terminator
-        // const filepath = path ++ [_]u8{0};
         const filepath_len = path.len + 1; // null terminator
+
+        // Zero by default for reproducibility, plus it's probably best to not
+        // meaningfully use this field. The new ascii cpio format suffers from the
+        // year 2038 problem with only being able to store 32 bits of time
+        // information.
+        var mtime_buf = [_]u8{0} ** (@sizeOf(u32) * 8);
+        var fba = std.heap.FixedBufferAllocator.init(&mtime_buf);
+        const mtime = b: {
+            const mtime_string = std.process.getEnvVarOwned(fba.allocator(), "SOURCE_DATE_EPOCH") catch break :b 0;
+            break :b try std.fmt.parseInt(u32, mtime_string, 10);
+        };
 
         // write entry to archive
         {
@@ -94,6 +99,7 @@ pub const CpioArchive = struct {
                 .devminor = 0,
                 .rdevmajor = 0,
                 .rdevminor = 0,
+                .mtime = mtime,
                 .namesize = @intCast(filepath_len),
             };
 
@@ -124,15 +130,15 @@ pub const CpioArchive = struct {
             try self.dest.writer().writeByteNTimes(0, header_padding);
             self.total_written += header_padding;
 
-            if (source) |_source| {
+            if (source) |source_| {
                 var pos: usize = 0;
-                const end = try _source.getEndPos();
+                const end = try source_.getEndPos();
 
                 var buf = [_]u8{0} ** 4096;
 
                 while (pos < end) {
-                    try _source.seekTo(pos);
-                    const bytes_read = try _source.read(&buf);
+                    try source_.seekTo(pos);
+                    const bytes_read = try source_.read(&buf);
                     try self.dest.writer().writeAll(buf[0..bytes_read]);
                     self.total_written += bytes_read;
                     pos += bytes_read;
@@ -182,6 +188,117 @@ pub const CpioArchive = struct {
     }
 };
 
+fn handleFile(
+    arena: *std.heap.ArenaAllocator,
+    kind: std.fs.File.Kind,
+    filename: []const u8,
+    directory_path: []const u8,
+    starting_directory: []const u8,
+    archive: *CpioArchive,
+    directory: std.fs.Dir,
+) anyerror!void {
+    var fullpath_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const full_entry_path = try directory.realpath(filename, &fullpath_buf);
+    const entry_path = try std.fs.path.relative(arena.allocator(), starting_directory, full_entry_path);
+
+    switch (kind) {
+        .directory => {
+            var sub_directory = try directory.openDir(
+                filename,
+                .{ .iterate = true },
+            );
+            defer sub_directory.close();
+
+            try walkDirectory(
+                arena,
+                starting_directory,
+                archive,
+                sub_directory,
+            );
+        },
+        .file => {
+            var file = try directory.openFile(filename, .{});
+            defer file.close();
+
+            const stat = try file.stat();
+            var source = std.io.StreamSource{ .file = file };
+            try archive.addFile(entry_path, &source, @intCast(stat.mode));
+        },
+        .sym_link => {
+            const resolved_path = try std.fs.path.resolve(
+                arena.allocator(),
+                &.{ starting_directory, entry_path },
+            );
+
+            if (std.mem.startsWith(u8, resolved_path, starting_directory)) {
+                const symlink_path = try std.fs.path.join(
+                    arena.allocator(),
+                    &.{ directory_path, filename },
+                );
+
+                try archive.addSymlink(symlink_path, entry_path);
+            } else {
+                const stat = try std.fs.cwd().statFile(resolved_path);
+
+                try handleFile(
+                    arena,
+                    stat.kind,
+                    resolved_path,
+                    directory_path,
+                    starting_directory,
+                    archive,
+                    directory,
+                );
+
+                // std.log.warn(
+                //     "Resolved symlink {s} is outside of {s}, refusing to add to CPIO archive",
+                //     .{ resolved_path, starting_directory },
+                // );
+            }
+        },
+        // We explicitly don't add these kinds of files.
+        .block_device => {},
+        .character_device => {},
+        .unix_domain_socket => {},
+        else => {
+            std.log.warn(
+                "Do not know how to add file {s} of kind {} to CPIO archive",
+                .{ full_entry_path, kind },
+            );
+        },
+    }
+}
+
+fn walkDirectory(
+    arena: *std.heap.ArenaAllocator,
+    starting_directory: []const u8,
+    archive: *CpioArchive,
+    directory: std.fs.Dir,
+) anyerror!void {
+    var iter = directory.iterate();
+
+    // Before iterating through the directory, first add the directory itself.
+    var fullpath_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const full_directory_path = try directory.realpath(".", &fullpath_buf);
+    const directory_path = try std.fs.path.relative(arena.allocator(), starting_directory, full_directory_path);
+
+    // We don't need to add the root directory, as it will already exist.
+    if (!std.mem.eql(u8, directory_path, "")) {
+        try archive.addDirectory(directory_path, 0o755);
+    }
+
+    while (try iter.next()) |dir_entry| {
+        try handleFile(
+            arena,
+            dir_entry.kind,
+            dir_entry.name,
+            directory_path,
+            starting_directory,
+            archive,
+            directory,
+        );
+    }
+}
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
@@ -248,62 +365,4 @@ pub fn main() !void {
     }
 
     try archive.finalize();
-}
-
-fn walkDirectory(arena: *std.heap.ArenaAllocator, starting_directory: []const u8, archive: *CpioArchive, directory: std.fs.Dir) !void {
-    var iter = directory.iterate();
-
-    // This buffer is reused across multiple paths.
-    var fullpath_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
-
-    // Before iterating through the directory, first add the directory itself.
-    const full_directory_path = try directory.realpath(".", &fullpath_buf);
-    const directory_path = try std.fs.path.relative(arena.allocator(), starting_directory, full_directory_path);
-
-    // We don't need to add the root directory, as it will already exist.
-    if (!std.mem.eql(u8, directory_path, "")) {
-        try archive.addDirectory(directory_path, 0o755);
-    }
-
-    while (try iter.next()) |dir_entry| {
-        const full_entry_path = try directory.realpath(dir_entry.name, &fullpath_buf);
-        const entry_path = try std.fs.path.relative(arena.allocator(), starting_directory, full_entry_path);
-
-        switch (dir_entry.kind) {
-            .directory => {
-                var sub_directory = try directory.openDir(
-                    dir_entry.name,
-                    .{ .iterate = true },
-                );
-                defer sub_directory.close();
-                try walkDirectory(arena, starting_directory, archive, sub_directory);
-            },
-            .file => {
-                var file = try directory.openFile(dir_entry.name, .{});
-                defer file.close();
-
-                const stat = try file.stat();
-                var source = std.io.StreamSource{ .file = file };
-                try archive.addFile(entry_path, &source, @intCast(stat.mode));
-            },
-            .sym_link => {
-                const resolved_path = try std.fs.path.resolve(arena.allocator(), &.{ starting_directory, entry_path });
-                if (std.mem.startsWith(u8, resolved_path, starting_directory)) {
-                    const symlink_path = try std.fs.path.join(arena.allocator(), &.{ directory_path, dir_entry.name });
-                    try archive.addSymlink(symlink_path, entry_path);
-                } else {
-                    std.log.warn(
-                        "Resolved symlink {s} is outside of {s}, refusing to add to CPIO archive",
-                        .{ resolved_path, starting_directory },
-                    );
-                }
-            },
-            else => |kind| {
-                std.log.warn(
-                    "Do not know how to add file {s} of kind {} to CPIO archive",
-                    .{ full_entry_path, kind },
-                );
-            },
-        }
-    }
 }

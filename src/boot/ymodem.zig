@@ -54,7 +54,7 @@ pub fn match(device: *const Device) ?u8 {
         else => return null,
     }
 
-    var serial_path_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+    var serial_path_buf: [std.fs.max_path_bytes]u8 = undefined;
     const serial_path = device.nodePath(&serial_path_buf) catch return null;
     var serial = std.fs.cwd().openFile(
         serial_path,
@@ -90,7 +90,7 @@ pub fn timeout(self: *YmodemBootLoader) u8 {
 pub fn probe(self: *YmodemBootLoader, entries: *std.ArrayList(BootLoader.Entry), device: Device) !void {
     const allocator = self.arena.allocator();
 
-    var serial_path_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+    var serial_path_buf: [std.fs.max_path_bytes]u8 = undefined;
     const serial_path = try device.nodePath(&serial_path_buf);
 
     var serial = try std.fs.cwd().openFile(serial_path, .{ .mode = .read_write });
@@ -112,8 +112,8 @@ pub fn probe(self: *YmodemBootLoader, entries: *std.ArrayList(BootLoader.Entry),
     {
         // Temporarily turn off the system console so that no kernel logs are
         // printed during the file transfer process.
-        system.toggleConsole(.off) catch {};
-        defer system.toggleConsole(.on) catch {};
+        system.setConsole(.off) catch {};
+        defer system.setConsole(.on) catch {};
 
         try ymodem.recv(&tty, tmpdir.dir);
     }

@@ -3,8 +3,12 @@ const log = std.log;
 const builtin = @import("builtin");
 
 pub fn build(b: *std.Build) !void {
-    const target = b.standardTargetOptions(.{ .default_target = .{ .cpu_model = .baseline } });
+    const target = b.standardTargetOptions(
+        .{ .default_target = .{ .cpu_model = .baseline } },
+    );
+
     const optimize = b.standardOptimizeOption(.{});
+
     const tboot_loader_optimize = if (optimize == std.builtin.OptimizeMode.Debug)
         std.builtin.OptimizeMode.Debug
     else
@@ -13,7 +17,11 @@ pub fn build(b: *std.Build) !void {
 
     const with_loader = b.option(bool, "loader", "With boot loader") orelse true;
     const with_tools = b.option(bool, "tools", "With tools") orelse true;
-    const firmware_directory = b.option([]const u8, "firmware-directory", "Firmware directory");
+    const firmware_directory = b.option(
+        []const u8,
+        "firmware-directory",
+        "Firmware directory",
+    );
 
     const clap = b.dependency("clap", .{});
 
@@ -53,7 +61,7 @@ pub fn build(b: *std.Build) !void {
 
         const cpio_tool = b.addExecutable(.{
             .name = "cpio",
-            .target = b.host,
+            .target = b.graph.host,
             .root_source_file = b.path("src/cpio/main.zig"),
         });
         cpio_tool.root_module.addImport("clap", clap.module("clap"));
@@ -66,12 +74,20 @@ pub fn build(b: *std.Build) !void {
         // the CPIO generation in here.
         run_cpio_tool.addPrefixedFileArg("-i", tboot_loader.getEmittedBin());
 
-        // TODO(jared): we need any changes in the firmware directory to result in a rebuild
         if (firmware_directory) |directory| {
-            run_cpio_tool.addPrefixedDirectoryArg("-d", .{ .cwd_relative = directory });
+            const directory_ = b.addWriteFiles().addCopyDirectory(
+                .{ .cwd_relative = directory },
+                "",
+                .{},
+            );
+
+            run_cpio_tool.addPrefixedDirectoryArg("-d", directory_);
         }
 
-        const cpio_output_file = run_cpio_tool.addPrefixedOutputFileArg("-o", "tboot-loader.cpio");
+        const cpio_output_file = run_cpio_tool.addPrefixedOutputFileArg(
+            "-o",
+            "tboot-loader.cpio",
+        );
 
         run_cpio_tool.expectExitCode(0);
 
@@ -85,7 +101,7 @@ pub fn build(b: *std.Build) !void {
 
         const runner_tool = b.addRunArtifact(b.addExecutable(.{
             .name = "tboot-runner",
-            .target = b.host,
+            .target = b.graph.host,
             .root_source_file = b.path("src/runner.zig"),
         }));
         runner_tool.step.dependOn(&cpio_archive.step);

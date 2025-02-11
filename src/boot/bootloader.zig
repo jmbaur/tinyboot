@@ -217,7 +217,7 @@ fn kexecLoad(
     defer allocator.free(cmdline_z);
     const cmdline_len = cmdline_z.len + 1;
 
-    const rc = posix.system.syscall5(
+    const rc = std.os.linux.syscall5(
         .kexec_file_load,
         linux_fd,
         @as(usize, @bitCast(@as(isize, initrd_fd))),

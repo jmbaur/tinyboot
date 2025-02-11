@@ -25,10 +25,9 @@
         SERIAL_AMBA_PL011_CONSOLE = yes;
       };
       dtb = lib.mkDefault (
-        pkgs.buildPackages.runCommand "qemu-aarch64.dtb" { depsBuildBuild = [ pkgs.pkgsBuildBuild.qemu ]; }
-          ''
-            qemu-system-aarch64 -M virt,secure=on,virtualization=on,dumpdtb=$out -cpu cortex-a53 -m 2G -smp 2 -nographic
-          ''
+        pkgs.runCommand "qemu-aarch64.dtb" { depsBuildBuild = [ pkgs.pkgsBuildBuild.qemu ]; } ''
+          qemu-system-aarch64 -M virt,secure=on,virtualization=on,dumpdtb=$out -cpu cortex-a53 -m 2G -smp 2 -nographic
+        ''
       );
     };
     coreboot.kconfig = with lib.kernel; {

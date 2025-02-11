@@ -1,6 +1,8 @@
 const std = @import("std");
 const posix = std.posix;
+const linux = std.os.linux;
 const system = std.posix.system;
+const MS = std.os.linux.MS;
 
 const linux_headers = @import("linux_headers");
 
@@ -9,7 +11,7 @@ fn mountPseudoFs(
     fstype: [*:0]const u8,
     flags: u32,
 ) !void {
-    const rc = system.mount(fstype, path, fstype, flags, 0);
+    const rc = linux.mount(fstype, path, fstype, flags, 0);
 
     switch (posix.errno(rc)) {
         .SUCCESS => {},
@@ -20,18 +22,18 @@ fn mountPseudoFs(
 /// Mounts basic psuedo-filesystems (/dev, /proc, /sys, etc.).
 pub fn mountPseudoFilesystems() !void {
     try std.fs.cwd().makePath("/proc");
-    try mountPseudoFs("/proc", "proc", system.MS.NOSUID | system.MS.NODEV | system.MS.NOEXEC);
+    try mountPseudoFs("/proc", "proc", MS.NOSUID | MS.NODEV | MS.NOEXEC);
 
     try std.fs.cwd().makePath("/sys");
-    try mountPseudoFs("/sys", "sysfs", system.MS.NOSUID | system.MS.NODEV | system.MS.NOEXEC | system.MS.RELATIME);
-    try mountPseudoFs("/sys/kernel/security", "securityfs", system.MS.NOSUID | system.MS.NODEV | system.MS.NOEXEC | system.MS.RELATIME);
-    try mountPseudoFs("/sys/kernel/debug", "debugfs", system.MS.NOSUID | system.MS.NODEV | system.MS.NOEXEC | system.MS.RELATIME);
+    try mountPseudoFs("/sys", "sysfs", MS.NOSUID | MS.NODEV | MS.NOEXEC | MS.RELATIME);
+    try mountPseudoFs("/sys/kernel/security", "securityfs", MS.NOSUID | MS.NODEV | MS.NOEXEC | MS.RELATIME);
+    try mountPseudoFs("/sys/kernel/debug", "debugfs", MS.NOSUID | MS.NODEV | MS.NOEXEC | MS.RELATIME);
 
     try std.fs.cwd().makePath("/dev");
-    try mountPseudoFs("/dev", "devtmpfs", system.MS.SILENT | system.MS.NOSUID | system.MS.NOEXEC);
+    try mountPseudoFs("/dev", "devtmpfs", MS.SILENT | MS.NOSUID | MS.NOEXEC);
 
     try std.fs.cwd().makePath("/run");
-    try mountPseudoFs("/run", "tmpfs", system.MS.NOSUID | system.MS.NODEV);
+    try mountPseudoFs("/run", "tmpfs", MS.NOSUID | MS.NODEV);
 
     try std.fs.cwd().makePath("/mnt");
 }
@@ -117,7 +119,7 @@ pub const Tty = struct {
 
     pub fn reset(self: *@This()) void {
         // wait until everything is sent
-        _ = system.tcdrain(self.fd);
+        _ = linux.tcdrain(self.fd);
 
         // flush input queue
         _ = system.ioctl(self.fd, TCFLSH, TCIOFLUSH);
@@ -207,7 +209,7 @@ pub fn setupTty(fd: posix.fd_t, mode: Tty.Mode) !Tty {
     }
 
     // wait until everything is sent
-    _ = system.tcdrain(fd);
+    _ = linux.tcdrain(fd);
 
     // flush input queue
     _ = system.ioctl(fd, TCFLSH, TCIOFLUSH);
@@ -233,11 +235,11 @@ pub fn printKernelLogs(
     filter: u3,
     writer: std.io.AnyWriter,
 ) !void {
-    const bytes_available = system.syscall3(system.SYS.syslog, SYSLOG_ACTION_UNREAD, 0, 0);
+    const bytes_available = std.os.linux.syscall3(system.SYS.syslog, SYSLOG_ACTION_UNREAD, 0, 0);
     const buf = try allocator.alloc(u8, bytes_available);
     defer allocator.free(buf);
 
-    switch (posix.errno(system.syscall3(
+    switch (posix.errno(std.os.linux.syscall3(
         system.SYS.syslog,
         SYSLOG_ACTION_READ_ALL,
         @intFromPtr(buf.ptr),
@@ -266,8 +268,8 @@ pub fn printKernelLogs(
     }
 }
 
-pub fn toggleConsole(toggle: enum { on, off }) !void {
-    switch (posix.errno(system.syscall3(
+pub fn setConsole(toggle: enum { on, off }) !void {
+    switch (posix.errno(std.os.linux.syscall3(
         system.SYS.syslog,
         switch (toggle) {
             .on => SYSLOG_ACTION_CONSOLE_ON,

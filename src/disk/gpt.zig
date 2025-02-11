@@ -54,7 +54,7 @@ fn guidFromString(str: []const u8) !std.os.uefi.Guid {
 }
 
 const known_partition_guids = b: {
-    @setEvalBranchQuota(100_000);
+    @setEvalBranchQuota(100_000_000);
 
     const PairHuman = struct { type: PartitionType, guid: []const u8 };
     const PairMachine = struct { type: PartitionType, guid: std.os.uefi.Guid };

@@ -34,6 +34,9 @@ in
     EXPERT = yes;
     FAT_FS = yes;
     FUTEX = yes;
+    FW_LOADER = yes;
+    FW_LOADER_COMPRESS = yes;
+    FW_LOADER_COMPRESS_XZ = yes;
     GOOGLE_CBMEM = yes;
     GOOGLE_COREBOOT_TABLE = yes;
     GOOGLE_FIRMWARE = yes;

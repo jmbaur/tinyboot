@@ -4,8 +4,27 @@
   lib,
   ...
 }:
+
 let
+  inherit (lib)
+    concatLines
+    hasPrefix
+    isDerivation
+    isPath
+    isString
+    kernel
+    mapAttrsToList
+    mkEnableOption
+    mkOption
+    mkPackageOption
+    optionalAttrs
+    optionalString
+    optionals
+    types
+    ;
+
   boardsDir = builtins.readDir ./boards;
+
   testStartupScript = pkgs.writeScript "installer-startup-script" ''
     #!/bin/sh
     mkdir -p /proc && mount -t proc proc /proc
@@ -19,6 +38,7 @@ let
     ln -sfn /proc/self/fd/2 /dev/stderr
     touch /etc/fstab
   '';
+
   testInittab = pkgs.writeText "inittab" ''
     ::sysinit:/etc/init.d/rcS
     ::askfirst:/bin/sh
@@ -27,6 +47,7 @@ let
     ::shutdown:/bin/umount -a -r
     ::restart:/bin/init
   '';
+
   testInitrd = pkgs.makeInitrdNG {
     compressor = "xz";
     contents = [
@@ -46,15 +67,20 @@ let
         source = testInittab;
         target = "/etc/inittab";
       }
-    ] ++ config.extraInitrdContents;
+      {
+        source = "${config.linux.firmware}/lib/firmware";
+        target = "/lib/firmware";
+      }
+    ];
   };
-  kconfigOption = lib.mkOption {
-    type = lib.types.attrsOf lib.types.anything;
+
+  kconfigOption = mkOption {
+    type = types.attrsOf types.anything;
     default = { };
     apply =
       attrs:
-      lib.concatLines (
-        lib.mapAttrsToList (
+      concatLines (
+        mapAttrsToList (
           kconfOption: answer:
           let
             optionName = "CONFIG_${kconfOption}";
@@ -62,10 +88,10 @@ let
               if answer ? freeform then
                 if
                   (
-                    (lib.isPath answer.freeform || lib.isDerivation answer.freeform)
-                    || (lib.isString answer.freeform && builtins.match "[0-9]+" answer.freeform == null)
+                    (isPath answer.freeform || isDerivation answer.freeform)
+                    || (isString answer.freeform && builtins.match "[0-9]+" answer.freeform == null)
                   )
-                  && !(lib.hasPrefix "0x" answer.freeform)
+                  && !(hasPrefix "0x" answer.freeform)
                 then
                   "${optionName}=\"${answer.freeform}\""
                 else
@@ -82,13 +108,15 @@ let
         ) attrs
       );
   };
-  vpdOption = lib.mkOption {
-    type = lib.types.attrsOf (lib.types.either lib.types.str lib.types.path);
+
+  vpdOption = mkOption {
+    type = types.attrsOf (types.either types.str types.path);
     default = { };
   };
+
   applyVpd =
     vpdPartition: key: value:
-    if lib.isPath value then
+    if isPath value then
       ''
         base64 <${value} >tmp.base64
         vpd -f $out -i ${vpdPartition} -S ${key}=tmp.base64
@@ -102,15 +130,18 @@ in
 {
   imports = [
     ./kernel-configs
-  ] ++ (lib.mapAttrsToList (board: _: ./boards/${board}/config.nix) boardsDir);
-  options = with lib; {
+  ] ++ (mapAttrsToList (board: _: ./boards/${board}/config.nix) boardsDir);
+
+  options = {
     board = mkOption { type = types.enum (builtins.attrNames boardsDir); };
+
     build = mkOption {
       default = { };
       type = types.submoduleWith {
         modules = [ { freeformType = with types; lazyAttrsOf (uniq unspecified); } ];
       };
     };
+
     flashrom = {
       package = mkPackageOption pkgs "flashrom-cros" { };
       programmer = mkOption {
@@ -118,10 +149,15 @@ in
         default = "internal";
       };
     };
+
     debug = mkEnableOption "debug";
+
     video = mkEnableOption "video";
+
     network = mkEnableOption "network";
+
     chromebook = mkEnableOption "chromebook";
+
     platform = mkOption {
       type = types.nullOr (
         types.attrTag {
@@ -134,6 +170,7 @@ in
       );
       default = null;
     };
+
     linux = {
       package = mkOption {
         type = types.package;
@@ -153,18 +190,19 @@ in
         default = null;
       };
       firmware = mkOption {
-        type = types.listOf (
-          types.submodule {
-            options.dir = mkOption {
-              type = types.str;
-              default = ".";
-            };
-            options.pattern = mkOption { type = types.str; };
-          }
-        );
+        type = types.listOf types.package;
         default = [ ];
+        apply =
+          list:
+          pkgs.buildEnv {
+            name = "firmware";
+            paths = map pkgs.compressFirmwareXz list;
+            pathsToLink = [ "/lib/firmware" ];
+            ignoreCollisions = true;
+          };
       };
     };
+
     coreboot = {
       enable = mkEnableOption "coreboot integration" // {
         default = config.chromebook;
@@ -175,6 +213,7 @@ in
       vpd.ro = vpdOption;
       vpd.rw = vpdOption;
     };
+
     verifiedBoot = {
       requiredSystemFeatures = mkOption {
         type = types.listOf types.str;
@@ -205,20 +244,12 @@ in
         default = ./tests/keys/firmware/key.keyblock;
       };
     };
-    extraInitrdContents = mkOption {
-      type = types.listOf (
-        types.submodule {
-          options.source = mkOption { type = types.path; };
-          options.target = mkOption { type = types.str; };
-        }
-      );
-      default = [ ];
-    };
   };
+
   config = {
-    linux.kconfig.CMDLINE = lib.kernel.freeform (
+    linux.kconfig.CMDLINE = kernel.freeform (
       toString (
-        lib.optionals config.video [ "fbcon=logo-count:1" ]
+        optionals config.video [ "fbcon=logo-count:1" ]
         ++ [
           "printk.devkmsg=on"
           "loglevel=${if config.debug then "8" else "5"}"
@@ -226,25 +257,11 @@ in
         ++ map (c: "console=${c}") config.linux.consoles
       )
     );
-    extraInitrdContents = lib.optional (config.linux.firmware != [ ]) {
-      target = "/lib/firmware";
-      source = pkgs.buildPackages.runCommand "linux-firmware" { } (
-        lib.concatLines (
-          map (
-            { dir, pattern }:
-            ''
-              pushd ${pkgs.linux-firmware}/lib/firmware
-              find ${dir} -type f -name "${pattern}" -exec install -Dm0444 --target-directory=$out/${dir} {} \;
-              popd
-            ''
-          ) config.linux.firmware
-        )
-      );
-    };
 
     coreboot.vpd.ro.pubkey = config.verifiedBoot.tbootPublicCertificate;
+
     coreboot.kconfig =
-      with lib.kernel;
+      with kernel;
       {
         "DEFAULT_CONSOLE_LOGLEVEL_${if config.debug then "7" else "6"}" = yes;
         PAYLOAD_NONE = unset;
@@ -258,50 +275,44 @@ in
         VBOOT_SIGN = unset; # don't sign during build
         VPD = yes;
       }
-      // lib.optionalAttrs pkgs.hostPlatform.isx86_64 {
-        LINUX_INITRD = freeform "${config.build.initrd}/initrd";
+      // optionalAttrs pkgs.hostPlatform.isx86_64 {
+        LINUX_INITRD = freeform "${config.build.initrd}/${config.build.initrd.initrdPath}";
         PAYLOAD_FILE = freeform "${config.build.linux}/${pkgs.stdenv.hostPlatform.linux-kernel.target}";
         PAYLOAD_LINUX = yes;
-        VBOOT_SLOTS_RW_AB = lib.mkDefault yes; # x86_64 spi flash is usually large enough for 3 vboot slots
+        VBOOT_SLOTS_RW_AB = mkDefault yes; # x86_64 spi flash is usually large enough for 3 vboot slots
         VBOOT_X86_SHA256_ACCELERATION = yes;
       }
-      // lib.optionalAttrs pkgs.hostPlatform.isAarch64 {
+      // optionalAttrs pkgs.hostPlatform.isAarch64 {
         PAYLOAD_FILE = freeform "${config.build.fitImage}/uImage";
         PAYLOAD_FIT = yes;
         PAYLOAD_FIT_SUPPORT = yes;
         VBOOT_ARMV8_CE_SHA256_ACCELERATION = yes;
-        VBOOT_SLOTS_RW_A = lib.mkDefault yes; # spi flash on aarch64 chromebooks is usually not large enough for 3 vboot slots
+        VBOOT_SLOTS_RW_A = mkDefault yes; # spi flash on aarch64 chromebooks is usually not large enough for 3 vboot slots
       };
 
     build = {
       inherit testInitrd;
-      initrd = pkgs.makeInitrdNG {
-        prepend = [ "${pkgs.tinybootLoader}/tboot-loader.cpio.xz" ];
-        compressor = "xz";
-        contents = config.extraInitrdContents ++ [
-          # TODO(jared): Hack making makeInitrdNG not working with contents
-          # being an empty list.
-          {
-            target = "/empty";
-            source = pkgs.emptyFile;
-          }
-        ];
-      };
+
+      initrd = pkgs.tinybootLoader.override { firmwareDirectory = config.linux.firmware; };
+
       linux = (
         pkgs.callPackage ./pkgs/linux {
           linux = config.linux.package;
           inherit (config.linux) kconfig;
         }
       );
+
       fitImage = (pkgs.callPackage ./fitimage { }) {
         inherit (config) board;
         inherit (config.build) linux initrd;
         inherit (config.linux) dtb dtbPattern;
       };
+
       coreboot = pkgs.callPackage ./pkgs/coreboot {
         inherit (config) board;
         inherit (config.coreboot) kconfig;
       };
+
       firmware =
         pkgs.runCommand "tinyboot-${config.board}"
           {
@@ -323,11 +334,11 @@ in
           ''
             dd status=none if=${config.build.coreboot}/coreboot.rom of=$out
 
-            ${lib.optionalString (lib.trace "TODO: create vpd image in zig" false) ''
+            ${optionalString (builtins.trace "TODO: create vpd image in zig" false) ''
               vpd -f $out -i RO_VPD -O
-              ${lib.concatLines (lib.mapAttrsToList (applyVpd "RO_VPD") config.coreboot.vpd.ro)}
+              ${concatLines (mapAttrsToList (applyVpd "RO_VPD") config.coreboot.vpd.ro)}
               vpd -f $out -i RW_VPD -O
-              ${lib.concatLines (lib.mapAttrsToList (applyVpd "RW_VPD") config.coreboot.vpd.rw)}
+              ${concatLines (mapAttrsToList (applyVpd "RW_VPD") config.coreboot.vpd.rw)}
             ''}
 
             futility sign \
@@ -336,6 +347,7 @@ in
               --kernelkey "${config.verifiedBoot.vbootFirmwareKey}" \
               $out
           '';
+
       # useful for testing kernel configurations
       testScript =
         let
