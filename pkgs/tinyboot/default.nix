@@ -12,6 +12,9 @@
   zigForTinyboot,
 }:
 
+# Using zig-overlay (without the patches from nixpkgs) does not work well when
+# doing sandboxed builds because of the following issue: https://github.com/ziglang/zig/issues/15898
+assert stdenv.hostPlatform.isStatic;
 stdenv.mkDerivation (
   let
     zigLibc =
