@@ -666,7 +666,7 @@ const PartitionRecord = extern struct {
         const byte_count = @sizeOf(@TypeOf(self.partition_name)) / @sizeOf(u16);
         var name_utf16le_bytes: [byte_count]u16 = @bitCast(self.partition_name);
         var name_utf8_bytes: [byte_count]u8 = undefined;
-        const end = try std.unicode.utf16leToUtf8(&name_utf8_bytes, &name_utf16le_bytes);
+        const end = try std.unicode.utf16LeToUtf8(&name_utf8_bytes, &name_utf16le_bytes);
         return try allocator.dupe(u8, std.mem.trimRight(u8, name_utf8_bytes[0..end], &.{0}));
     }
 

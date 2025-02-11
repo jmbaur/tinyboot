@@ -7,16 +7,12 @@
   lib,
   openssl,
   pkg-config,
-  pkgsBuildBuild,
-  pkgsBuildHost,
-  runCommand,
   stdenv,
   xz,
   zigForTinyboot,
 }:
 
 stdenv.mkDerivation (
-  finalAttrs:
   let
     zigLibc =
       {
@@ -45,19 +41,13 @@ stdenv.mkDerivation (
       zigForTinyboot
       xz
       pkg-config
-      # Can remove when https://github.com/ziglang/zig/commit/d263f1ec0eb988f0e4ed1859351f5040f590996b is included in a release.
-      (runCommand "pkg-config-for-zig" { } ''
-        mkdir -p $out/bin; ln -s ${pkgsBuildHost.pkg-config}/bin/${stdenv.cc.targetPrefix}pkg-config $out/bin/pkg-config
-      '')
     ];
-    buildInputs = [ openssl ];
-
-    doCheck = true;
-
-    deps = callPackage ../../build.zig.zon.nix { };
+    buildInputs = lib.optionals withTools [ openssl ];
 
     zigBuildFlags =
       [
+        "--release=safe"
+        "-Dcpu=baseline"
         "-Dtarget=${stdenv.hostPlatform.qemuArch}-${stdenv.hostPlatform.parsed.kernel.name}-${zigLibc}"
         "-Ddynamic-linker=${stdenv.cc.bintools.dynamicLinker}"
         "-Dloader=${lib.boolToString withLoader}"
@@ -65,18 +55,34 @@ stdenv.mkDerivation (
       ]
       ++ lib.optionals (firmwareDirectory != null) [
         "-Dfirmware-directory=${firmwareDirectory}"
-      ]
-      ++ [
-        "--system"
-        "${finalAttrs.deps}"
       ];
 
-    # TODO(jared): The checkPhase should already include the zigBuildFlags,
-    # probably a nixpkgs bug.
-    zigCheckFlags = finalAttrs.zigBuildFlags;
+    dontInstall = true;
+    doCheck = true;
 
-    postInstall = lib.optionalString withLoader ''
-      xz --threads=$NIX_BUILD_CORES --check=crc32 --lzma2=dict=512KiB $out/tboot-loader.cpio
+    configurePhase = ''
+      runHook preConfigure
+      export ZIG_GLOBAL_CACHE_DIR=$TEMPDIR
+      ln -s ${callPackage ../../build.zig.zon.nix { }} $ZIG_GLOBAL_CACHE_DIR/p
+      runHook postConfigure
+    '';
+
+    buildPhase =
+      ''
+        runHook preBuild
+        zig build install --prefix $out $zigBuildFlags
+      ''
+      + lib.optionalString withLoader ''
+        xz --threads=$NIX_BUILD_CORES --check=crc32 --lzma2=dict=512KiB $out/tboot-loader.cpio
+      ''
+      + ''
+        runHook postBuild
+      '';
+
+    checkPhase = ''
+      runHook preCheck
+      zig build test $zigBuildFlags
+      runHook postCheck
     '';
 
     passthru = lib.optionalAttrs withLoader { initrdPath = "tboot-loader.cpio.xz"; };

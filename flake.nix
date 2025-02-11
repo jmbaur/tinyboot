@@ -18,24 +18,24 @@
       (
         {
           zigForTinyboot = inputs.zig-overlay.packages.${final.stdenv.buildPlatform.system}.master;
-          tinybootLoader = prev.callPackage ./pkgs/tinyboot {
+          tinybootLoader = final.pkgsStatic.callPackage ./pkgs/tinyboot {
             withLoader = true;
             withTools = false;
           };
-          tinybootTools = prev.callPackage ./pkgs/tinyboot {
+          tinybootTools = final.pkgsStatic.callPackage ./pkgs/tinyboot {
             withLoader = false;
             withTools = true;
           };
-          armTrustedFirmwareMT8183 = prev.callPackage ./pkgs/arm-trusted-firmware-cros {
+          armTrustedFirmwareMT8183 = final.callPackage ./pkgs/arm-trusted-firmware-cros {
             platform = "mt8183";
           };
-          armTrustedFirmwareMT8192 = prev.callPackage ./pkgs/arm-trusted-firmware-cros {
+          armTrustedFirmwareMT8192 = final.callPackage ./pkgs/arm-trusted-firmware-cros {
             platform = "mt8192";
           };
-          armTrustedFirmwareSC7180 = prev.callPackage ./pkgs/arm-trusted-firmware-cros {
+          armTrustedFirmwareSC7180 = final.callPackage ./pkgs/arm-trusted-firmware-cros {
             platform = "sc7180";
           };
-          flashrom-cros = prev.callPackage ./pkgs/flashrom-cros { };
+          flashrom-cros = final.callPackage ./pkgs/flashrom-cros { };
           kernelPatches = prev.kernelPatches // {
             ima_tpm_early_init = {
               name = "ima_tpm_early_init";
