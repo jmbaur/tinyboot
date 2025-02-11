@@ -91,7 +91,7 @@ pub fn send(
     var file_node = parent_node.start(filename, stat.size / 1024);
     defer file_node.end();
 
-    var buf: []align(std.heap.pageSize()) u8 = if (stat.size > 0)
+    var buf: []align(std.heap.page_size_min) u8 = if (stat.size > 0)
         try posix.mmap(
             null,
             stat.size,
