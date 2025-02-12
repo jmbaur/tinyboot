@@ -24,9 +24,11 @@ runCommand "firmware-xz"
     inherit (compressor) nativeBuildInputs;
   }
   (
-    lib.concatLines (
+    ''
+      mkdir -p $out/lib/firmware
+    ''
+    + lib.concatLines (
       map (firmware: ''
-        mkdir -p $out/lib
         (cd ${firmware} && find lib/firmware -type d -print0) |
             (cd $out && xargs -0 mkdir -v --)
         (cd ${firmware} && find lib/firmware -type f -print0) |
