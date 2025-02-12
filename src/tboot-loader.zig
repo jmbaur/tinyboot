@@ -14,7 +14,6 @@ const Log = @import("./log.zig");
 const YmodemBootLoader = @import("./boot/ymodem.zig");
 const security = @import("./security.zig");
 const system = @import("./system.zig");
-const utils = @import("./utils.zig");
 
 // Since we log to /dev/kmsg, we inherit the kernel's log level, so we should
 // make sure we don't do any filtering on our side of log messages that get

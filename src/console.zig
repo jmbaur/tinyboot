@@ -8,7 +8,6 @@ const linux_headers = @import("linux_headers");
 const BootLoader = @import("./boot/bootloader.zig");
 const Device = @import("./device.zig");
 const system = @import("./system.zig");
-const utils = @import("./utils.zig");
 
 const esc = std.ascii.control_code.esc;
 

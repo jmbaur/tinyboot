@@ -5,7 +5,6 @@ const epoll_event = std.os.linux.epoll_event;
 
 const Device = @import("./device.zig");
 const kobject = @import("./kobject.zig");
-const utils = @import("./utils.zig");
 
 const linux_headers = @import("linux_headers");
 
