@@ -1,5 +1,5 @@
+const builtin = @import("builtin");
 const std = @import("std");
-
 const clap = @import("clap");
 
 const C = @cImport({
@@ -10,6 +10,8 @@ const C = @cImport({
     @cInclude("openssl/err.h");
     @cInclude("openssl/engine.h");
 });
+
+pub const std_options = std.Options{ .log_level = if (builtin.mode == .Debug) .debug else .info };
 
 const MODULE_SIG_STRING = "~Module signature appended~\n";
 
@@ -304,7 +306,11 @@ pub fn main() !void {
         return clap.help(std.io.getStdErr().writer(), clap.Help, &params, .{});
     }
 
-    if (res.positionals.len != 2 or res.args.@"private-key" == null or res.args.@"public-key" == null) {
+    if (res.positionals[0] == null or
+        res.positionals[1] == null or
+        res.args.@"private-key" == null or
+        res.args.@"public-key" == null)
+    {
         try diag.report(stderr, error.InvalidArgument);
         try clap.usage(stderr, clap.Help, &params);
         return;

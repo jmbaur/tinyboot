@@ -1,6 +1,8 @@
+const builtin = @import("builtin");
 const std = @import("std");
-
 const clap = @import("clap");
+
+pub const std_options = std.Options{ .log_level = if (builtin.mode == .Debug) .debug else .info };
 
 const DiskBootLoader = @import("./boot/disk.zig");
 
@@ -176,7 +178,7 @@ pub fn main() !void {
     }
 
     const esp_mnt = res.args.@"esp-mnt" orelse std.fs.path.sep_str ++ "boot";
-    const action = if (res.positionals.len > 0) try Action.fromStr(res.positionals[0].?) else Action.status;
+    const action = if (res.positionals[0]) |action| try Action.fromStr(action) else Action.status;
 
     const kernel_cmdline_file = try std.fs.cwd().openFile("/proc/cmdline", .{});
     defer kernel_cmdline_file.close();

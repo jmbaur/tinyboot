@@ -1,7 +1,10 @@
+const builtin = @import("builtin");
 const std = @import("std");
 const path = std.fs.path;
-
+const utils = @import("./utils.zig");
 const clap = @import("clap");
+
+pub const std_options = std.Options{ .log_level = if (builtin.mode == .Debug) .debug else .info };
 
 const DiskBootLoader = @import("./boot/disk.zig");
 const signFile = @import("./tboot-sign.zig").signFile;
@@ -21,7 +24,7 @@ fn ensureFilesystemState(
         try esp.makePath("loader/entries");
     }
 
-    if (!pathExists(esp, "loader/entries.srel")) {
+    if (!utils.pathExists(esp, "loader/entries.srel")) {
         if (!args.dry_run) {
             var entries_srel_file = try esp.createFile("loader/entries.srel", .{});
             defer entries_srel_file.close();
@@ -32,14 +35,6 @@ fn ensureFilesystemState(
     }
 
     std.log.debug("filesystem state is good", .{});
-}
-
-fn pathExists(d: std.fs.Dir, p: []const u8) bool {
-    d.access(p, .{}) catch {
-        return false;
-    };
-
-    return true;
 }
 
 fn installGeneration(
@@ -69,7 +64,7 @@ fn installGeneration(
         &.{ args.efi_sys_mount_point, linux_target },
     );
 
-    if (!pathExists(esp, linux_target)) {
+    if (!utils.pathExists(esp, linux_target)) {
         if (!args.dry_run) {
             try signFile(
                 allocator,
@@ -105,7 +100,7 @@ fn installGeneration(
                 initrd_target,
             });
 
-            if (!pathExists(esp, initrd_target)) {
+            if (!utils.pathExists(esp, initrd_target)) {
                 if (!args.dry_run) {
                     try signFile(
                         allocator,
@@ -291,7 +286,7 @@ pub fn main() !void {
         return clap.help(std.io.getStdErr().writer(), clap.Help, &params, .{});
     }
 
-    if (res.positionals.len != 1 or res.args.@"private-key" == null or res.args.@"public-key" == null) {
+    if (res.positionals[0] == null or res.args.@"private-key" == null or res.args.@"public-key" == null) {
         try diag.report(stderr, error.InvalidArgument);
         try clap.usage(stderr, clap.Help, &params);
         return;

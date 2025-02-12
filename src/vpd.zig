@@ -253,7 +253,7 @@ pub fn main() !void {
         return clap.help(std.io.getStdErr().writer(), clap.Help, &params, .{});
     }
 
-    if (res.positionals.len != 1 or res.args.file == null) {
+    if (res.positionals[0] == null or res.args.file == null) {
         try diag.report(stderr, error.InvalidArgument);
         try clap.usage(std.io.getStdErr().writer(), clap.Help, &params);
         return;

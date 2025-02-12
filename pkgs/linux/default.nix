@@ -25,7 +25,25 @@ stdenv.mkDerivation {
   postConfigure = ''
     cat $kconfigPath $extraConfigPath > all.config
     make -j$NIX_BUILD_CORES ARCH=${stdenv.hostPlatform.linuxArch} KCONFIG_ALLCONFIG=1 allnoconfig
-    bash ${./check_config.bash} all.config .config
+
+    start_config=all.config
+    end_config=.config
+
+    missing=()
+    while read -r line; do
+      if ! grep --silent "$line" "$end_config"; then
+        missing+=("$line")
+      fi
+    done <"$start_config"
+
+    if [[ ''${#missing[@]} -gt 0 ]]; then
+      echo
+      for line in "''${missing[@]}"; do
+        echo "\"$line\" not found in final config!"
+      done
+      echo
+      exit 1
+    fi
   '';
   buildFlags = [
     "DTC_FLAGS=-@"

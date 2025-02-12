@@ -193,14 +193,7 @@ in
       firmware = mkOption {
         type = types.listOf types.package;
         default = [ ];
-        apply =
-          list:
-          pkgs.buildEnv {
-            name = "firmware";
-            paths = map pkgs.compressFirmwareXz list;
-            pathsToLink = [ "/lib/firmware" ];
-            ignoreCollisions = true;
-          };
+        apply = pkgs.callPackage ./compress-firmware.nix { };
       };
     };
 

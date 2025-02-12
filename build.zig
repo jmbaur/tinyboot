@@ -1,4 +1,7 @@
 const std = @import("std");
+const utils = @import("./src/utils.zig");
+
+const TBOOT_INITRD_NAME = "tboot-initrd";
 
 pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(
@@ -46,6 +49,91 @@ pub fn build(b: *std.Build) !void {
     });
     const linux_headers_module = linux_headers_translated.addModule("linux_headers");
 
+    // For re-usage with building the tboot-loader initrd, if we are also
+    // building tools.
+    var maybe_tboot_initrd_tool: ?*std.Build.Step.Compile = null;
+
+    if (with_tools) {
+        maybe_tboot_initrd_tool = b.addExecutable(.{
+            .name = TBOOT_INITRD_NAME,
+            .target = target,
+            .optimize = optimize,
+            .root_source_file = b.path("src/tboot-initrd.zig"),
+        });
+
+        var tboot_initrd_tool = maybe_tboot_initrd_tool.?;
+        tboot_initrd_tool.linkLibC();
+        tboot_initrd_tool.linkSystemLibrary("liblzma");
+        tboot_initrd_tool.root_module.addImport("clap", clap.module("clap"));
+        b.installArtifact(tboot_initrd_tool);
+
+        const tboot_bless_boot = b.addExecutable(.{
+            .name = "tboot-bless-boot",
+            .root_source_file = b.path("src/tboot-bless-boot.zig"),
+            .target = target,
+            .optimize = optimize,
+            .strip = optimize != std.builtin.OptimizeMode.Debug,
+        });
+        tboot_bless_boot.root_module.addImport("clap", clap.module("clap"));
+        b.installArtifact(tboot_bless_boot);
+
+        const tboot_bless_boot_generator = b.addExecutable(.{
+            .name = "tboot-bless-boot-generator",
+            .root_source_file = b.path("src/tboot-bless-boot-generator.zig"),
+            .target = target,
+            .optimize = optimize,
+            .strip = optimize != std.builtin.OptimizeMode.Debug,
+        });
+        tboot_bless_boot_generator.root_module.addImport("clap", clap.module("clap"));
+        b.installArtifact(tboot_bless_boot_generator);
+
+        const tboot_sign = b.addExecutable(.{
+            .name = "tboot-sign",
+            .root_source_file = b.path("src/tboot-sign.zig"),
+            .target = target,
+            .optimize = optimize,
+            .strip = optimize != std.builtin.OptimizeMode.Debug,
+        });
+        tboot_sign.linkLibC();
+        tboot_sign.linkSystemLibrary("libcrypto");
+        tboot_sign.root_module.addImport("clap", clap.module("clap"));
+        b.installArtifact(tboot_sign);
+
+        const tboot_nixos_install = b.addExecutable(.{
+            .name = "tboot-nixos-install",
+            .root_source_file = b.path("src/tboot-nixos-install.zig"),
+            .target = target,
+            .optimize = optimize,
+            .strip = optimize != std.builtin.OptimizeMode.Debug,
+        });
+        tboot_nixos_install.linkLibC();
+        tboot_nixos_install.linkSystemLibrary("libcrypto");
+        tboot_nixos_install.root_module.addImport("clap", clap.module("clap"));
+        b.installArtifact(tboot_nixos_install);
+
+        const tboot_ymodem = b.addExecutable(.{
+            .name = "tboot-ymodem",
+            .root_source_file = b.path("src/ymodem.zig"),
+            .target = target,
+            .optimize = optimize,
+            .strip = optimize != std.builtin.OptimizeMode.Debug,
+        });
+        tboot_ymodem.root_module.addImport("linux_headers", linux_headers_module);
+        tboot_ymodem.root_module.addImport("clap", clap.module("clap"));
+        b.installArtifact(tboot_ymodem);
+
+        const tboot_vpd = b.addExecutable(.{
+            .name = "tboot-vpd",
+            .root_source_file = b.path("src/vpd.zig"),
+            .target = target,
+            .optimize = optimize,
+            .strip = optimize != std.builtin.OptimizeMode.Debug,
+        });
+        tboot_vpd.root_module.addImport("linux_headers", linux_headers_module);
+        tboot_vpd.root_module.addImport("clap", clap.module("clap"));
+        b.installArtifact(tboot_vpd);
+    }
+
     if (with_loader) {
         const tboot_loader = b.addExecutable(.{
             .name = "tboot-loader",
@@ -59,7 +147,12 @@ pub fn build(b: *std.Build) !void {
         });
         tboot_loader.root_module.addImport("linux_headers", linux_headers_module);
 
-        var run_tboot_initrd = b.addSystemCommand(&.{"tboot-initrd"});
+        // First look for a local build of tboot-initrd, helpful for iteration
+        // on the tool itself, otherwise use the one that exists on $PATH.
+        var run_tboot_initrd = if (maybe_tboot_initrd_tool) |tboot_initrd_tool|
+            b.addRunArtifact(tboot_initrd_tool)
+        else
+            b.addSystemCommand(&.{TBOOT_INITRD_NAME});
 
         // TODO(jared): Would be nicer to have generic
         // --file=tboot_loader:/init CLI interface, but don't know how to
@@ -116,83 +209,6 @@ pub fn build(b: *std.Build) !void {
 
         const run_step = b.step("run", "Run in qemu");
         run_step.dependOn(&runner_tool.step);
-    }
-
-    if (with_tools) {
-        const tboot_initrd_tool = b.addExecutable(.{
-            .name = "tboot-initrd",
-            .target = target,
-            .root_source_file = b.path("src/tboot-initrd.zig"),
-        });
-        tboot_initrd_tool.linkLibC();
-        tboot_initrd_tool.linkSystemLibrary("liblzma");
-        tboot_initrd_tool.root_module.addImport("clap", clap.module("clap"));
-        b.installArtifact(tboot_initrd_tool);
-
-        const tboot_bless_boot = b.addExecutable(.{
-            .name = "tboot-bless-boot",
-            .root_source_file = b.path("src/tboot-bless-boot.zig"),
-            .target = target,
-            .optimize = optimize,
-            .strip = optimize != std.builtin.OptimizeMode.Debug,
-        });
-        tboot_bless_boot.root_module.addImport("clap", clap.module("clap"));
-        b.installArtifact(tboot_bless_boot);
-
-        const tboot_bless_boot_generator = b.addExecutable(.{
-            .name = "tboot-bless-boot-generator",
-            .root_source_file = b.path("src/tboot-bless-boot-generator.zig"),
-            .target = target,
-            .optimize = optimize,
-            .strip = optimize != std.builtin.OptimizeMode.Debug,
-        });
-        b.installArtifact(tboot_bless_boot_generator);
-
-        const tboot_sign = b.addExecutable(.{
-            .name = "tboot-sign",
-            .root_source_file = b.path("src/tboot-sign.zig"),
-            .target = target,
-            .optimize = optimize,
-            .strip = optimize != std.builtin.OptimizeMode.Debug,
-        });
-        tboot_sign.linkLibC();
-        tboot_sign.linkSystemLibrary("libcrypto");
-        tboot_sign.root_module.addImport("clap", clap.module("clap"));
-        b.installArtifact(tboot_sign);
-
-        const tboot_nixos_install = b.addExecutable(.{
-            .name = "tboot-nixos-install",
-            .root_source_file = b.path("src/tboot-nixos-install.zig"),
-            .target = target,
-            .optimize = optimize,
-            .strip = optimize != std.builtin.OptimizeMode.Debug,
-        });
-        tboot_nixos_install.linkLibC();
-        tboot_nixos_install.linkSystemLibrary("libcrypto");
-        tboot_nixos_install.root_module.addImport("clap", clap.module("clap"));
-        b.installArtifact(tboot_nixos_install);
-
-        const tboot_ymodem = b.addExecutable(.{
-            .name = "tboot-ymodem",
-            .root_source_file = b.path("src/ymodem.zig"),
-            .target = target,
-            .optimize = optimize,
-            .strip = optimize != std.builtin.OptimizeMode.Debug,
-        });
-        tboot_ymodem.root_module.addImport("linux_headers", linux_headers_module);
-        tboot_ymodem.root_module.addImport("clap", clap.module("clap"));
-        b.installArtifact(tboot_ymodem);
-
-        const tboot_vpd = b.addExecutable(.{
-            .name = "tboot-vpd",
-            .root_source_file = b.path("src/vpd.zig"),
-            .target = target,
-            .optimize = optimize,
-            .strip = optimize != std.builtin.OptimizeMode.Debug,
-        });
-        tboot_vpd.root_module.addImport("linux_headers", linux_headers_module);
-        tboot_vpd.root_module.addImport("clap", clap.module("clap"));
-        b.installArtifact(tboot_vpd);
     }
 
     const unit_tests = b.addTest(.{

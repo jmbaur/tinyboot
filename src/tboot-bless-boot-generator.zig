@@ -1,22 +1,53 @@
+const builtin = @import("builtin");
 const std = @import("std");
+const clap = @import("clap");
 
-const GeneratorError = error{
-    MissingNormalDir,
-    MissingEarlyDir,
-    MissingLateDir,
-};
+pub const std_options = std.Options{ .log_level = if (builtin.mode == .Debug) .debug else .info };
 
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    var args = std.process.args();
+    const params = comptime clap.parseParamsComptime(
+        \\-h, --help    Display this help and exit.
+        \\<DIR>         The normal generator directory.
+        \\<DIR>         The early generator directory.
+        \\<DIR>         The late generator directory.
+        \\
+    );
 
-    _ = args.next().?; // skip argv[0]
-    const normal_dir = args.next() orelse return GeneratorError.MissingNormalDir;
-    const early_dir = args.next() orelse return GeneratorError.MissingEarlyDir;
-    const late_dir = args.next() orelse return GeneratorError.MissingLateDir;
+    const parsers = comptime .{ .DIR = clap.parsers.string };
+
+    const stderr = std.io.getStdErr().writer();
+
+    var diag = clap.Diagnostic{};
+    var res = clap.parse(clap.Help, &params, &parsers, .{
+        .diagnostic = &diag,
+        .allocator = arena.allocator(),
+    }) catch |err| {
+        try diag.report(stderr, err);
+        try clap.usage(stderr, clap.Help, &params);
+        return;
+    };
+    defer res.deinit();
+
+    if (res.args.help != 0) {
+        return clap.help(std.io.getStdErr().writer(), clap.Help, &params, .{});
+    }
+
+    if (res.positionals[0] == null or
+        res.positionals[1] == null or
+        res.positionals[2] == null)
+    {
+        try diag.report(stderr, error.InvalidArgument);
+        try clap.usage(std.io.getStdErr().writer(), clap.Help, &params);
+        return;
+    }
+
+    const normal_dir = res.positionals[0].?;
+    const early_dir = res.positionals[1].?;
+    const late_dir = res.positionals[2].?;
 
     _ = normal_dir;
     _ = late_dir;

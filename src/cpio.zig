@@ -36,7 +36,7 @@ const CpioEntryType = enum {
 
 pub const CpioArchive = @This();
 
-dest: *std.io.StreamSource,
+destination: *std.io.StreamSource,
 ino: u32 = 0,
 total_written: usize = 0,
 
@@ -45,8 +45,8 @@ const Error = error{
     UnexpectedSource,
 };
 
-pub fn init(dest: *std.io.StreamSource) !@This() {
-    return @This(){ .dest = dest };
+pub fn init(destination: *std.io.StreamSource) !@This() {
+    return @This(){ .destination = destination };
 }
 
 pub fn addEntry(
@@ -103,7 +103,7 @@ pub fn addEntry(
             .namesize = @intCast(filepath_len),
         };
 
-        try self.dest.writer().print("{X:0>6}{X:0>8}{X:0>8}{X:0>8}{X:0>8}{X:0>8}{X:0>8}{X:0>8}{X:0>8}{X:0>8}{X:0>8}{X:0>8}{X:0>8}{X:0>8}", .{
+        try self.destination.writer().print("{X:0>6}{X:0>8}{X:0>8}{X:0>8}{X:0>8}{X:0>8}{X:0>8}{X:0>8}{X:0>8}{X:0>8}{X:0>8}{X:0>8}{X:0>8}{X:0>8}", .{
             header.magic,
             header.ino,
             header.mode,
@@ -121,13 +121,13 @@ pub fn addEntry(
         });
         self.total_written += ASCII_CPIO_HEADER_SIZE;
 
-        try self.dest.writer().writeAll(path);
-        try self.dest.writer().writeByte(0); // null terminator
+        try self.destination.writer().writeAll(path);
+        try self.destination.writer().writeByte(0); // null terminator
         self.total_written += filepath_len;
 
         // pad the file name
         const header_padding = (4 - ((ASCII_CPIO_HEADER_SIZE + filepath_len) % 4)) % 4;
-        try self.dest.writer().writeByteNTimes(0, header_padding);
+        try self.destination.writer().writeByteNTimes(0, header_padding);
         self.total_written += header_padding;
 
         if (source) |source_| {
@@ -139,14 +139,14 @@ pub fn addEntry(
             while (pos < end) {
                 try source_.seekTo(pos);
                 const bytes_read = try source_.read(&buf);
-                try self.dest.writer().writeAll(buf[0..bytes_read]);
+                try self.destination.writer().writeAll(buf[0..bytes_read]);
                 self.total_written += bytes_read;
                 pos += bytes_read;
             }
 
             // pad the file data
             const filedata_padding = (4 - (end % 4)) % 4;
-            try self.dest.writer().writeByteNTimes(0, filedata_padding);
+            try self.destination.writer().writeByteNTimes(0, filedata_padding);
             self.total_written += filedata_padding;
         }
     }
@@ -184,17 +184,17 @@ pub fn finalize(self: *@This()) !void {
 
     // Maintain a block size of 512 by adding padding to the end of the
     // archive.
-    try self.dest.writer().writeByteNTimes(0, (512 - (self.total_written % 512)) % 512);
+    try self.destination.writer().writeByteNTimes(0, (512 - (self.total_written % 512)) % 512);
 }
 
 fn handleFile(
     arena: *std.heap.ArenaAllocator,
     kind: std.fs.File.Kind,
     filename: []const u8,
-    directory_path: []const u8,
+    current_directory: []const u8,
     starting_directory: []const u8,
     archive: *CpioArchive,
-    directory: std.fs.Dir,
+    directory: *std.fs.Dir,
 ) anyerror!void {
     var fullpath_buf: [std.fs.max_path_bytes]u8 = undefined;
     const full_entry_path = try directory.realpath(filename, &fullpath_buf);
@@ -212,7 +212,7 @@ fn handleFile(
                 arena,
                 starting_directory,
                 archive,
-                sub_directory,
+                &sub_directory,
             );
         },
         .file => {
@@ -221,6 +221,9 @@ fn handleFile(
 
             const stat = try file.stat();
             var source = std.io.StreamSource{ .file = file };
+
+            std.log.debug("adding file to archive at {s}", .{entry_path});
+
             try archive.addFile(entry_path, &source, @intCast(stat.mode));
         },
         .sym_link => {
@@ -232,7 +235,7 @@ fn handleFile(
             if (std.mem.startsWith(u8, resolved_path, starting_directory)) {
                 const symlink_path = try std.fs.path.join(
                     arena.allocator(),
-                    &.{ directory_path, filename },
+                    &.{ current_directory, filename },
                 );
 
                 try archive.addSymlink(symlink_path, entry_path);
@@ -243,22 +246,13 @@ fn handleFile(
                     arena,
                     stat.kind,
                     resolved_path,
-                    directory_path,
+                    current_directory,
                     starting_directory,
                     archive,
                     directory,
                 );
-
-                // std.log.warn(
-                //     "Resolved symlink {s} is outside of {s}, refusing to add to CPIO archive",
-                //     .{ resolved_path, starting_directory },
-                // );
             }
         },
-        // We explicitly don't add these kinds of files.
-        .block_device => {},
-        .character_device => {},
-        .unix_domain_socket => {},
         else => {
             std.log.warn(
                 "Do not know how to add file {s} of kind {} to CPIO archive",
@@ -272,7 +266,7 @@ pub fn walkDirectory(
     arena: *std.heap.ArenaAllocator,
     starting_directory: []const u8,
     archive: *CpioArchive,
-    directory: std.fs.Dir,
+    directory: *std.fs.Dir,
 ) anyerror!void {
     var iter = directory.iterate();
 
@@ -281,8 +275,12 @@ pub fn walkDirectory(
     const full_directory_path = try directory.realpath(".", &fullpath_buf);
     const directory_path = try std.fs.path.relative(arena.allocator(), starting_directory, full_directory_path);
 
+    std.log.debug("walking directory {s}", .{full_directory_path});
+
     // We don't need to add the root directory, as it will already exist.
     if (!std.mem.eql(u8, directory_path, "")) {
+        // Before iterating through the directory, add the directory itself to
+        // the archive.
         try archive.addDirectory(directory_path, 0o755);
     }
 
