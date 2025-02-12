@@ -18,13 +18,14 @@
       (
         {
           zigForTinyboot = inputs.zig-overlay.packages.${final.stdenv.buildPlatform.system}.master;
-          tinybootLoader = final.pkgsStatic.callPackage ./pkgs/tinyboot {
-            withLoader = true;
-            withTools = false;
-          };
           tinybootTools = final.pkgsStatic.callPackage ./pkgs/tinyboot {
             withLoader = false;
             withTools = true;
+          };
+          tinybootLoader = final.pkgsStatic.callPackage ./pkgs/tinyboot {
+            withLoader = true;
+            withTools = false;
+            tinybootTools = final.buildPackages.pkgsStatic.tinybootTools;
           };
           armTrustedFirmwareMT8183 = final.callPackage ./pkgs/arm-trusted-firmware-cros {
             platform = "mt8183";
@@ -63,18 +64,11 @@
         );
     devShells = inputs.nixpkgs.lib.mapAttrs (_: pkgs: {
       default = pkgs.mkShell {
-        inputsFrom = [
-          pkgs.tinybootLoader
-          pkgs.tinybootTools
-        ];
+        inputsFrom = [ pkgs.tinybootLoader ];
         packages = [
-          pkgs.swtpm
           pkgs.qemu
+          pkgs.swtpm
         ];
-        # https://github.com/NixOS/nixpkgs/issues/270415
-        shellHook = ''
-          unset ZIG_GLOBAL_CACHE_DIR
-        '';
         env.TINYBOOT_KERNEL = ''${pkgs."tinyboot-qemu-${pkgs.stdenv.hostPlatform.qemuArch}".linux}/kernel'';
       };
     }) inputs.self.legacyPackages;

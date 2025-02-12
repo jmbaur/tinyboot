@@ -5,7 +5,7 @@ test {
     _ = @import("./boot/ymodem.zig");
     _ = @import("./bootspec.zig");
     _ = @import("./console.zig");
-    _ = @import("./cpio/main.zig");
+    _ = @import("./cpio.zig");
     _ = @import("./device.zig");
     _ = @import("./disk/filesystem.zig");
     _ = @import("./disk/gpt.zig");
@@ -17,6 +17,7 @@ test {
     _ = @import("./system.zig");
     _ = @import("./tboot-bless-boot-generator.zig");
     _ = @import("./tboot-bless-boot.zig");
+    _ = @import("./tboot-initrd.zig");
     _ = @import("./tboot-loader.zig");
     _ = @import("./tboot-nixos-install.zig");
     _ = @import("./tboot-sign.zig");

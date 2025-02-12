@@ -1,7 +1,9 @@
 {
+  firmwareDirectory ? null,
+  tinybootTools,
   withLoader ? true,
   withTools ? true,
-  firmwareDirectory ? null,
+  zigForTinyboot,
 
   callPackage,
   lib,
@@ -9,7 +11,6 @@
   pkg-config,
   stdenv,
   xz,
-  zigForTinyboot,
 }:
 
 let
@@ -23,8 +24,9 @@ in
 # Using zig-overlay (without the patches from nixpkgs) does not work well when
 # doing sandboxed builds because of the following issue: https://github.com/ziglang/zig/issues/15898
 assert stdenv.hostPlatform.isStatic && stdenv.hostPlatform.libc == "musl";
+assert withTools != withLoader;
 stdenv.mkDerivation {
-  pname = "tinyboot";
+  pname = "tinyboot-${if withTools then "tools" else "loader"}";
   version = "0.1.0";
 
   src = lib.fileset.toSource {
@@ -40,11 +42,14 @@ stdenv.mkDerivation {
   strictDeps = true;
 
   nativeBuildInputs = [
-    zigForTinyboot
-    xz
     pkg-config
+    zigForTinyboot
+  ] ++ lib.optional (!withTools) tinybootTools;
+
+  buildInputs = lib.optionals withTools [
+    openssl
+    xz
   ];
-  buildInputs = lib.optionals withTools [ openssl ];
 
   zigBuildFlags =
     [
@@ -69,17 +74,11 @@ stdenv.mkDerivation {
     runHook postConfigure
   '';
 
-  buildPhase =
-    ''
-      runHook preBuild
-      zig build install --prefix $out $zigBuildFlags
-    ''
-    + lib.optionalString withLoader ''
-      xz --threads=$NIX_BUILD_CORES --check=crc32 --lzma2=dict=512KiB $out/tboot-loader.cpio
-    ''
-    + ''
-      runHook postBuild
-    '';
+  buildPhase = ''
+    runHook preBuild
+    zig build install --prefix $out $zigBuildFlags
+    runHook postBuild
+  '';
 
   checkPhase = ''
     runHook preCheck

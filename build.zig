@@ -18,7 +18,7 @@ pub fn build(b: *std.Build) !void {
         std.builtin.OptimizeMode.ReleaseSmall;
 
     const with_loader = b.option(bool, "loader", "With boot loader") orelse true;
-    const with_tools = b.option(bool, "tools", "With tools") orelse true;
+    const with_tools = b.option(bool, "tools", "With tools") orelse false;
     const firmware_directory = b.option(
         []const u8,
         "firmware-directory",
@@ -61,20 +61,14 @@ pub fn build(b: *std.Build) !void {
         });
         tboot_loader.root_module.addImport("linux_headers", linux_headers_module);
 
-        const cpio_tool = b.addExecutable(.{
-            .name = "cpio",
-            .target = b.graph.host,
-            .root_source_file = b.path("src/cpio/main.zig"),
-        });
-        cpio_tool.root_module.addImport("clap", clap.module("clap"));
+        var run_tboot_initrd = b.addSystemCommand(&.{"tboot-initrd"});
 
-        const run_cpio_tool = b.addRunArtifact(cpio_tool);
         // TODO(jared): Would be nicer to have generic
         // --file=tboot_loader:/init CLI interface, but don't know how to
         // obtain path and string format it into that form. Further, would
         // be nicer to not shell-out to a separate tool at all and just do
         // the CPIO generation in here.
-        run_cpio_tool.addPrefixedFileArg("-i", tboot_loader.getEmittedBin());
+        run_tboot_initrd.addPrefixedFileArg("-i", tboot_loader.getEmittedBin());
 
         if (firmware_directory) |directory| {
             const directory_ = b.addWriteFiles().addCopyDirectory(
@@ -83,15 +77,15 @@ pub fn build(b: *std.Build) !void {
                 .{},
             );
 
-            run_cpio_tool.addPrefixedDirectoryArg("-d", directory_);
+            run_tboot_initrd.addPrefixedDirectoryArg("-d", directory_);
         }
 
-        const cpio_output_file = run_cpio_tool.addPrefixedOutputFileArg(
+        const cpio_output_file = run_tboot_initrd.addPrefixedOutputFileArg(
             "-o",
             "tboot-loader.cpio",
         );
 
-        run_cpio_tool.expectExitCode(0);
+        run_tboot_initrd.expectExitCode(0);
 
         const cpio_archive = b.addInstallFile(
             cpio_output_file,
@@ -127,6 +121,16 @@ pub fn build(b: *std.Build) !void {
     }
 
     if (with_tools) {
+        const tboot_initrd_tool = b.addExecutable(.{
+            .name = "tboot-initrd",
+            .target = target,
+            .root_source_file = b.path("src/tboot-initrd.zig"),
+        });
+        tboot_initrd_tool.linkLibC();
+        tboot_initrd_tool.linkSystemLibrary("liblzma");
+        tboot_initrd_tool.root_module.addImport("clap", clap.module("clap"));
+        b.installArtifact(tboot_initrd_tool);
+
         const tboot_bless_boot = b.addExecutable(.{
             .name = "tboot-bless-boot",
             .root_source_file = b.path("src/tboot-bless-boot.zig"),
