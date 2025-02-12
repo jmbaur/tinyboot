@@ -3,8 +3,10 @@
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
-    zig-overlay.url = "github:mitchellh/zig-overlay";
     zig-overlay.inputs.nixpkgs.follows = "nixpkgs";
+    zig-overlay.url = "github:mitchellh/zig-overlay";
+    zls.inputs.nixpkgs.follows = "nixpkgs";
+    zls.url = "github:zigtools/zls";
   };
 
   outputs = inputs: {
@@ -66,6 +68,7 @@
       default = pkgs.mkShell {
         inputsFrom = [ pkgs.tinybootLoader ];
         packages = [
+          inputs.zls.packages.${pkgs.stdenv.hostPlatform.system}.default
           pkgs.qemu
           pkgs.swtpm
         ];
