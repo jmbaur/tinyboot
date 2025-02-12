@@ -10,6 +10,12 @@ pub fn build(b: *std.Build) !void {
         },
     );
 
+    const is_native_build = std.zig.system.getExternalExecutor(
+        b.graph.host.result,
+        &target.result,
+        .{},
+    ) == .native;
+
     const optimize = b.standardOptimizeOption(.{});
 
     const tboot_loader_optimize = if (optimize == std.builtin.OptimizeMode.Debug)
@@ -53,19 +59,21 @@ pub fn build(b: *std.Build) !void {
     // building tools.
     var maybe_tboot_initrd_tool: ?*std.Build.Step.Compile = null;
 
-    if (with_tools) {
+    if ((with_loader and is_native_build) or with_tools) {
         maybe_tboot_initrd_tool = b.addExecutable(.{
             .name = TBOOT_INITRD_NAME,
             .target = target,
             .optimize = optimize,
             .root_source_file = b.path("src/tboot-initrd.zig"),
         });
-
         var tboot_initrd_tool = maybe_tboot_initrd_tool.?;
         tboot_initrd_tool.linkLibC();
         tboot_initrd_tool.linkSystemLibrary("liblzma");
         tboot_initrd_tool.root_module.addImport("clap", clap.module("clap"));
-        b.installArtifact(tboot_initrd_tool);
+    }
+
+    if (with_tools) {
+        b.installArtifact(maybe_tboot_initrd_tool.?);
 
         const tboot_bless_boot = b.addExecutable(.{
             .name = "tboot-bless-boot",
@@ -147,10 +155,13 @@ pub fn build(b: *std.Build) !void {
         });
         tboot_loader.root_module.addImport("linux_headers", linux_headers_module);
 
-        // First look for a local build of tboot-initrd, helpful for iteration
-        // on the tool itself, otherwise use the one that exists on $PATH.
-        var run_tboot_initrd = if (maybe_tboot_initrd_tool) |tboot_initrd_tool|
-            b.addRunArtifact(tboot_initrd_tool)
+        // If we are performing a native build (i.e. the platform we are
+        // building on is the same as the platform we are building to), look
+        // for a local build of tboot-initrd to use, as it is helpful for
+        // iteration on the tool itself. Otherwise, use the tboot-initrd that
+        // exists on $PATH.
+        var run_tboot_initrd = if (is_native_build)
+            b.addRunArtifact(maybe_tboot_initrd_tool.?)
         else
             b.addSystemCommand(&.{TBOOT_INITRD_NAME});
 
