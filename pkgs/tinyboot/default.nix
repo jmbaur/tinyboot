@@ -86,6 +86,6 @@ stdenv.mkDerivation {
     runHook postCheck
   '';
 
-  passthru = lib.optionalAttrs withLoader { initrdPath = "tboot-loader.cpio.xz"; };
+  passthru = lib.optionalAttrs withLoader { initrdPath = "tboot-loader.cpio"; };
   meta.platforms = lib.platforms.linux;
 }
