@@ -1,9 +1,6 @@
 const std = @import("std");
 const posix = std.posix;
-const system = std.posix.system;
 const MS = std.os.linux.MS;
-
-const linux_headers = @import("linux_headers");
 
 const BootLoader = @import("./bootloader.zig");
 const Device = @import("../device.zig");
@@ -224,9 +221,6 @@ fn _entryLoaded(self: *@This(), ctx: *anyopaque) !void {
         std.log.debug("entry renamed to {s}", .{new_name});
     }
 }
-
-const random_bytes_count = 12;
-const sub_path_len = std.fs.base64_encoder.calcSize(random_bytes_count);
 
 const mountpath = "mount";
 

@@ -7,7 +7,6 @@ const linux_headers = @import("linux_headers");
 const Autoboot = @import("./autoboot.zig");
 const BootLoader = @import("./boot/bootloader.zig");
 const Console = @import("./console.zig");
-const Device = @import("./device.zig");
 const DeviceWatcher = @import("./watch.zig");
 const DiskBootLoader = @import("./boot/disk.zig");
 const Log = @import("./log.zig");

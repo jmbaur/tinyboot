@@ -1,6 +1,4 @@
 const std = @import("std");
-const log = std.log;
-const builtin = @import("builtin");
 
 pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(

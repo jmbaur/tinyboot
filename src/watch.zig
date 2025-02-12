@@ -1,6 +1,5 @@
 const std = @import("std");
 const posix = std.posix;
-const path = std.fs.path;
 const epoll_event = std.os.linux.epoll_event;
 
 const Device = @import("./device.zig");

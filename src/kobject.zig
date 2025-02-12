@@ -1,5 +1,4 @@
 const std = @import("std");
-const posix = std.posix;
 
 const Device = @import("./device.zig");
 const DeviceWatcher = @import("./watch.zig");

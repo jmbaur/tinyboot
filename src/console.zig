@@ -3,10 +3,7 @@ const std = @import("std");
 const posix = std.posix;
 const process = std.process;
 
-const linux_headers = @import("linux_headers");
-
 const BootLoader = @import("./boot/bootloader.zig");
-const Device = @import("./device.zig");
 const system = @import("./system.zig");
 
 const esc = std.ascii.control_code.esc;
@@ -25,8 +22,6 @@ pub const Event = enum {
 };
 
 const Console = @This();
-
-const CONSOLE = "/dev/char/5:1";
 
 pub const IN = posix.STDIN_FILENO;
 

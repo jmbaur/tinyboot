@@ -1,5 +1,4 @@
 const std = @import("std");
-const posix = std.posix;
 
 pub fn enumFromStr(T: anytype, value: []const u8) !T {
     inline for (std.meta.fields(T)) |field| {

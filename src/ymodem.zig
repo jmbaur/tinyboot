@@ -6,7 +6,6 @@ const posix = std.posix;
 const Crc16Xmodem = std.hash.crc.Crc16Xmodem;
 const Progress = std.Progress;
 
-const linux_headers = @import("linux_headers");
 const system = @import("./system.zig");
 
 const clap = @import("clap");
