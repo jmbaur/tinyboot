@@ -18,6 +18,8 @@ pub fn build(b: *std.Build) !void {
 
     const optimize = b.standardOptimizeOption(.{});
 
+    const do_strip = optimize != std.builtin.OptimizeMode.Debug;
+
     const tboot_loader_optimize = if (optimize == std.builtin.OptimizeMode.Debug)
         std.builtin.OptimizeMode.Debug
     else
@@ -62,9 +64,10 @@ pub fn build(b: *std.Build) !void {
     if ((with_loader and is_native_build) or with_tools) {
         maybe_tboot_initrd_tool = b.addExecutable(.{
             .name = TBOOT_INITRD_NAME,
+            .root_source_file = b.path("src/tboot-initrd.zig"),
             .target = target,
             .optimize = optimize,
-            .root_source_file = b.path("src/tboot-initrd.zig"),
+            .strip = do_strip,
         });
         var tboot_initrd_tool = maybe_tboot_initrd_tool.?;
         tboot_initrd_tool.linkLibC();
@@ -80,7 +83,7 @@ pub fn build(b: *std.Build) !void {
             .root_source_file = b.path("src/tboot-bless-boot.zig"),
             .target = target,
             .optimize = optimize,
-            .strip = optimize != std.builtin.OptimizeMode.Debug,
+            .strip = do_strip,
         });
         tboot_bless_boot.root_module.addImport("clap", clap.module("clap"));
         b.installArtifact(tboot_bless_boot);
@@ -90,7 +93,7 @@ pub fn build(b: *std.Build) !void {
             .root_source_file = b.path("src/tboot-bless-boot-generator.zig"),
             .target = target,
             .optimize = optimize,
-            .strip = optimize != std.builtin.OptimizeMode.Debug,
+            .strip = do_strip,
         });
         tboot_bless_boot_generator.root_module.addImport("clap", clap.module("clap"));
         b.installArtifact(tboot_bless_boot_generator);
@@ -100,7 +103,7 @@ pub fn build(b: *std.Build) !void {
             .root_source_file = b.path("src/tboot-sign.zig"),
             .target = target,
             .optimize = optimize,
-            .strip = optimize != std.builtin.OptimizeMode.Debug,
+            .strip = do_strip,
         });
         tboot_sign.linkLibC();
         tboot_sign.linkSystemLibrary("libcrypto");
@@ -112,7 +115,7 @@ pub fn build(b: *std.Build) !void {
             .root_source_file = b.path("src/tboot-nixos-install.zig"),
             .target = target,
             .optimize = optimize,
-            .strip = optimize != std.builtin.OptimizeMode.Debug,
+            .strip = do_strip,
         });
         tboot_nixos_install.linkLibC();
         tboot_nixos_install.linkSystemLibrary("libcrypto");
@@ -124,7 +127,7 @@ pub fn build(b: *std.Build) !void {
             .root_source_file = b.path("src/ymodem.zig"),
             .target = target,
             .optimize = optimize,
-            .strip = optimize != std.builtin.OptimizeMode.Debug,
+            .strip = do_strip,
         });
         tboot_ymodem.root_module.addImport("linux_headers", linux_headers_module);
         tboot_ymodem.root_module.addImport("clap", clap.module("clap"));
@@ -135,7 +138,7 @@ pub fn build(b: *std.Build) !void {
             .root_source_file = b.path("src/vpd.zig"),
             .target = target,
             .optimize = optimize,
-            .strip = optimize != std.builtin.OptimizeMode.Debug,
+            .strip = do_strip,
         });
         tboot_vpd.root_module.addImport("linux_headers", linux_headers_module);
         tboot_vpd.root_module.addImport("clap", clap.module("clap"));
@@ -148,7 +151,7 @@ pub fn build(b: *std.Build) !void {
             .root_source_file = b.path("src/tboot-loader.zig"),
             .target = target,
             .optimize = tboot_loader_optimize,
-            .strip = optimize != std.builtin.OptimizeMode.Debug,
+            .strip = do_strip,
         });
         tboot_loader.root_module.addAnonymousImport("test_key", .{
             .root_source_file = b.path("tests/keys/tboot/key.der"),
