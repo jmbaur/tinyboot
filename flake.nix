@@ -6,6 +6,7 @@
     zig-overlay.inputs.nixpkgs.follows = "nixpkgs";
     zig-overlay.url = "github:mitchellh/zig-overlay";
     zls.inputs.nixpkgs.follows = "nixpkgs";
+    zls.inputs.zig-overlay.follows = "zig-overlay";
     zls.url = "github:zigtools/zls";
   };
 
