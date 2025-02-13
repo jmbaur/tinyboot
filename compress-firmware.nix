@@ -2,11 +2,7 @@
 # but dereferences all symlinks so that the zig build system is capable of
 # including all paths we want. See https://github.com/ziglang/zig/blob/53216d2f22053ca94a68f5da234038c01f73d60f/lib/std/Build/Step/WriteFile.zig#L232.
 
-{
-  runCommand,
-  lib,
-  zstd,
-}:
+{ runCommand, lib }:
 
 firmwares:
 
