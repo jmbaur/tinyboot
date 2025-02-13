@@ -99,7 +99,6 @@ in
         environment.systemPackages = with pkgs; [
           cbmem
           cbfstool
-          nvramtool
         ];
 
         programs.flashrom = {
