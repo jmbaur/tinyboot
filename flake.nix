@@ -80,5 +80,6 @@
       disk = pkgs.callPackage ./tests/disk { };
       ymodem = pkgs.callPackage ./tests/ymodem { };
     }) inputs.self.legacyPackages;
+    hydraJobs = inputs.self.checks;
   };
 }
