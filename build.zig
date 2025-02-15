@@ -6,7 +6,10 @@ const TBOOT_INITRD_NAME = "tboot-initrd";
 pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(
         .{
-            .default_target = .{ .cpu_model = .baseline, .abi = .musl },
+            .default_target = .{
+                .cpu_model = .baseline,
+                .abi = .musl,
+            },
         },
     );
 

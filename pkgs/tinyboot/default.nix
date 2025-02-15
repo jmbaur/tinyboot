@@ -5,6 +5,7 @@
   withTools,
   zigForTinyboot,
 
+  bubblewrap,
   callPackage,
   lib,
   openssl,
@@ -20,9 +21,12 @@ let
       "musl" = "musl";
     }
     .${stdenv.hostPlatform.libc} or "none";
+
+  # Using zig-overlay (without the patches from nixpkgs) does not work well when
+  # doing sandboxed builds because of the following issue: https://github.com/ziglang/zig/issues/15898.
+  # Providing a /usr/bin/env for zig fixes some issues.
+  bwrap = "bwrap --ro-bind $(command -v env) /usr/bin/env --bind /nix/store /nix/store --bind /build /build --proc /proc --dev /dev";
 in
-# Using zig-overlay (without the patches from nixpkgs) does not work well when
-# doing sandboxed builds because of the following issue: https://github.com/ziglang/zig/issues/15898
 assert stdenv.hostPlatform.isStatic && stdenv.hostPlatform.libc == "musl";
 assert withTools != withLoader;
 stdenv.mkDerivation {
@@ -43,6 +47,7 @@ stdenv.mkDerivation {
 
   nativeBuildInputs = [
     pkg-config
+    bubblewrap
     zigForTinyboot
   ] ++ lib.optional (!withTools) tinybootTools;
 
@@ -51,19 +56,6 @@ stdenv.mkDerivation {
     ++ lib.optional (withTools || stdenv.buildPlatform.canExecute stdenv.hostPlatform) xz # tboot-initrd
   ;
 
-  zigBuildFlags =
-    [
-      "--release=safe"
-      "-Dcpu=baseline"
-      "-Dtarget=${stdenv.hostPlatform.qemuArch}-${stdenv.hostPlatform.parsed.kernel.name}-${zigLibc}"
-      "-Ddynamic-linker=${stdenv.cc.bintools.dynamicLinker}"
-      "-Dloader=${lib.boolToString withLoader}"
-      "-Dtools=${lib.boolToString withTools}"
-    ]
-    ++ lib.optionals (firmwareDirectory != null) [
-      "-Dfirmware-directory=${firmwareDirectory}"
-    ];
-
   dontInstall = true;
   doCheck = true;
 
@@ -71,18 +63,23 @@ stdenv.mkDerivation {
     runHook preConfigure
     export ZIG_GLOBAL_CACHE_DIR=$TEMPDIR
     ln -s ${callPackage ../../build.zig.zon.nix { }} $ZIG_GLOBAL_CACHE_DIR/p
+    zigBuildFlags=("-Dloader=${lib.boolToString withLoader}" "-Dtools=${lib.boolToString withTools}" "--release=safe" "-Dtarget=${stdenv.hostPlatform.qemuArch}-${stdenv.hostPlatform.parsed.kernel.name}-${zigLibc}")
+    zigBuildFlags+=("-Ddynamic-linker=$(echo ${stdenv.cc.bintools.dynamicLinker})") # can contain a glob
+    ${lib.optionalString (firmwareDirectory != null) ''
+      zigBuildFlags+=("-Dfirmware-directory=${firmwareDirectory}")
+    ''}
     runHook postConfigure
   '';
 
   buildPhase = ''
     runHook preBuild
-    zig build install --prefix $out $zigBuildFlags
+    ${bwrap} zig build install --prefix $out ''${zigBuildFlags[@]}
     runHook postBuild
   '';
 
   checkPhase = ''
     runHook preCheck
-    zig build test $zigBuildFlags
+    ${bwrap} zig build test ''${zigBuildFlags[@]}
     runHook postCheck
   '';
 
