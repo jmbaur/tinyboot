@@ -28,7 +28,7 @@
           tinybootLoader = final.pkgsStatic.callPackage ./pkgs/tinyboot {
             withLoader = true;
             withTools = false;
-            tinybootTools = final.buildPackages.pkgsStatic.tinybootTools;
+            tinybootTools = final.buildPackages.pkgsStatic.tinybootTools; # TODO(jared): this shouldn't be needed
           };
           armTrustedFirmwareMT8183 = final.callPackage ./pkgs/arm-trusted-firmware-cros {
             platform = "mt8183";
