@@ -1,8 +1,8 @@
 {
   firmwareDirectory ? null,
   tinybootTools,
-  withLoader ? true,
-  withTools ? true,
+  withLoader,
+  withTools,
   zigForTinyboot,
 
   callPackage,
@@ -46,10 +46,10 @@ stdenv.mkDerivation {
     zigForTinyboot
   ] ++ lib.optional (!withTools) tinybootTools;
 
-  buildInputs = lib.optionals withTools [
-    openssl
-    xz
-  ];
+  buildInputs =
+    lib.optional withTools openssl # tboot-sign
+    ++ lib.optional (withTools || stdenv.buildPlatform.canExecute stdenv.hostPlatform) xz # tboot-initrd
+  ;
 
   zigBuildFlags =
     [
