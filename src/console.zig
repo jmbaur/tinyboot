@@ -1,12 +1,12 @@
-const builtin = @import("builtin");
 const std = @import("std");
 const posix = std.posix;
 const process = std.process;
+const esc = std.ascii.control_code.esc;
+pub const IN = posix.STDIN_FILENO;
+const builtin = @import("builtin");
 
 const BootLoader = @import("./boot/bootloader.zig");
 const system = @import("./system.zig");
-
-const esc = std.ascii.control_code.esc;
 
 const ArgsIterator = process.ArgIteratorGeneral(.{});
 
@@ -22,8 +22,6 @@ pub const Event = enum {
 };
 
 const Console = @This();
-
-pub const IN = posix.STDIN_FILENO;
 
 const NON_WORD_CHARS = std.ascii.whitespace ++ [_]u8{ '.', ';', ',' };
 
@@ -564,8 +562,9 @@ test "shell history" {
 }
 
 arena: std.heap.ArenaAllocator = std.heap.ArenaAllocator.init(std.heap.page_allocator),
-shell: Shell = .{},
 context: ?*BootLoader = null,
+resize_signal: posix.fd_t,
+shell: Shell = .{},
 tty: ?system.Tty = null,
 
 pub fn init() !Console {
@@ -576,7 +575,15 @@ pub fn init() !Console {
         writeAllAndFlush("\npress ENTER to interrupt\n\n");
     }
 
-    return .{};
+    var mask = std.mem.zeroes(posix.sigset_t);
+    std.os.linux.sigaddset(&mask, posix.SIG.WINCH);
+    posix.sigprocmask(posix.SIG.BLOCK, &mask, null);
+
+    const resize_signal = try posix.signalfd(-1, &mask, 0);
+
+    return .{
+        .resize_signal = resize_signal,
+    };
 }
 
 fn flush() void {
@@ -652,6 +659,11 @@ pub fn deinit(self: *Console) void {
     if (self.tty) |*tty| {
         tty.reset();
     }
+}
+
+pub fn handleResize(self: *Console) void {
+    writeAll("\n");
+    self.shell.prompt(self.context);
 }
 
 pub fn handleStdin(self: *Console, boot_loaders: []*BootLoader) !?Event {

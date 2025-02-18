@@ -6,13 +6,13 @@ const linux_headers = @import("linux_headers");
 
 const Autoboot = @import("./autoboot.zig");
 const BootLoader = @import("./boot/bootloader.zig");
-const Console = @import("./console.zig");
-const DeviceWatcher = @import("./watch.zig");
 const DiskBootLoader = @import("./boot/disk.zig");
-const Log = @import("./log.zig");
 const YmodemBootLoader = @import("./boot/ymodem.zig");
+const Console = @import("./console.zig");
+const Log = @import("./log.zig");
 const security = @import("./security.zig");
 const system = @import("./system.zig");
+const DeviceWatcher = @import("./watch.zig");
 
 // Since we log to /dev/kmsg, we inherit the kernel's log level, so we should
 // make sure we don't do any filtering on our side of log messages that get
@@ -96,6 +96,18 @@ fn init() !TbootLoader {
         &console_event,
     );
 
+    var terminal_resize_signal = epoll_event{
+        .data = .{ .fd = self.console.resize_signal },
+        .events = std.os.linux.EPOLL.IN,
+    };
+
+    try posix.epoll_ctl(
+        self.epoll,
+        std.os.linux.EPOLL.CTL_ADD,
+        self.console.resize_signal,
+        &terminal_resize_signal,
+    );
+
     try self.newDeviceArmTimer();
 
     return self;
@@ -108,7 +120,11 @@ fn disarmTimer(self: *TbootLoader) !void {
     self.state = .user_input;
 }
 
-fn handleConsole(self: *TbootLoader) !?posix.RebootCommand {
+fn handleConsoleResize(self: *TbootLoader) void {
+    self.console.handleResize();
+}
+
+fn handleConsoleInput(self: *TbootLoader) !?posix.RebootCommand {
     if (self.state != .user_input) {
         // disarm the timer to prevent autoboot from taking over
         try self.disarmTimer();
@@ -257,9 +273,11 @@ fn run(self: *TbootLoader) !posix.RebootCommand {
             const event = events[i_event];
 
             if (event.data.fd == Console.IN) {
-                if (try self.handleConsole()) |outcome| {
+                if (try self.handleConsoleInput()) |outcome| {
                     return outcome;
                 }
+            } else if (event.data.fd == self.console.resize_signal) {
+                self.handleConsoleResize();
             } else if (event.data.fd == self.device_watcher.event) {
                 try self.handleDevice();
             } else if (event.data.fd == self.timer) {
@@ -280,6 +298,12 @@ pub fn main() !void {
         }
 
         arena.deinit();
+    }
+
+    {
+        var mask = std.mem.zeroes(posix.sigset_t);
+        std.os.linux.sigaddset(&mask, posix.SIG.INT);
+        posix.sigprocmask(posix.SIG.BLOCK, &mask, null);
     }
 
     {
