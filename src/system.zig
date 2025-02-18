@@ -82,6 +82,7 @@ fn cfmakeraw(t: *posix.termios) void {
 pub const Tty = struct {
     fd: posix.fd_t,
     original: posix.termios,
+    winsize: posix.winsize,
 
     pub const Mode = enum {
         no_echo,
@@ -132,12 +133,13 @@ pub const Tty = struct {
 };
 
 pub fn setupTty(fd: posix.fd_t, mode: Tty.Mode) !Tty {
-    const orig = Tty{
+    var tty = Tty{
         .fd = fd,
         .original = try posix.tcgetattr(fd),
+        .winsize = std.mem.zeroes(posix.winsize),
     };
 
-    var termios = orig.original;
+    var termios = tty.original;
 
     switch (mode) {
         .no_echo => {
@@ -219,7 +221,14 @@ pub fn setupTty(fd: posix.fd_t, mode: Tty.Mode) !Tty {
     // restart output
     _ = system.ioctl(fd, TCXONC, TCOON);
 
-    return orig;
+    const err = posix.system.ioctl(fd, posix.T.IOCGWINSZ, @intFromPtr(&tty.winsize));
+    if ((posix.errno(err) != .SUCCESS) or (tty.winsize.row == 0 and tty.winsize.col == 0)) {
+        std.log.debug("failed to determine terminal size; using conservative guess 80x25", .{});
+        tty.winsize.col = 80;
+        tty.winsize.row = 25;
+    }
+
+    return tty;
 }
 
 // These aren't defined in the UAPI linux headers for some odd reason.
