@@ -659,6 +659,8 @@ pub fn deinit(self: *Console) void {
     if (self.tty) |*tty| {
         tty.reset();
     }
+
+    posix.close(self.resize_signal);
 }
 
 pub fn handleResize(self: *Console) void {
