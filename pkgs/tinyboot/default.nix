@@ -5,7 +5,6 @@
   withTools,
   zigForTinyboot,
 
-  bubblewrap,
   callPackage,
   lib,
   openssl,
@@ -21,11 +20,6 @@ let
       "musl" = "musl";
     }
     .${stdenv.hostPlatform.libc} or "none";
-
-  # Using zig-overlay (without the patches from nixpkgs) does not work well when
-  # doing sandboxed builds because of the following issue: https://github.com/ziglang/zig/issues/15898.
-  # Providing a /usr/bin/env for zig fixes some issues.
-  bwrap = "bwrap --ro-bind $(command -v env) /usr/bin/env --bind /nix/store /nix/store --bind /build /build --proc /proc --dev /dev";
 in
 assert stdenv.hostPlatform.isStatic && stdenv.hostPlatform.libc == "musl";
 assert withTools != withLoader;
@@ -47,7 +41,6 @@ stdenv.mkDerivation {
 
   nativeBuildInputs = [
     pkg-config
-    bubblewrap
     zigForTinyboot
   ] ++ lib.optional (!withTools) tinybootTools;
 
@@ -73,13 +66,13 @@ stdenv.mkDerivation {
 
   buildPhase = ''
     runHook preBuild
-    ${bwrap} zig build install --prefix $out ''${zigBuildFlags[@]}
+    zig build install --prefix $out ''${zigBuildFlags[@]}
     runHook postBuild
   '';
 
   checkPhase = ''
     runHook preCheck
-    ${bwrap} zig build test ''${zigBuildFlags[@]}
+    zig build test ''${zigBuildFlags[@]}
     runHook postCheck
   '';
 
