@@ -68,12 +68,12 @@ pub fn logFn(
     mutex.lock();
     defer mutex.unlock();
 
-    stream.reset();
-
     stream.writer().print(
-        "<" ++ syslog_prefix ++ ">" ++ LOG_PREFIX ++ ": " ++ format ++ "\n",
+        "<" ++ syslog_prefix ++ ">" ++ LOG_PREFIX ++ ": " ++ format,
         args,
     ) catch {};
 
-    file.writeAll(log_buf[0..stream.pos]) catch {};
+    file.writeAll(stream.getWritten()) catch {};
+
+    stream.reset();
 }
