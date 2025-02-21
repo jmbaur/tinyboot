@@ -3,6 +3,7 @@
   linux.kconfig = lib.mkIf pkgs.stdenv.hostPlatform.isAarch64 (
     with lib.kernel;
     {
+      ARM64_AMU_EXTN = yes;
       ARM64_ERRATUM_1024718 = yes;
       ARM64_ERRATUM_1165522 = yes;
       ARM64_ERRATUM_1286807 = yes;
@@ -42,6 +43,7 @@
       IIO = unset;
       MAILBOX = yes;
       MFD_SYSCON = yes;
+      MMC_SDHCI_PLTFM = yes;
       MTD = yes;
       MTD_BLOCK = yes;
       NVMEM = yes;
@@ -66,7 +68,6 @@
       SPMI = yes;
       SRAM = unset;
       SUSPEND = yes;
-      ARM64_AMU_EXTN = yes;
     }
   );
 }

@@ -69,6 +69,9 @@ in
     KEYS = yes;
     LSM = freeform "integrity";
     LTO_NONE = yes;
+    MMC = yes;
+    MMC_BLOCK = yes;
+    MMC_SDHCI = yes;
     MMU = yes;
     MODULE_SIG_FORMAT = yes;
     MSDOS_FS = yes;

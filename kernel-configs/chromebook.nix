@@ -17,8 +17,6 @@
       HID_VIVALDI = yes;
       I2C_CROS_EC_TUNNEL = yes;
       KEYBOARD_CROS_EC = yes;
-      MMC = yes;
-      MMC_BLOCK = yes;
       TCG_TIS_I2C_CR50 = yes;
       TCG_TIS_SPI = yes;
       TCG_TIS_SPI_CR50 = yes;
