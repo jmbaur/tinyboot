@@ -191,7 +191,10 @@ pub fn signFile(
     key_pass = env.get("TBOOT_SIGN_PIN");
 
     const in_bio = C.BIO_new_file(
-        try arena_alloc.dupeZ(u8, in_file),
+        try arena_alloc.dupeZ(u8, try std.fs.cwd().realpathAlloc(
+            arena_alloc,
+            in_file,
+        )),
         "rb",
     ) orelse {
         displayOpensslErrors(@src());
