@@ -73,8 +73,9 @@ fn drain_openssl_errors() void {
     while (C.ERR_get_error() != 0) {}
 }
 
-fn readPrivateKey(allocator: std.mem.Allocator, filepath: []const u8) !*anyopaque {
-    const filepathZ = try allocator.dupeZ(u8, filepath);
+fn readPrivateKey(arena_alloc: std.mem.Allocator, filepath: []const u8) !*anyopaque {
+    const full_filepath = try std.fs.cwd().realpathAlloc(arena_alloc, filepath);
+    const filepathZ = try arena_alloc.dupeZ(u8, full_filepath);
 
     if (std.mem.startsWith(u8, filepath, "pkcs11:")) {
         C.ENGINE_load_builtin_engines();
@@ -94,7 +95,7 @@ fn readPrivateKey(allocator: std.mem.Allocator, filepath: []const u8) !*anyopaqu
         }
 
         if (key_pass) |pass| {
-            if (C.ENGINE_ctrl_cmd_string(engine, "PIN", try allocator.dupeZ(u8, pass), 0) == 0) {
+            if (C.ENGINE_ctrl_cmd_string(engine, "PIN", try arena_alloc.dupeZ(u8, pass), 0) == 0) {
                 displayOpensslErrors(@src());
                 return error.OpensslError;
             }
@@ -118,8 +119,9 @@ fn readPrivateKey(allocator: std.mem.Allocator, filepath: []const u8) !*anyopaqu
     }
 }
 
-fn readX509(allocator: std.mem.Allocator, filepath: []const u8) !*anyopaque {
-    const filepathZ = try allocator.dupeZ(u8, filepath);
+fn readX509(arena_alloc: std.mem.Allocator, filepath: []const u8) !*anyopaque {
+    const full_filepath = try std.fs.cwd().realpathAlloc(arena_alloc, filepath);
+    const filepathZ = try arena_alloc.dupeZ(u8, full_filepath);
 
     const bio = C.BIO_new_file(filepathZ, "rb") orelse {
         displayOpensslErrors(@src());
@@ -174,7 +176,7 @@ fn displayOpensslErrors(src: std.builtin.SourceLocation) void {
 }
 
 pub fn signFile(
-    allocator: std.mem.Allocator,
+    arena_alloc: std.mem.Allocator,
     in_file: []const u8,
     out_file: []const u8,
     private_key_filepath: []const u8,
@@ -184,12 +186,12 @@ pub fn signFile(
     _ = C.OPENSSL_init_crypto(C.OPENSSL_INIT_LOAD_CRYPTO_STRINGS, null);
     C.ERR_clear_error();
 
-    var env = try std.process.getEnvMap(allocator);
+    var env = try std.process.getEnvMap(arena_alloc);
 
     key_pass = env.get("TBOOT_SIGN_PIN");
 
     const in_bio = C.BIO_new_file(
-        try allocator.dupeZ(u8, in_file),
+        try arena_alloc.dupeZ(u8, in_file),
         "rb",
     ) orelse {
         displayOpensslErrors(@src());
@@ -197,9 +199,9 @@ pub fn signFile(
     };
     defer _ = C.BIO_free(in_bio);
 
-    const private_key = try readPrivateKey(allocator, private_key_filepath);
+    const private_key = try readPrivateKey(arena_alloc, private_key_filepath);
 
-    const public_key = try readX509(allocator, public_key_filepath);
+    const public_key = try readX509(arena_alloc, public_key_filepath);
 
     _ = C.OPENSSL_init_crypto(C.OPENSSL_INIT_ADD_ALL_DIGESTS, null);
     displayOpensslErrors(@src());
@@ -217,7 +219,7 @@ pub fn signFile(
         C.PKCS7_NOCERTS | C.PKCS7_BINARY | C.PKCS7_DETACHED | C.PKCS7_NOATTR,
     );
 
-    const out_bio = C.BIO_new_file(try allocator.dupeZ(u8, out_file), "wb") orelse {
+    const out_bio = C.BIO_new_file(try arena_alloc.dupeZ(u8, out_file), "wb") orelse {
         displayOpensslErrors(@src());
         return error.OpensslError;
     };

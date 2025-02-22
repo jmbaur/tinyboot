@@ -38,36 +38,36 @@ fn ensureFilesystemState(
 }
 
 fn installGeneration(
-    allocator: std.mem.Allocator,
+    arena_alloc: std.mem.Allocator,
     known_files: *StringSet,
     spec: *const BootSpecV1,
     generation: u32,
     esp: std.fs.Dir,
     args: *const Args,
 ) !void {
-    var entry_contents_list = std.ArrayList(u8).init(allocator);
+    var entry_contents_list = std.ArrayList(u8).init(arena_alloc);
 
     const linux_target_filename = try std.fmt.allocPrint(
-        allocator,
+        arena_alloc,
         "{s}-{s}",
         .{ path.basename(path.dirname(spec.kernel).?), path.basename(spec.kernel) },
     );
 
-    const linux_target = try path.join(allocator, &.{
+    const linux_target = try path.join(arena_alloc, &.{
         "EFI",
         "nixos",
         linux_target_filename,
     });
 
     const full_linux_path = try path.join(
-        allocator,
+        arena_alloc,
         &.{ args.efi_sys_mount_point, linux_target },
     );
 
     if (!utils.pathExists(esp, linux_target)) {
         if (!args.dry_run) {
             try signFile(
-                allocator,
+                arena_alloc,
                 args.private_key,
                 args.public_key,
                 spec.kernel,
@@ -83,18 +83,18 @@ fn installGeneration(
     const initrd_target = b: {
         if (spec.initrd) |initrd| {
             const initrd_target_filename = try std.fmt.allocPrint(
-                allocator,
+                arena_alloc,
                 "{s}-{s}",
                 .{ path.basename(path.dirname(initrd).?), path.basename(initrd) },
             );
 
-            const initrd_target = try path.join(allocator, &.{
+            const initrd_target = try path.join(arena_alloc, &.{
                 "EFI",
                 "nixos",
                 initrd_target_filename,
             });
 
-            const full_initrd_path = try path.join(allocator, &.{
+            const full_initrd_path = try path.join(arena_alloc, &.{
                 path.sep_str,
                 args.efi_sys_mount_point,
                 initrd_target,
@@ -103,7 +103,7 @@ fn installGeneration(
             if (!utils.pathExists(esp, initrd_target)) {
                 if (!args.dry_run) {
                     try signFile(
-                        allocator,
+                        arena_alloc,
                         args.private_key,
                         args.public_key,
                         spec.initrd.?,
@@ -122,18 +122,18 @@ fn installGeneration(
         }
     };
 
-    const kernel_params_without_init = try std.mem.join(allocator, " ", spec.kernel_params);
+    const kernel_params_without_init = try std.mem.join(arena_alloc, " ", spec.kernel_params);
 
     const kernel_params = try std.fmt.allocPrint(
-        allocator,
+        arena_alloc,
         "init={s} {s}",
         .{ spec.init, kernel_params_without_init },
     );
 
     const sub_name = if (spec.name) |name|
-        try std.fmt.allocPrint(allocator, " ({s})", .{name})
+        try std.fmt.allocPrint(arena_alloc, " ({s})", .{name})
     else
-        try allocator.alloc(u8, 0);
+        try arena_alloc.alloc(u8, 0);
 
     try entry_contents_list.writer().print("title {s}{s}\n", .{ spec.label, sub_name });
     try entry_contents_list.writer().print("version {s}\n", .{spec.label});
@@ -145,30 +145,30 @@ fn installGeneration(
     const entry_contents = try entry_contents_list.toOwnedSlice();
 
     const sub_entry_name = if (spec.name) |name|
-        try std.fmt.allocPrint(allocator, "-specialisation-{s}", .{name})
+        try std.fmt.allocPrint(arena_alloc, "-specialisation-{s}", .{name})
     else
-        try allocator.alloc(u8, 0);
+        try arena_alloc.alloc(u8, 0);
 
     const entry_name = try std.fmt.allocPrint(
-        allocator,
+        arena_alloc,
         "nixos-generation-{d}{s}",
         .{ generation, sub_entry_name },
     );
 
     const entry_filename_with_counters = try std.fmt.allocPrint(
-        allocator,
+        arena_alloc,
         "{s}+{d}-0.conf",
         .{ entry_name, args.max_tries },
     );
 
-    const entry_path = try path.join(allocator, &.{
+    const entry_path = try path.join(arena_alloc, &.{
         "loader",
         "entries",
         entry_filename_with_counters,
     });
 
     var entries_dir = try esp.openDir(
-        entry_path,
+        "loader/entries",
         .{ .iterate = true },
     );
     defer entries_dir.close();
@@ -183,7 +183,7 @@ fn installGeneration(
 
         if (std.mem.eql(u8, existing_entry.name, entry_name)) {
             std.log.debug("entry {s} already installed", .{entry_name});
-            const known_entry = try path.join(allocator, &.{
+            const known_entry = try path.join(arena_alloc, &.{
                 path.sep_str,
                 args.efi_sys_mount_point,
                 "loader",
@@ -249,7 +249,7 @@ pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
 
-    const allocator = arena.allocator();
+    const arena_alloc = arena.allocator();
 
     const params = comptime clap.parseParamsComptime(
         \\-h, --help              Display this help and exit.
@@ -315,7 +315,7 @@ pub fn main() !void {
     }
 
     if (args.dry_run) {
-        std.log.warn("running a dry run, no filesystem changes will occur", .{});
+        std.log.warn("in dry run mode, no filesystem changes will occur", .{});
     }
 
     const esp = try std.fs.cwd().openDir(args.efi_sys_mount_point, .{
@@ -333,7 +333,7 @@ pub fn main() !void {
     );
     defer nixos_system_profile_dir.close();
 
-    var known_files = StringSet.init(allocator);
+    var known_files = StringSet.init(arena_alloc);
 
     var it = nixos_system_profile_dir.iterate();
     while (try it.next()) |entry| {
@@ -355,7 +355,7 @@ pub fn main() !void {
             }
         };
 
-        const boot_json_path = try path.join(allocator, &.{
+        const boot_json_path = try path.join(arena_alloc, &.{
             entry.name,
             "boot.json",
         });
@@ -363,15 +363,15 @@ pub fn main() !void {
         var boot_json_file = try nixos_system_profile_dir.openFile(boot_json_path, .{});
         defer boot_json_file.close();
 
-        const boot_json_contents = try boot_json_file.readToEndAlloc(allocator, 8192);
+        const boot_json_contents = try boot_json_file.readToEndAlloc(arena_alloc, 8192);
 
-        const boot_json = BootJson.parse(allocator, boot_json_contents) catch |err| {
+        const boot_json = BootJson.parse(arena_alloc, boot_json_contents) catch |err| {
             std.log.err("failed to parse bootspec boot.json: {any}", .{err});
             continue;
         };
 
         try installGeneration(
-            allocator,
+            arena_alloc,
             &known_files,
             &boot_json.spec,
             generation,
@@ -381,7 +381,7 @@ pub fn main() !void {
         if (boot_json.specialisations) |specialisations| {
             for (specialisations) |s| {
                 try installGeneration(
-                    allocator,
+                    arena_alloc,
                     &known_files,
                     &s,
                     generation,
@@ -392,12 +392,12 @@ pub fn main() !void {
         }
 
         if (std.mem.eql(u8, boot_json.spec.toplevel, args.default_nixos_system_closure)) {
-            const loader_conf_path = try path.join(allocator, &.{
+            const loader_conf_path = try path.join(arena_alloc, &.{
                 "loader",
                 "loader.conf",
             });
 
-            const loader_conf_contents = try std.fmt.allocPrint(allocator,
+            const loader_conf_contents = try std.fmt.allocPrint(arena_alloc,
                 \\timeout {d}
                 \\default nixos-generation-{d}
             , .{ args.timeout, generation });
@@ -414,6 +414,6 @@ pub fn main() !void {
         }
     }
 
-    try cleanupDir(allocator, &known_files, esp, "EFI/nixos", &args);
-    try cleanupDir(allocator, &known_files, esp, "loader/entries", &args);
+    try cleanupDir(arena_alloc, &known_files, esp, "EFI/nixos", &args);
+    try cleanupDir(arena_alloc, &known_files, esp, "loader/entries", &args);
 }
