@@ -49,6 +49,7 @@ stdenv.mkDerivation {
     "DTC_FLAGS=-@"
     "KBUILD_BUILD_VERSION=1-tinyboot"
   ];
+  installTargets = [ (if stdenv.hostPlatform.isArmv7 then "zinstall" else "install") ];
   installFlags =
     [ "INSTALL_PATH=$(out)" ]
     ++ lib.optionals stdenv.hostPlatform.isAarch [

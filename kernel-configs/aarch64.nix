@@ -3,6 +3,7 @@
   linux.kconfig = lib.mkIf pkgs.stdenv.hostPlatform.isAarch64 (
     with lib.kernel;
     {
+      "64BIT" = yes;
       ARM64_AMU_EXTN = yes;
       ARM64_ERRATUM_1024718 = yes;
       ARM64_ERRATUM_1165522 = yes;

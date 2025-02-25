@@ -3,6 +3,7 @@
   linux.kconfig = lib.mkIf pkgs.stdenv.hostPlatform.isx86_64 (
     with lib.kernel;
     {
+      "64BIT" = yes;
       ACPI = yes;
       ACPI_BUTTON = yes;
       ACPI_PROCESSOR = yes;

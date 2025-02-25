@@ -4,7 +4,6 @@ let
 in
 {
   linux.kconfig = with lib.kernel; {
-    "64BIT" = yes;
     ASYMMETRIC_KEY_TYPE = yes;
     ASYMMETRIC_PUBLIC_KEY_SUBTYPE = yes;
     ATA = yes;
@@ -27,8 +26,8 @@ in
     DEVMEM = yes;
     DEVTMPFS = yes;
     DMADEVICES = yes;
-    EFI = lib.mkIf efi yes;
-    EFI_STUB = lib.mkIf efi yes;
+    # EFI = lib.mkIf efi yes;
+    # EFI_STUB = lib.mkIf efi yes;
     EPOLL = yes;
     EVENTFD = yes;
     EXPERT = yes;
@@ -52,7 +51,7 @@ in
     IMA_APPRAISE = yes;
     IMA_APPRAISE_MODSIG = yes;
     IMA_DEFAULT_HASH_SHA256 = yes;
-    IMA_KEXEC = yes;
+    # IMA_KEXEC = yes;
     IMA_MEASURE_ASYMMETRIC_KEYS = yes;
     INPUT = yes;
     INPUT_KEYBOARD = yes;
@@ -65,7 +64,7 @@ in
     IRQ_POLL = yes;
     JUMP_LABEL = yes;
     KEXEC = yes;
-    KEXEC_FILE = yes;
+    # KEXEC_FILE = yes;
     KEYS = yes;
     LSM = freeform "integrity";
     LTO_NONE = yes;
@@ -85,7 +84,7 @@ in
     PRINTK = yes;
     PROC_FS = yes;
     RD_XZ = yes;
-    RELOCATABLE = yes; # allows for this kernel itself to be kexec'ed
+    # RELOCATABLE = yes; # allows for this kernel itself to be kexec'ed
     RTC_CLASS = yes;
     SCSI = yes;
     SCSI_LOWLEVEL = yes;
