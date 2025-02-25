@@ -13,14 +13,6 @@
   xz,
 }:
 
-let
-  zigLibc =
-    {
-      "glibc" = "gnu";
-      "musl" = "musl";
-    }
-    .${stdenv.hostPlatform.libc} or "none";
-in
 assert stdenv.hostPlatform.isStatic && stdenv.hostPlatform.libc == "musl";
 assert withTools != withLoader;
 stdenv.mkDerivation {
@@ -56,7 +48,7 @@ stdenv.mkDerivation {
     runHook preConfigure
     export ZIG_GLOBAL_CACHE_DIR=$TEMPDIR
     ln -s ${callPackage ../../build.zig.zon.nix { }} $ZIG_GLOBAL_CACHE_DIR/p
-    zigBuildFlags=("-Dloader=${lib.boolToString withLoader}" "-Dtools=${lib.boolToString withTools}" "--release=safe" "-Dtarget=${stdenv.hostPlatform.qemuArch}-${stdenv.hostPlatform.parsed.kernel.name}-${zigLibc}")
+    zigBuildFlags=("-Dloader=${lib.boolToString withLoader}" "-Dtools=${lib.boolToString withTools}" "--release=safe" "-Dtarget=${stdenv.hostPlatform.qemuArch}-${stdenv.hostPlatform.parsed.kernel.name}")
     zigBuildFlags+=("-Ddynamic-linker=$(echo ${stdenv.cc.bintools.dynamicLinker})") # can contain a glob
     ${lib.optionalString (firmwareDirectory != null) ''
       zigBuildFlags+=("-Dfirmware-directory=${firmwareDirectory}")
