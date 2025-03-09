@@ -1,14 +1,7 @@
 {
   description = "A small linuxboot payload for coreboot";
 
-  inputs = {
-    nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
-    zig-overlay.inputs.nixpkgs.follows = "nixpkgs";
-    zig-overlay.url = "github:mitchellh/zig-overlay";
-    zls.inputs.nixpkgs.follows = "nixpkgs";
-    zls.inputs.zig-overlay.follows = "zig-overlay";
-    zls.url = "github:zigtools/zls";
-  };
+  inputs.nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
 
   outputs = inputs: {
     formatter = inputs.nixpkgs.lib.mapAttrs (_: pkgs: pkgs.nixfmt-rfc-style) inputs.self.legacyPackages;
@@ -20,7 +13,6 @@
       final: prev:
       (
         {
-          zigForTinyboot = inputs.zig-overlay.packages.${final.stdenv.buildPlatform.system}.master;
           tinybootTools = final.pkgsStatic.callPackage ./pkgs/tinyboot {
             withLoader = false;
             withTools = true;
@@ -69,10 +61,9 @@
       default = pkgs.mkShell {
         inputsFrom = [ pkgs.tinybootLoader ];
         packages = [
-          inputs.zls.packages.${pkgs.stdenv.hostPlatform.system}.default
           pkgs.qemu
           pkgs.swtpm
-        ];
+        ] ++ pkgs.tinybootLoader.depsBuildBuild; # depsBuildBuild not inherited by inputsFrom
         env.TINYBOOT_KERNEL = ''${pkgs."tinyboot-qemu-${pkgs.stdenv.hostPlatform.qemuArch}".linux}/kernel'';
       };
     }) inputs.self.legacyPackages;

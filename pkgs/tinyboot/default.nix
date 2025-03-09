@@ -1,16 +1,16 @@
 {
   firmwareDirectory ? null,
-  tinybootTools,
   withLoader,
   withTools,
-  zigForTinyboot,
 
   callPackage,
   lib,
   openssl,
   pkg-config,
   stdenv,
+  tinybootTools,
   xz,
+  zig_0_14,
 }:
 
 assert stdenv.hostPlatform.isStatic && stdenv.hostPlatform.libc == "musl";
@@ -31,10 +31,8 @@ stdenv.mkDerivation {
 
   strictDeps = true;
 
-  nativeBuildInputs = [
-    pkg-config
-    zigForTinyboot
-  ] ++ lib.optional (!withTools) tinybootTools;
+  depsBuildBuild = [ zig_0_14 ];
+  nativeBuildInputs = [ pkg-config ] ++ lib.optional (!withTools) tinybootTools;
 
   buildInputs =
     lib.optional withTools openssl # tboot-sign
