@@ -78,7 +78,7 @@ fn installGeneration(
         std.log.info("installed {s}", .{full_linux_path});
     }
 
-    try known_files.put(full_linux_path, {});
+    try known_files.put(linux_target, {});
 
     const initrd_target = b: {
         if (spec.initrd) |initrd| {
@@ -114,7 +114,7 @@ fn installGeneration(
                 std.log.info("installed {s}", .{full_initrd_path});
             }
 
-            try known_files.put(full_initrd_path, {});
+            try known_files.put(initrd_target, {});
 
             break :b initrd_target;
         } else {
@@ -178,8 +178,6 @@ fn installGeneration(
         if (std.mem.eql(u8, existing_entry.name, entry_name)) {
             std.log.debug("entry {s} already installed", .{entry_name});
             const known_entry = try path.join(arena_alloc, &.{
-                path.sep_str,
-                args.efi_sys_mount_point,
                 "loader",
                 "entries",
                 dir_entry.name,
@@ -210,22 +208,23 @@ fn installGeneration(
 }
 
 fn cleanupDir(
-    alloc: std.mem.Allocator,
+    arena_alloc: std.mem.Allocator,
     known_files: *StringSet,
     parent_dir: std.fs.Dir,
     dir: []const u8,
     args: *const Args,
 ) !void {
-    var open_dir = try parent_dir.openDir(dir, .{ .iterate = true });
-    defer open_dir.close();
+    var cleanup_dir = try parent_dir.openDir(dir, .{ .iterate = true });
+    defer cleanup_dir.close();
 
-    var it = open_dir.iterate();
+    var it = cleanup_dir.iterate();
     while (try it.next()) |entry| {
         if (entry.kind != .file) {
             continue;
         }
 
-        const full_path = try path.join(alloc, &.{ path.sep_str, dir, entry.name });
+        const full_path = try cleanup_dir.realpathAlloc(arena_alloc, entry.name);
+        const full_path = try path.join(arena_alloc, &.{ path.sep_str, dir, entry.name });
 
         if (known_files.get(full_path) == null) {
             if (!args.dry_run) {
