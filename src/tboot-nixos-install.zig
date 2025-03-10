@@ -68,10 +68,10 @@ fn installGeneration(
         if (!args.dry_run) {
             try signFile(
                 arena_alloc,
-                args.private_key,
-                args.public_key,
                 spec.kernel,
                 full_linux_path,
+                args.private_key,
+                args.public_key,
             );
             std.log.info("signed {s}", .{full_linux_path});
         }
@@ -104,10 +104,10 @@ fn installGeneration(
                 if (!args.dry_run) {
                     try signFile(
                         arena_alloc,
+                        initrd,
+                        full_initrd_path,
                         args.private_key,
                         args.public_key,
-                        spec.initrd.?,
-                        full_initrd_path,
                     );
                     std.log.info("signed {s}", .{full_initrd_path});
                 }
