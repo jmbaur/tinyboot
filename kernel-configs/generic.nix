@@ -84,8 +84,6 @@ in
     NLS_ISO8859_1 = yes;
     PCI = yes;
     PINCTRL = yes;
-    PINCONF = yes;
-    GENERIC_PINCONF = yes;
     PRINTK = yes;
     PROC_FS = yes;
     RD_XZ = yes;
