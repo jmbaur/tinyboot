@@ -106,8 +106,9 @@ in
       }
       (lib.mkIf cfg.coreboot.enable {
         environment.systemPackages = [
-          pkgs.cbmem
           pkgs.cbfstool
+          pkgs.cbmem
+          pkgs.tinybootTools
         ];
 
         programs.flashrom = {
