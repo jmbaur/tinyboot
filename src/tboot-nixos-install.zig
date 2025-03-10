@@ -161,12 +161,6 @@ fn installGeneration(
         .{ entry_name, args.max_tries },
     );
 
-    const entry_path = try path.join(arena_alloc, &.{
-        "loader",
-        "entries",
-        entry_filename_with_counters,
-    });
-
     var entries_dir = try esp.openDir(
         "loader/entries",
         .{ .iterate = true },
@@ -195,8 +189,17 @@ fn installGeneration(
         }
     }
 
+    // TODO(jared): There doesn't appear to be a way in the zig standard
+    // library to obtain the "realpath" of a filepath if the path doesn't
+    // actually exist.
+    const entry_path = try path.join(arena_alloc, &.{
+        "loader",
+        "entries",
+        entry_filename_with_counters,
+    });
+
     if (!args.dry_run) {
-        var entry_file = try std.fs.cwd().createFile(entry_path, .{});
+        var entry_file = try entries_dir.createFile(entry_filename_with_counters, .{});
         defer entry_file.close();
 
         try entry_file.writeAll(entry_contents);
