@@ -88,7 +88,7 @@ pub fn probe(
     // All GPTs also have an MBR, so we can invalidate the disk
     // entirely if it does not have an MBR.
     var mbr = Mbr.init(&disk_source) catch |err| {
-        std.log.err("no MBR found on disk {s}: {}", .{ disk_device, err });
+        std.log.warn("no MBR found on disk {s}: {}", .{ disk_device, err });
         return;
     };
 

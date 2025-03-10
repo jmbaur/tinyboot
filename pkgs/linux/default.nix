@@ -23,8 +23,8 @@ stdenv.mkDerivation {
   inherit kconfig;
   passAsFile = [ "kconfig" ];
   postConfigure = ''
-    cat $kconfigPath $extraConfigPath > all.config
-    make -j$NIX_BUILD_CORES ARCH=${stdenv.hostPlatform.linuxArch} KCONFIG_ALLCONFIG=1 allnoconfig
+    cat $kconfigPath >all.config
+    make -j$NIX_BUILD_CORES $makeFlags KCONFIG_ALLCONFIG=1 allnoconfig
 
     start_config=all.config
     end_config=.config

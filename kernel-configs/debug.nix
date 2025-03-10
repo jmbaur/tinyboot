@@ -15,7 +15,7 @@ in
       FTRACE = yes;
       GENERIC_BUG = yes;
       IKCONFIG = yes;
-      KALLSYMS = yes;
+      KALLSYMS_ALL = yes;
       SERIAL_EARLYCON = yes;
       SYMBOLIC_ERRNAME = yes;
     }

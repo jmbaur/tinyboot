@@ -72,6 +72,8 @@ in
     MMC = yes;
     MMC_BLOCK = yes;
     MMC_SDHCI = yes;
+    MMC_CQHCI = yes;
+    MMC_HSQ = yes;
     MMU = yes;
     MODULE_SIG_FORMAT = yes;
     MSDOS_FS = yes;
@@ -82,6 +84,8 @@ in
     NLS_ISO8859_1 = yes;
     PCI = yes;
     PINCTRL = yes;
+    PINCONF = yes;
+    GENERIC_PINCONF = yes;
     PRINTK = yes;
     PROC_FS = yes;
     RD_XZ = yes;
