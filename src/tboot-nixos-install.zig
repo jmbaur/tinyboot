@@ -161,6 +161,12 @@ fn installGeneration(
         .{ entry_name, args.max_tries },
     );
 
+    const entry_path = try path.join(arena_alloc, &.{
+        "loader",
+        "entries",
+        entry_filename_with_counters,
+    });
+
     var entries_dir = try esp.openDir(
         "loader/entries",
         .{ .iterate = true },
@@ -189,17 +195,12 @@ fn installGeneration(
         }
     }
 
-    const entry_path = try entries_dir.realpathAlloc(arena_alloc, entry_filename_with_counters);
-
     if (!args.dry_run) {
-        var entry_file = try entries_dir.createFile(entry_filename_with_counters, .{});
+        var entry_file = try std.fs.cwd().createFile(entry_path, .{});
         defer entry_file.close();
 
         try entry_file.writeAll(entry_contents);
-        try known_files.put(
-            try entries_dir.realpathAlloc(arena_alloc, entry_filename_with_counters),
-            {},
-        );
+        try known_files.put(entry_path, {});
     }
 
     std.log.info("installed {s}", .{entry_path});
@@ -314,7 +315,7 @@ pub fn main() !void {
     }
 
     if (args.dry_run) {
-        std.log.warn("running in dry run mode, no filesystem changes will occur", .{});
+        std.log.warn("in dry run mode, no filesystem changes will occur", .{});
     }
 
     const esp = try std.fs.cwd().openDir(args.efi_sys_mount_point, .{
