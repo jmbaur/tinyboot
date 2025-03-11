@@ -1,12 +1,13 @@
 { lib, pkgs, ... }:
+let
+  tinyboot = pkgs."tinyboot-qemu-${pkgs.stdenv.hostPlatform.qemuArch}";
+in
 {
   virtualisation = {
     directBoot.enable = false;
-
-    # The bios option wants a package with a bios.bin file in it.
-    bios = pkgs.runCommand "tinyboot-bios.bin" { } ''
-      install -D ${pkgs."tinyboot-qemu-${pkgs.stdenv.hostPlatform.qemuArch}"} $out/bios.bin
-    '';
-    qemu.options = lib.optionals pkgs.stdenv.hostPlatform.isx86_64 [ "-machine q35" ];
+    qemu.options = [
+      "-kernel ${tinyboot.linux}/kernel"
+      "-initrd ${tinyboot.initrd}/tboot-loader.cpio"
+    ] ++ lib.optionals pkgs.stdenv.hostPlatform.isx86_64 [ "-machine q35" ];
   };
 }
