@@ -26,6 +26,8 @@
       ARM_PSCI_CPUIDLE = yes;
       ARM_PSCI_FW = yes;
       ARM_SCMI_PROTOCOL = yes;
+      ARM_SCMI_TRANSPORT_MAILBOX = yes;
+      ARM_SCMI_TRANSPORT_SMC = yes;
       ARM_SCPI_PROTOCOL = yes;
       ARM_SMMU = yes;
       ARM_SMMU_V3 = yes;

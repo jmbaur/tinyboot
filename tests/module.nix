@@ -4,6 +4,7 @@ let
 in
 {
   virtualisation = {
+    graphics = false;
     directBoot.enable = false;
     qemu.options = [
       "-kernel ${tinyboot.linux}/kernel"

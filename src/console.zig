@@ -672,8 +672,8 @@ pub fn handleStdin(self: *Console, boot_loaders: []*BootLoader) !?Event {
     // We may already have a prompt from a boot timeout, so don't print
     // a prompt if we already have one.
     if (self.tty == null) {
+        try system.setConsole(.off);
         self.tty = try system.setupTty(IN, .user_input);
-        std.log.debug("user presence detected", .{});
         self.shell.prompt(self.context);
     }
 

@@ -12,7 +12,7 @@
     debug = true;
     linux = {
       kconfig = with lib.kernel; {
-        GPIOLIB = yes;
+        ARM_SCMI_TRANSPORT_VIRTIO = yes;
         GPIO_PL061 = yes;
         MEMORY_HOTPLUG = yes;
         MEMORY_HOTREMOVE = yes;

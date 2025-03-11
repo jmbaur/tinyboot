@@ -285,6 +285,13 @@ fn run(self: *TbootLoader) !posix.RebootCommand {
                 if (self.handleTimer()) |outcome| {
                     return outcome;
                 }
+                // Autobooting did not work, thus we go into user input mode.
+                // This will block on console input, though that is fine
+                // because we don't have anything else to try since we've
+                // already tried autobooting.
+                else if (try self.handleConsoleInput()) |outcome| {
+                    return outcome;
+                }
             } else {
                 std.debug.panic("unknown event: {}", .{event});
             }
