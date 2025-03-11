@@ -1,6 +1,6 @@
 const std = @import("std");
 
-pub fn pathExists(d: std.fs.Dir, p: []const u8) bool {
+pub fn pathExists(d: *std.fs.Dir, p: []const u8) bool {
     d.access(p, .{}) catch {
         return false;
     };

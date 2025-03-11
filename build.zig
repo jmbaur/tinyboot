@@ -1,5 +1,5 @@
 const std = @import("std");
-const utils = @import("./src/utils.zig");
+const zig = std.zig;
 
 const TBOOT_INITRD_NAME = "tboot-initrd";
 
@@ -13,7 +13,7 @@ pub fn build(b: *std.Build) !void {
         },
     );
 
-    const is_native_build = std.zig.system.getExternalExecutor(
+    const is_native_build = zig.system.getExternalExecutor(
         b.graph.host.result,
         &target.result,
         .{},

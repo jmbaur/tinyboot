@@ -1,9 +1,7 @@
 const std = @import("std");
-const posix = std.posix;
-
-const linux_headers = @import("linux_headers");
 
 const Device = @import("../device.zig");
+const kexec = @import("./kexec.zig").kexec;
 
 const BootLoader = @This();
 
@@ -144,111 +142,7 @@ pub fn probe(self: *BootLoader) ![]const Entry {
 pub fn load(self: *BootLoader, entry: Entry) !void {
     self.boot_attempted = true;
 
-    try kexecLoad(self.allocator, entry.linux, entry.initrd, entry.cmdline);
+    try kexec(self.allocator, entry.linux, entry.initrd, entry.cmdline);
 
     self.vtable.entryLoaded(self.inner, entry);
-}
-
-const KEXEC_LOADED = "/sys/kernel/kexec_loaded";
-
-fn kexecIsLoaded(f: std.fs.File) bool {
-    f.seekTo(0) catch return false;
-
-    return (f.reader().readByte() catch return false) == '1';
-}
-
-fn kexecLoad(
-    allocator: std.mem.Allocator,
-    linux_filepath: []const u8,
-    initrd_filepath: ?[]const u8,
-    cmdline: ?[]const u8,
-) !void {
-    std.log.info("preparing kexec", .{});
-    std.log.info("loading linux {s}", .{linux_filepath});
-    std.log.info("loading initrd {s}", .{initrd_filepath orelse "<none>"});
-    std.log.info("loading params {s}", .{cmdline orelse "<none>"});
-
-    // Use a constant path for the kernel and initrd so that the IMA events
-    // don't have differing random temporary paths each boot.
-    std.fs.cwd().makeDir("/tinyboot") catch |err| switch (err) {
-        error.PathAlreadyExists => {},
-        else => return err,
-    };
-    var boot_dir = try std.fs.cwd().openDir("/tinyboot", .{});
-    defer {
-        boot_dir.close();
-        std.fs.cwd().deleteTree("/tinyboot") catch {};
-    }
-
-    try std.fs.cwd().copyFile(linux_filepath, std.fs.cwd(), "/tinyboot/kernel", .{});
-    if (initrd_filepath) |initrd| {
-        try std.fs.cwd().copyFile(initrd, std.fs.cwd(), "/tinyboot/initrd", .{});
-    }
-
-    const linux = try std.fs.cwd().openFile("/tinyboot/kernel", .{});
-    defer linux.close();
-
-    const linux_fd = @as(usize, @bitCast(@as(isize, linux.handle)));
-
-    const initrd_fd = b: {
-        if (initrd_filepath != null) {
-            const file = try std.fs.cwd().openFile("/tinyboot/initrd", .{});
-
-            break :b file.handle;
-        } else {
-            break :b 0;
-        }
-    };
-
-    defer {
-        if (initrd_fd != 0) {
-            posix.close(initrd_fd);
-        }
-    }
-
-    var flags: usize = 0;
-    if (initrd_filepath == null) {
-        flags |= linux_headers.KEXEC_FILE_NO_INITRAMFS;
-    }
-
-    // dupeZ() returns a null-terminated slice, however the null-terminator
-    // is not included in the length of the slice, so we must add 1.
-    const cmdline_z = try allocator.dupeZ(u8, cmdline orelse "");
-    defer allocator.free(cmdline_z);
-    const cmdline_len = cmdline_z.len + 1;
-
-    const rc = std.os.linux.syscall5(
-        .kexec_file_load,
-        linux_fd,
-        @as(usize, @bitCast(@as(isize, initrd_fd))),
-        cmdline_len,
-        @intFromPtr(cmdline_z.ptr),
-        flags,
-    );
-
-    switch (posix.errno(rc)) {
-        .SUCCESS => {},
-        // IMA appraisal failed
-        .ACCES => return error.PermissionDenied,
-        // Invalid kernel image (CONFIG_RELOCATABLE not enabled?)
-        .NOEXEC => return error.InvalidExe,
-        // Another image is already loaded
-        .BUSY => return error.FilesAlreadyRegistered,
-        .NOMEM => return error.SystemResources,
-        .BADF => return error.InvalidFileDescriptor,
-        else => |err| {
-            std.log.err("kexec load failed for unknown reason: {}", .{err});
-            return posix.unexpectedErrno(err);
-        },
-    }
-
-    // Wait for up to a second for kernel to report for kexec to be loaded.
-    var i: u8 = 10;
-    var f = try std.fs.cwd().openFile(KEXEC_LOADED, .{});
-    defer f.close();
-    while (!kexecIsLoaded(f) and i > 0) : (i -= 1) {
-        std.time.sleep(100 * std.time.ns_per_ms);
-    }
-
-    std.log.info("kexec loaded", .{});
 }
