@@ -69,7 +69,7 @@
                       {
                         _module.args.pkgs = import inputs.nixpkgs (
                           {
-                            localSystem = system;
+                            inherit localSystem;
                             overlays = [ inputs.self.overlays.default ];
                           }
                           // lib.optionalAttrs (!(lib.systems.equals localSystem crossSystem)) {
