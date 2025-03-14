@@ -91,8 +91,6 @@ fn installImaPolicy(policy: []const u8) !void {
     try policy_file.writeAll(policy);
 }
 
-const TEST_KEY = @embedFile("test_key");
-
 const MAX_KEY_SIZE = 8192;
 
 // The public key is held in VPD as a base64 encoded string.
@@ -146,10 +144,6 @@ fn loadVerificationKey(allocator: std.mem.Allocator) !void {
             const key_id = try addKey(keyring_id, pubkey);
 
             std.log.info("added verification key (id=0x{x})", .{key_id});
-
-            if (std.mem.eql(u8, pubkey, TEST_KEY)) {
-                std.log.warn("test key in use!", .{});
-            }
 
             return;
         } else |err| switch (err) {

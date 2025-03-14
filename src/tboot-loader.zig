@@ -289,8 +289,10 @@ fn run(self: *TbootLoader) !posix.RebootCommand {
                 // This will block on console input, though that is fine
                 // because we don't have anything else to try since we've
                 // already tried autobooting.
-                else if (try self.handleConsoleInput()) |outcome| {
-                    return outcome;
+                else if (self.state == .user_input) {
+                    if (try self.handleConsoleInput()) |outcome| {
+                        return outcome;
+                    }
                 }
             } else {
                 std.debug.panic("unknown event: {}", .{event});
@@ -345,5 +347,4 @@ pub fn main() !void {
     // reboot.
     var futex = std.atomic.Value(u32).init(0);
     while (true) std.Thread.Futex.wait(&futex, 0);
-    unreachable;
 }

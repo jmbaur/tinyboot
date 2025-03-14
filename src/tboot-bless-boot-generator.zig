@@ -7,6 +7,7 @@ pub const std_options = std.Options{ .log_level = if (builtin.mode == .Debug) .d
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
+
     const allocator = arena.allocator();
 
     const params = comptime clap.parseParamsComptime(

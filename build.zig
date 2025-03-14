@@ -4,6 +4,9 @@ const zig = std.zig;
 const TBOOT_INITRD_NAME = "tboot-initrd";
 
 pub fn build(b: *std.Build) !void {
+    var env = try std.process.getEnvMap(b.allocator);
+    defer env.deinit();
+
     const target = b.standardTargetOptions(
         .{
             .default_target = .{
@@ -36,6 +39,8 @@ pub fn build(b: *std.Build) !void {
         "firmware-directory",
         "Firmware directory",
     );
+    const runner_keydir = b.option([]const u8, "keydir", "Directory of keys to use when spawning VM runner (as output by tboot-keygen)");
+    const runner_kernel = b.option([]const u8, "kernel", "Kernel to use when spawning VM runner") orelse env.get("TINYBOOT_KERNEL");
 
     const clap = b.dependency("clap", .{});
 
@@ -113,6 +118,18 @@ pub fn build(b: *std.Build) !void {
         tboot_sign.root_module.addImport("clap", clap.module("clap"));
         b.installArtifact(tboot_sign);
 
+        const tboot_keygen = b.addExecutable(.{
+            .name = "tboot-keygen",
+            .root_source_file = b.path("src/tboot-keygen.zig"),
+            .target = target,
+            .optimize = optimize,
+            .strip = do_strip,
+        });
+        tboot_keygen.linkLibC();
+        tboot_keygen.linkSystemLibrary("libcrypto");
+        tboot_keygen.root_module.addImport("clap", clap.module("clap"));
+        b.installArtifact(tboot_keygen);
+
         const tboot_nixos_install = b.addExecutable(.{
             .name = "tboot-nixos-install",
             .root_source_file = b.path("src/tboot-nixos-install.zig"),
@@ -155,9 +172,6 @@ pub fn build(b: *std.Build) !void {
             .target = target,
             .optimize = tboot_loader_optimize,
             .strip = do_strip,
-        });
-        tboot_loader.root_module.addAnonymousImport("test_key", .{
-            .root_source_file = b.path("tests/keys/tboot/key.der"),
         });
         tboot_loader.root_module.addImport("linux_headers", linux_headers_module);
 
@@ -203,24 +217,25 @@ pub fn build(b: *std.Build) !void {
         // install the cpio archive during "zig build install"
         b.getInstallStep().dependOn(&cpio_archive.step);
 
-        const runner_tool = b.addRunArtifact(b.addExecutable(.{
+        const tboot_runner = b.addExecutable(.{
             .name = "tboot-runner",
             .target = b.graph.host,
             .root_source_file = b.path("src/runner.zig"),
-        }));
+        });
+        tboot_runner.root_module.addImport("clap", clap.module("clap"));
+        const runner_tool = b.addRunArtifact(tboot_runner);
         runner_tool.step.dependOn(&cpio_archive.step);
+        runner_tool.addArg(@tagName(target.result.cpu.arch));
         runner_tool.addArg(b.makeTempPath());
+        runner_tool.addArg(if (runner_keydir) |keydir| keydir else "");
         runner_tool.addFileArg(cpio_archive.source);
+        runner_tool.addArg(if (runner_kernel) |kernel| kernel else "");
 
-        var env = try std.process.getEnvMap(b.allocator);
-        defer env.deinit();
-
-        if (env.get("TINYBOOT_KERNEL")) |kernel| {
-            runner_tool.addArg(kernel);
-        }
-
-        // extra args passed through to qemu
+        // Extra arguments passed through to qemu. We add our own '--' since
+        // zig-clap will accept variadic extra arguments only after the
+        // '--', which `zig build ...` already excepts.
         if (b.args) |args| {
+            runner_tool.addArg("--");
             runner_tool.addArgs(args);
         }
 

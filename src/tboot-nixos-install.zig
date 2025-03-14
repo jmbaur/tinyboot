@@ -53,8 +53,6 @@ fn installGeneration(
     generation: u32,
     args: *const Args,
 ) !void {
-    _ = nixos_dir;
-
     var entry_contents_list = std.ArrayList(u8).init(arena_alloc);
 
     const linux_target_filename = try std.fmt.allocPrint(
@@ -79,15 +77,26 @@ fn installGeneration(
 
     if (!utils.pathExists(esp, linux_target)) {
         if (!args.dry_run) {
-            try signFile(
-                arena_alloc,
-                spec.kernel,
-                full_linux_path,
-                args.private_key,
-                args.public_key,
-            );
-            std.log.info("signed {s}", .{linux_target_filename});
+            if (args.sign) |sign| {
+                try signFile(
+                    arena_alloc,
+                    spec.kernel,
+                    full_linux_path,
+                    sign.private_key,
+                    sign.public_key,
+                );
+
+                std.log.info("signed {s}", .{linux_target_filename});
+            } else {
+                try std.fs.cwd().copyFile(
+                    spec.kernel,
+                    nixos_dir.*,
+                    linux_target_filename,
+                    .{},
+                );
+            }
         }
+
         std.log.info("installed {s}", .{linux_target_filename});
     }
 
@@ -117,15 +126,24 @@ fn installGeneration(
 
             if (!utils.pathExists(esp, initrd_target)) {
                 if (!args.dry_run) {
-                    try signFile(
-                        arena_alloc,
-                        initrd,
-                        full_initrd_path,
-                        args.private_key,
-                        args.public_key,
-                    );
+                    if (args.sign) |sign| {
+                        try signFile(
+                            arena_alloc,
+                            initrd,
+                            full_initrd_path,
+                            sign.private_key,
+                            sign.public_key,
+                        );
 
-                    std.log.info("signed {s}", .{initrd_target_filename});
+                        std.log.info("signed {s}", .{initrd_target_filename});
+                    } else {
+                        try std.fs.cwd().copyFile(
+                            initrd,
+                            nixos_dir.*,
+                            initrd_target_filename,
+                            .{},
+                        );
+                    }
                 }
 
                 std.log.info("installed {s}", .{initrd_target_filename});
@@ -230,9 +248,13 @@ fn cleanupDir(
 
 const StringSet = std.StringHashMap(void);
 
-const Args = struct {
+const SignArgs = struct {
     private_key: []const u8,
     public_key: []const u8,
+};
+
+const Args = struct {
+    sign: ?SignArgs = null,
     efi_sys_mount_point: []const u8 = std.fs.path.sep_str ++ "boot",
     max_tries: u8 = 3,
     timeout: u8 = 5,
@@ -250,7 +272,7 @@ pub fn main() !void {
         \\-h, --help              Display this help and exit.
         \\--dry-run               Don't make any modifications to the filesystem.
         \\--private-key <FILE>    Private key to sign with.
-        \\--public-key  <FILE>    Public key to sign with.
+        \\--certificate <FILE>    X509 certificate to sign with.
         \\--esp-mnt <DIR>         UEFI system partition mountpoint (default /boot).
         \\--max-tries <NUM>       Maximum number of boot attempts (default 3).
         \\--timeout <NUM>         Bootloader timeout (default 5).
@@ -281,7 +303,7 @@ pub fn main() !void {
         return clap.help(std.io.getStdErr().writer(), clap.Help, &params, .{});
     }
 
-    if (res.positionals[0] == null or res.args.@"private-key" == null or res.args.@"public-key" == null) {
+    if (res.positionals[0] == null or res.args.@"private-key" == null or res.args.certificate == null) {
         try diag.report(stderr, error.InvalidArgument);
         try clap.usage(stderr, clap.Help, &params);
         return;
@@ -289,9 +311,26 @@ pub fn main() !void {
 
     var args = Args{
         .default_nixos_system_closure = res.positionals[0].?,
-        .private_key = res.args.@"private-key".?,
-        .public_key = res.args.@"public-key".?,
     };
+
+    // If a private or public key is provided but the other corresponding key
+    // is not provided, error out.
+    if ((res.args.@"private-key" == null) !=
+        (res.args.certificate == null))
+    {
+        try diag.report(stderr, error.InvalidArgument);
+        try clap.usage(stderr, clap.Help, &params);
+        return;
+    }
+
+    if (res.args.@"private-key" != null and
+        res.args.certificate != null)
+    {
+        args.sign = .{
+            .private_key = res.args.@"private-key".?,
+            .public_key = res.args.certificate.?,
+        };
+    }
 
     if (res.args.@"dry-run" > 0) {
         args.dry_run = true;

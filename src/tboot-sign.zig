@@ -2,6 +2,8 @@ const builtin = @import("builtin");
 const std = @import("std");
 const clap = @import("clap");
 
+const openssl = @import("./openssl.zig");
+
 const C = @cImport({
     @cInclude("openssl/opensslv.h");
     @cInclude("openssl/bio.h");
@@ -65,14 +67,6 @@ fn pemPasswordCallback(buff: [*c]u8, len: c_int, w: c_int, v: ?*anyopaque) callc
     }
 }
 
-fn drain_openssl_errors() void {
-    if (C.ERR_peek_error() == 0) {
-        return;
-    }
-
-    while (C.ERR_get_error() != 0) {}
-}
-
 fn readPrivateKey(arena_alloc: std.mem.Allocator, filepath: []const u8) !*anyopaque {
     const full_filepath = try std.fs.cwd().realpathAlloc(arena_alloc, filepath);
     const filepathZ = try arena_alloc.dupeZ(u8, full_filepath);
@@ -80,40 +74,40 @@ fn readPrivateKey(arena_alloc: std.mem.Allocator, filepath: []const u8) !*anyopa
     if (std.mem.startsWith(u8, filepath, "pkcs11:")) {
         C.ENGINE_load_builtin_engines();
 
-        drain_openssl_errors();
+        openssl.drainOpensslErrors();
 
         const engine = C.ENGINE_by_id("pkcs11") orelse {
-            displayOpensslErrors(@src());
+            openssl.displayOpensslErrors(@src());
             return error.OpensslError;
         };
 
         if (C.ENGINE_init(engine) == 0) {
-            drain_openssl_errors();
+            openssl.drainOpensslErrors();
         } else {
-            displayOpensslErrors(@src());
+            openssl.displayOpensslErrors(@src());
             return error.OpensslError;
         }
 
         if (key_pass) |pass| {
             if (C.ENGINE_ctrl_cmd_string(engine, "PIN", try arena_alloc.dupeZ(u8, pass), 0) == 0) {
-                displayOpensslErrors(@src());
+                openssl.displayOpensslErrors(@src());
                 return error.OpensslError;
             }
         }
 
         return C.ENGINE_load_private_key(engine, filepathZ, null, null) orelse {
-            displayOpensslErrors(@src());
+            openssl.displayOpensslErrors(@src());
             return error.OpensslError;
         };
     } else {
         const b = C.BIO_new_file(filepathZ, "rb") orelse {
-            displayOpensslErrors(@src());
+            openssl.displayOpensslErrors(@src());
             return error.OpensslError;
         };
         defer _ = C.BIO_free(b);
 
         return C.PEM_read_bio_PrivateKey(b, null, pemPasswordCallback, null) orelse {
-            displayOpensslErrors(@src());
+            openssl.displayOpensslErrors(@src());
             return error.OpensslError;
         };
     }
@@ -124,7 +118,7 @@ fn readX509(arena_alloc: std.mem.Allocator, filepath: []const u8) !*anyopaque {
     const filepathZ = try arena_alloc.dupeZ(u8, full_filepath);
 
     const bio = C.BIO_new_file(filepathZ, "rb") orelse {
-        displayOpensslErrors(@src());
+        openssl.displayOpensslErrors(@src());
         return error.OpensslError;
     };
     defer _ = C.BIO_free(bio);
@@ -132,46 +126,26 @@ fn readX509(arena_alloc: std.mem.Allocator, filepath: []const u8) !*anyopaque {
     var buf: [2]u8 = undefined;
     const n_read = C.BIO_read(bio, &buf, 2);
     if (n_read != 2) {
-        displayOpensslErrors(@src());
+        openssl.displayOpensslErrors(@src());
         return error.OpensslError;
     }
 
     if (C.BIO_reset(bio) != 0) {
-        displayOpensslErrors(@src());
+        openssl.displayOpensslErrors(@src());
         return error.OpensslError;
     }
 
     if (buf[0] == 0x30 and buf[1] >= 0x81 and buf[1] <= 0x84) {
         // Using DER encoding
         return C.d2i_X509_bio(bio, null) orelse {
-            displayOpensslErrors(@src());
+            openssl.displayOpensslErrors(@src());
             return error.OpensslError;
         };
     } else {
         return C.PEM_read_bio_X509(bio, null, null, null) orelse {
-            displayOpensslErrors(@src());
+            openssl.displayOpensslErrors(@src());
             return error.OpensslError;
         };
-    }
-}
-
-fn displayOpensslErrors(src: std.builtin.SourceLocation) void {
-    if (C.ERR_peek_error() == 0) {
-        return;
-    }
-
-    var stderr = std.io.getStdErr().writer();
-    stderr.print("OpenSSL error at {s}:{}:\n", .{ src.file, src.line }) catch unreachable;
-
-    var buff = [_]u8{0} ** 1024;
-
-    while (true) {
-        const rc = C.ERR_get_error();
-        if (rc == 0) {
-            break;
-        }
-        _ = C.ERR_error_string(rc, &buff);
-        stderr.print("- {s}\n", .{buff}) catch unreachable;
     }
 }
 
@@ -180,7 +154,7 @@ pub fn signFile(
     in_file: []const u8,
     out_file: []const u8,
     private_key_filepath: []const u8,
-    public_key_filepath: []const u8,
+    certificate_filepath: []const u8,
 ) !void {
     _ = C.OPENSSL_init_crypto(C.OPENSSL_INIT_ADD_ALL_CIPHERS | C.OPENSSL_INIT_ADD_ALL_DIGESTS, null);
     _ = C.OPENSSL_init_crypto(C.OPENSSL_INIT_LOAD_CRYPTO_STRINGS, null);
@@ -197,25 +171,25 @@ pub fn signFile(
         )),
         "rb",
     ) orelse {
-        displayOpensslErrors(@src());
+        openssl.displayOpensslErrors(@src());
         return error.OpensslError;
     };
     defer _ = C.BIO_free(in_bio);
 
     const private_key = try readPrivateKey(arena_alloc, private_key_filepath);
 
-    const public_key = try readX509(arena_alloc, public_key_filepath);
+    const certificate = try readX509(arena_alloc, certificate_filepath);
 
     _ = C.OPENSSL_init_crypto(C.OPENSSL_INIT_ADD_ALL_DIGESTS, null);
-    displayOpensslErrors(@src());
+    openssl.displayOpensslErrors(@src());
     const digest_algo = C.EVP_get_digestbyname("sha256") orelse {
-        displayOpensslErrors(@src());
+        openssl.displayOpensslErrors(@src());
         return error.OpensslError;
     };
     _ = digest_algo;
 
     const pkcs7 = C.PKCS7_sign(
-        @ptrCast(public_key),
+        @ptrCast(certificate),
         @ptrCast(private_key),
         null,
         in_bio,
@@ -223,14 +197,14 @@ pub fn signFile(
     );
 
     const out_bio = C.BIO_new_file(try arena_alloc.dupeZ(u8, out_file), "wb") orelse {
-        displayOpensslErrors(@src());
+        openssl.displayOpensslErrors(@src());
         return error.OpensslError;
     };
     defer _ = C.BIO_free(out_bio);
 
     // Append the marker and the PKCS#7 message to the destination file
     if (C.BIO_reset(in_bio) < 0) {
-        displayOpensslErrors(@src());
+        openssl.displayOpensslErrors(@src());
         return error.OpensslError;
     }
 
@@ -242,7 +216,7 @@ pub fn signFile(
         }
 
         if (C.BIO_write(out_bio, @ptrCast(&buff), n_read) < 0) {
-            displayOpensslErrors(@src());
+            openssl.displayOpensslErrors(@src());
             return error.OpensslError;
         }
     }
@@ -250,7 +224,7 @@ pub fn signFile(
     const out_size = C.BIO_number_written(out_bio);
 
     if (C.i2d_PKCS7_bio(out_bio, pkcs7) != 1) {
-        displayOpensslErrors(@src());
+        openssl.displayOpensslErrors(@src());
         return error.OpensslError;
     }
 
@@ -267,12 +241,12 @@ pub fn signFile(
     };
 
     if (C.BIO_write(out_bio, std.mem.asBytes(&sig_info), @sizeOf(@TypeOf(sig_info))) < 0) {
-        displayOpensslErrors(@src());
+        openssl.displayOpensslErrors(@src());
         return error.OpensslError;
     }
 
     if (C.BIO_write(out_bio, MODULE_SIG_STRING, MODULE_SIG_STRING.len) < 0) {
-        displayOpensslErrors(@src());
+        openssl.displayOpensslErrors(@src());
         return error.OpensslError;
     }
 }
@@ -284,7 +258,7 @@ pub fn main() !void {
     const params = comptime clap.parseParamsComptime(
         \\-h, --help              Display this help and exit.
         \\--private-key <FILE>    Private key to sign with.
-        \\--public-key  <FILE>    Public key to sign with.
+        \\--certificate <FILE>    X509 certificate to sign with.
         \\<FILE>                  Input file.
         \\<FILE>                  Output file.
         \\
@@ -314,7 +288,7 @@ pub fn main() !void {
     if (res.positionals[0] == null or
         res.positionals[1] == null or
         res.args.@"private-key" == null or
-        res.args.@"public-key" == null)
+        res.args.certificate == null)
     {
         try diag.report(stderr, error.InvalidArgument);
         try clap.usage(stderr, clap.Help, &params);
@@ -324,13 +298,13 @@ pub fn main() !void {
     const in_file = res.positionals[0].?;
     const out_file = res.positionals[1].?;
     const private_key_filepath = res.args.@"private-key".?;
-    const public_key_filepath = res.args.@"public-key".?;
+    const certificate_filepath = res.args.certificate.?;
 
     return signFile(
         arena.allocator(),
         in_file,
         out_file,
         private_key_filepath,
-        public_key_filepath,
+        certificate_filepath,
     );
 }

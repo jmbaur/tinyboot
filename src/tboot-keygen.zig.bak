@@ -1,0 +1,69 @@
+// https://github.com/libtor/openssl/blob/master/demos/x509/mkcert.c
+
+const std = @import("std");
+
+const C = @cImport({
+    @cInclude("openssl/opensslv.h");
+    @cInclude("openssl/bio.h");
+    @cInclude("openssl/evp.h");
+    @cInclude("openssl/pem.h");
+    @cInclude("openssl/err.h");
+    @cInclude("openssl/engine.h");
+});
+
+fn callback(p: c_int, n: c_int, arg: ?*anyopaque) callconv(.c) void {
+    _ = n;
+    _ = arg;
+
+    std.io.getStdErr().writer().writeByte(switch (p) {
+        0 => '.',
+        1 => '+',
+        2 => '*',
+        3 => '\n',
+        else => 'B',
+    }) catch {};
+}
+
+fn ossl_param(
+    comptime T: type,
+    comptime key: [*c]const u8,
+    data: ?*anyopaque,
+) C.OSSL_PARAM {
+    return .{
+        .key = key,
+        .data_type = C.OSSL_PARAM_UNSIGNED_INTEGER,
+        .data = data,
+        .data_size = @sizeOf(T),
+        .return_size = C.OSSL_PARAM_UNMODIFIED,
+    };
+}
+
+pub fn main() !void {
+    var rsa_n: c_ulong = 0xbc747fc5;
+    var rsa_e: c_ulong = 0x10001;
+    var rsa_d: c_ulong = 0x7b133399;
+
+    var params = [_]C.OSSL_PARAM{
+        ossl_param(c_ulong, "n", &rsa_n),
+        ossl_param(c_ulong, "e", &rsa_e),
+        ossl_param(c_ulong, "d", &rsa_d),
+        .{},
+    };
+
+    const ctx = C.EVP_PKEY_CTX_new_from_name(
+        null,
+        "RSA",
+        null,
+    );
+    defer C.EVP_PKEY_CTX_free(ctx);
+
+    var pkey: ?*C.EVP_PKEY = null;
+    defer C.EVP_PKEY_free(pkey);
+
+    if (ctx == null or
+        C.EVP_PKEY_fromdata_init(ctx) <= 0 or
+        C.EVP_PKEY_fromdata(ctx, &pkey, C.EVP_PKEY_KEYPAIR, &params) <= 0)
+    {
+        return error.Todo;
+    }
+}

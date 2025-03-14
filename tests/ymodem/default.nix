@@ -7,7 +7,7 @@
 
 testers.runNixOSTest {
   name = "ymodem";
-  extraBaseModules.imports = [ ../module.nix ];
+  defaults.imports = [ ../module.nix ];
   nodes.machine = { };
   testScript =
     { nodes, ... }:
