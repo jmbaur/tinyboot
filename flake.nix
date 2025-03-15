@@ -15,7 +15,7 @@
     in
     {
       nixosModules.default = {
-        imports = [ ./nixos-module.nix ];
+        imports = [ ./modules/nixos ];
         nixpkgs.overlays = [ inputs.self.overlays.default ];
       };
 
