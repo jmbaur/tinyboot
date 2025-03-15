@@ -2,6 +2,7 @@ test {
     _ = @import("./autoboot.zig");
     _ = @import("./boot/bootloader.zig");
     _ = @import("./boot/disk.zig");
+    _ = @import("./boot/kexec.zig");
     _ = @import("./boot/ymodem.zig");
     _ = @import("./bootspec.zig");
     _ = @import("./console.zig");
@@ -12,12 +13,14 @@ test {
     _ = @import("./disk/mbr.zig");
     _ = @import("./kobject.zig");
     _ = @import("./log.zig");
+    _ = @import("./openssl.zig");
     _ = @import("./runner.zig");
     _ = @import("./security.zig");
     _ = @import("./system.zig");
     _ = @import("./tboot-bless-boot-generator.zig");
     _ = @import("./tboot-bless-boot.zig");
     _ = @import("./tboot-initrd.zig");
+    _ = @import("./tboot-keygen.zig");
     _ = @import("./tboot-loader.zig");
     _ = @import("./tboot-nixos-install.zig");
     _ = @import("./tboot-sign.zig");
