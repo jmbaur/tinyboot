@@ -303,7 +303,12 @@ pub fn main() !void {
         return clap.help(std.io.getStdErr().writer(), clap.Help, &params, .{});
     }
 
-    if (res.positionals[0] == null or res.args.@"private-key" == null or res.args.certificate == null) {
+    if (res.positionals[0] == null or
+        // If a private or public key is provided but the other corresponding
+        // key is not provided, error out.
+        ((res.args.@"private-key" == null) !=
+            (res.args.certificate == null)))
+    {
         try diag.report(stderr, error.InvalidArgument);
         try clap.usage(stderr, clap.Help, &params);
         return;
@@ -312,16 +317,6 @@ pub fn main() !void {
     var args = Args{
         .default_nixos_system_closure = res.positionals[0].?,
     };
-
-    // If a private or public key is provided but the other corresponding key
-    // is not provided, error out.
-    if ((res.args.@"private-key" == null) !=
-        (res.args.certificate == null))
-    {
-        try diag.report(stderr, error.InvalidArgument);
-        try clap.usage(stderr, clap.Help, &params);
-        return;
-    }
 
     if (res.args.@"private-key" != null and
         res.args.certificate != null)
