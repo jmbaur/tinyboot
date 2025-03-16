@@ -16,11 +16,7 @@ pub fn build(b: *std.Build) !void {
         },
     );
 
-    const is_native_build = zig.system.getExternalExecutor(
-        b.graph.host.result,
-        &target.result,
-        .{},
-    ) == .native;
+    const is_native_build = b.graph.host.result.cpu.arch == target.result.cpu.arch;
 
     const optimize = b.standardOptimizeOption(.{});
 

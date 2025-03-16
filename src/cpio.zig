@@ -145,7 +145,7 @@ pub fn addEntry(
             }
 
             // pad the file data
-            const filedata_padding = (4 - (end % 4)) % 4;
+            const filedata_padding: usize = @intCast((4 - (end % 4)) % 4);
             try self.destination.writer().writeByteNTimes(0, filedata_padding);
             self.total_written += filedata_padding;
         }
