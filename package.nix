@@ -3,8 +3,9 @@
   withLoader,
   withTools,
 
-  callPackage,
+  fetchzip,
   lib,
+  linkFarm,
   openssl,
   pkg-config,
   stdenv,
@@ -44,7 +45,17 @@ stdenv.mkDerivation {
   configurePhase = ''
     runHook preConfigure
     export ZIG_GLOBAL_CACHE_DIR=$TEMPDIR
-    ln -s ${callPackage ./build.zig.zon.nix { }} $ZIG_GLOBAL_CACHE_DIR/p
+    ln -s ${
+      linkFarm "tinyboot-deps" [
+        {
+          name = "12204387e122dd8b6828847165a7153c5d624b0a77217fd907c7f4f718ecce36e217";
+          path = fetchzip {
+            url = "https://github.com/Hejsil/zig-clap/archive/e47028deaefc2fb396d3d9e9f7bd776ae0b2a43a.tar.gz";
+            hash = "sha256-leXnA97ITdvmBhD2YESLBZAKjBg+G4R/+PPPRslz/ec=";
+          };
+        }
+      ]
+    } $ZIG_GLOBAL_CACHE_DIR/p
     zigBuildFlags=("-Dloader=${lib.boolToString withLoader}" "-Dtools=${lib.boolToString withTools}" "--release=safe" "-Dtarget=${stdenv.hostPlatform.qemuArch}-${stdenv.hostPlatform.parsed.kernel.name}")
     zigBuildFlags+=("-Ddynamic-linker=$(echo ${stdenv.cc.bintools.dynamicLinker})") # can contain a glob
     ${lib.optionalString (firmwareDirectory != null) ''
