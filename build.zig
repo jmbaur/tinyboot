@@ -3,6 +3,21 @@ const zig = std.zig;
 
 const TBOOT_INITRD_NAME = "tboot-initrd";
 
+fn linuxHeadersForTarget(
+    b: *std.Build,
+    header_file: *std.Build.Step.WriteFile,
+    target: std.Build.ResolvedTarget,
+) *std.Build.Step.TranslateC {
+    return b.addTranslateC(.{
+        .root_source_file = .{ .generated = .{
+            .file = &header_file.generated_directory,
+            .sub_path = "linux.h",
+        } },
+        .target = target,
+        .optimize = .ReleaseSafe, // This doesn't seem to do anything when translating pure headers
+    });
+}
+
 pub fn build(b: *std.Build) !void {
     var env = try std.process.getEnvMap(b.allocator);
     defer env.deinit();
@@ -10,6 +25,13 @@ pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(
         .{ .default_target = .{ .cpu_model = .baseline } },
     );
+
+    // tboot-loader is a fully-native Zig program, so we can statically link it
+    // by setting the ABI to musl.
+    var tboot_loader_target_query = target.query;
+    tboot_loader_target_query.abi = .musl;
+
+    const tboot_loader_target = b.resolveTargetQuery(tboot_loader_target_query);
 
     const is_native_build = b.graph.host.result.cpu.arch == target.result.cpu.arch;
 
@@ -45,16 +67,10 @@ pub fn build(b: *std.Build) !void {
         \\#include <termios.h>
     );
 
-    const linux_headers_translated = b.addTranslateC(.{
-        .root_source_file = .{ .generated = .{
-            .file = &linux_h.generated_directory,
-            .sub_path = "linux.h",
-        } },
-        .target = target,
-        // TODO(jared): how much does optimization do for the translate-c stuff?
-        .optimize = tboot_loader_optimize,
-    });
-    const linux_headers_module = linux_headers_translated.addModule("linux_headers");
+    const tboot_loader_linux_headers = linuxHeadersForTarget(b, linux_h, tboot_loader_target);
+    const linux_headers = linuxHeadersForTarget(b, linux_h, target);
+    const tboot_loader_linux_headers_module = tboot_loader_linux_headers.addModule("linux_headers");
+    const linux_headers_module = linux_headers.addModule("linux_headers");
 
     // For re-usage with building the tboot-loader initrd, if we are also
     // building tools.
@@ -164,11 +180,12 @@ pub fn build(b: *std.Build) !void {
         const tboot_loader = b.addExecutable(.{
             .name = "tboot-loader",
             .root_source_file = b.path("src/tboot-loader.zig"),
-            .target = target,
+            .target = tboot_loader_target,
             .optimize = tboot_loader_optimize,
             .strip = do_strip,
         });
-        tboot_loader.root_module.addImport("linux_headers", linux_headers_module);
+        b.installArtifact(tboot_loader);
+        tboot_loader.root_module.addImport("linux_headers", tboot_loader_linux_headers_module);
 
         // If we are performing a native build (i.e. the platform we are
         // building on is the same as the platform we are building to), look
