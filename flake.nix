@@ -20,14 +20,13 @@
       };
 
       overlays.default = final: prev: ({
-        tinybootTools = final.pkgsStatic.callPackage ./package.nix {
+        tinybootTools = final.callPackage ./package.nix {
           withLoader = false;
           withTools = true;
         };
-        tinybootLoader = final.pkgsStatic.callPackage ./package.nix {
+        tinybootLoader = final.callPackage ./package.nix {
           withLoader = true;
           withTools = false;
-          tinybootTools = final.buildPackages.pkgsStatic.tinybootTools; # TODO(jared): this shouldn't be needed
         };
         kernelPatches = prev.kernelPatches // {
           ima_tpm_early_init = {
@@ -90,7 +89,10 @@
 
       devShells = mapAttrs (system: pkgs: {
         default = pkgs.mkShell {
-          inputsFrom = [ pkgs.tinybootLoader ];
+          inputsFrom = [
+            pkgs.tinybootLoader
+            pkgs.tinybootTools
+          ];
           packages = [
             pkgs.qemu
             pkgs.swtpm

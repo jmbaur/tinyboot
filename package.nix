@@ -14,7 +14,18 @@
   zig_0_14,
 }:
 
-assert stdenv.hostPlatform.isStatic && stdenv.hostPlatform.libc == "musl";
+let
+  deps = linkFarm "tinyboot-deps" [
+    {
+      name = "12204387e122dd8b6828847165a7153c5d624b0a77217fd907c7f4f718ecce36e217";
+      path = fetchzip {
+        url = "https://github.com/Hejsil/zig-clap/archive/e47028deaefc2fb396d3d9e9f7bd776ae0b2a43a.tar.gz";
+        hash = "sha256-leXnA97ITdvmBhD2YESLBZAKjBg+G4R/+PPPRslz/ec=";
+      };
+    }
+  ];
+in
+
 assert withTools != withLoader;
 stdenv.mkDerivation {
   pname = "tinyboot-${if withTools then "tools" else "loader"}";
@@ -44,23 +55,23 @@ stdenv.mkDerivation {
 
   configurePhase = ''
     runHook preConfigure
+
     export ZIG_GLOBAL_CACHE_DIR=$TEMPDIR
-    ln -s ${
-      linkFarm "tinyboot-deps" [
-        {
-          name = "12204387e122dd8b6828847165a7153c5d624b0a77217fd907c7f4f718ecce36e217";
-          path = fetchzip {
-            url = "https://github.com/Hejsil/zig-clap/archive/e47028deaefc2fb396d3d9e9f7bd776ae0b2a43a.tar.gz";
-            hash = "sha256-leXnA97ITdvmBhD2YESLBZAKjBg+G4R/+PPPRslz/ec=";
-          };
-        }
-      ]
-    } $ZIG_GLOBAL_CACHE_DIR/p
-    zigBuildFlags=("-Dloader=${lib.boolToString withLoader}" "-Dtools=${lib.boolToString withTools}" "--release=safe" "-Dtarget=${stdenv.hostPlatform.qemuArch}-${stdenv.hostPlatform.parsed.kernel.name}")
-    zigBuildFlags+=("-Ddynamic-linker=$(echo ${stdenv.cc.bintools.dynamicLinker})") # can contain a glob
+
+    ln -s ${deps} $ZIG_GLOBAL_CACHE_DIR/p
+
+    zigBuildFlags=(
+      "-Dloader=${lib.boolToString withLoader}"
+      "-Dtools=${lib.boolToString withTools}"
+      "--release=safe"
+      "-Dtarget=${stdenv.hostPlatform.qemuArch}-linux-gnu"
+      "-Ddynamic-linker=$(cat $NIX_CC/nix-support/dynamic-linker)"
+    )
+
     ${lib.optionalString (firmwareDirectory != null) ''
       zigBuildFlags+=("-Dfirmware-directory=${firmwareDirectory}")
     ''}
+
     runHook postConfigure
   '';
 
@@ -77,5 +88,9 @@ stdenv.mkDerivation {
   '';
 
   passthru = lib.optionalAttrs withLoader { initrdFile = "tboot-loader.cpio"; };
-  meta.platforms = lib.platforms.linux;
+
+  meta = {
+    platforms = lib.platforms.linux;
+    broken = !stdenv.hostPlatform.isGnu;
+  };
 }
