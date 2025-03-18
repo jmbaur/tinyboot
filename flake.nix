@@ -103,10 +103,24 @@
         };
       }) inputs.self.legacyPackages;
 
-      checks = mapAttrs (_: pkgs: {
-        disk = pkgs.callPackage ./tests/disk { };
-        ymodem = pkgs.callPackage ./tests/ymodem { };
-      }) inputs.self.legacyPackages;
+      checks = mapAttrs (
+        _: pkgs:
+        let
+          cross = if pkgs.stdenv.hostPlatform.isx86_64 then "aarch64-multiplatform" else "gnu64";
+        in
+        {
+          disk = pkgs.callPackage ./tests/disk { };
+          ymodem = pkgs.callPackage ./tests/ymodem { };
+          tinybootTools = pkgs.tinybootTools;
+          tinybootLoader = pkgs.tinybootLoader;
+          tinybootToolsStatic = pkgs.pkgsStatic.tinybootTools;
+          tinybootLoaderStatic = pkgs.pkgsStatic.tinybootLoader;
+          tinybootToolsCross = pkgs.pkgsCross.${cross}.tinybootTools;
+          tinybootLoaderCross = pkgs.pkgsCross.${cross}.tinybootLoader;
+          tinybootToolsCrossStatic = pkgs.pkgsCross.${cross}.pkgsStatic.tinybootTools;
+          tinybootLoaderCrossStatic = pkgs.pkgsCross.${cross}.pkgsStatic.tinybootLoader;
+        }
+      ) inputs.self.legacyPackages;
 
       hydraJobs = recursiveUpdate inputs.self.checks inputs.self.packages;
     };

@@ -64,7 +64,9 @@ stdenv.mkDerivation {
       "-Dloader=${lib.boolToString withLoader}"
       "-Dtools=${lib.boolToString withTools}"
       "--release=safe"
-      "-Dtarget=${stdenv.hostPlatform.qemuArch}-linux-gnu"
+      "-Dtarget=${stdenv.hostPlatform.qemuArch}-linux-${
+        if stdenv.hostPlatform.isGnu then "gnu" else "musl"
+      }"
       "-Ddynamic-linker=$(cat $NIX_CC/nix-support/dynamic-linker)"
     )
 
@@ -89,8 +91,5 @@ stdenv.mkDerivation {
 
   passthru = lib.optionalAttrs withLoader { initrdFile = "tboot-loader.cpio"; };
 
-  meta = {
-    platforms = lib.platforms.linux;
-    broken = !stdenv.hostPlatform.isGnu;
-  };
+  meta.platforms = lib.platforms.linux;
 }

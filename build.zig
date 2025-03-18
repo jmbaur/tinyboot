@@ -86,7 +86,7 @@ pub fn build(b: *std.Build) !void {
         });
         var tboot_initrd_tool = maybe_tboot_initrd_tool.?;
         tboot_initrd_tool.linkLibC();
-        tboot_initrd_tool.each_lib_rpath = true;
+        tboot_initrd_tool.each_lib_rpath = !target.result.isMuslLibC();
         tboot_initrd_tool.linkSystemLibrary("liblzma");
         tboot_initrd_tool.root_module.addImport("clap", clap.module("clap"));
     }
@@ -122,7 +122,7 @@ pub fn build(b: *std.Build) !void {
             .strip = do_strip,
         });
         tboot_sign.linkLibC();
-        tboot_sign.each_lib_rpath = true;
+        tboot_sign.each_lib_rpath = !target.result.isMuslLibC();
         tboot_sign.linkSystemLibrary("libcrypto");
         tboot_sign.root_module.addImport("clap", clap.module("clap"));
         b.installArtifact(tboot_sign);
@@ -135,7 +135,7 @@ pub fn build(b: *std.Build) !void {
             .strip = do_strip,
         });
         tboot_keygen.linkLibC();
-        tboot_keygen.each_lib_rpath = true;
+        tboot_keygen.each_lib_rpath = !target.result.isMuslLibC();
         tboot_keygen.linkSystemLibrary("libcrypto");
         tboot_keygen.root_module.addImport("clap", clap.module("clap"));
         b.installArtifact(tboot_keygen);
@@ -148,7 +148,7 @@ pub fn build(b: *std.Build) !void {
             .strip = do_strip,
         });
         tboot_nixos_install.linkLibC();
-        tboot_nixos_install.each_lib_rpath = true;
+        tboot_nixos_install.each_lib_rpath = !target.result.isMuslLibC();
         tboot_nixos_install.linkSystemLibrary("libcrypto");
         tboot_nixos_install.root_module.addImport("clap", clap.module("clap"));
         b.installArtifact(tboot_nixos_install);
