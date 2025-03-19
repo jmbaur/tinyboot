@@ -3,21 +3,6 @@ const zig = std.zig;
 
 const TBOOT_INITRD_NAME = "tboot-initrd";
 
-fn linuxHeadersForTarget(
-    b: *std.Build,
-    header_file: *std.Build.Step.WriteFile,
-    target: std.Build.ResolvedTarget,
-) *std.Build.Step.TranslateC {
-    return b.addTranslateC(.{
-        .root_source_file = .{ .generated = .{
-            .file = &header_file.generated_directory,
-            .sub_path = "linux.h",
-        } },
-        .target = target,
-        .optimize = .ReleaseSafe, // This doesn't seem to do anything when translating pure headers
-    });
-}
-
 pub fn build(b: *std.Build) !void {
     var env = try std.process.getEnvMap(b.allocator);
     defer env.deinit();
@@ -27,11 +12,11 @@ pub fn build(b: *std.Build) !void {
     );
 
     // tboot-loader is a fully-native Zig program, so we can statically link it
-    // by setting the ABI to musl.
-    var tboot_loader_target_query = target.query;
-    tboot_loader_target_query.abi = .musl;
-
-    const tboot_loader_target = b.resolveTargetQuery(tboot_loader_target_query);
+    // and don't need an ABI specified.
+    var target_no_abi_query = target.query;
+    target_no_abi_query.abi = null;
+    target_no_abi_query.os_tag = target.result.os.tag;
+    const target_no_abi = b.resolveTargetQuery(target_no_abi_query);
 
     const is_native_build = b.graph.host.result.cpu.arch == target.result.cpu.arch;
 
@@ -39,10 +24,12 @@ pub fn build(b: *std.Build) !void {
 
     const do_strip = optimize != std.builtin.OptimizeMode.Debug;
 
-    const tboot_loader_optimize = if (optimize == std.builtin.OptimizeMode.Debug)
+    // For certain outputs of this project, we always use release small (if we
+    // are in release mode). Smallest size is our goal in order to minimize
+    // footprint on flash.
+    const optimize_prefer_small = if (optimize == std.builtin.OptimizeMode.Debug)
         std.builtin.OptimizeMode.Debug
     else
-        // Always use release small, smallest size is our goal.
         std.builtin.OptimizeMode.ReleaseSmall;
 
     const with_loader = b.option(bool, "loader", "With boot loader") orelse true;
@@ -67,9 +54,15 @@ pub fn build(b: *std.Build) !void {
         \\#include <termios.h>
     );
 
-    const tboot_loader_linux_headers = linuxHeadersForTarget(b, linux_h, tboot_loader_target);
-    const linux_headers = linuxHeadersForTarget(b, linux_h, target);
-    const tboot_loader_linux_headers_module = tboot_loader_linux_headers.addModule("linux_headers");
+    const linux_headers = b.addTranslateC(.{
+        .root_source_file = .{ .generated = .{
+            .file = &linux_h.generated_directory,
+            .sub_path = "linux.h",
+        } },
+        .target = target_no_abi,
+        .optimize = .ReleaseSafe, // This doesn't seem to do anything when translating pure headers
+    });
+
     const linux_headers_module = linux_headers.addModule("linux_headers");
 
     // For re-usage with building the tboot-loader initrd, if we are also
@@ -180,12 +173,12 @@ pub fn build(b: *std.Build) !void {
         const tboot_loader = b.addExecutable(.{
             .name = "tboot-loader",
             .root_source_file = b.path("src/tboot-loader.zig"),
-            .target = tboot_loader_target,
-            .optimize = tboot_loader_optimize,
+            .target = target_no_abi,
+            .optimize = optimize_prefer_small,
             .strip = do_strip,
         });
         b.installArtifact(tboot_loader);
-        tboot_loader.root_module.addImport("linux_headers", tboot_loader_linux_headers_module);
+        tboot_loader.root_module.addImport("linux_headers", linux_headers_module);
 
         // If we are performing a native build (i.e. the platform we are
         // building on is the same as the platform we are building to), look
