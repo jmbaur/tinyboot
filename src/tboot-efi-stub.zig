@@ -15,18 +15,21 @@ var print_buf: [256]u8 = undefined;
 fn printf(comptime fmt: []const u8, args: anytype) void {
     var fbs = std.io.fixedBufferStream(&print_buf);
 
-    std.fmt.format(fbs.writer().any(), fmt, args) catch |err| switch (err) {
+    const truncated = if (std.fmt.format(fbs.writer().any(), fmt, args)) false else |err| switch (err) {
         // Ignore NoSpaceLeft errors, since the writer will still have written
         // enough bytes for us to get something on the screen to likely still
         // be useful. In this case, the output will just be truncated. This is
         // the same as what the Linux EFI stub does.
-        error.NoSpaceLeft => {},
+        error.NoSpaceLeft => true,
         else => unreachable,
     };
 
-    const written = fbs.getWritten();
-    puts(written[0 .. written.len - 1]);
-    puts(">"); // Indicate that we truncated the output
+    puts(fbs.getWritten());
+
+    // Indicate that we truncated the output
+    if (truncated) {
+        puts(">");
+    }
 }
 
 fn println(comptime fmt: []const u8, args: anytype) void {
