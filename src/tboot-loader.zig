@@ -2,6 +2,7 @@ const std = @import("std");
 const posix = std.posix;
 const epoll_event = std.os.linux.epoll_event;
 const builtin = @import("builtin");
+const tboot_builtin = @import("tboot_builtin");
 
 const linux_headers = @import("linux_headers");
 
@@ -333,8 +334,7 @@ pub fn main() !void {
         });
         defer device_watch_thread.join();
 
-        std.log.info("tinyboot started", .{});
-        std.log.debug("built with zig version {s}", .{builtin.zig_version_string});
+        std.log.info("tinyboot {s} (zig {s})", .{ tboot_builtin.version, builtin.zig_version_string });
 
         try security.initializeSecurity(arena.allocator());
 

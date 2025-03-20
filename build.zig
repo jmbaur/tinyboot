@@ -1,9 +1,20 @@
 const std = @import("std");
 const zig = std.zig;
 
+// TODO(jared): Get this automatically from importing the information in
+// build.zig.zon.
+const version = std.SemanticVersion.parse("0.1.0") catch @compileError("invalid version");
+
 const TBOOT_INITRD_NAME = "tboot-initrd";
 
 pub fn build(b: *std.Build) !void {
+    const tboot_builtin = b.addOptions();
+    tboot_builtin.addOption(
+        []const u8,
+        "version",
+        try std.fmt.allocPrint(b.allocator, "{}", .{version}),
+    );
+
     var env = try std.process.getEnvMap(b.allocator);
     defer env.deinit();
 
@@ -197,6 +208,7 @@ pub fn build(b: *std.Build) !void {
             .optimize = optimize_prefer_small,
             .strip = do_strip,
         });
+        tboot_loader.root_module.addOptions("tboot_builtin", tboot_builtin);
         b.installArtifact(tboot_loader);
         tboot_loader.root_module.addImport("linux_headers", linux_headers_module);
 
