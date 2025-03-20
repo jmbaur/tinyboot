@@ -89,11 +89,13 @@
 
       devShells = mapAttrs (system: pkgs: {
         default = pkgs.mkShell {
-          inputsFrom = [ pkgs.tinybootLoader ];
+          inputsFrom = [
+            pkgs.tinybootLoader
+            pkgs.tinybootTools
+          ];
           packages = [
             pkgs.qemu
             pkgs.swtpm
-            pkgs.tinybootTools
           ] ++ pkgs.tinybootLoader.depsBuildBuild; # depsBuildBuild not inherited by inputsFrom
           env.TINYBOOT_KERNEL =
             with inputs.self.checks.${system}.disk.nodes.machine.tinyboot.build;
