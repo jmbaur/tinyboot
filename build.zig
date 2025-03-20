@@ -37,14 +37,29 @@ pub fn build(b: *std.Build) !void {
     else
         std.builtin.OptimizeMode.ReleaseSmall;
 
-    const with_loader = b.option(bool, "loader", "With boot loader") orelse true;
     const with_tools = b.option(bool, "tools", "With tools") orelse false;
+
+    const with_loader = b.option(bool, "loader", "With boot loader") orelse true;
+
+    const with_loader_efi_stub = b.option(
+        bool,
+        "loader-efi-stub",
+        "With boot loader EFI stub (not available on all architectures)",
+    ) orelse
+        // We get the following error when attempting to build for armv7, so we
+        // default to not building the EFI stub for this architecture.
+        //
+        // "error: the following command terminated unexpectedly"
+        !target.result.cpu.arch.isArm();
+
     const firmware_directory = b.option(
         []const u8,
         "firmware-directory",
-        "Firmware directory",
+        "Firmware directory to put in /lib/firmware of the initrd",
     );
+
     const runner_keydir = b.option([]const u8, "keydir", "Directory of keys to use when spawning VM runner (as output by tboot-keygen)");
+
     const runner_kernel = b.option([]const u8, "kernel", "Kernel to use when spawning VM runner") orelse env.get("TINYBOOT_KERNEL");
 
     const clap = b.dependency("clap", .{});
@@ -227,17 +242,19 @@ pub fn build(b: *std.Build) !void {
         // install the cpio archive during "zig build install"
         b.getInstallStep().dependOn(&cpio_archive.step);
 
-        const tboot_efi_stub = b.addExecutable(.{
-            .name = "tboot-efi-stub",
-            .target = target_efi,
-            .root_source_file = b.path("src/tboot-efi-stub.zig"),
-            .strip = do_strip,
-            .optimize = optimize_prefer_small,
-        });
-        const tboot_efi_stub_artifact = b.addInstallArtifact(tboot_efi_stub, .{
-            .dest_dir = .{ .override = .{ .custom = "efi" } },
-        });
-        b.getInstallStep().dependOn(&tboot_efi_stub_artifact.step);
+        if (with_loader_efi_stub) {
+            const tboot_efi_stub = b.addExecutable(.{
+                .name = "tboot-efi-stub",
+                .target = target_efi,
+                .root_source_file = b.path("src/tboot-efi-stub.zig"),
+                .strip = do_strip,
+                .optimize = optimize_prefer_small,
+            });
+            const tboot_efi_stub_artifact = b.addInstallArtifact(tboot_efi_stub, .{
+                .dest_dir = .{ .override = .{ .custom = "efi" } },
+            });
+            b.getInstallStep().dependOn(&tboot_efi_stub_artifact.step);
+        }
 
         const tboot_runner = b.addExecutable(.{
             .name = "tboot-runner",
