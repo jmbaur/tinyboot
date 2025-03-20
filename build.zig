@@ -18,6 +18,11 @@ pub fn build(b: *std.Build) !void {
     target_no_abi_query.os_tag = target.result.os.tag;
     const target_no_abi = b.resolveTargetQuery(target_no_abi_query);
 
+    var target_efi_query = target.query;
+    target_efi_query.os_tag = .uefi;
+    target_efi_query.abi = .msvc;
+    const target_efi = b.resolveTargetQuery(target_efi_query);
+
     const is_native_build = b.graph.host.result.cpu.arch == target.result.cpu.arch;
 
     const optimize = b.standardOptimizeOption(.{});
@@ -221,6 +226,18 @@ pub fn build(b: *std.Build) !void {
 
         // install the cpio archive during "zig build install"
         b.getInstallStep().dependOn(&cpio_archive.step);
+
+        const tboot_efi_stub = b.addExecutable(.{
+            .name = "tboot-efi-stub",
+            .target = target_efi,
+            .root_source_file = b.path("src/tboot-efi-stub.zig"),
+            .strip = do_strip,
+            .optimize = optimize_prefer_small,
+        });
+        const tboot_efi_stub_artifact = b.addInstallArtifact(tboot_efi_stub, .{
+            .dest_dir = .{ .override = .{ .custom = "efi" } },
+        });
+        b.getInstallStep().dependOn(&tboot_efi_stub_artifact.step);
 
         const tboot_runner = b.addExecutable(.{
             .name = "tboot-runner",

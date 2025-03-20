@@ -11,7 +11,7 @@
         NETWORK_FILESYSTEMS = yes;
         NET_9P = yes;
         NET_9P_VIRTIO = yes;
-        NET_VENDOR_INTEL = yes;
+        NET_VENDOR_INTEL = lib.mkIf config.network yes;
         SCSI_VIRTIO = yes;
         VIRTIO = yes;
         VIRTIO_ANCHOR = yes;
@@ -20,7 +20,7 @@
         VIRTIO_INPUT = yes;
         VIRTIO_MENU = yes;
         VIRTIO_MMIO = yes;
-        VIRTIO_NET = yes;
+        VIRTIO_NET = lib.mkIf config.network yes;
         VIRTIO_PCI = yes;
         VIRTIO_PCI_LIB = yes;
       };

@@ -79,6 +79,8 @@ in
 
     chromebook = mkEnableOption "chromebook";
 
+    efi = mkEnableOption "efi";
+
     platform = mkOption {
       type = types.nullOr (
         types.attrTag {

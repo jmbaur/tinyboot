@@ -80,6 +80,8 @@
     SECCOMP = unset;
     SECURITY = yes;
     SECURITYFS = yes;
+    SERIAL_CORE = yes;
+    SERIAL_CORE_CONSOLE = yes;
     SHMEM = yes;
     SIGNALFD = yes;
     SLUB = yes;

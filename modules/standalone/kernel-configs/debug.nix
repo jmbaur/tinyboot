@@ -13,6 +13,7 @@
       IKCONFIG = yes;
       KALLSYMS = yes;
       KALLSYMS_ALL = yes;
+      SERIAL_EARLYCON = yes;
       SYMBOLIC_ERRNAME = yes;
     }
   );

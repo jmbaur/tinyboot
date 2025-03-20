@@ -4,6 +4,7 @@
     ./arm.nix
     ./chromebook.nix
     ./debug.nix
+    ./efi.nix
     ./generic.nix
     ./ima.nix
     ./network.nix
