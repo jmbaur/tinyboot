@@ -122,70 +122,58 @@ const efi_initrd_device_path: extern struct {
     },
 };
 
-fn logic() uefi.Status {
-    var status: uefi.Status = .success;
+const TbootStubError = error{
+    MissingSection,
+    OutOfMemory,
+    EndOfStream,
+    MissingPEHeader,
+} || uefi.Status.Error;
 
+fn run() TbootStubError!void {
     var self_loaded_image_: ?*uefi.protocol.LoadedImage = undefined;
-    status = boot_services.handleProtocol(
+    try uefi.Status.err(boot_services.handleProtocol(
         uefi.handle,
         &uefi.protocol.LoadedImage.guid,
         @ptrCast(&self_loaded_image_),
-    );
-    if (status != .success) {
-        println("failed to get EFI_LOADED_IMAGE_PROTOCOL for tinyboot", .{});
-        return status;
-    }
+    ));
 
     const self_loaded_image = self_loaded_image_.?;
 
-    const coff = std.coff.Coff.init(
+    const coff = try std.coff.Coff.init(
         self_loaded_image.image_base[0..self_loaded_image.image_size],
         true,
-    ) catch {
-        println("failed to get coff image", .{});
-        return .invalid_parameter;
-    };
+    );
 
     const linux = coff.getSectionByName(".linux") orelse {
-        println("failed to get '.linux' section", .{});
-        return .not_found;
+        return TbootStubError.MissingSection;
     };
 
     const linux_data = coff.getSectionData(linux);
 
     var linux_image_handle: ?uefi.Handle = null;
-    status = boot_services.loadImage(
+    try uefi.Status.err(boot_services.loadImage(
         false,
         uefi.handle,
         null,
         linux_data.ptr,
         linux_data.len,
         &linux_image_handle,
-    );
-    if (status != .success) {
-        println("failed to load linux", .{});
-        return status;
-    }
+    ));
 
     var linux_loaded_image_: ?*uefi.protocol.LoadedImage = undefined;
-    status = boot_services.handleProtocol(
+    try uefi.Status.err(boot_services.handleProtocol(
         linux_image_handle.?,
         &uefi.protocol.LoadedImage.guid,
         @ptrCast(&linux_loaded_image_),
-    );
-    if (status != .success) {
-        println("failed to get EFI_LOADED_IMAGE_PROTOCOL for linux", .{});
-        return status;
-    }
+    ));
 
     const initrd = coff.getSectionByName(".initrd") orelse {
-        println("failed to get '.initrd' section", .{});
-        return .not_found;
+        return TbootStubError.MissingSection;
     };
 
     const initrd_data = coff.getSectionData(initrd);
 
-    const loader = uefi.pool_allocator.create(InitrdLoader) catch return .out_of_resources;
+    const loader = try uefi.pool_allocator.create(InitrdLoader);
     loader.* = InitrdLoader{
         .load_file = .{ .load_file = initrd_load_file },
         .address = @ptrCast(initrd_data.ptr),
@@ -203,49 +191,80 @@ fn logic() uefi.Status {
     const efi_initrd_device_path_: [*]uefi.protocol.DevicePath = @constCast(@ptrCast(&efi_initrd_device_path));
 
     // TODO(jared): Use InstallMultipleProtocolInterfaces()
-    status = boot_services.installProtocolInterface(
+    try uefi.Status.err(boot_services.installProtocolInterface(
         @ptrCast(&initrd_image_handle),
         &uefi.protocol.DevicePath.guid,
         .efi_native_interface,
         efi_initrd_device_path_,
-    );
-    if (status != .success) {
-        println("failed to register initrd", .{});
-        return status;
-    }
+    ));
 
-    status = boot_services.installProtocolInterface(
+    try uefi.Status.err(boot_services.installProtocolInterface(
         @ptrCast(&initrd_image_handle),
         @alignCast(&EFI_LOAD_FILE2_PROTOCOL_GUID),
         .efi_native_interface,
         loader,
-    );
-    if (status != .success) {
-        println("failed to register initrd", .{});
-        return status;
-    }
+    ));
 
-    status = boot_services.startImage(linux_image_handle.?, null, null);
-    if (status != .success) {
-        println("failed to start linux", .{});
-        return status;
-    }
-
-    return .aborted;
+    try uefi.Status.err(boot_services.startImage(linux_image_handle.?, null, null));
 }
 
 pub fn main() uefi.Status {
     con_out = uefi.system_table.con_out.?;
     boot_services = uefi.system_table.boot_services.?;
 
-    const status = logic();
+    const status: uefi.Status = if (run()) .aborted else |err| switch (err) {
+        error.EndOfStream => .end_of_file,
+        error.MissingPEHeader => .not_found,
+        error.MissingSection => .not_found,
+        error.OutOfMemory => .out_of_resources,
 
-    if (status != .success) {
-        println("failed to run tinyboot EFI stub: {}", .{status});
+        // Errors from std.os.uefi.Status.Error
+        error.LoadError => .load_error,
+        error.InvalidParameter => .invalid_parameter,
+        error.Unsupported => .unsupported,
+        error.BadBufferSize => .bad_buffer_size,
+        error.BufferTooSmall => .buffer_too_small,
+        error.NotReady => .not_ready,
+        error.DeviceError => .device_error,
+        error.WriteProtected => .write_protected,
+        error.OutOfResources => .out_of_resources,
+        error.VolumeCorrupted => .volume_corrupted,
+        error.VolumeFull => .volume_full,
+        error.NoMedia => .no_media,
+        error.MediaChanged => .media_changed,
+        error.NotFound => .not_found,
+        error.AccessDenied => .access_denied,
+        error.NoResponse => .no_response,
+        error.NoMapping => .no_mapping,
+        error.Timeout => .timeout,
+        error.NotStarted => .not_started,
+        error.AlreadyStarted => .already_started,
+        error.Aborted => .aborted,
+        error.IcmpError => .icmp_error,
+        error.TftpError => .tftp_error,
+        error.ProtocolError => .protocol_error,
+        error.IncompatibleVersion => .incompatible_version,
+        error.SecurityViolation => .security_violation,
+        error.CrcError => .crc_error,
+        error.EndOfMedia => .end_of_media,
+        error.EndOfFile => .end_of_file,
+        error.InvalidLanguage => .invalid_language,
+        error.CompromisedData => .compromised_data,
+        error.IpAddressConflict => .ip_address_conflict,
+        error.HttpError => .http_error,
+        error.NetworkUnreachable => .network_unreachable,
+        error.HostUnreachable => .host_unreachable,
+        error.ProtocolUnreachable => .protocol_unreachable,
+        error.PortUnreachable => .port_unreachable,
+        error.ConnectionFin => .connection_fin,
+        error.ConnectionReset => .connection_reset,
+        error.ConnectionRefused => .connection_refused,
+    };
 
-        // Stall so that the user has some time to see what happened.
-        _ = boot_services.stall(5 * std.time.ms_per_s);
-    }
+    println("Failed to run tinyboot EFI stub: {}", .{status});
+
+    // Stall so that the user has some time to see what happened.
+    _ = boot_services.stall(5 * std.time.ms_per_s);
 
     return status;
 }
