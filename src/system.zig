@@ -34,8 +34,6 @@ pub fn mountPseudoFilesystems() !void {
 
     try std.fs.cwd().makePath("/run");
     try mountPseudoFs("/run", "tmpfs", MS.NOSUID | MS.NODEV);
-
-    try std.fs.cwd().makePath("/mnt");
 }
 
 const TCFLSH = linux_headers.TCFLSH;
