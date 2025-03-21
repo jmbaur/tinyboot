@@ -369,8 +369,10 @@ pub fn main() !void {
         }
     }
 
-    // Sleep forever without hammering the CPU, waiting for the kernel to
-    // reboot.
-    var futex = std.atomic.Value(u32).init(0);
-    while (true) std.Thread.Futex.wait(&futex, 0);
+    if (is_pid1) {
+        // Sleep forever without hammering the CPU, waiting for the kernel to
+        // reboot.
+        var futex = std.atomic.Value(u32).init(0);
+        while (true) std.Thread.Futex.wait(&futex, 0);
+    }
 }

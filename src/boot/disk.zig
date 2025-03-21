@@ -100,9 +100,9 @@ pub fn probe(
                 // BootLoaderSpec uses this partition type for MBR, see
                 // https://uapi-group.org/specifications/specs/boot_loader_specification/#the-partitionsl.
                 (part_type == .LinuxExtendedBoot or
-                // QEMU uses this partition type when using a FAT
-                // emulated drive with `-drive file=fat:rw:some/directory`.
-                part_type == .Fat16)) or
+                    // QEMU uses this partition type when using a FAT
+                    // emulated drive with `-drive file=fat:rw:some/directory`.
+                    part_type == .Fat16)) or
                 // Many ISOs have this MBR table setup where the partition type
                 // is ESP and it is marked as non-bootable.
                 part_type == .EfiSystemPartition)
@@ -274,10 +274,79 @@ fn unmount(self: *DiskBootLoader) !void {
     }
 }
 
-fn versionInId(id: []const u8) ?std.SemanticVersion {
+const Version = union(enum) {
+    semver: std.SemanticVersion,
+    number: u32,
+
+    fn parse(value: []const u8) !@This() {
+        if (std.SemanticVersion.parse(value)) |semver| {
+            return .{
+                .semver = semver,
+            };
+        } else |_| {}
+
+        if (std.fmt.parseInt(u32, value, 10)) |number| {
+            return .{ .number = number };
+        } else |_| {}
+
+        return error.InvalidVersion;
+    }
+
+    fn order(left: @This(), right: @This()) std.math.Order {
+        return switch (left) {
+            .semver => |left_value| switch (right) {
+                .semver => |right_value| left_value.order(right_value),
+                .number => .lt,
+            },
+            .number => |left_value| switch (right) {
+                .semver => .gt,
+                .number => |right_value| std.math.order(left_value, right_value),
+            },
+        };
+    }
+};
+
+test "version" {
+    try std.testing.expectEqual(
+        Version{ .number = 10 },
+        try Version.parse("10"),
+    );
+
+    try std.testing.expectEqual(
+        Version{ .semver = std.SemanticVersion.parse("0.10.0") catch unreachable },
+        try Version.parse("0.10.0"),
+    );
+
+    try std.testing.expectEqual(.lt, b: {
+        const left = Version{ .number = 1 };
+        const right = Version{ .number = 2 };
+        break :b left.order(right);
+    });
+
+    try std.testing.expectEqual(.lt, b: {
+        const left = Version{ .semver = std.SemanticVersion.parse("0.10.0") catch unreachable };
+        const right = Version{ .number = 1 };
+        break :b left.order(right);
+    });
+
+    try std.testing.expectEqual(.gt, b: {
+        const left = Version{ .number = 1 };
+        const right = Version{ .semver = std.SemanticVersion.parse("0.10.0") catch unreachable };
+        break :b left.order(right);
+    });
+
+    try std.testing.expectEqual(.gt, b: {
+        const left = Version{ .semver = std.SemanticVersion.parse("0.11.0") catch unreachable };
+        const right = Version{ .semver = std.SemanticVersion.parse("0.10.0") catch unreachable };
+        break :b left.order(right);
+    });
+}
+
+// Assumes the BLS entry ID is of the form "<name>-?<version>".
+fn versionInId(id: []const u8) ?Version {
     for (id, 0..) |char, idx| {
         if ('0' <= char and char <= '9') {
-            return std.SemanticVersion.parse(id[idx..]) catch break;
+            return Version.parse(id[idx..]) catch break;
         }
     }
 
@@ -285,6 +354,7 @@ fn versionInId(id: []const u8) ?std.SemanticVersion {
 }
 
 // Example implementation in systemd-boot https://github.com/systemd/systemd/blob/de732ade0909c2d44a214fb1eaea5f5b1721e9f1/src/boot/efi/boot.c#L1670
+//
 /// Follows logic outlined by Boot Loader Specification sorting (described at https://uapi-group.org/specifications/specs/boot_loader_specification/#sorting).
 ///
 /// Version comparisons are done by parsing version fields using semantic versioning.
@@ -328,25 +398,18 @@ fn blsEntryLessThan(default_entry: ?[]const u8, a: BlsEntry, b: BlsEntry) bool {
             .lt => return true,
         }
 
-        {
-            const a_version = std.SemanticVersion.parse(a.version orelse "0.0.0") catch b: {
-                std.log.debug("invalid version in {s}: {?s}", .{ a.id, a.version });
-                break :b std.SemanticVersion{
-                    .major = 0,
-                    .minor = 0,
-                    .patch = 0,
-                };
-            };
-            const b_version = std.SemanticVersion.parse(b.version orelse "0.0.0") catch b: {
-                std.log.debug("invalid version in {s}: {?s}", .{ b.id, b.version });
-                break :b std.SemanticVersion{
-                    .major = 0,
-                    .minor = 0,
-                    .patch = 0,
-                };
+        if (a.version != null and b.version != null) {
+            const a_version = Version.parse(a.version.?) catch b: {
+                std.log.debug("invalid version in {s}: {s}", .{ a.id, a.version.? });
+                break :b Version{ .number = 0 };
             };
 
-            switch (std.SemanticVersion.order(a_version, b_version)) {
+            const b_version = Version.parse(b.version.?) catch b: {
+                std.log.debug("invalid version in {s}: {s}", .{ b.id, b.version.? });
+                break :b Version{ .number = 0 };
+            };
+
+            switch (Version.order(a_version, b_version)) {
                 .eq => {},
                 .gt => return true,
                 .lt => return false,
@@ -358,7 +421,7 @@ fn blsEntryLessThan(default_entry: ?[]const u8, a: BlsEntry, b: BlsEntry) bool {
         const a_id_version = versionInId(a.id);
         const b_id_version = versionInId(b.id);
         if (a_id_version != null and b_id_version != null) {
-            switch (std.SemanticVersion.order(a_id_version.?, b_id_version.?)) {
+            switch (a_id_version.?.order(b_id_version.?)) {
                 .eq => {},
                 .gt => return true,
                 .lt => return false,
@@ -546,6 +609,10 @@ fn searchForEntries(
         break :b LoaderConf.parse(contents);
     };
 
+    if (loader_conf.default_entry) |default_entry| {
+        std.log.debug("default BLS entry {s}", .{default_entry});
+    }
+
     self.loader_timeout = loader_conf.timeout;
 
     var it = entries_dir.iterate();
@@ -589,6 +656,8 @@ fn searchForEntries(
     std.mem.sort(BlsEntry, bls_entries.items, loader_conf.default_entry, blsEntryLessThan);
 
     for (bls_entries.items) |entry| {
+        std.log.debug("inspecting {s}", .{entry.id});
+
         const linux = mount_dir.realpathAlloc(allocator, entry.linux orelse {
             std.log.err("missing linux kernel in entry {s}", .{entry.id});
             continue;
