@@ -25,21 +25,6 @@ pub fn nodePath(device: *const Device, buf: []u8) ![]u8 {
     });
 }
 
-pub fn nodePathZ(device: *const Device, buf: []u8) ![:0]const u8 {
-    std.debug.assert(device.type == .node);
-
-    const major, const minor = device.type.node;
-
-    return try std.fmt.bufPrintZ(buf, "/dev/{s}/{d}:{d}", .{
-        switch (device.subsystem) {
-            .block => "block",
-            else => "char",
-        },
-        major,
-        minor,
-    });
-}
-
 pub fn nodeSysfsPath(device: *const Device, buf: []u8) ![]u8 {
     std.debug.assert(device.type == .node);
 

@@ -672,7 +672,6 @@ pub fn handleStdin(self: *Console, boot_loaders: []*BootLoader) !?Event {
     // We may already have a prompt from a boot timeout, so don't print
     // a prompt if we already have one.
     if (self.tty == null) {
-        try system.setConsole(.off);
         self.tty = try system.setupTty(IN, .user_input);
         self.shell.prompt(self.context);
     }
@@ -879,14 +878,18 @@ pub const Command = struct {
         ;
 
         fn run(console: *Console, args: *ArgsIterator, _: []*BootLoader) !?Event {
-            const filter = if (args.next()) |filter_str|
-                try std.fmt.parseInt(u3, filter_str, 10)
+            var filter = if (args.next()) |filter_str|
+                try std.fmt.parseInt(usize, filter_str, 10)
             else
                 6;
 
+            if (filter > std.math.maxInt(u3)) {
+                filter = std.math.maxInt(u3);
+            }
+
             try system.printKernelLogs(
                 console.arena.allocator(),
-                filter,
+                @intCast(filter),
                 out.writer().any(),
             );
 

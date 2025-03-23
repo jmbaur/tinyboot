@@ -31,11 +31,17 @@ const KERN_RCVBUF = 128 * 1024 * 1024;
 
 arena: std.heap.ArenaAllocator = std.heap.ArenaAllocator.init(std.heap.page_allocator),
 
+is_pid1: bool,
+
 block_dir: std.fs.Dir,
 char_dir: std.fs.Dir,
 
+/// An epoll file descriptor for receiving events on other file descriptors for
+/// the watcher.
+epoll: posix.fd_t,
+
 /// Netlink socket fd for subscribing to new device events.
-nl_fd: posix.fd_t,
+nl: posix.fd_t,
 
 /// An eventfd file descriptor used to indicate when new device events are
 /// available on the device queue.
@@ -44,35 +50,29 @@ event: posix.fd_t,
 mutex: std.Thread.Mutex = .{},
 queue: Queue = .{},
 
-pub fn init() !DeviceWatcher {
+pub fn init(is_pid1: bool) !DeviceWatcher {
     var self = DeviceWatcher{
+        .is_pid1 = is_pid1,
         .event = try posix.eventfd(0, 0),
         .block_dir = try std.fs.cwd().makeOpenPath("/dev/block", .{}),
         .char_dir = try std.fs.cwd().makeOpenPath("/dev/char", .{}),
-        .nl_fd = try posix.socket(
+        .epoll = try posix.epoll_create1(linux_headers.EPOLL_CLOEXEC),
+        .nl = try posix.socket(
             posix.system.AF.NETLINK,
             posix.system.SOCK.DGRAM,
             std.os.linux.NETLINK.KOBJECT_UEVENT,
         ),
     };
 
-    try self.scanAndCreateExistingDevices();
-
-    return self;
-}
-
-pub fn watch(self: *DeviceWatcher, done: posix.fd_t) !void {
-    defer self.deinit();
-
     try posix.setsockopt(
-        self.nl_fd,
+        self.nl,
         posix.SOL.SOCKET,
         posix.SO.RCVBUF,
         &std.mem.toBytes(@as(c_int, KERN_RCVBUF)),
     );
 
     try posix.setsockopt(
-        self.nl_fd,
+        self.nl,
         posix.SOL.SOCKET,
         posix.SO.RCVBUFFORCE,
         &std.mem.toBytes(@as(c_int, KERN_RCVBUF)),
@@ -82,22 +82,27 @@ pub fn watch(self: *DeviceWatcher, done: posix.fd_t) !void {
         .groups = 1, // KOBJECT_UEVENT groups bitmask must be 1
         .pid = @bitCast(posix.system.getpid()),
     };
-    try posix.bind(self.nl_fd, @ptrCast(&nls), @sizeOf(posix.sockaddr.nl));
-
-    const epoll_fd = try posix.epoll_create1(linux_headers.EPOLL_CLOEXEC);
-    defer posix.close(epoll_fd);
+    try posix.bind(self.nl, @ptrCast(&nls), @sizeOf(posix.sockaddr.nl));
 
     var netlink_event = epoll_event{
-        .data = .{ .fd = self.nl_fd },
+        .data = .{ .fd = self.nl },
         .events = std.os.linux.EPOLL.IN,
     };
 
     try posix.epoll_ctl(
-        epoll_fd,
+        self.epoll,
         std.os.linux.EPOLL.CTL_ADD,
-        self.nl_fd,
+        self.nl,
         &netlink_event,
     );
+
+    try self.scanAndCreateExistingDevices();
+
+    return self;
+}
+
+pub fn watch(self: *DeviceWatcher, done: posix.fd_t) !void {
+    defer self.deinit();
 
     var done_event = epoll_event{
         .data = .{ .fd = done },
@@ -105,7 +110,7 @@ pub fn watch(self: *DeviceWatcher, done: posix.fd_t) !void {
     };
 
     try posix.epoll_ctl(
-        epoll_fd,
+        self.epoll,
         std.os.linux.EPOLL.CTL_ADD,
         done,
         &done_event,
@@ -114,7 +119,7 @@ pub fn watch(self: *DeviceWatcher, done: posix.fd_t) !void {
     while (true) {
         var events = [_]posix.system.epoll_event{undefined} ** (2 << 4);
 
-        const n_events = posix.epoll_wait(epoll_fd, &events, -1);
+        const n_events = posix.epoll_wait(self.epoll, &events, -1);
 
         var i_event: usize = 0;
         while (i_event < n_events) : (i_event += 1) {
@@ -123,7 +128,7 @@ pub fn watch(self: *DeviceWatcher, done: posix.fd_t) !void {
             if (event.data.fd == done) {
                 std.log.debug("done watching devices", .{});
                 return;
-            } else if (event.data.fd == self.nl_fd) {
+            } else if (event.data.fd == self.nl) {
                 self.handleNewEvent() catch |err| {
                     std.log.err("failed to handle new device: {}", .{err});
                 };
@@ -137,7 +142,7 @@ pub fn watch(self: *DeviceWatcher, done: posix.fd_t) !void {
 fn handleNewEvent(self: *DeviceWatcher) !void {
     var recv_bytes: [USER_RCVBUF]u8 = undefined;
 
-    const bytes_read = try posix.read(self.nl_fd, &recv_bytes);
+    const bytes_read = try posix.read(self.nl, &recv_bytes);
 
     const event = kobject.parseUeventKobjectContents(
         recv_bytes[0..bytes_read],
@@ -165,7 +170,9 @@ pub fn deinit(self: *DeviceWatcher) void {
     self.block_dir.close();
     self.char_dir.close();
 
-    posix.close(self.nl_fd);
+    posix.close(self.nl);
+    posix.close(self.event);
+    posix.close(self.epoll);
 }
 
 fn mknod(self: *DeviceWatcher, node_type: NodeType, major: u32, minor: u32) !void {
@@ -241,15 +248,17 @@ pub fn scanAndCreateExistingDevicesForSubsystem(
 }
 
 fn addDevice(self: *DeviceWatcher, event: Event) !void {
-    switch (event.device.type) {
-        .node => |node| {
-            const major, const minor = node;
-            try self.mknod(switch (event.device.subsystem) {
-                .block => .block,
-                else => .char,
-            }, major, minor);
-        },
-        else => {},
+    if (self.is_pid1) {
+        switch (event.device.type) {
+            .node => |node| {
+                const major, const minor = node;
+                try self.mknod(switch (event.device.subsystem) {
+                    .block => .block,
+                    else => .char,
+                }, major, minor);
+            },
+            else => {},
+        }
     }
 
     {
@@ -266,15 +275,17 @@ fn addDevice(self: *DeviceWatcher, event: Event) !void {
 }
 
 fn removeDevice(self: *DeviceWatcher, event: Event) !void {
-    switch (event.device.type) {
-        .node => |node| {
-            const major, const minor = node;
-            try self.removeNode(switch (event.device.subsystem) {
-                .block => .block,
-                else => .char,
-            }, major, minor);
-        },
-        else => {},
+    if (self.is_pid1) {
+        switch (event.device.type) {
+            .node => |node| {
+                const major, const minor = node;
+                try self.removeNode(switch (event.device.subsystem) {
+                    .block => .block,
+                    else => .char,
+                }, major, minor);
+            },
+            else => {},
+        }
     }
 
     {
@@ -290,6 +301,7 @@ fn removeDevice(self: *DeviceWatcher, event: Event) !void {
     }
 }
 
+/// Assumes we are PID1.
 fn removeNode(self: *DeviceWatcher, node_type: NodeType, major: u32, minor: u32) !void {
     var buf: [10]u8 = undefined;
     const device = try std.fmt.bufPrint(&buf, "{}:{}", .{ major, minor });

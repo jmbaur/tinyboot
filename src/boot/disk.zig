@@ -100,9 +100,9 @@ pub fn probe(
                 // BootLoaderSpec uses this partition type for MBR, see
                 // https://uapi-group.org/specifications/specs/boot_loader_specification/#the-partitionsl.
                 (part_type == .LinuxExtendedBoot or
-                // QEMU uses this partition type when using a FAT
-                // emulated drive with `-drive file=fat:rw:some/directory`.
-                part_type == .Fat16)) or
+                    // QEMU uses this partition type when using a FAT emulated
+                    // drive with `-drive file=fat:rw:some/directory`.
+                    part_type == .Fat16)) or
                 // Many ISOs have this MBR table setup where the partition type
                 // is ESP and it is marked as non-bootable.
                 part_type == .EfiSystemPartition)
@@ -274,20 +274,318 @@ fn unmount(self: *DiskBootLoader) !void {
     }
 }
 
-fn versionInId(id: []const u8) ?std.SemanticVersion {
-    for (id, 0..) |char, idx| {
-        if ('0' <= char and char <= '9') {
-            return std.SemanticVersion.parse(id[idx..]) catch break;
+fn isValidVersionCharacter(char: u8) bool {
+    return std.ascii.isAlphanumeric(char) or char == '-' or char == '.' or char == '~' or char == '^';
+}
+
+/// Version comparison as outlined in https://uapi-group.org/specifications/specs/version_format_specification/#version-comparison.
+fn compareVersion(left_buffer: []const u8, right_buffer: []const u8) std.math.Order {
+    var left_stream = std.io.fixedBufferStream(left_buffer);
+    var right_stream = std.io.fixedBufferStream(right_buffer);
+    const left = left_stream.reader();
+    const right = right_stream.reader();
+
+    var left_char: u8 = left.readByte() catch 0;
+    var right_char: u8 = right.readByte() catch 0;
+
+    // 128 bytes oughta be enough??
+    var left_buf = [_]u8{0} ** 128;
+    var right_buf = [_]u8{0} ** 128;
+
+    var left_fba = std.heap.FixedBufferAllocator.init(&left_buf);
+    var right_fba = std.heap.FixedBufferAllocator.init(&right_buf);
+
+    while (true) {
+        defer {
+            left_fba.reset();
+            right_fba.reset();
+        }
+
+        // Any characters which are outside of the set of listed above (a-z,
+        // A-Z, 0-9, -, ., ~, ^) are skipped in both strings. In particular,
+        // this means that non-ASCII characters that are Unicode digits or
+        // letters are skipped too.
+        while (left_char != 0 and !isValidVersionCharacter(left_char)) {
+            left_char = left.readByte() catch 0;
+        }
+        while (right_char != 0 and !isValidVersionCharacter(right_char)) {
+            right_char = right.readByte() catch 0;
+        }
+
+        // If the remaining part of one of strings starts with ~: if other
+        // remaining part does not start with ~, the string with ~ compares
+        // lower. Otherwise, both tilde characters are skipped.
+        if (left_char == '~' or right_char == '~') {
+            const ord = std.math.order(@intFromBool(left_char != '~'), @intFromBool(right_char != '~'));
+            if (ord != .eq) {
+                return ord;
+            }
+
+            left_char = left.readByte() catch 0;
+            right_char = right.readByte() catch 0;
+        }
+
+        // If one of the strings has ended: if the other string hasn’t, the
+        // string that has remaining characters compares higher. Otherwise, the
+        // strings compare equal.
+        if (left_char == 0 or right_char == 0) {
+            return std.math.order(left_char, right_char);
+        }
+
+        // If the remaining part of one of strings starts with -: if the other
+        // remaining part does not start with -, the string with - compares
+        // lower. Otherwise, both minus characters are skipped.
+        if (left_char == '-' or right_char == '-') {
+            const ord = std.math.order(@intFromBool(left_char != '-'), @intFromBool(right_char != '-'));
+            if (ord != .eq) {
+                return ord;
+            }
+
+            left_char = left.readByte() catch 0;
+            right_char = right.readByte() catch 0;
+        }
+
+        // If the remaining part of one of strings starts with ^: if the other
+        // remaining part does not start with ^, the string with ^ compares
+        // lower. Otherwise, both caret characters are skipped.
+        if (left_char == '^' or right_char == '^') {
+            const ord = std.math.order(@intFromBool(left_char != '^'), @intFromBool(right_char != '^'));
+            if (ord != .eq) {
+                return ord;
+            }
+
+            left_char = left.readByte() catch 0;
+            right_char = right.readByte() catch 0;
+        }
+
+        // If the remaining part of one of strings starts with .: if the other
+        // remaining part does not start with ., the string with . compares
+        // lower. Otherwise, both dot characters are skipped.
+        if (left_char == '.' or right_char == '.') {
+            const ord = std.math.order(@intFromBool(left_char != '.'), @intFromBool(right_char != '.'));
+            if (ord != .eq) {
+                return ord;
+            }
+
+            left_char = left.readByte() catch 0;
+            right_char = right.readByte() catch 0;
+        }
+
+        // If either of the remaining parts starts with a digit: numerical
+        // prefixes are compared numerically. Any leading zeroes are skipped.
+        // The numerical prefixes (until the first non-digit character) are
+        // evaluated as numbers. If one of the prefixes is empty, it evaluates
+        // as 0. If the numbers are different, the string with the bigger
+        // number compares higher. Otherwise, the comparison continues at the
+        // following characters at point 1.
+        if (std.ascii.isDigit(left_char) or std.ascii.isDigit(right_char)) {
+            var left_num_buf = std.ArrayList(u8).init(left_fba.allocator());
+            while (std.ascii.isDigit(left_char)) {
+                left_num_buf.append(left_char) catch unreachable;
+                left_char = left.readByte() catch 0;
+            }
+
+            var right_num_buf = std.ArrayList(u8).init(right_fba.allocator());
+            while (std.ascii.isDigit(right_char)) {
+                right_num_buf.append(right_char) catch unreachable;
+                right_char = right.readByte() catch 0;
+            }
+
+            const non_empty_ord = std.math.order(@intFromBool(left_num_buf.items.len != 0), @intFromBool(right_num_buf.items.len != 0));
+            if (non_empty_ord != .eq) {
+                return non_empty_ord;
+            }
+
+            const left_trimmed = std.mem.trimLeft(u8, left_num_buf.items, "0");
+            const right_trimmed = std.mem.trimLeft(u8, right_num_buf.items, "0");
+
+            const left_num = if (left_trimmed.len == 0) 0 else std.fmt.parseInt(
+                usize,
+                left_trimmed,
+                10,
+            ) catch unreachable;
+            const right_num = if (right_trimmed.len == 0) 0 else std.fmt.parseInt(
+                usize,
+                right_trimmed,
+                10,
+            ) catch unreachable;
+
+            const ord = std.math.order(left_num, right_num);
+            if (ord != .eq) {
+                return ord;
+            }
+
+            continue;
+        }
+
+        // Leading alphabetical prefixes are compared alphabetically. The
+        // substrings are compared letter-by-letter. If both letters are the
+        // same, the comparison continues with the next letter. All capital
+        // letters compare lower than lower-case letters (B < a). When the end
+        // of one substring has been reached (a non-letter character or the end
+        // of the whole string), if the other substring has remaining letters,
+        // it compares higher. Otherwise, the comparison continues at the
+        // following characters at point 1.
+        {
+            var left_alpha_buf = std.ArrayList(u8).init(left_fba.allocator());
+            while (std.ascii.isAlphabetic(left_char)) {
+                left_alpha_buf.append(left_char) catch unreachable;
+                left_char = left.readByte() catch 0;
+            }
+
+            var right_alpha_buf = std.ArrayList(u8).init(right_fba.allocator());
+            while (std.ascii.isAlphabetic(right_char)) {
+                right_alpha_buf.append(right_char) catch unreachable;
+                right_char = right.readByte() catch 0;
+            }
+
+            const len_for_comparison = @min(left_alpha_buf.items.len, right_alpha_buf.items.len);
+            const lex_ord = std.mem.order(u8, left_alpha_buf.items[0..len_for_comparison], right_alpha_buf.items[0..len_for_comparison]);
+            if (lex_ord != .eq) {
+                return lex_ord;
+            }
+
+            const len_ord = std.math.order(left_alpha_buf.items.len, right_alpha_buf.items.len);
+            if (len_ord != .eq) {
+                return len_ord;
+            }
         }
     }
+}
 
-    return null;
+test "compareVersion" {
+    // Test cases from https://uapi-group.org/specifications/specs/version_format_specification/#examples
+    {
+        try std.testing.expectEqual(.eq, compareVersion("", ""));
+        try std.testing.expectEqual(.gt, compareVersion("", "~"));
+        try std.testing.expectEqual(.gt, compareVersion("0", "~"));
+        try std.testing.expectEqual(.lt, compareVersion("", "0"));
+        try std.testing.expectEqual(.eq, compareVersion("11", "11"));
+        try std.testing.expectEqual(.gt, compareVersion("0.", "0"));
+        try std.testing.expectEqual(.gt, compareVersion("0.0", "0"));
+        try std.testing.expectEqual(.eq, compareVersion("1_", "1"));
+        try std.testing.expectEqual(.eq, compareVersion("_1", "1"));
+        try std.testing.expectEqual(.lt, compareVersion("1_", "1.2"));
+        try std.testing.expectEqual(.gt, compareVersion("1_2_3", "1.3.3"));
+        try std.testing.expectEqual(.eq, compareVersion("1+", "1"));
+        try std.testing.expectEqual(.eq, compareVersion("+1", "1"));
+        try std.testing.expectEqual(.lt, compareVersion("1+", "1.2"));
+        try std.testing.expectEqual(.gt, compareVersion("1+2+3", "1.3.3"));
+        try std.testing.expectEqual(.eq, compareVersion("systemd-123", "systemd-123"));
+        try std.testing.expectEqual(.lt, compareVersion("bar-123", "foo-123"));
+        try std.testing.expectEqual(.gt, compareVersion("123a", "123"));
+        try std.testing.expectEqual(.lt, compareVersion("123.a", "123.b"));
+        try std.testing.expectEqual(.gt, compareVersion("123a", "123.a"));
+        try std.testing.expectEqual(.eq, compareVersion("11α", "11β"));
+        try std.testing.expectEqual(.lt, compareVersion("B", "a"));
+    }
+
+    // Test cases used by systemd, see https://github.com/systemd/systemd/blob/2e3efb18845416e728ebf5bdf8ad64da7b240660/src/test/test-string-util.c#L908
+    {
+        var window = std.mem.window([]const u8, &.{
+            "~1",
+            "",
+            "ab",
+            "abb",
+            "abc",
+            "0001",
+            "002",
+            "12",
+            "122",
+            "122.9",
+            "123~rc1",
+            "123",
+            "123-a",
+            "123-a.1",
+            "123-a1",
+            "123-a1.1",
+            "123-3",
+            "123-3.1",
+            "123^patch1",
+            "123^1",
+            "123.a-1",
+            "123.1-1",
+            "123a-1",
+            "124",
+        }, 2, 1);
+
+        while (window.next()) |slices| {
+            try std.testing.expectEqual(.lt, compareVersion(slices[0], slices[1]));
+        }
+
+        try std.testing.expectEqual(.lt, compareVersion("123.45-67.88", "123.45-67.89"));
+        try std.testing.expectEqual(.lt, compareVersion("123.45-67.89", "123.45-67.89a"));
+        try std.testing.expectEqual(.lt, compareVersion("123.45-67.ab", "123.45-67.89"));
+        try std.testing.expectEqual(.lt, compareVersion("123.45-67.9", "123.45-67.89"));
+        try std.testing.expectEqual(.lt, compareVersion("123.45-67", "123.45-67.89"));
+        try std.testing.expectEqual(.lt, compareVersion("123.45-66.89", "123.45-67.89"));
+        try std.testing.expectEqual(.lt, compareVersion("123.45-9.99", "123.45-67.89"));
+        try std.testing.expectEqual(.lt, compareVersion("123.42-99.99", "123.45-67.89"));
+        try std.testing.expectEqual(.lt, compareVersion("123-99.99", "123.45-67.89"));
+
+        // '~' : pre-releases
+        try std.testing.expectEqual(.lt, compareVersion("123~rc1-99.99", "123.45-67.89"));
+        try std.testing.expectEqual(.lt, compareVersion("123~rc1-99.99", "123-45.67.89"));
+        try std.testing.expectEqual(.lt, compareVersion("123~rc1-99.99", "123~rc2-67.89"));
+        try std.testing.expectEqual(.lt, compareVersion("123~rc1-99.99", "123^aa2-67.89"));
+        try std.testing.expectEqual(.lt, compareVersion("123~rc1-99.99", "123aa2-67.89"));
+
+        // '-' : separator between version and release.
+        try std.testing.expectEqual(.lt, compareVersion("123-99.99", "123.45-67.89"));
+        try std.testing.expectEqual(.lt, compareVersion("123-99.99", "123^aa2-67.89"));
+        try std.testing.expectEqual(.lt, compareVersion("123-99.99", "123aa2-67.89"));
+
+        // '^' : patch releases
+        try std.testing.expectEqual(.lt, compareVersion("123^45-67.89", "123.45-67.89"));
+        try std.testing.expectEqual(.lt, compareVersion("123^aa1-99.99", "123^aa2-67.89"));
+        try std.testing.expectEqual(.lt, compareVersion("123^aa2-67.89", "123aa2-67.89"));
+
+        // '.' : point release
+        try std.testing.expectEqual(.lt, compareVersion("123.aa2-67.89", "123aa2-67.89"));
+        try std.testing.expectEqual(.lt, compareVersion("123.aa2-67.89", "123.ab2-67.89"));
+
+        // invalid characters
+        try std.testing.expectEqual(.eq, compareVersion("123_aa2-67.89", "123aa+2-67.89"));
+
+        // some corner cases
+        try std.testing.expectEqual(.gt, compareVersion("123.", "123")); // One more version segment
+        try std.testing.expectEqual(.lt, compareVersion("12_3", "123")); // 12 < 123
+        try std.testing.expectEqual(.gt, compareVersion("12_3", "12")); // 3 > ''
+        try std.testing.expectEqual(.gt, compareVersion("12_3", "12.3")); // 3 > ''
+        try std.testing.expectEqual(.gt, compareVersion("123.0", "123")); // 0 > ''
+        try std.testing.expectEqual(.gt, compareVersion("123_0", "123")); // 0 > ''
+        try std.testing.expectEqual(.lt, compareVersion("123..0", "123.0")); // '' < 0
+
+        // empty strings or strings with ignored characters only
+        try std.testing.expectEqual(.eq, compareVersion("", ""));
+        try std.testing.expectEqual(.eq, compareVersion("0_", "0"));
+        try std.testing.expectEqual(.eq, compareVersion("_0_", "0"));
+        try std.testing.expectEqual(.eq, compareVersion("_0", "0"));
+        try std.testing.expectEqual(.eq, compareVersion("0", "0___"));
+        try std.testing.expectEqual(.eq, compareVersion("", "_"));
+        try std.testing.expectEqual(.eq, compareVersion("_", ""));
+        try std.testing.expectEqual(.eq, compareVersion("_", "_"));
+        try std.testing.expectEqual(.gt, compareVersion("", "~"));
+        try std.testing.expectEqual(.lt, compareVersion("~", ""));
+        try std.testing.expectEqual(.eq, compareVersion("~", "~"));
+    }
+
+    // Fuzz testing (to ensure we don't panic)
+    {
+        const Context = struct {
+            fn testOne(context: @This(), input: []const u8) anyerror!void {
+                _ = context;
+                _ = compareVersion(input[0 .. input.len / 2], input[input.len / 2 ..]);
+            }
+        };
+
+        try std.testing.fuzz(Context{}, Context.testOne, .{});
+    }
 }
 
 // Example implementation in systemd-boot https://github.com/systemd/systemd/blob/de732ade0909c2d44a214fb1eaea5f5b1721e9f1/src/boot/efi/boot.c#L1670
+//
 /// Follows logic outlined by Boot Loader Specification sorting (described at https://uapi-group.org/specifications/specs/boot_loader_specification/#sorting).
-///
-/// Version comparisons are done by parsing version fields using semantic versioning.
 fn blsEntryLessThan(default_entry: ?[]const u8, a: BlsEntry, b: BlsEntry) bool {
     if (default_entry) |default_title| {
         if (std.mem.eql(u8, a.id, default_title)) {
@@ -328,25 +626,8 @@ fn blsEntryLessThan(default_entry: ?[]const u8, a: BlsEntry, b: BlsEntry) bool {
             .lt => return true,
         }
 
-        {
-            const a_version = std.SemanticVersion.parse(a.version orelse "0.0.0") catch b: {
-                std.log.debug("invalid version in {s}: {?s}", .{ a.id, a.version });
-                break :b std.SemanticVersion{
-                    .major = 0,
-                    .minor = 0,
-                    .patch = 0,
-                };
-            };
-            const b_version = std.SemanticVersion.parse(b.version orelse "0.0.0") catch b: {
-                std.log.debug("invalid version in {s}: {?s}", .{ b.id, b.version });
-                break :b std.SemanticVersion{
-                    .major = 0,
-                    .minor = 0,
-                    .patch = 0,
-                };
-            };
-
-            switch (std.SemanticVersion.order(a_version, b_version)) {
+        if (a.version != null and b.version != null) {
+            switch (compareVersion(a.version.?, b.version.?)) {
                 .eq => {},
                 .gt => return true,
                 .lt => return false,
@@ -354,16 +635,10 @@ fn blsEntryLessThan(default_entry: ?[]const u8, a: BlsEntry, b: BlsEntry) bool {
         }
     }
 
-    {
-        const a_id_version = versionInId(a.id);
-        const b_id_version = versionInId(b.id);
-        if (a_id_version != null and b_id_version != null) {
-            switch (std.SemanticVersion.order(a_id_version.?, b_id_version.?)) {
-                .eq => {},
-                .gt => return true,
-                .lt => return false,
-            }
-        }
+    switch (compareVersion(a.id, b.id)) {
+        .eq => {},
+        .gt => return true,
+        .lt => return false,
     }
 
     if (a.tries_left == null or b.tries_left == null) {
@@ -546,6 +821,10 @@ fn searchForEntries(
         break :b LoaderConf.parse(contents);
     };
 
+    if (loader_conf.default_entry) |default_entry| {
+        std.log.debug("default BLS entry {s}", .{default_entry});
+    }
+
     self.loader_timeout = loader_conf.timeout;
 
     var it = entries_dir.iterate();
@@ -589,6 +868,8 @@ fn searchForEntries(
     std.mem.sort(BlsEntry, bls_entries.items, loader_conf.default_entry, blsEntryLessThan);
 
     for (bls_entries.items) |entry| {
+        std.log.debug("inspecting {s}", .{entry.id});
+
         const linux = mount_dir.realpathAlloc(allocator, entry.linux orelse {
             std.log.err("missing linux kernel in entry {s}", .{entry.id});
             continue;
