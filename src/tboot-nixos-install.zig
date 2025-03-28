@@ -22,7 +22,7 @@ fn ensureFilesystemState(
     std.log.debug("ensuring filesystem state", .{});
 
     if (!args.dry_run) {
-        try esp.makePath("EFI/nixos");
+        try esp.makePath("loader/nixos");
         try esp.makePath("loader/entries");
     }
 
@@ -65,7 +65,7 @@ fn installGeneration(
     );
 
     const linux_target = try path.resolve(arena_alloc, &.{
-        "EFI",
+        "loader",
         "nixos",
         linux_target_filename,
     });
@@ -114,7 +114,7 @@ fn installGeneration(
             );
 
             const initrd_target = try path.resolve(arena_alloc, &.{
-                "EFI",
+                "loader",
                 "nixos",
                 initrd_target_filename,
             });
@@ -273,7 +273,7 @@ pub fn main() !void {
         \\--dry-run               Don't make any modifications to the filesystem.
         \\--private-key <FILE>    Private key to sign with.
         \\--certificate <FILE>    X509 certificate to sign with.
-        \\--esp-mnt <DIR>         UEFI system partition mountpoint (default /boot).
+        \\--esp-mnt <DIR>         EFI system partition mountpoint (default /boot).
         \\--max-tries <NUM>       Maximum number of boot attempts (default 3).
         \\--timeout <NUM>         Bootloader timeout (default 5).
         \\<DIR>                   NixOS toplevel directory.
@@ -357,7 +357,7 @@ pub fn main() !void {
         &args,
     );
 
-    var nixos_dir = try esp.openDir("EFI/nixos", .{ .iterate = true });
+    var nixos_dir = try esp.openDir("loader/nixos", .{ .iterate = true });
     defer nixos_dir.close();
 
     var entries_dir = try esp.openDir("loader/entries", .{ .iterate = true });
