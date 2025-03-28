@@ -315,7 +315,10 @@ pub fn main() !void {
     }
 
     var args = Args{
-        .default_nixos_system_closure = res.positionals[0].?,
+        .default_nixos_system_closure = try std.fs.cwd().realpathAlloc(
+            arena.allocator(),
+            res.positionals[0].?,
+        ),
     };
 
     if (res.args.@"private-key" != null and
