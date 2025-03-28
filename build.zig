@@ -106,7 +106,6 @@ pub fn build(b: *std.Build) !void {
             .root_source_file = b.path("src/tboot-initrd.zig"),
             .target = target,
             .optimize = optimize,
-            .strip = do_strip,
         });
         var tboot_initrd_tool = maybe_tboot_initrd_tool.?;
         tboot_initrd_tool.linkLibC();
@@ -123,7 +122,6 @@ pub fn build(b: *std.Build) !void {
             .root_source_file = b.path("src/tboot-bless-boot.zig"),
             .target = target,
             .optimize = optimize,
-            .strip = do_strip,
         });
         tboot_bless_boot.root_module.addImport("clap", clap.module("clap"));
         b.installArtifact(tboot_bless_boot);
@@ -133,7 +131,6 @@ pub fn build(b: *std.Build) !void {
             .root_source_file = b.path("src/tboot-bless-boot-generator.zig"),
             .target = target,
             .optimize = optimize,
-            .strip = do_strip,
         });
         tboot_bless_boot_generator.root_module.addImport("clap", clap.module("clap"));
         b.installArtifact(tboot_bless_boot_generator);
@@ -143,7 +140,6 @@ pub fn build(b: *std.Build) !void {
             .root_source_file = b.path("src/tboot-sign.zig"),
             .target = target,
             .optimize = optimize,
-            .strip = do_strip,
         });
         tboot_sign.linkLibC();
         tboot_sign.each_lib_rpath = !target.result.isMuslLibC();
@@ -156,7 +152,6 @@ pub fn build(b: *std.Build) !void {
             .root_source_file = b.path("src/tboot-keygen.zig"),
             .target = target,
             .optimize = optimize,
-            .strip = do_strip,
         });
         tboot_keygen.linkLibC();
         tboot_keygen.each_lib_rpath = !target.result.isMuslLibC();
@@ -169,7 +164,6 @@ pub fn build(b: *std.Build) !void {
             .root_source_file = b.path("src/tboot-nixos-install.zig"),
             .target = target,
             .optimize = optimize,
-            .strip = do_strip,
         });
         tboot_nixos_install.linkLibC();
         tboot_nixos_install.each_lib_rpath = !target.result.isMuslLibC();
@@ -182,7 +176,6 @@ pub fn build(b: *std.Build) !void {
             .root_source_file = b.path("src/ymodem.zig"),
             .target = target,
             .optimize = optimize,
-            .strip = do_strip,
         });
         tboot_ymodem.root_module.addImport("linux_headers", linux_headers_module);
         tboot_ymodem.root_module.addImport("clap", clap.module("clap"));
@@ -193,7 +186,6 @@ pub fn build(b: *std.Build) !void {
             .root_source_file = b.path("src/vpd.zig"),
             .target = target,
             .optimize = optimize,
-            .strip = do_strip,
         });
         tboot_vpd.root_module.addImport("linux_headers", linux_headers_module);
         tboot_vpd.root_module.addImport("clap", clap.module("clap"));
