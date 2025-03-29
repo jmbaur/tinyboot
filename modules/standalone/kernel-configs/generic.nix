@@ -2,6 +2,8 @@
 {
   linux.kconfig = with lib.kernel; {
     "64BIT" = lib.mkIf pkgs.stdenv.hostPlatform.is64bit yes;
+    VT = yes;
+    VT_CONSOLE = yes;
     ASYMMETRIC_KEY_TYPE = yes;
     ASYMMETRIC_PUBLIC_KEY_SUBTYPE = yes;
     ATA = yes;
@@ -28,6 +30,10 @@
     EVENTFD = yes;
     EXPERT = yes;
     FAT_FS = yes;
+    FB = yes;
+    FRAMEBUFFER_CONSOLE = yes;
+    FRAMEBUFFER_CONSOLE_DEFERRED_TAKEOVER = yes;
+    FRAMEBUFFER_CONSOLE_DETECT_PRIMARY = yes;
     FUTEX = yes;
     FW_LOADER = yes;
     FW_LOADER_COMPRESS = yes;
