@@ -21,10 +21,10 @@ fn ensureFilesystemState(
 ) !void {
     std.log.debug("ensuring filesystem state", .{});
 
-    if (!args.dry_run) {
-        try esp.makePath("loader/nixos");
-        try esp.makePath("loader/entries");
-    }
+    // Make directories even if we are in dry run mode, as we need to be able
+    // to open these directories for iterating over.
+    try esp.makePath("loader/nixos");
+    try esp.makePath("loader/entries");
 
     if (!utils.pathExists(esp, "loader/entries.srel")) {
         if (!args.dry_run) {
@@ -200,6 +200,7 @@ fn installGeneration(
     );
 
     var it = entries_dir.iterate();
+
     while (try it.next()) |dir_entry| {
         if (dir_entry.kind != .file) {
             continue;
@@ -209,7 +210,7 @@ fn installGeneration(
 
         if (std.mem.eql(u8, existing_entry.name, entry_name)) {
             std.log.debug("entry {s} already installed", .{entry_name});
-            try entries_known_files.put(dir_entry.name, {});
+            try entries_known_files.put(try arena_alloc.dupe(u8, dir_entry.name), {});
             return;
         }
     }
@@ -291,7 +292,7 @@ pub fn main() !void {
     var diag = clap.Diagnostic{};
     var res = clap.parse(clap.Help, &params, &parsers, .{
         .diagnostic = &diag,
-        .allocator = arena.allocator(),
+        .allocator = arena_alloc,
     }) catch |err| {
         try diag.report(stderr, err);
         try clap.usage(stderr, clap.Help, &params);
@@ -316,7 +317,7 @@ pub fn main() !void {
 
     var args = Args{
         .default_nixos_system_closure = try std.fs.cwd().realpathAlloc(
-            arena.allocator(),
+            arena_alloc,
             res.positionals[0].?,
         ),
     };
@@ -355,10 +356,7 @@ pub fn main() !void {
     });
     defer esp.close();
 
-    try ensureFilesystemState(
-        &esp,
-        &args,
-    );
+    try ensureFilesystemState(&esp, &args);
 
     var nixos_dir = try esp.openDir("loader/nixos", .{ .iterate = true });
     defer nixos_dir.close();

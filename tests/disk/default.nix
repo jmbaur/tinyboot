@@ -72,15 +72,18 @@ testers.runNixOSTest {
       machine.wait_for_shutdown()
 
       with subtest("boot-counting"):
-          with tempfile.TemporaryDirectory() as esp:
-              os.environ["ESP"] = esp
-              populate_esp(
-                  esp,
-                  "foo",
-                  tries_left=3,
-                  tries_done=0,
-              )
-              machine.wait_for_unit("multi-user.target")
-              machine.succeed("test -e /boot/loader/entries/foo+2-1.conf")
+          # TODO(jared): qemu bug: https://gitlab.com/qemu-project/qemu/-/issues/2786
+          if False:
+              with tempfile.TemporaryDirectory() as esp:
+                  os.environ["ESP"] = esp
+                  populate_esp(
+                      esp,
+                      "foo",
+                      tries_left=3,
+                      tries_done=0,
+                  )
+                  machine.wait_for_unit("boot-complete.target")
+                  assert "active" == machine.succeed("systemctl is-active tboot-bless-boot.service").strip()
+                  machine.succeed("test -e /boot/loader/entries/foo.conf")
     '';
 }
