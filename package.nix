@@ -26,19 +26,6 @@ let
     }
   ];
 
-  # # The directory that contains `stdlib.h`.
-  # # On POSIX-like systems, include directories be found with: `cc -E -Wp,-v -xc /dev/null`
-  # include_dir=/nix/store/i58yz1rxjxpha40l17hgg7cz62jck9q3-glibc-2.38-77-dev/include
-  #
-  # # The system-specific include directory. May be the same as `include_dir`.
-  # # On Windows it's the directory that includes `vcruntime.h`.
-  # # On POSIX it's the directory that includes `sys/errno.h`.
-  # sys_include_dir=/nix/store/i58yz1rxjxpha40l17hgg7cz62jck9q3-glibc-2.38-77-dev/include
-  #
-  # # The directory that contains `crt1.o` or `crt2.o`.
-  # # On POSIX, can be found with `cc -print-file-name=crt1.o`.
-  # # Not needed when targeting MacOS.
-  # crt_dir=/nix/store/j0by58xwyc66f884x0q8rpzvgpwvjmf2-glibc-2.38-77/lib
   libcFile = writeText "zig-libc-file" ''
     include_dir=${lib.getDev stdenv.cc.libc}/include
     sys_include_dir=${lib.getDev stdenv.cc.libc}/include
