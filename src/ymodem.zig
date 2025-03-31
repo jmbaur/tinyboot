@@ -86,14 +86,15 @@ pub fn send(
     const filename = opts.?.filename;
 
     const stat = try file.stat();
+    const file_size: usize = @intCast(stat.size);
 
-    var file_node = parent_node.start(filename, stat.size / 1024);
+    var file_node = parent_node.start(filename, file_size / 1024);
     defer file_node.end();
 
-    var buf: []align(std.heap.page_size_min) u8 = if (stat.size > 0)
+    var buf: []align(std.heap.page_size_min) u8 = if (file_size > 0)
         try posix.mmap(
             null,
-            stat.size,
+            file_size,
             posix.PROT.READ,
             .{ .TYPE = .PRIVATE },
             file.handle,
@@ -103,7 +104,7 @@ pub fn send(
         &.{};
 
     defer {
-        if (stat.size > 0) {
+        if (file_size > 0) {
             defer posix.munmap(buf);
         }
     }
@@ -113,7 +114,7 @@ pub fn send(
         _ = try std.fmt.bufPrint(
             &payload,
             "{s}{c}{d}{c}",
-            .{ filename, 0x0, stat.size, 0x20 },
+            .{ filename, 0x0, file_size, 0x20 },
         );
         var chunk: Chunk128 = .{
             .block = 0,
@@ -128,7 +129,7 @@ pub fn send(
         }
     }
 
-    var unsent_bytes = stat.size;
+    var unsent_bytes = file_size;
     var buf_index: usize = 0;
 
     var chunk = Chunk1K{ .start = STX };

@@ -49,6 +49,7 @@ const VpdList = std.ArrayList(struct { []const u8, []const u8 });
 
 fn writeVpd(vpd_list: VpdList, file: std.fs.File) !void {
     const stat = try file.stat();
+    const file_size: usize = @intCast(stat.size);
 
     try file.seekTo(GOOGLE_VPD_2_0_OFFSET + @sizeOf(GoogleVpdInfo));
 
@@ -71,8 +72,8 @@ fn writeVpd(vpd_list: VpdList, file: std.fs.File) !void {
 
     try writer.writeByte(VPD_TYPE_TERMINATOR);
 
-    const pos = try file.getPos();
-    try writer.writeByteNTimes(0xff, stat.size - pos);
+    const pos: usize = @intCast(try file.getPos());
+    try writer.writeByteNTimes(0xff, file_size - pos);
 
     try file.seekTo(GOOGLE_VPD_2_0_OFFSET);
     const vpd_info: GoogleVpdInfo = .{
@@ -189,8 +190,8 @@ fn collectVpd(allocator: std.mem.Allocator, file: std.fs.File) !VpdList {
     return vpd_list;
 }
 
-fn readLength(reader: std.fs.File.Reader) !u64 {
-    var total: u64 = 0;
+fn readLength(reader: std.fs.File.Reader) !usize {
+    var total: usize = 0;
 
     while (true) {
         const byte = try reader.readByte();

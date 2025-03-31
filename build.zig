@@ -5,7 +5,7 @@ const zig = std.zig;
 // build.zig.zon.
 const version = std.SemanticVersion.parse("0.1.0") catch @compileError("invalid version");
 
-const TBOOT_INITRD_NAME = "tboot-initrd";
+const tboot_initrd_name = "tboot-initrd";
 
 pub fn build(b: *std.Build) !void {
     const tboot_builtin = b.addOptions();
@@ -102,7 +102,7 @@ pub fn build(b: *std.Build) !void {
 
     if ((with_loader and is_native_build) or with_tools) {
         maybe_tboot_initrd_tool = b.addExecutable(.{
-            .name = TBOOT_INITRD_NAME,
+            .name = tboot_initrd_name,
             .root_source_file = b.path("src/tboot-initrd.zig"),
             .target = target,
             .optimize = optimize,
@@ -212,7 +212,7 @@ pub fn build(b: *std.Build) !void {
         var run_tboot_initrd = if (is_native_build)
             b.addRunArtifact(maybe_tboot_initrd_tool.?)
         else
-            b.addSystemCommand(&.{TBOOT_INITRD_NAME});
+            b.addSystemCommand(&.{tboot_initrd_name});
 
         // TODO(jared): Would be nicer to have generic
         // --file=tboot_loader:/init CLI interface, but don't know how to

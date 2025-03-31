@@ -44,7 +44,7 @@ pub fn main() !void {
 
     const parsers = comptime .{
         .STR = clap.parsers.string,
-        .NUM = clap.parsers.int(u32, 10),
+        .NUM = clap.parsers.int(c_long, 10),
     };
 
     const stderr = std.io.getStdErr().writer();
