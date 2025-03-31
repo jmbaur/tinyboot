@@ -77,8 +77,11 @@ stdenv.mkDerivation {
         if stdenv.hostPlatform.isGnu then "gnu" else "musl"
       }"
       "-Ddynamic-linker=$(cat $NIX_CC/nix-support/dynamic-linker)"
-      "--libc ${libcFile}"
     )
+
+    ${lib.optionalString withTools ''
+      zigBuildFlags+=("--libc ${libcFile}")
+    ''}
 
     ${lib.optionalString (firmwareDirectory != null) ''
       zigBuildFlags+=("-Dfirmware-directory=${firmwareDirectory}")
