@@ -95,9 +95,6 @@ stdenv.mkDerivation (finalAttrs: {
   enableParallelBuilding = true;
 
   patches = [ ./tpm-probe.patch ];
-  postPatch = ''
-    cp ${./boots_ascii_16.ppm} drivers/video/logo/logo_linux_vga16.ppm
-  '';
 
   inherit kconfig;
   passAsFile = [ "kconfig" ];

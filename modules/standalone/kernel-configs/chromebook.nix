@@ -14,6 +14,10 @@
       CROS_EC_LPC = lib.mkIf pkgs.stdenv.hostPlatform.isx86_64 yes;
       CROS_EC_PROTO = yes;
       CROS_EC_SPI = yes;
+      GOOGLE_CBMEM = yes;
+      GOOGLE_COREBOOT_TABLE = yes;
+      GOOGLE_FIRMWARE = yes;
+      GOOGLE_VPD = yes;
       HID_VIVALDI = yes;
       I2C_CROS_EC_TUNNEL = yes;
       KEYBOARD_CROS_EC = yes;

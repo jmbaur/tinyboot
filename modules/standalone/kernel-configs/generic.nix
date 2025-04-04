@@ -2,8 +2,6 @@
 {
   linux.kconfig = with lib.kernel; {
     "64BIT" = lib.mkIf pkgs.stdenv.hostPlatform.is64bit yes;
-    VT = yes;
-    VT_CONSOLE = yes;
     ASYMMETRIC_KEY_TYPE = yes;
     ASYMMETRIC_PUBLIC_KEY_SUBTYPE = yes;
     ATA = yes;
@@ -26,6 +24,7 @@
     DEVMEM = yes;
     DEVTMPFS = yes;
     DMADEVICES = yes;
+    DUMMY_CONSOLE = yes;
     EPOLL = yes;
     EVENTFD = yes;
     EXPERT = yes;
@@ -38,11 +37,6 @@
     FW_LOADER = yes;
     FW_LOADER_COMPRESS = yes;
     FW_LOADER_COMPRESS_XZ = yes;
-    GOOGLE_CBMEM = yes;
-    GOOGLE_COREBOOT_TABLE = yes;
-    GOOGLE_FIRMWARE = yes;
-    GOOGLE_MEMCONSOLE_COREBOOT = yes;
-    GOOGLE_VPD = yes;
     GPIOLIB = yes;
     HAS_IOMEM = yes;
     HID = yes;
@@ -111,6 +105,8 @@
     USB_XHCI_HCD = yes;
     USB_XHCI_PCI = yes;
     VFAT_FS = yes;
+    VT = yes;
+    VT_CONSOLE = yes;
     WATCHDOG = yes;
     WATCHDOG_HANDLE_BOOT_ENABLED = yes;
     WIRELESS = unset;

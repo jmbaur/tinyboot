@@ -73,8 +73,6 @@ in
 
     debug = mkEnableOption "debug";
 
-    video = mkEnableOption "video";
-
     network = mkEnableOption "network";
 
     chromebook = mkEnableOption "chromebook";
@@ -114,10 +112,9 @@ in
   config = {
     linux.kconfig.CMDLINE = kernel.freeform (
       toString (
-        optionals config.video [ "fbcon=logo-count:1" ]
-        ++ [
+        [
           "printk.devkmsg=on"
-          "loglevel=${if config.debug then "8" else "5"}"
+          "loglevel=${if config.debug then "7" else "4"}"
         ]
         ++ map (c: "console=${c}") config.linux.consoles
       )

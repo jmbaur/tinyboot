@@ -17,6 +17,7 @@
       DMA_ACPI = yes;
       DMI = yes;
       DW_DMAC = yes;
+      FB_VESA = yes;
       GPIO_ACPI = yes;
       INTEL_IOMMU = yes;
       INTEL_IOMMU_DEFAULT_ON = yes;
