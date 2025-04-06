@@ -27,6 +27,40 @@ fn waitForKexecLoad() !void {
     return error.Timeout;
 }
 
+fn kexecLoad(
+    allocator: std.mem.Allocator,
+    linux: std.fs.File,
+    initrd: ?std.fs.File,
+    cmdline: ?[]const u8,
+) !void {
+    _ = allocator;
+    _ = linux;
+    _ = initrd;
+    _ = cmdline;
+
+    const rc = std.os.linux.syscall4(.kexec_load, 0, 0, 0, 0);
+
+    try kexecLoadErrorHandling(rc);
+}
+
+fn kexecLoadErrorHandling(return_code: usize) !void {
+    switch (posix.errno(return_code)) {
+        .SUCCESS => {},
+        // IMA appraisal failed
+        .ACCES => return error.PermissionDenied,
+        // Invalid kernel image (CONFIG_RELOCATABLE not enabled?)
+        .NOEXEC => return error.InvalidExe,
+        // Another image is already loaded
+        .BUSY => return error.FilesAlreadyRegistered,
+        .NOMEM => return error.SystemResources,
+        .BADF => return error.InvalidFileDescriptor,
+        else => |err| {
+            std.log.err("kexec load failed for unknown reason: {}", .{err});
+            return posix.unexpectedErrno(err);
+        },
+    }
+}
+
 fn kexecFileLoad(
     allocator: std.mem.Allocator,
     linux: std.fs.File,
@@ -56,21 +90,7 @@ fn kexecFileLoad(
         flags,
     );
 
-    switch (posix.errno(rc)) {
-        .SUCCESS => {},
-        // IMA appraisal failed
-        .ACCES => return error.PermissionDenied,
-        // Invalid kernel image (CONFIG_RELOCATABLE not enabled?)
-        .NOEXEC => return error.InvalidExe,
-        // Another image is already loaded
-        .BUSY => return error.FilesAlreadyRegistered,
-        .NOMEM => return error.SystemResources,
-        .BADF => return error.InvalidFileDescriptor,
-        else => |err| {
-            std.log.err("kexec load failed for unknown reason: {}", .{err});
-            return posix.unexpectedErrno(err);
-        },
-    }
+    try kexecLoadErrorHandling(rc);
 }
 
 pub fn kexec(
@@ -111,7 +131,8 @@ pub fn kexec(
         }
     }
 
-    try kexecFileLoad(allocator, linux, initrd, cmdline);
+    try kexecLoad(allocator, linux, initrd, cmdline);
+    // try kexecFileLoad(allocator, linux, initrd, cmdline);
     try waitForKexecLoad();
 
     std.log.info("kexec loaded", .{});
