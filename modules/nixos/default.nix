@@ -9,13 +9,11 @@ let
 
   inherit (lib)
     getExe'
-    kernel
     mkEnableOption
     mkForce
     mkIf
     mkMerge
     mkOption
-    optionalAttrs
     optionals
     types
     ;
@@ -57,24 +55,15 @@ in
           message = "Bootloader install program depends on bootspec";
         }
       ];
-
       boot.kernelPatches = [
         pkgs.kernelPatches.ima_tpm_early_init
         {
           name = "enable-ima";
           patch = null;
-          extraStructuredConfig =
-            {
-              IMA = kernel.yes;
-              TCG_TIS_SPI = kernel.yes;
-              IMA_DEFAULT_HASH_SHA256 = kernel.yes;
-            }
-            // optionalAttrs pkgs.stdenv.hostPlatform.isx86_64 {
-              # helpful for early TPM initialization on x86_64 chromebooks
-              SPI_INTEL_PCI = kernel.yes;
-              MFD_INTEL_LPSS_ACPI = kernel.yes;
-              MFD_INTEL_LPSS_PCI = kernel.yes;
-            };
+          extraStructuredConfig = {
+            IMA = lib.kernel.yes;
+            IMA_DEFAULT_HASH_SHA256 = lib.kernel.yes;
+          };
         }
       ];
       boot.loader.supportsInitrdSecrets = mkForce false;
