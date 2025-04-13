@@ -34,11 +34,11 @@ let
 in
 stdenv.mkDerivation (finalAttrs: {
   pname = "tinyboot-linux";
-  version = "6.13.11";
+  version = "6.14.2";
 
   src = fetchurl {
     url = "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-${finalAttrs.version}.tar.xz";
-    hash = "sha256-9ivxuafHhQybODXMnm+z2ZN2Vj5i7iQ5GBHB/Yiu7CE=";
+    hash = "sha256-xcaCo1TqMZATk1elfTSnnlw3IhrOgjqTjhARa1d6Lhs=";
   };
 
   depsBuildBuild = [ buildPackages.stdenv.cc ];
