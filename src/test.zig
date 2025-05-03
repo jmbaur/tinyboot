@@ -11,6 +11,7 @@ test {
     _ = @import("./disk/filesystem.zig");
     _ = @import("./disk/gpt.zig");
     _ = @import("./disk/mbr.zig");
+    _ = @import("./fdt.zig");
     _ = @import("./kobject.zig");
     _ = @import("./log.zig");
     _ = @import("./openssl.zig");
@@ -19,12 +20,12 @@ test {
     _ = @import("./system.zig");
     _ = @import("./tboot-bless-boot-generator.zig");
     _ = @import("./tboot-bless-boot.zig");
+    _ = @import("./tboot-efi-stub.zig");
     _ = @import("./tboot-initrd.zig");
     _ = @import("./tboot-keygen.zig");
     _ = @import("./tboot-loader.zig");
     _ = @import("./tboot-nixos-install.zig");
     _ = @import("./tboot-sign.zig");
-    _ = @import("./test.zig");
     _ = @import("./tmpdir.zig");
     _ = @import("./utils.zig");
     _ = @import("./vpd.zig");
