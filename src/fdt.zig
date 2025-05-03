@@ -1,3 +1,5 @@
+// Implemented from documentation found at https://devicetree-specification.readthedocs.io/en/stable/flattened-format.html#flattened-devicetree-dtb-format
+
 const std = @import("std");
 
 const Fdt = @This();
@@ -105,6 +107,16 @@ fn getPropertyName(self: *@This(), offset: u32, buf: []u8) ![]const u8 {
     var buf_stream = std.io.fixedBufferStream(buf);
     try self.stream.reader().streamUntilDelimiter(buf_stream.writer(), 0, null);
     return buf_stream.getWritten();
+}
+
+// TODO(jared): Make this nicer.
+/// Returns the path that the phandle points to.
+pub fn getPhandleProperty(
+    self: *@This(),
+    path: []const []const u8,
+    allocator: std.mem.Allocator,
+) ![]const u8 {
+    return self.getStringProperty(path, allocator);
 }
 
 pub fn getStringProperty(
@@ -246,6 +258,7 @@ const Token = enum(u32) {
 };
 
 // /dts-v1/;
+//
 // / {
 //   testlabel: chosen {
 //     this_is_a_bool;
@@ -282,6 +295,18 @@ test "fdt parse" {
     var stream = std.io.StreamSource{ .const_buffer = std.io.fixedBufferStream(&test_fdt) };
 
     var fdt = try Fdt.init(&stream);
+
+    try std.testing.expectError(error.PropertyNotFound, fdt.getStringProperty(
+        &.{ "chosen", "not_present" },
+        std.testing.allocator,
+    ));
+
+    const this_is_a_phandle = try fdt.getPhandleProperty(
+        &.{ "chosen", "this_is_a_phandle" },
+        std.testing.allocator,
+    );
+    defer std.testing.allocator.free(this_is_a_phandle);
+    try std.testing.expectEqualStrings("/chosen", this_is_a_phandle);
 
     const this_is_a_string = try fdt.getStringProperty(
         &.{ "chosen", "this_is_a_string" },
