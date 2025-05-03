@@ -32,7 +32,6 @@
         ARCH_QCOM = yes;
         ARM_QCOM_CPUFREQ_HW = unset;
         ARM_SMMU_QCOM = yes;
-        BACKLIGHT_QCOM_WLED = unset;
         COMMON_CLK_QCOM = yes;
         CRYPTO_DEV_QCOM_RNG = yes;
         HWSPINLOCK = yes;
@@ -94,7 +93,6 @@
         QCOM_MPM = unset;
         QCOM_OCMEM = unset;
         QCOM_PDC = unset;
-        QCOM_PMIC_GLINK = yes;
         QCOM_Q6V5_PAS = yes;
         QCOM_RMTFS_MEM = yes;
         QCOM_RPMH = yes;
