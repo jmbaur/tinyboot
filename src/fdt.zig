@@ -138,11 +138,7 @@ fn alignStream(stream: *std.io.StreamSource) !void {
 }
 
 fn fdtPad(val: u32) u32 {
-    const off_alignment = val % 4;
-    return if (off_alignment == 0)
-        off_alignment
-    else
-        4 - off_alignment;
+    return std.mem.alignForward(u32, val, @sizeOf(u32)) - val;
 }
 
 fn createLinkedList(
