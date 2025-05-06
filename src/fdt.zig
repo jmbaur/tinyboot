@@ -109,7 +109,7 @@ fn deinitList(allocator: std.mem.Allocator, list: LinkedList) void {
     allocator.destroy(node);
 }
 
-fn deinit(self: *@This()) void {
+pub fn deinit(self: *@This()) void {
     self.strings.deinit();
 
     deinitList(self.allocator, self.list);
