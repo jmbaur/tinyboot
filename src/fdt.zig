@@ -588,7 +588,7 @@ fn upsertProperty(self: *@This(), path: []const u8, value_bytes: []const u8) !vo
 /// Returns the total size (in bytes) needed to serialize the devicetree to FDT
 /// format. This is useful to call if the FDT is going to be written to a
 /// heap-backed buffer, since the returned value can be used with alloc().
-fn size(self: *@This()) usize {
+pub fn size(self: *@This()) usize {
     return self.header.total_size;
 }
 
@@ -615,7 +615,7 @@ fn writeListNode(writer: anytype, node: *LinkedList.Node) !void {
     }
 }
 
-fn save(self: *@This(), writer: anytype) !void {
+pub fn save(self: *@This(), writer: anytype) !void {
     var node = self.list.first orelse return error.InvalidFdt;
 
     try writer.writeStructEndian(self.header, .big);
