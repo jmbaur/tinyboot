@@ -2,7 +2,6 @@ test {
     _ = @import("./autoboot.zig");
     _ = @import("./boot/bootloader.zig");
     _ = @import("./boot/disk.zig");
-    _ = @import("./boot/kexec.zig");
     _ = @import("./boot/ymodem.zig");
     _ = @import("./bootspec.zig");
     _ = @import("./console.zig");
@@ -12,6 +11,7 @@ test {
     _ = @import("./disk/gpt.zig");
     _ = @import("./disk/mbr.zig");
     _ = @import("./fdt.zig");
+    _ = @import("./kexec/kexec.zig");
     _ = @import("./kobject.zig");
     _ = @import("./log.zig");
     _ = @import("./openssl.zig");

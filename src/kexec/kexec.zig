@@ -1,12 +1,29 @@
 const std = @import("std");
 const posix = std.posix;
+const builtin = @import("builtin");
 
 const linux_headers = @import("linux_headers");
 
 const KEXEC_LOADED = "/sys/kernel/kexec_loaded";
 
+pub const MemoryType = enum(u8) {
+    Ram = 0,
+    Reserved = 1,
+    Acpi = 2,
+    AcpiNvs = 3,
+    Uncached = 4,
+    Pmem = 6,
+    Pram = 11,
+};
+
+pub const MemoryRange = struct {
+    start: usize,
+    end: usize,
+    type: MemoryType,
+};
+
 /// Wait for up to 10 seconds for kernel to report for kexec to be loaded.
-fn waitForKexecLoad() !void {
+fn waitForKexecKernelLoaded() !void {
     const sleep_interval = 100 * std.time.ns_per_ms;
 
     var time_slept: u64 = 0;
@@ -25,6 +42,20 @@ fn waitForKexecLoad() !void {
     }
 
     return error.Timeout;
+}
+
+fn kexecLoad(
+    allocator: std.mem.Allocator,
+    linux: std.fs.File,
+    initrd: ?std.fs.File,
+    cmdline: ?[]const u8,
+) !void {
+    _ = allocator;
+    _ = linux;
+    _ = initrd;
+    _ = cmdline;
+
+    return error.NotImplemented;
 }
 
 fn kexecFileLoad(
@@ -73,6 +104,12 @@ fn kexecFileLoad(
     }
 }
 
+pub const kexec_file_load_available = switch(builtin.cpu.arch) {
+        // TODO(jared): confirm there aren't any more.
+        .aarch64, .riscv64, .x86_64 => true,
+        else => false,
+};
+
 pub fn kexec(
     allocator: std.mem.Allocator,
     linux_filepath: []const u8,
@@ -90,6 +127,7 @@ pub fn kexec(
         error.PathAlreadyExists => {},
         else => return err,
     };
+
     var boot_dir = try std.fs.cwd().openDir("/tinyboot", .{});
     defer {
         boot_dir.close();
@@ -111,8 +149,13 @@ pub fn kexec(
         }
     }
 
-    try kexecFileLoad(allocator, linux, initrd, cmdline);
-    try waitForKexecLoad();
+    if (kexec_file_load_available) {
+        try kexecFileLoad(allocator, linux, initrd, cmdline);
+    } else {
+        try kexecLoad(allocator, linux, initrd, cmdline);
+    }
+
+    try waitForKexecKernelLoaded();
 
     std.log.info("kexec loaded", .{});
 }

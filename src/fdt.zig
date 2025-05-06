@@ -602,17 +602,13 @@ fn writeListNode(writer: anytype, node: *LinkedList.Node) !void {
     switch (node.data) {
         .BeginNode => |node_name| {
             try writer.writeAll(node_name);
-            try writer.writeByte(0);
-            for (0..fdtPad(@intCast(node_name.len + 1))) |_| {
-                try writer.writeByte(0);
-            }
+            try writer.writeByte(0); // null terminator
+            try writer.writeByteNTimes(0, fdtPad(@intCast(node_name.len + 1))); // padding
         },
         .Prop => |prop| {
             try writer.writeStructEndian(prop.inner, .big);
             try writer.writeAll(prop.value);
-            for (0..fdtPad(@intCast(prop.value.len))) |_| {
-                try writer.writeByte(0);
-            }
+            try writer.writeByteNTimes(0, fdtPad(@intCast(prop.value.len))); // padding
         },
         .EndNode, .Nop, .End => {},
     }
@@ -623,9 +619,7 @@ pub fn save(self: *@This(), writer: anytype) !void {
 
     try writer.writeStructEndian(self.header, .big);
 
-    for (0..self.header.off_mem_rsvmap - @sizeOf(Header)) |_| {
-        try writer.writeByte(0);
-    }
+    try writer.writeByteNTimes(0, self.header.off_mem_rsvmap - @sizeOf(Header));
 
     try self.stream.seekTo(self.header.off_mem_rsvmap);
 
@@ -644,9 +638,7 @@ pub fn save(self: *@This(), writer: anytype) !void {
         node = next;
     }
 
-    for (0..self.header.off_dt_strings - self.header.off_dt_struct - self.header.size_dt_struct) |_| {
-        try writer.writeByte(0);
-    }
+    try writer.writeByteNTimes(0, self.header.off_dt_strings - self.header.off_dt_struct - self.header.size_dt_struct);
 
     try writer.writeAll(self.strings.items);
 }

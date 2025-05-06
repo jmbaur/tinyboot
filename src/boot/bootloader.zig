@@ -1,7 +1,7 @@
 const std = @import("std");
 
 const Device = @import("../device.zig");
-const kexec = @import("./kexec.zig").kexec;
+const kexec = @import("../kexec/kexec.zig").kexec;
 
 const BootLoader = @This();
 

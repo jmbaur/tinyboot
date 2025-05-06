@@ -3,33 +3,21 @@ const std = @import("std");
 /// A read-only legacy Master Boot Record partition table
 const Mbr = @This();
 
-pub const Error = error{
-    InvalidHeaderSize,
-    MissingMagicNumber,
-};
+const boot_magic = std.mem.bigToNative(u16, 0x55aa);
 
-const boot_magic = 0x55aa;
-
-header: *Header,
+header: Header,
 
 /// Caller is responsible for source.
-pub fn init(source: *std.io.StreamSource) !Mbr {
-    var header_bytes: [@sizeOf(Header)]u8 = undefined;
-    const bytes_read = try source.reader().readAll(&header_bytes);
-    if (bytes_read != @sizeOf(Header)) {
-        return Error.InvalidHeaderSize;
-    }
-    const aligned_buf = @as([]align(@alignOf(Header)) u8, @alignCast(&header_bytes));
+pub fn init(stream: *std.io.StreamSource) !Mbr {
+    comptime std.debug.assert(@sizeOf(Header) == 512);
 
-    const header: *Header = @ptrCast(aligned_buf);
+    const header = try stream.reader().readStructEndian(Header, .little);
 
-    if (std.mem.bigToNative(@TypeOf(header.signature), header.signature) != boot_magic) {
-        return Error.MissingMagicNumber;
+    if (header.signature != boot_magic) {
+        return error.InvalidMbr;
     }
 
-    return .{
-        .header = header,
-    };
+    return .{ .header = header };
 }
 
 pub fn identifier(self: *const Mbr) u32 {
@@ -41,11 +29,11 @@ pub fn partitions(self: *const Mbr) [4]PartitionRecord {
 }
 
 const Header = extern struct {
-    boot_code: [440]u8,
-    unique_mbr_signature: u32 align(2),
-    unknown: u16,
-    partition_records: [4]PartitionRecord align(2),
-    signature: u16,
+    boot_code: [440]u8 align(1),
+    unique_mbr_signature: u32 align(1),
+    unknown: u16 align(1),
+    partition_records: [4]PartitionRecord,
+    signature: u16 align(1),
 };
 
 const PartitionRecord = extern struct {
@@ -57,8 +45,8 @@ const PartitionRecord = extern struct {
     end_head: u8,
     end_sector: u8,
     end_track: u8,
-    starting_lba: u32,
-    size_in_lba: u32,
+    starting_lba: u32 align(1),
+    size_in_lba: u32 align(1),
 
     const bootable_flag = 0x80;
 
@@ -99,7 +87,7 @@ test "mbr parsing" {
     //
     // Device     Boot Start     End Sectors  Size Id Type
     // /dev/sda1  *       63 1032191 1032129  504M  6 FAT16
-    const partition_table: []const u8 = &.{
+    const partition_table= [_]u8{
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -134,11 +122,9 @@ test "mbr parsing" {
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x55, 0xaa,
     };
 
-    var source = std.io.StreamSource{
-        .const_buffer = std.io.fixedBufferStream(partition_table),
-    };
+    var stream = std.io.StreamSource{ .const_buffer = std.io.fixedBufferStream(&partition_table) };
 
-    var disk = try Mbr.init(&source);
+    var disk = try Mbr.init(&stream);
 
     try std.testing.expectEqual(@as(u32, 0xbe1afdfa), disk.identifier());
     const mbr_partitions = disk.partitions();

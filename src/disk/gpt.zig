@@ -712,27 +712,33 @@ pub const Error = error{
 const magic = "EFI PART";
 
 sector_size: u16,
-source: *io.StreamSource,
+stream: *io.StreamSource,
 header: Header,
 
 /// Caller is responsible for source.
-pub fn init(source: *io.StreamSource) !Gpt {
+pub fn init(stream: *io.StreamSource) !Gpt {
+    comptime std.debug.assert(@sizeOf(Header) == 512);
+    comptime std.debug.assert(@sizeOf(PartitionRecord) == 128);
+    comptime std.debug.assert(@offsetOf(Header, "partition_entry_size") == 84);
+
     for ([_]u16{ 512, 1024, 2048, 4096 }) |sector_size| {
-        try source.seekTo(sector_size * 1); // LBA1
+        // Seek to LBA1
+        try stream.seekTo(sector_size * 1);
+
         var header_bytes: [@sizeOf(Header)]u8 = undefined;
-        const bytes_read = try source.reader().readAll(&header_bytes);
-        if (bytes_read != @sizeOf(Header)) {
+        const bytes_read = try stream.reader().readAll(&header_bytes);
+        if (bytes_read != header_bytes.len) {
             return Error.InvalidHeaderSize;
         }
-        const aligned_buf = @as([]align(@alignOf(Header)) u8, @alignCast(&header_bytes));
 
-        const header: *Header = @ptrCast(aligned_buf);
+        var header_stream = std.io.StreamSource{ .buffer = std.io.fixedBufferStream(&header_bytes) };
+        const header = try header_stream.reader().readStructEndian(Header, .little);
+
         if (!mem.eql(u8, &header.signature, magic)) {
             continue;
         }
 
-        const partition_entry_size = mem.littleToNative(@TypeOf(header.partition_entry_size), header.partition_entry_size);
-        if (partition_entry_size != @sizeOf(PartitionRecord)) {
+        if (header.partition_entry_size != @sizeOf(PartitionRecord)) {
             return Error.UnknownPartitionEntrySize;
         }
 
@@ -749,17 +755,14 @@ pub fn init(source: *io.StreamSource) !Gpt {
             break :b std.hash.crc.Crc32.hash(&zeroed_crc_header);
         };
 
-        if (calculated_header_crc != mem.littleToNative(
-            @TypeOf(header.header_crc32),
-            header.header_crc32,
-        )) {
+        if (calculated_header_crc != header.header_crc32) {
             return Error.HeaderCrcFail;
         }
 
         return .{
             .sector_size = sector_size,
-            .source = source,
-            .header = header.*,
+            .stream = stream,
+            .header = header,
         };
     }
 
@@ -771,30 +774,27 @@ pub fn partitions(self: *Gpt, allocator: std.mem.Allocator) ![]PartitionRecord {
     var p = std.ArrayList(PartitionRecord).init(allocator);
     errdefer p.deinit();
 
-    var partition_offset = mem.littleToNative(@TypeOf(self.header.starting_partition_entry_lba), self.header.starting_partition_entry_lba) * self.sector_size;
-    const partition_end = (mem.littleToNative(
-        @TypeOf(self.header.num_partition_entries),
-        self.header.num_partition_entries,
-    ) * @sizeOf(PartitionRecord)) + partition_offset;
+    var partition_offset = self.header.starting_partition_entry_lba * self.sector_size;
+    const partition_end = (self.header.num_partition_entries * @sizeOf(PartitionRecord)) + partition_offset;
 
     var crc = std.hash.crc.Crc32.init();
 
     var no_more_partitions = false;
 
-    while (partition_offset < partition_end) : (partition_offset += @sizeOf(PartitionRecord)) {
-        try self.source.seekTo(partition_offset);
+    var part_bytes: [@sizeOf(PartitionRecord)]u8 = undefined;
 
-        var part_bytes: [@sizeOf(PartitionRecord)]u8 = undefined;
-        const bytes_read = try self.source.reader().readAll(&part_bytes);
-        if (bytes_read != @sizeOf(PartitionRecord)) {
+    while (partition_offset < partition_end) : (partition_offset += @sizeOf(PartitionRecord)) {
+        try self.stream.seekTo(partition_offset);
+
+        const bytes_read = try self.stream.reader().readAll(&part_bytes);
+        if (bytes_read != part_bytes.len) {
             return Error.InvalidPartitionSize;
         }
 
+        var part_stream = std.io.StreamSource{ .buffer = std.io.fixedBufferStream(&part_bytes) };
+        const part = try part_stream.reader().readStructEndian(PartitionRecord, .little);
+
         crc.update(&part_bytes);
-
-        const aligned_buf = @as([]align(@alignOf(PartitionRecord)) u8, @alignCast(&part_bytes));
-
-        const part: *PartitionRecord = @ptrCast(aligned_buf);
 
         // UnusedEntry is an indication that there are no longer any valid
         // partitions at or beyond our current position.
@@ -805,14 +805,11 @@ pub fn partitions(self: *Gpt, allocator: std.mem.Allocator) ![]PartitionRecord {
         }
 
         if (!no_more_partitions) {
-            try p.append(part.*);
+            try p.append(part);
         }
     }
 
-    if (crc.final() != mem.littleToNative(
-        @TypeOf(self.header.partition_entries_crc32),
-        self.header.partition_entries_crc32,
-    )) {
+    if (crc.final() != self.header.partition_entries_crc32) {
         return Error.PartitionEntriesCrcFail;
     }
 
@@ -828,12 +825,6 @@ test "guid parsing" {
 
     const partition_type = PartitionType.fromGuid(got_guid).?;
     try std.testing.expectEqual(PartitionType.EfiSystem, partition_type);
-}
-
-test "gpt header struct sizes and offset" {
-    try std.testing.expectEqual(512, @sizeOf(Header));
-    try std.testing.expectEqual(128, @sizeOf(PartitionRecord));
-    try std.testing.expectEqual(84, @offsetOf(Header, "partition_entry_size"));
 }
 
 test "gpt parsing" {
@@ -936,9 +927,9 @@ test "gpt parsing" {
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     } ++ [_]u8{0x0} ** (1024 * 16);
 
-    var source = io.StreamSource{ .const_buffer = io.fixedBufferStream(partition_table[0..]) };
+    var stream = io.StreamSource{ .const_buffer = io.fixedBufferStream(&partition_table) };
 
-    var disk = try Gpt.init(&source);
+    var disk = try Gpt.init(&stream);
 
     try std.testing.expectEqual(@as(u16, 512), disk.sector_size);
 
