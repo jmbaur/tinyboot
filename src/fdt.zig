@@ -149,10 +149,13 @@ fn createLinkedList(
     try stream.seekTo(header.off_dt_struct);
 
     var list = LinkedList{};
+    errdefer deinitList(allocator, list);
+
     var current_node: ?*LinkedList.Node = null;
 
     while (true) {
         const new_node = try allocator.create(LinkedList.Node);
+        errdefer allocator.destroy(new_node);
 
         switch (try nextToken(stream)) {
             .BeginNode => {
@@ -510,19 +513,22 @@ fn upsertProperty(self: *@This(), path: []const u8, value_bytes: []const u8) !vo
 
                 self.list.insertBefore(node, new_node);
 
-                const struct_bytes_added: u32 = @intCast(
-                    @sizeOf(u32) // prop tag
-                    + @sizeOf(Prop) // prop struct
-                    + value_bytes.len + fdtPad(@intCast(value_bytes.len)), // prop value plus padding
-                );
+                // adjust size/offset metadata
+                {
+                    const struct_bytes_added: u32 = @intCast(
+                        @sizeOf(u32) // prop tag
+                        + @sizeOf(Prop) // prop struct
+                        + value_bytes.len + fdtPad(@intCast(value_bytes.len)), // prop value plus padding
+                    );
 
-                self.header.size_dt_struct += struct_bytes_added;
-                self.header.off_dt_strings += struct_bytes_added;
-                self.header.total_size += struct_bytes_added;
-                if (!name_found) {
-                    const strings_bytes_added = @as(u32, @intCast(path_entry.len)) + 1; // include null terminator
-                    self.header.size_dt_strings += strings_bytes_added;
-                    self.header.total_size += strings_bytes_added;
+                    self.header.size_dt_struct += struct_bytes_added;
+                    self.header.off_dt_strings += struct_bytes_added;
+                    self.header.total_size += struct_bytes_added;
+                    if (!name_found) {
+                        const strings_bytes_added = @as(u32, @intCast(path_entry.len)) + 1; // include null terminator
+                        self.header.size_dt_strings += strings_bytes_added;
+                        self.header.total_size += strings_bytes_added;
+                    }
                 }
 
                 property_added = true;
@@ -540,6 +546,7 @@ fn upsertProperty(self: *@This(), path: []const u8, value_bytes: []const u8) !vo
                 new_end_node.* = .{ .data = .EndNode };
                 self.list.insertBefore(node, new_end_node);
 
+                // adjust size/offset metadata
                 {
                     const struct_bytes_added: u32 = @intCast(
                         @sizeOf(u32) // begin node tag
