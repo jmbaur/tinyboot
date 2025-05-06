@@ -1,5 +1,4 @@
 const std = @import("std");
-const zig = std.zig;
 
 // TODO(jared): Get this automatically from importing the information in
 // build.zig.zon.
@@ -18,9 +17,7 @@ pub fn build(b: *std.Build) !void {
     var env = try std.process.getEnvMap(b.allocator);
     defer env.deinit();
 
-    const target = b.standardTargetOptions(
-        .{ .default_target = .{ .cpu_model = .baseline } },
-    );
+    const target = b.standardTargetOptions(.{ .default_target = .{ .cpu_model = .baseline } });
 
     // tboot-loader is a fully-native Zig program, so we can statically link it
     // and don't need an ABI specified.

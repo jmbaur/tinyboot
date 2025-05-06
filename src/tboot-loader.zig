@@ -4,8 +4,6 @@ const epoll_event = std.os.linux.epoll_event;
 const builtin = @import("builtin");
 const tboot_builtin = @import("tboot_builtin");
 
-const linux_headers = @import("linux_headers");
-
 const Autoboot = @import("./autoboot.zig");
 const BootLoader = @import("./boot/bootloader.zig");
 const DiskBootLoader = @import("./boot/disk.zig");
@@ -58,7 +56,7 @@ state: enum { init, autobooting, user_input } = .init,
 fn init(is_pid1: bool) !TbootLoader {
     var self = TbootLoader{
         .is_pid1 = is_pid1,
-        .epoll = try posix.epoll_create1(linux_headers.EPOLL_CLOEXEC),
+        .epoll = try posix.epoll_create1(std.os.linux.EPOLL.CLOEXEC),
         .timer = try posix.timerfd_create(posix.timerfd_clockid_t.MONOTONIC, .{}),
         .device_watcher = try DeviceWatcher.init(is_pid1),
         .console = try Console.init(),

@@ -5,8 +5,6 @@ const epoll_event = std.os.linux.epoll_event;
 const Device = @import("./device.zig");
 const kobject = @import("./kobject.zig");
 
-const linux_headers = @import("linux_headers");
-
 const DeviceWatcher = @This();
 
 pub const Event = struct {
@@ -56,7 +54,7 @@ pub fn init(is_pid1: bool) !DeviceWatcher {
         .event = try posix.eventfd(0, 0),
         .block_dir = try std.fs.cwd().makeOpenPath("/dev/block", .{}),
         .char_dir = try std.fs.cwd().makeOpenPath("/dev/char", .{}),
-        .epoll = try posix.epoll_create1(linux_headers.EPOLL_CLOEXEC),
+        .epoll = try posix.epoll_create1(std.os.linux.EPOLL.CLOEXEC),
         .nl = try posix.socket(
             posix.system.AF.NETLINK,
             posix.system.SOCK.DGRAM,
