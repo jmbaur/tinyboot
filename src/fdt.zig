@@ -134,11 +134,15 @@ fn parseStringTable(
 }
 
 fn alignStream(stream: *std.io.StreamSource) !void {
-    const pos = try stream.getPos();
-    const off_alignment = pos % 4;
-    if (off_alignment != 0) {
-        try stream.reader().skipBytes(4 - off_alignment, .{});
-    }
+    try stream.reader().skipBytes(fdtPad(@intCast(try stream.getPos())), .{});
+}
+
+fn fdtPad(val: u32) u32 {
+    const off_alignment = val % 4;
+    return if (off_alignment == 0)
+        off_alignment
+    else
+        4 - off_alignment;
 }
 
 fn createLinkedList(
@@ -412,9 +416,9 @@ pub fn getU64Property(self: *@This(), path: []const u8) !u64 {
     return (@as(u64, std.mem.readInt(u32, &left, .big)) << 32) | @as(u64, std.mem.readInt(u32, &right, .big));
 }
 
-fn addString(self: *@This(), value: []const u8) !u32 {
+fn addString(self: *@This(), value: []const u8) !std.meta.Tuple(&.{ bool, u32 }) {
     if (std.mem.indexOf(u8, self.strings.items, value)) |offset| {
-        return @intCast(offset);
+        return .{ true, @intCast(offset) };
     }
 
     const offset = self.strings.items.len;
@@ -422,7 +426,7 @@ fn addString(self: *@This(), value: []const u8) !u32 {
     try self.strings.appendSlice(value);
     try self.strings.append(0); // null terminator
 
-    return @intCast(offset);
+    return .{ false, @intCast(offset) };
 }
 
 pub fn upsertStringProperty(self: *@This(), path: []const u8, value: []const u8) !void {
@@ -439,6 +443,47 @@ pub fn upsertStringProperty(self: *@This(), path: []const u8, value: []const u8)
     try self.upsertProperty(path, dest);
 }
 
+pub fn upsertU32Property(self: *@This(), path: []const u8, value: u32) !void {
+    var value_bytes = [_]u8{0} ** @sizeOf(u32);
+    std.mem.writeInt(u32, &value_bytes, value, .big);
+
+    const dest = try self.allocator.alloc(u8, @sizeOf(u32));
+    errdefer self.allocator.free(dest);
+
+    @memcpy(dest, &value_bytes);
+
+    try self.upsertProperty(path, dest);
+}
+
+pub fn upsertU64Property(self: *@This(), path: []const u8, value: u64) !void {
+    var left = [_]u8{0} ** @sizeOf(u32);
+    std.mem.writeInt(u32, &left, @intCast(value >> 32), .big);
+
+    var right = [_]u8{0} ** @sizeOf(u32);
+    std.mem.writeInt(u32, &right, @intCast(value & std.math.maxInt(u32)), .big);
+
+    const dest = try self.allocator.alloc(u8, @sizeOf(u64));
+    errdefer self.allocator.free(dest);
+
+    @memcpy(dest[0..4], &left);
+    @memcpy(dest[4..], &right);
+
+    try self.upsertProperty(path, dest);
+}
+
+pub fn upsertBoolProperty(self: *@This(), path: []const u8, value: bool) !void {
+    return if (value) self.upsertProperty(path, &.{}) else self.removeProperty(path);
+}
+
+fn removeProperty(self: *@This(), path: []const u8) !void {
+    const found, const node = try self.findProperty(self.list.first, path);
+
+    if (found) {
+        self.list.remove(node);
+        self.allocator.destroy(node);
+    }
+}
+
 fn upsertProperty(self: *@This(), path: []const u8, value_bytes: []const u8) !void {
     var split = std.mem.splitScalar(u8, path, '/');
     const found, var node = try self._findProperty(self.list.first orelse return error.InvalidFdt, &split);
@@ -446,8 +491,6 @@ fn upsertProperty(self: *@This(), path: []const u8, value_bytes: []const u8) !vo
     if (!found) {
         var property_added = false;
         while (split.next()) |path_entry| {
-            // std.debug.print("path_entry={s}\n", .{path_entry});
-
             const at_end_of_path = split.peek() == null;
 
             if (at_end_of_path) {
@@ -455,7 +498,7 @@ fn upsertProperty(self: *@This(), path: []const u8, value_bytes: []const u8) !vo
                 const new_node = try self.allocator.create(LinkedList.Node);
                 errdefer self.allocator.destroy(new_node);
 
-                const name_offset = try self.addString(path_entry);
+                const name_found, const name_offset = try self.addString(path_entry);
 
                 new_node.* = .{
                     .data = .{
@@ -470,6 +513,21 @@ fn upsertProperty(self: *@This(), path: []const u8, value_bytes: []const u8) !vo
                 };
 
                 self.list.insertBefore(node, new_node);
+
+                const struct_bytes_added: u32 = @intCast(
+                    @sizeOf(u32) // prop tag
+                    + @sizeOf(Prop) // prop struct
+                    + value_bytes.len + fdtPad(@intCast(value_bytes.len)), // prop value plus padding
+                );
+
+                self.header.size_dt_struct += struct_bytes_added;
+                self.header.off_dt_strings += struct_bytes_added;
+                self.header.total_size += struct_bytes_added;
+                if (!name_found) {
+                    const strings_bytes_added = @as(u32, @intCast(path_entry.len)) + 1; // include null terminator
+                    self.header.size_dt_strings += strings_bytes_added;
+                    self.header.total_size += strings_bytes_added;
+                }
 
                 property_added = true;
             } else {
@@ -486,6 +544,18 @@ fn upsertProperty(self: *@This(), path: []const u8, value_bytes: []const u8) !vo
                 new_end_node.* = .{ .data = .EndNode };
                 self.list.insertBefore(node, new_end_node);
 
+                {
+                    const struct_bytes_added: u32 = @intCast(
+                        @sizeOf(u32) // begin node tag
+                        + node_name.len + 1 + fdtPad(@as(u32, @intCast(node_name.len)) + 1) // begin node value (node name) plus padding
+                        + @sizeOf(u32), // end node tag
+                    );
+
+                    self.header.size_dt_struct += struct_bytes_added;
+                    self.header.off_dt_strings += struct_bytes_added;
+                    self.header.total_size += struct_bytes_added;
+                }
+
                 node = new_end_node;
             }
         }
@@ -500,61 +570,82 @@ fn upsertProperty(self: *@This(), path: []const u8, value_bytes: []const u8) !vo
                 self.allocator.free(prop.value); // free old value
 
                 prop.value = value_bytes;
+
+                const struct_bytes_diff: u32 = @intCast(
+                    value_bytes.len + fdtPad(@intCast(value_bytes.len)) // new value plus padding
+                    - (prop.value.len + fdtPad(@intCast(prop.value.len))), // old value plus padding
+                );
+
+                self.header.size_dt_struct += struct_bytes_diff;
+                self.header.off_dt_strings += struct_bytes_diff;
+                self.header.total_size += struct_bytes_diff;
             },
             else => unreachable,
         }
     }
 }
 
-pub fn main() !void {
-    var args = std.process.args();
-    _ = args.next() orelse unreachable;
-    const fdt_filepath = args.next() orelse return error.InvalidArgument;
-    const fdt_file = try std.fs.cwd().openFile(fdt_filepath, .{});
-    defer fdt_file.close();
+/// Returns the total size (in bytes) needed to serialize the devicetree to FDT
+/// format. This is useful to call if the FDT is going to be written to a
+/// heap-backed buffer, since the returned value can be used with alloc().
+fn size(self: *@This()) usize {
+    return self.header.total_size;
+}
 
-    var debug_allocator = std.heap.DebugAllocator(.{ .verbose_log = false }){};
+fn writeListNode(writer: anytype, node: *LinkedList.Node) !void {
+    const tag_value = @intFromEnum(node.data);
+    try writer.writeInt(u32, tag_value, .big);
 
-    var stream = std.io.StreamSource{ .file = fdt_file };
-    var fdt = try Fdt.init(&stream, debug_allocator.allocator());
-    defer {
-        fdt.deinit();
+    switch (node.data) {
+        .BeginNode => |node_name| {
+            try writer.writeAll(node_name);
+            try writer.writeByte(0);
+            for (0..fdtPad(@intCast(node_name.len + 1))) |_| {
+                try writer.writeByte(0);
+            }
+        },
+        .Prop => |prop| {
+            try writer.writeStructEndian(prop.inner, .big);
+            try writer.writeAll(prop.value);
+            for (0..fdtPad(@intCast(prop.value.len))) |_| {
+                try writer.writeByte(0);
+            }
+        },
+        .EndNode, .Nop, .End => {},
+    }
+}
 
-        const has_leaks = debug_allocator.detectLeaks();
+fn save(self: *@This(), writer: anytype) !void {
+    var node = self.list.first orelse return error.InvalidFdt;
 
-        if (has_leaks) {
-            std.debug.print("leaked!\n", .{});
-        }
+    try writer.writeStructEndian(self.header, .big);
+
+    for (0..self.header.off_mem_rsvmap - @sizeOf(Header)) |_| {
+        try writer.writeByte(0);
     }
 
-    std.debug.print("{}\n", .{fdt.header});
+    try self.stream.seekTo(self.header.off_mem_rsvmap);
 
+    // TODO(jared): probably don't need to alloc here
     {
-        std.debug.print("BEFORE\n", .{});
-        var node = fdt.list.first.?;
-        std.debug.print("{?}\n", .{node.data});
-
-        while (node.next) |next| {
-            std.debug.print("{?}\n", .{next.data});
-            node = next;
-        }
+        const mem_rsvmap_bytes = self.header.off_dt_struct - self.header.off_mem_rsvmap;
+        const mem_rsvmap_buf = try self.allocator.alloc(u8, mem_rsvmap_bytes);
+        defer self.allocator.free(mem_rsvmap_buf);
+        _ = try self.stream.reader().readAll(mem_rsvmap_buf);
+        try writer.writeAll(mem_rsvmap_buf);
     }
 
-    try fdt.upsertStringProperty("/foo", "bar");
-    try fdt.upsertStringProperty("/chosen/bootargs", "console=ttyAMA0,115200");
-    try fdt.upsertStringProperty("/cchosen/bootargs", "console=ttyAMA0,115200");
-    try fdt.upsertStringProperty("/chosen/foo/bootargs", "console=ttyAMA0,115200");
-
-    {
-        std.debug.print("AFTER\n", .{});
-        var node = fdt.list.first.?;
-        std.debug.print("{?}\n", .{node.data});
-
-        while (node.next) |next| {
-            std.debug.print("{?}\n", .{next.data});
-            node = next;
-        }
+    try writeListNode(writer, node);
+    while (node.next) |next| {
+        try writeListNode(writer, next);
+        node = next;
     }
+
+    for (0..self.header.off_dt_strings - self.header.off_dt_struct - self.header.size_dt_struct) |_| {
+        try writer.writeByte(0);
+    }
+
+    try writer.writeAll(self.strings.items);
 }
 
 // /dts-v1/;
@@ -650,4 +741,22 @@ test "fdt write" {
     // change an existing property
     try fdt.upsertStringProperty("/foo", "baz");
     try std.testing.expectEqualStrings("baz", try fdt.getStringProperty("/foo"));
+
+    try fdt.upsertU32Property("/u32", 0x1);
+    try std.testing.expectEqual(0x1, try fdt.getU32Property("/u32"));
+
+    try fdt.upsertU64Property("/u64", 0x1122334455667788);
+    try std.testing.expectEqual(0x1122334455667788, try fdt.getU64Property("/u64"));
+
+    try fdt.upsertBoolProperty("/bool", true);
+    try std.testing.expect(fdt.getBoolProperty("/bool"));
+
+    try fdt.upsertBoolProperty("/bool", false);
+    try std.testing.expect(!fdt.getBoolProperty("/bool"));
+
+    // serialize back to FDT
+    const buf = try std.testing.allocator.alloc(u8, fdt.size());
+    defer std.testing.allocator.free(buf);
+    var update_stream = std.io.StreamSource{ .buffer = std.io.fixedBufferStream(buf) };
+    try fdt.save(update_stream.writer());
 }
