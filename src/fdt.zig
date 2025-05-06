@@ -62,7 +62,7 @@ header: Header,
 strings: std.ArrayList(u8),
 list: LinkedList,
 
-fn init(stream: *std.io.StreamSource, allocator: std.mem.Allocator) !@This() {
+pub fn init(stream: *std.io.StreamSource, allocator: std.mem.Allocator) !@This() {
     const header = try stream.reader().readStructEndian(Header, .big);
 
     if (header.magic != magic) {
