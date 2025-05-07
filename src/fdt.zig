@@ -90,6 +90,7 @@ pub fn init(stream: *std.io.StreamSource, allocator: std.mem.Allocator) !@This()
 
 fn deinitList(allocator: std.mem.Allocator, list: LinkedList) void {
     var node = list.first orelse return;
+
     while (node.next) |next| {
         switch (node.data) {
             .BeginNode => |name| {
@@ -102,7 +103,6 @@ fn deinitList(allocator: std.mem.Allocator, list: LinkedList) void {
         }
 
         allocator.destroy(node);
-
         node = next;
     }
 
@@ -241,6 +241,7 @@ fn skipToFdtEndNode(start: *LinkedList.Node) !*LinkedList.Node {
     var depth: usize = 0;
 
     var node = start;
+
     while (node.next) |next| {
         switch (next.data) {
             .EndNode => {
@@ -474,13 +475,82 @@ pub fn upsertBoolProperty(self: *@This(), path: []const u8, value: bool) !void {
     return if (value) self.upsertProperty(path, &.{}) else self.removeProperty(path);
 }
 
+fn removeString(self: *@This(), name_offset: u32) !usize {
+    // First visit all properties first to ensure no other properties are
+    // referencing this string.
+    var node = self.list.first orelse return 0;
+
+    var references: usize = 0;
+
+    while (true) {
+        switch (node.data) {
+            .Prop => |prop| {
+                if (prop.inner.name_offset == name_offset) {
+                    references += 1;
+                }
+            },
+            else => {},
+        }
+
+        node = node.next orelse break;
+    }
+
+    if (references > 1) {
+        return 0;
+    }
+
+    const null_index = std.mem.indexOfScalarPos(u8, self.strings.items, name_offset, 0) orelse return 0;
+    try self.strings.replaceRange(name_offset, null_index + 1 - name_offset, &.{});
+    return null_index + 1 - name_offset;
+}
+
+fn updateNameOffsets(self: *@This(), removed_name_offset: u32, bytes_removed: u32) void {
+    var node = self.list.first orelse return;
+    while (true) {
+        switch (node.data) {
+            .Prop => |*prop| {
+                if (prop.inner.name_offset > removed_name_offset) {
+                    prop.inner.name_offset -= bytes_removed;
+                }
+            },
+            else => {},
+        }
+
+        node = node.next orelse break;
+    }
+}
+
 fn removeProperty(self: *@This(), path: []const u8) !void {
     const found, const node = try self.findProperty(self.list.first, path);
 
-    if (found) {
-        self.list.remove(node);
-        self.allocator.destroy(node);
+    if (!found) {
+        return;
     }
+
+    std.debug.assert(node.data == .Prop);
+
+    const prop = switch (node.data) {
+        .Prop => |prop| prop,
+        else => unreachable,
+    };
+
+    const strings_bytes_removed: u32 = @intCast(try self.removeString(prop.inner.name_offset));
+    self.updateNameOffsets(prop.inner.name_offset, strings_bytes_removed);
+
+    self.list.remove(node);
+    self.allocator.destroy(node);
+    self.allocator.free(prop.value);
+
+    const struct_bytes_removed: u32 = @intCast(
+        @sizeOf(u32) // prop tag
+        + @sizeOf(Prop) // prop struct
+        + prop.value.len + fdtPad(@intCast(prop.value.len)), // prop value plus padding
+    );
+
+    self.header.size_dt_struct -= struct_bytes_removed;
+    self.header.off_dt_strings -= struct_bytes_removed;
+    self.header.total_size -= (struct_bytes_removed + strings_bytes_removed);
+    self.header.size_dt_strings -= strings_bytes_removed;
 }
 
 fn upsertProperty(self: *@This(), path: []const u8, value_bytes: []const u8) !void {
@@ -632,15 +702,72 @@ pub fn save(self: *@This(), writer: anytype) !void {
         try writer.writeAll(mem_rsvmap_buf);
     }
 
-    try writeListNode(writer, node);
-    while (node.next) |next| {
-        try writeListNode(writer, next);
-        node = next;
+    while (true) {
+        try writeListNode(writer, node);
+        node = node.next orelse break;
     }
 
     try writer.writeByteNTimes(0, self.header.off_dt_strings - self.header.off_dt_struct - self.header.size_dt_struct);
 
     try writer.writeAll(self.strings.items);
+}
+
+// Outputs a simple representation of the FDT heirarchy, including the raw
+// values of each property. Output is not valid DeviceTree source and is only
+// intended to be a debug tool, not a replacement for the `dtc` tool.
+pub fn main() !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer {
+        _ = gpa.deinit();
+    }
+
+    var args = try std.process.argsWithAllocator(gpa.allocator());
+    defer args.deinit();
+
+    _ = args.next() orelse return error.InvalidArgument; // skip argv[0]
+    const dtb_filepath = args.next() orelse return error.InvalidArgument;
+
+    const dtb_file = try std.fs.cwd().openFile(dtb_filepath, .{});
+    defer dtb_file.close();
+
+    var stream = std.io.StreamSource{ .file = dtb_file };
+
+    var fdt = try Fdt.init(&stream, gpa.allocator());
+    defer fdt.deinit();
+
+    var stdout_ = std.io.bufferedWriter(std.io.getStdOut().writer());
+    defer stdout_.flush() catch {};
+    var stdout = stdout_.writer();
+
+    var node = fdt.list.first orelse return error.InvalidFdt;
+
+    var depth: usize = 0;
+
+    while (true) {
+        switch (node.data) {
+            .Nop => {},
+            .BeginNode => |node_name| {
+                if (node_name.len != 0) {
+                    try stdout.writeByte('\n');
+                    try stdout.writeByteNTimes('\t', depth);
+                    try stdout.print("{s}:\n", .{node_name});
+
+                    depth += 1;
+                }
+            },
+            .EndNode => {
+                depth -%= 1;
+            },
+            .End => break,
+            .Prop => |prop| {
+                const prop_name = try fdt.getString(prop.inner.name_offset);
+                try stdout.writeByteNTimes('\t', depth);
+                try stdout.print("{s}={x}\n", .{ prop_name, prop.value });
+            },
+        }
+
+        node = node.next orelse return error.InvalidFdt;
+    }
 }
 
 // /dts-v1/;
@@ -746,12 +873,21 @@ test "fdt write" {
     try fdt.upsertBoolProperty("/bool", true);
     try std.testing.expect(fdt.getBoolProperty("/bool"));
 
+    // "add" boolean property set to false, which actually removes the property
+    // ensure the "bool" property name is not present in the string table.
     try fdt.upsertBoolProperty("/bool", false);
     try std.testing.expect(!fdt.getBoolProperty("/bool"));
+
+    // ensure removing a property we started with works
+    try fdt.removeProperty("/chosen/this_is_a_stringlist");
 
     // serialize back to FDT
     const buf = try std.testing.allocator.alloc(u8, fdt.size());
     defer std.testing.allocator.free(buf);
     var update_stream = std.io.StreamSource{ .buffer = std.io.fixedBufferStream(buf) };
     try fdt.save(update_stream.writer());
+
+    // ensure the unique strings we removed don't appear
+    try std.testing.expectEqual(null, std.mem.indexOf(u8, buf, "bool"));
+    try std.testing.expectEqual(null, std.mem.indexOf(u8, buf, "this_is_a_stringlist"));
 }
