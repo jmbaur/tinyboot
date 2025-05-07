@@ -19,12 +19,13 @@ pub fn build(b: *std.Build) !void {
 
     const target = b.standardTargetOptions(.{ .default_target = .{ .cpu_model = .baseline } });
 
-    // tboot-loader is a fully-native Zig program, so we can statically link it
-    // and don't need an ABI specified.
+    // tboot-loader is a fully-native, linux-only Zig program, so we can
+    // hardcode the OS to linux, statically link it and don't need an ABI
+    // specified.
     var target_no_abi_query = target.query;
     target_no_abi_query.abi = null;
-    target_no_abi_query.os_tag = target.result.os.tag;
-    const target_no_abi = b.resolveTargetQuery(target_no_abi_query);
+    target_no_abi_query.os_tag = .linux;
+    const target_linux_no_abi = b.resolveTargetQuery(target_no_abi_query);
 
     var target_efi_query = target.query;
     target_efi_query.os_tag = .uefi;
@@ -87,7 +88,7 @@ pub fn build(b: *std.Build) !void {
             .file = &linux_h.generated_directory,
             .sub_path = "linux.h",
         } },
-        .target = target_no_abi,
+        .target = target_linux_no_abi,
         .optimize = .ReleaseSafe, // This doesn't seem to do anything when translating pure headers
     });
 
@@ -193,7 +194,7 @@ pub fn build(b: *std.Build) !void {
         const tboot_loader = b.addExecutable(.{
             .name = "tboot-loader",
             .root_source_file = b.path("src/tboot-loader.zig"),
-            .target = target_no_abi,
+            .target = target_linux_no_abi,
             .optimize = optimize_prefer_small,
             .strip = do_strip,
         });
