@@ -844,6 +844,9 @@ test "fdt write" {
     var fdt = try Fdt.init(&stream, std.testing.allocator);
     defer fdt.deinit();
 
+    // ensure removing a property we started with works
+    try fdt.removeProperty("/chosen/this_is_a_stringlist");
+
     // add new property to root node
     try fdt.upsertStringProperty("/foo", "bar");
     try std.testing.expectEqualStrings("bar", try fdt.getStringProperty("/foo"));
@@ -877,9 +880,6 @@ test "fdt write" {
     // ensure the "bool" property name is not present in the string table.
     try fdt.upsertBoolProperty("/bool", false);
     try std.testing.expect(!fdt.getBoolProperty("/bool"));
-
-    // ensure removing a property we started with works
-    try fdt.removeProperty("/chosen/this_is_a_stringlist");
 
     // serialize back to FDT
     const buf = try std.testing.allocator.alloc(u8, fdt.size());
