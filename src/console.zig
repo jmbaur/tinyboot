@@ -1101,7 +1101,7 @@ pub const Command = struct {
                             .{entry.linux},
                         );
 
-                        return Event.kexec;
+                        return .kexec;
                     } else |err| {
                         print("failed to load entry: {}\n", .{err});
                         return null;

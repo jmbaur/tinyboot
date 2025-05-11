@@ -12,6 +12,7 @@ test {
     _ = @import("./disk/mbr.zig");
     _ = @import("./fdt.zig");
     _ = @import("./kexec/kexec.zig");
+    _ = @import("./kexec/arm.zig");
     _ = @import("./kobject.zig");
     _ = @import("./log.zig");
     _ = @import("./openssl.zig");

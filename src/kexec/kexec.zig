@@ -22,6 +22,16 @@ pub const MemoryRange = struct {
     type: MemoryType,
 };
 
+/// This structure is used to hold the arguments that
+/// are used when loading  kernel binaries.
+/// https://github.com/torvalds/linux/blob/0d8d44db295ccad20052d6301ef49ff01fb8ae2d/include/uapi/linux/kexec.h#L59
+pub const KexecSegment = struct {
+    buf: *anyopaque,
+    buf_size: usize,
+    mem: *anyopaque,
+    mem_size: usize,
+};
+
 /// Wait for up to 10 seconds for kernel to report for kexec to be loaded.
 fn waitForKexecKernelLoaded() !void {
     const sleep_interval = 100 * std.time.ns_per_ms;
@@ -44,19 +54,10 @@ fn waitForKexecKernelLoaded() !void {
     return error.Timeout;
 }
 
-fn kexecLoad(
-    allocator: std.mem.Allocator,
-    linux: std.fs.File,
-    initrd: ?std.fs.File,
-    cmdline: ?[]const u8,
-) !void {
-    _ = allocator;
-    _ = linux;
-    _ = initrd;
-    _ = cmdline;
-
-    return error.NotImplemented;
-}
+const kexecLoad = switch (builtin.cpu.arch) {
+    .arm => @import("./arm.zig").kexecLoad,
+    else => @compileError("kexec_load not implemented for target architecture"),
+};
 
 fn kexecFileLoad(
     allocator: std.mem.Allocator,
@@ -104,11 +105,33 @@ fn kexecFileLoad(
     }
 }
 
-pub const kexec_file_load_available = switch(builtin.cpu.arch) {
-        // TODO(jared): confirm there aren't any more.
-        .aarch64, .riscv64, .x86_64 => true,
-        else => false,
+pub const kexec_file_load_available = switch (builtin.cpu.arch) {
+    // TODO(jared): confirm there aren't any more.
+    .aarch64, .riscv64, .x86_64 => true,
+    else => false,
 };
+
+pub fn kexecUnload() !void {
+    const rc = if (kexec_file_load_available) std.os.linux.syscall5(
+        .kexec_file_load,
+        null,
+        null,
+        null,
+        0,
+        linux_headers.KEXEC_FILE_NO_INITRAMFS,
+    ) else std.os.linux.syscall4(
+        .kexec_load,
+        null,
+        0,
+        null,
+        0,
+    );
+
+    return switch (posix.errno(rc)) {
+        .SUCESS => {},
+        else => |err| return posix.unexpectedErrno(err),
+    };
+}
 
 pub fn kexec(
     allocator: std.mem.Allocator,
