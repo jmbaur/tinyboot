@@ -2,6 +2,8 @@ const std = @import("std");
 const posix = std.posix;
 const MS = std.os.linux.MS;
 
+const linux_headers = @import("linux_headers");
+
 const BootLoader = @import("./bootloader.zig");
 const Device = @import("../device.zig");
 const Filesystem = @import("../disk/filesystem.zig");
@@ -22,6 +24,18 @@ pub fn match(device: *const Device) ?u8 {
         return null;
     }
 
+    const disk_major, const disk_minor = device.type.node;
+    _ = disk_minor;
+
+    switch (disk_major) {
+        linux_headers.LOOP_MAJOR,
+        linux_headers.MEM_MAJOR,
+        linux_headers.MTD_BLOCK_MAJOR,
+        linux_headers.NBD_MAJOR,
+        => return null,
+        else => {},
+    }
+
     var sysfs_disk_path_buf: [std.fs.max_path_bytes]u8 = undefined;
     const sysfs_disk_path = device.nodeSysfsPath(&sysfs_disk_path_buf) catch return null;
 
@@ -33,14 +47,11 @@ pub fn match(device: *const Device) ?u8 {
     var removable_file = sysfs_dir.openFile("removable", .{}) catch return null;
     defer removable_file.close();
 
-    var buf: [1]u8 = undefined;
-    if ((removable_file.read(&buf) catch return null) != 1) {
-        return null;
-    }
+    const removable = (removable_file.reader().readByte() catch return null) == '1';
 
     // Prioritize removable devices over non-removable. This allows for
     // plugging in a USB-stick and having it "just work".
-    if (std.mem.eql(u8, &buf, "1")) {
+    if (removable) {
         return 50;
     } else {
         return 55;
