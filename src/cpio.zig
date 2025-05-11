@@ -27,9 +27,9 @@ const CpioEntryType = enum {
 
     fn toMode(self: @This(), perms: u32) u32 {
         return @as(u32, switch (self) {
-            .Directory => std.posix.S.IFDIR | perms,
-            .File => std.posix.S.IFREG | perms,
-            .Symlink => std.posix.S.IFLNK | 0o777, // symlinks are always 0o777
+            .Directory => std.os.linux.S.IFDIR | perms,
+            .File => std.os.linux.S.IFREG | perms,
+            .Symlink => std.os.linux.S.IFLNK | 0o777, // symlinks are always 0o777
         });
     }
 };
