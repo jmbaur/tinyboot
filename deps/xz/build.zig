@@ -115,7 +115,6 @@ pub fn build(b: *std.Build) !void {
         },
         // replacement for config.h
         .flags = &.{
-            "-Wold-style-definition",
             "-DASSUME_RAM=32",
             "-DHAVE_CHECK_CRC32",
             "-DHAVE_CHECK_CRC64",
