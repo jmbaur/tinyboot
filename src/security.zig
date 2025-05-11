@@ -3,6 +3,8 @@ const base64 = std.base64.standard;
 const posix = std.posix;
 const system = std.posix.system;
 
+const kexec_file_load_available = @import("./kexec/kexec.zig").kexec_file_load_available;
+
 const linux_headers = @import("linux_headers");
 
 const MEASURE_POLICY =
@@ -161,6 +163,11 @@ fn loadVerificationKey(allocator: std.mem.Allocator) !void {
 // and persisted across kexecs, and the measurements are extended to the
 // system's TPM if one is available.
 pub fn initializeSecurity(allocator: std.mem.Allocator) !void {
+    if (!kexec_file_load_available) {
+        std.log.warn("platform does not have kexec_file_load(), skipping security setup", .{});
+        return;
+    }
+
     if (loadVerificationKey(allocator)) {
         try installImaPolicy(MEASURE_AND_APPRAISE_POLICY);
         std.log.info("boot measurement and verification is enabled", .{});
