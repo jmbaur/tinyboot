@@ -38,6 +38,19 @@ const ZimageTag = extern struct {
     },
 };
 
+fn mmapFile(file: std.fs.File) ![]align(std.heap.page_size_min) u8 {
+    const stat = try file.stat();
+
+    return try posix.mmap(
+        null,
+        @intCast(stat.size),
+        posix.PROT.READ,
+        .{ .TYPE = .PRIVATE },
+        file.handle,
+        0,
+    );
+}
+
 // No need to pass a purgatory program since the current kernel handles
 // invoking the next kernel with the correct r2 register value
 // (https://github.com/torvalds/linux/blob/0e1329d4045ca3606f9c06a8c47f62e758a09105/arch/arm/kernel/machine_kexec.c#L51).
@@ -59,8 +72,8 @@ pub fn kexecLoad(
         return error.InvalidKernel;
     }
 
-    const kernel_buf = try linux.readToEndAlloc(allocator, std.math.maxInt(usize));
-    defer allocator.free(kernel_buf);
+    const kernel_buf = try mmapFile(linux);
+    defer posix.munmap(kernel_buf);
 
     const hdr: *ZimageHeader = @ptrCast(@alignCast(kernel_buf));
 
@@ -175,16 +188,16 @@ pub fn kexecLoad(
         try fdt.upsertStringProperty("/chosen/bootargs", cmdline_);
     }
 
-    var initrd_buf: ?[]u8 = null;
+    var initrd_buf: ?[]align(std.heap.page_size_min) u8 = null;
     defer {
         if (initrd_buf) |buf| {
-            allocator.free(buf);
+            posix.munmap(buf);
         }
     }
 
     const initrd_size = b: {
         if (initrd) |initrd_file| {
-            initrd_buf = try initrd_file.readToEndAlloc(allocator, std.math.maxInt(usize));
+            initrd_buf = try mmapFile(initrd_file);
 
             initrd_base = try locateHole(
                 memory_ranges,
