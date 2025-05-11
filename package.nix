@@ -10,7 +10,6 @@
   pkg-config,
   stdenv,
   tinybootTools,
-  xz,
   zig_0_14,
   writeText,
 }:
@@ -22,6 +21,13 @@ let
       path = fetchzip {
         url = "https://github.com/Hejsil/zig-clap/archive/e47028deaefc2fb396d3d9e9f7bd776ae0b2a43a.tar.gz";
         hash = "sha256-leXnA97ITdvmBhD2YESLBZAKjBg+G4R/+PPPRslz/ec=";
+      };
+    }
+    {
+      name = "122008a7c2435438a09afd5a05773d9029e83908e2f4c631cf3d8aa118603b1ff84a";
+      path = fetchzip {
+        url = "https://github.com/tukaani-project/xz/archive/v5.8.1.tar.gz";
+        hash = "sha256-vGUNoX5VTM0aQ5GmBPXip97WGN9vaVrQLE9msToZyKs=";
       };
     }
   ];
@@ -45,6 +51,7 @@ stdenv.mkDerivation {
     fileset = lib.fileset.unions [
       ./build.zig
       ./build.zig.zon
+      ./deps
       ./src
     ];
   };
@@ -54,10 +61,7 @@ stdenv.mkDerivation {
   depsBuildBuild = [ zig_0_14 ];
   nativeBuildInputs = [ pkg-config ] ++ lib.optional (!withTools) tinybootTools;
 
-  buildInputs =
-    lib.optional withTools openssl # tboot-sign
-    ++ lib.optional (withTools || stdenv.buildPlatform.canExecute stdenv.hostPlatform) xz # tboot-initrd
-  ;
+  buildInputs = lib.optional withTools openssl; # tboot-sign
 
   dontInstall = true;
   doCheck = true;

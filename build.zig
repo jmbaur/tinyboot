@@ -72,6 +72,7 @@ pub fn build(b: *std.Build) !void {
     const runner_kernel = b.option([]const u8, "kernel", "Kernel to use when spawning VM runner") orelse env.get("TINYBOOT_KERNEL");
 
     const clap = b.dependency("clap", .{});
+    const xz = b.lazyDependency("xz", .{ .target = target, .optimize = optimize });
 
     const linux_h = b.addWriteFile("linux.h",
         \\#include <asm-generic/setup.h>
@@ -107,8 +108,7 @@ pub fn build(b: *std.Build) !void {
         });
         var tboot_initrd_tool = maybe_tboot_initrd_tool.?;
         tboot_initrd_tool.linkLibC();
-        tboot_initrd_tool.each_lib_rpath = !target.result.isMuslLibC();
-        tboot_initrd_tool.linkSystemLibrary("liblzma");
+        tboot_initrd_tool.linkLibrary(xz.?.artifact("xz"));
         tboot_initrd_tool.root_module.addImport("clap", clap.module("clap"));
     }
 

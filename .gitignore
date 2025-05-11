@@ -2,6 +2,6 @@
 *.qcow2
 .nixos-test-history
 /.direnv
-/.zig-cache
-/zig-out
+.zig-cache
+zig-out
 result*
