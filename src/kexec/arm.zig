@@ -182,27 +182,28 @@ pub fn kexecLoad(
         }
     }
 
-    if (initrd) |initrd_file| {
-        const initrd_buf_ = try initrd_file.readToEndAlloc(allocator, std.math.maxInt(usize));
-        errdefer allocator.free(initrd_buf_);
+    const initrd_size = b: {
+        if (initrd) |initrd_file| {
+            initrd_buf = try initrd_file.readToEndAlloc(allocator, std.math.maxInt(usize));
 
-        initrd_base = try locateHole(
-            memory_ranges,
-            initrd_buf.?.len,
-            page_size,
-            initrd_base,
-        );
+            initrd_base = try locateHole(
+                memory_ranges,
+                initrd_buf.?.len,
+                page_size,
+                initrd_base,
+            );
 
-        std.log.debug("initrd: address=0x{x} size=0x{x}", .{ initrd_base, initrd_buf_.len });
+            std.log.debug("initrd: address=0x{x} size=0x{x}", .{ initrd_base, initrd_buf.?.len });
 
-        const initrd_start = std.mem.nativeToBig(u32, initrd_base);
-        const initrd_end = std.mem.nativeToBig(u32, initrd_base + initrd_buf_.len);
+            const initrd_start = std.mem.nativeToBig(u32, initrd_base);
+            const initrd_end = std.mem.nativeToBig(u32, initrd_base + initrd_buf.?.len);
 
-        try fdt.upsertU32Property("/chosen/linux,initrd-start", initrd_start);
-        try fdt.upsertU32Property("/chosen/linux,initrd-end", initrd_end);
-        try addSegment(&segments, page_size, initrd_buf_, initrd_buf_.len, initrd_base, initrd_buf_.len);
-        initrd_buf = initrd_buf_;
-    }
+            try fdt.upsertU32Property("/chosen/linux,initrd-start", initrd_start);
+            try fdt.upsertU32Property("/chosen/linux,initrd-end", initrd_end);
+            try addSegment(&segments, page_size, initrd_buf.?, initrd_buf.?.len, initrd_base, initrd_buf.?.len);
+            break :b initrd_buf.?.len;
+        } else break :b 0;
+    };
 
     const dtb_buf = try allocator.alloc(u8, fdt.size());
     defer allocator.free(dtb_buf);
@@ -213,7 +214,7 @@ pub fn kexecLoad(
     const dtb_offset = b: {
         var offset = std.mem.alignBackward(
             u32,
-            initrd_base + (if (initrd_buf) |buf| buf.len else 0) + page_size,
+            initrd_base + initrd_size + page_size,
             page_size,
         );
         offset = try locateHole(
