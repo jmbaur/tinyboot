@@ -112,6 +112,8 @@ pub fn build(b: *std.Build) !void {
             "src/liblzma/simple/simple_encoder.c",
             "src/liblzma/simple/sparc.c",
             "src/liblzma/simple/x86.c",
+            "src/common/tuklib_cpucores.c",
+            "src/common/tuklib_physmem.c",
         },
         // replacement for config.h
         .flags = &.{
@@ -163,6 +165,7 @@ pub fn build(b: *std.Build) !void {
             b.fmt("-DSIZEOF_SIZE_T={}", .{target.result.ptrBitWidth() / 8}),
             "-DTUKLIB_FAST_UNALIGNED_ACCESS",
             "-DHAVE_SMALL",
+            "-DLZMA_API_STATIC"
         },
     });
 
