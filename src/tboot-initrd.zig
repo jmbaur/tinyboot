@@ -46,6 +46,8 @@ fn compress(
         return error.CompressFail;
     }
 
+    const actual_compressed_size = rc;
+
     const compressed_output = try std.fmt.allocPrint(
         arena.allocator(),
         "{s}.tmp",
@@ -55,7 +57,7 @@ fn compress(
     var compressed_file = try std.fs.cwd().createFile(compressed_output, .{ .mode = 0o444 });
     defer compressed_file.close();
 
-    try compressed_file.writer().writeAll(compressed_buf);
+    try compressed_file.writer().writeAll(compressed_buf[0..actual_compressed_size]);
 
     try std.fs.cwd().rename(compressed_output, output);
 }

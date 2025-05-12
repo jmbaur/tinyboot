@@ -6,12 +6,9 @@
   fetchzip,
   lib,
   linkFarm,
-  openssl,
-  pkg-config,
   stdenv,
   tinybootTools,
   zig_0_14,
-  writeText,
 }:
 
 let
@@ -38,17 +35,9 @@ let
       };
     }
   ];
-
-  libcFile = writeText "zig-libc-file" ''
-    include_dir=${lib.getDev stdenv.cc.libc}/include
-    sys_include_dir=${lib.getDev stdenv.cc.libc}/include
-    crt_dir=${lib.getLib stdenv.cc.libc}/lib
-    msvc_lib_dir=
-    kernel32_lib_dir=
-    gcc_dir=
-  '';
 in
 assert withTools != withLoader;
+assert withTools -> firmwareDirectory == null;
 stdenv.mkDerivation {
   pname = "tinyboot-${if withTools then "tools" else "loader"}";
   version = "0.1.0";
@@ -66,9 +55,7 @@ stdenv.mkDerivation {
   strictDeps = true;
 
   depsBuildBuild = [ zig_0_14 ];
-  nativeBuildInputs = [ pkg-config ] ++ lib.optional (!withTools) tinybootTools;
-
-  buildInputs = lib.optional withTools openssl; # tboot-sign
+  nativeBuildInputs = lib.optional (!withTools) tinybootTools;
 
   dontInstall = true;
   doCheck = true;
@@ -84,15 +71,8 @@ stdenv.mkDerivation {
       "-Dloader=${lib.boolToString withLoader}"
       "-Dtools=${lib.boolToString withTools}"
       "-Doptimize=ReleaseSafe"
-      "-Dtarget=${stdenv.hostPlatform.qemuArch}-linux-${
-        if stdenv.hostPlatform.isGnu then "gnu" else "musl"
-      }"
-      "-Ddynamic-linker=$(cat $NIX_CC/nix-support/dynamic-linker)"
+      "-Dtarget=${stdenv.hostPlatform.qemuArch}-linux"
     )
-
-    ${lib.optionalString withTools ''
-      zigBuildFlags+=("--libc ${libcFile}")
-    ''}
 
     ${lib.optionalString (firmwareDirectory != null) ''
       zigBuildFlags+=("-Dfirmware-directory=${firmwareDirectory}")
