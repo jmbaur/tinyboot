@@ -72,7 +72,10 @@ pub fn build(b: *std.Build) !void {
     const runner_kernel = b.option([]const u8, "kernel", "Kernel to use when spawning VM runner") orelse env.get("TINYBOOT_KERNEL");
 
     const clap = b.dependency("clap", .{});
-    const xz = b.lazyDependency("xz", .{ .target = target, .optimize = optimize });
+    const zstd = b.dependency("zstd", .{ .target = target, .optimize = optimize });
+    const zstd_lib = zstd.artifact("zstd");
+    // const wolfssl = b.dependency("wolfssl", .{ .target = target, .optimize = optimize });
+    // const wolfssl_lib = wolfssl.artifact("wolfssl");
 
     const linux_h = b.addWriteFile("linux.h",
         \\#include <asm-generic/setup.h>
@@ -108,7 +111,7 @@ pub fn build(b: *std.Build) !void {
         });
         var tboot_initrd_tool = maybe_tboot_initrd_tool.?;
         tboot_initrd_tool.linkLibC();
-        tboot_initrd_tool.linkLibrary(xz.?.artifact("xz"));
+        tboot_initrd_tool.linkLibrary(zstd_lib);
         tboot_initrd_tool.root_module.addImport("clap", clap.module("clap"));
     }
 
@@ -140,8 +143,7 @@ pub fn build(b: *std.Build) !void {
             .optimize = optimize,
         });
         tboot_sign.linkLibC();
-        tboot_sign.each_lib_rpath = !target.result.isMuslLibC();
-        tboot_sign.linkSystemLibrary("libcrypto");
+        // tboot_sign.linkLibrary(wolfssl_lib);
         tboot_sign.root_module.addImport("clap", clap.module("clap"));
         b.installArtifact(tboot_sign);
 
@@ -152,8 +154,7 @@ pub fn build(b: *std.Build) !void {
             .optimize = optimize,
         });
         tboot_keygen.linkLibC();
-        tboot_keygen.each_lib_rpath = !target.result.isMuslLibC();
-        tboot_keygen.linkSystemLibrary("libcrypto");
+        // tboot_keygen.linkLibrary(wolfssl_lib);
         tboot_keygen.root_module.addImport("clap", clap.module("clap"));
         b.installArtifact(tboot_keygen);
 
@@ -164,8 +165,7 @@ pub fn build(b: *std.Build) !void {
             .optimize = optimize,
         });
         tboot_nixos_install.linkLibC();
-        tboot_nixos_install.each_lib_rpath = !target.result.isMuslLibC();
-        tboot_nixos_install.linkSystemLibrary("libcrypto");
+        // tboot_nixos_install.linkLibrary(wolfssl_lib);
         tboot_nixos_install.root_module.addImport("clap", clap.module("clap"));
         b.installArtifact(tboot_nixos_install);
 
@@ -229,20 +229,20 @@ pub fn build(b: *std.Build) !void {
             run_tboot_initrd.addPrefixedDirectoryArg("-d", directory_);
         }
 
-        const cpio_output_file = run_tboot_initrd.addPrefixedOutputFileArg(
+        const initrd_output_file = run_tboot_initrd.addPrefixedOutputFileArg(
             "-o",
-            "tboot-loader.cpio",
+            "tboot-loader.cpio.zst",
         );
 
         run_tboot_initrd.expectExitCode(0);
 
-        const cpio_archive = b.addInstallFile(
-            cpio_output_file,
-            "tboot-loader.cpio",
+        const initrd_file = b.addInstallFile(
+            initrd_output_file,
+            "tboot-loader.cpio.zst",
         );
 
         // install the cpio archive during "zig build install"
-        b.getInstallStep().dependOn(&cpio_archive.step);
+        b.getInstallStep().dependOn(&initrd_file.step);
 
         if (with_loader_efi_stub) {
             const tboot_efi_stub = b.addExecutable(.{
@@ -265,11 +265,11 @@ pub fn build(b: *std.Build) !void {
         });
         tboot_runner.root_module.addImport("clap", clap.module("clap"));
         const runner_tool = b.addRunArtifact(tboot_runner);
-        runner_tool.step.dependOn(&cpio_archive.step);
+        runner_tool.step.dependOn(&initrd_file.step);
         runner_tool.addArg(@tagName(target.result.cpu.arch));
         runner_tool.addArg(b.makeTempPath());
         runner_tool.addArg(if (runner_keydir) |keydir| keydir else "");
-        runner_tool.addFileArg(cpio_archive.source);
+        runner_tool.addFileArg(initrd_file.source);
         runner_tool.addArg(if (runner_kernel) |kernel| kernel else "");
 
         // Extra arguments passed through to qemu. We add our own '--' since

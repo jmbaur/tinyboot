@@ -24,10 +24,17 @@ let
       };
     }
     {
-      name = "122008a7c2435438a09afd5a05773d9029e83908e2f4c631cf3d8aa118603b1ff84a";
+      name = "1220a6a30e67f7002fc1a2b4b832a9307a9ee6157898bd73347b485d1cd17b60a6d4";
       path = fetchzip {
-        url = "https://github.com/tukaani-project/xz/archive/v5.8.1.tar.gz";
-        hash = "sha256-vGUNoX5VTM0aQ5GmBPXip97WGN9vaVrQLE9msToZyKs=";
+        url = "https://github.com/wolfssl/wolfssl/archive/v5.8.0-stable.tar.gz";
+        hash = "sha256-Rws9LN7hNDLc8rr1tyjzSQ8GJl8bEH4CjGuWpI3shSo";
+      };
+    }
+    {
+      name = "122060e09a02cccff4a3603cc311f686c5147a25358ae66fe772f9587c0be5971418";
+      path = fetchzip {
+        url = "https://github.com/facebook/zstd/archive/v1.5.7.tar.gz";
+        hash = "sha256-tNFWIT9ydfozB8dWcmTMuZLCQmQudTFJIkSr0aG7S44=";
       };
     }
   ];
@@ -106,7 +113,7 @@ stdenv.mkDerivation {
     runHook postCheck
   '';
 
-  passthru = lib.optionalAttrs withLoader { initrdFile = "tboot-loader.cpio"; };
+  passthru = lib.optionalAttrs withLoader { initrdFile = "tboot-loader.cpio.zst"; };
 
   meta.platforms = lib.platforms.linux;
 }

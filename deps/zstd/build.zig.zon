@@ -1,0 +1,11 @@
+.{
+    .name = .zstd,
+    .version = "1.5.7",
+    .paths = .{""},
+    .dependencies = .{
+        .zstd = .{
+            .url = "https://github.com/facebook/zstd/archive/v1.5.7.tar.gz",
+            .hash = "122060e09a02cccff4a3603cc311f686c5147a25358ae66fe772f9587c0be5971418",
+        },
+    },
+}
