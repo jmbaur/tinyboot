@@ -15,7 +15,6 @@ test {
     _ = @import("./kexec/kexec.zig");
     _ = @import("./kobject.zig");
     _ = @import("./log.zig");
-    _ = @import("./mbedtls.zig");
     _ = @import("./runner.zig");
     _ = @import("./security.zig");
     _ = @import("./system.zig");
