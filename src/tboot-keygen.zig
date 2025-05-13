@@ -75,7 +75,7 @@ pub fn main() !void {
 
     try wolfssl.x509SetPubkey(x509, pkey);
 
-    const name = wolfssl.x509GetSubjectName(x509);
+    const name = try wolfssl.x509GetSubjectName(x509);
 
     try wolfssl.x509NameAddEntryByTxt(name, .country, country);
     try wolfssl.x509NameAddEntryByTxt(name, .common_name, common_name);
@@ -90,7 +90,7 @@ pub fn main() !void {
 
     try wolfssl.pemWriteBioPrivateKey(private_key_pem_file, pkey);
 
-    const public_key_pem_file = wolfssl.bioNewFile("tboot-public.pem");
+    const public_key_pem_file = try wolfssl.bioNewFile("tboot-public.pem");
     defer wolfssl.bioFree(public_key_pem_file);
 
     try wolfssl.pemWriteBioPubkey(public_key_pem_file, pkey);

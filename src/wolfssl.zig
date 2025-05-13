@@ -2,10 +2,10 @@ const std = @import("std");
 
 const C = @cImport({
     @cDefine("struct_XSTAT", "");
-    @cInclude("wolfssl/options.h");
-    @cInclude("wolfssl/openssl/ssl.h");
+    @cInclude("wolfssl/options.h"); // must come first
     @cInclude("wolfssl/openssl/evp.h");
     @cInclude("wolfssl/openssl/pem.h");
+    @cInclude("wolfssl/openssl/ssl.h");
 });
 
 pub fn enableDebugging() void {
@@ -106,12 +106,12 @@ pub fn x509SetIssuerName(x509: *C.X509, name: *C.X509_NAME) !void {
     try handleOpensslError(C.X509_set_issuer_name(x509, name));
 }
 
-pub fn x509Sign(x509: *C.X509, pkey: *C.EVP_KEY) !void {
+pub fn x509Sign(x509: *C.X509, pkey: *C.EVP_PKEY) !void {
     try handleOpensslError(C.X509_sign(x509, pkey, C.EVP_sha512()));
 }
 
 pub fn bioNewFile(name: []const u8) !*C.BIO {
-    return C.BIO_new_file(name, "wb") orelse {
+    return C.BIO_new_file(@ptrCast(name), "wb") orelse {
         displayWolfsslErrors(@src());
         return error.WolfsslError;
     };
