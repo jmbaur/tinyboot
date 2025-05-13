@@ -11,11 +11,11 @@ test {
     _ = @import("./disk/gpt.zig");
     _ = @import("./disk/mbr.zig");
     _ = @import("./fdt.zig");
-    _ = @import("./kexec/kexec.zig");
     _ = @import("./kexec/arm.zig");
+    _ = @import("./kexec/kexec.zig");
     _ = @import("./kobject.zig");
     _ = @import("./log.zig");
-    _ = @import("./openssl.zig");
+    _ = @import("./mbedtls.zig");
     _ = @import("./runner.zig");
     _ = @import("./security.zig");
     _ = @import("./system.zig");

@@ -1,0 +1,11 @@
+.{
+    .name = .mbedtls,
+    .version = "3.6.3",
+    .paths = .{""},
+    .dependencies = .{
+        .mbedtls = .{
+            .url = "https://github.com/MBED-TLS/mbedtls/archive/v3.6.3.tar.gz",
+            .hash = "1220730cf926f74aba5157b4c4c25ce6e98cc051acf4e10e264b97db6e7101acd0fb",
+        },
+    },
+}

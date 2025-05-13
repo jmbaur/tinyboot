@@ -10,6 +10,7 @@
             .hash = "12204387e122dd8b6828847165a7153c5d624b0a77217fd907c7f4f718ecce36e217",
         },
         .wolfssl = .{ .path = "./deps/wolfssl/" },
+        .mbedtls = .{ .path = "./deps/mbedtls/" },
         .zstd = .{ .path = "./deps/zstd/" },
     },
 }

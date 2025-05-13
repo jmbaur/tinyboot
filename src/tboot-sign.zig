@@ -2,15 +2,13 @@ const builtin = @import("builtin");
 const std = @import("std");
 const clap = @import("clap");
 
-const openssl = @import("./openssl.zig");
-
 const C = @cImport({
-    @cInclude("openssl/opensslv.h");
-    @cInclude("openssl/bio.h");
-    @cInclude("openssl/evp.h");
-    @cInclude("openssl/pem.h");
-    @cInclude("openssl/err.h");
-    @cInclude("openssl/engine.h");
+    @cInclude("wolfssl/openssl/opensslv.h");
+    @cInclude("wolfssl/openssl/bio.h");
+    @cInclude("wolfssl/openssl/evp.h");
+    @cInclude("wolfssl/openssl/pem.h");
+    @cInclude("wolfssl/openssl/err.h");
+    @cInclude("wolfssl/openssl/engine.h");
 });
 
 pub const std_options = std.Options{ .log_level = if (builtin.mode == .Debug) .debug else .info };

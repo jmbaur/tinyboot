@@ -74,8 +74,8 @@ pub fn build(b: *std.Build) !void {
     const clap = b.dependency("clap", .{});
     const zstd = b.dependency("zstd", .{ .target = target, .optimize = optimize });
     const zstd_lib = zstd.artifact("zstd");
-    // const wolfssl = b.dependency("wolfssl", .{ .target = target, .optimize = optimize });
-    // const wolfssl_lib = wolfssl.artifact("wolfssl");
+    const mbedtls = b.dependency("mbedtls", .{ .target = target, .optimize = optimize });
+    const mbedtls_lib = mbedtls.artifact("mbedtls");
 
     const linux_h = b.addWriteFile("linux.h",
         \\#include <asm-generic/setup.h>
@@ -118,24 +118,6 @@ pub fn build(b: *std.Build) !void {
     if (with_tools) {
         b.installArtifact(maybe_tboot_initrd_tool.?);
 
-        const tboot_bless_boot = b.addExecutable(.{
-            .name = "tboot-bless-boot",
-            .root_source_file = b.path("src/tboot-bless-boot.zig"),
-            .target = target,
-            .optimize = optimize,
-        });
-        tboot_bless_boot.root_module.addImport("clap", clap.module("clap"));
-        b.installArtifact(tboot_bless_boot);
-
-        const tboot_bless_boot_generator = b.addExecutable(.{
-            .name = "tboot-bless-boot-generator",
-            .root_source_file = b.path("src/tboot-bless-boot-generator.zig"),
-            .target = target,
-            .optimize = optimize,
-        });
-        tboot_bless_boot_generator.root_module.addImport("clap", clap.module("clap"));
-        b.installArtifact(tboot_bless_boot_generator);
-
         // const tboot_sign = b.addExecutable(.{
         //     .name = "tboot-sign",
         //     .root_source_file = b.path("src/tboot-sign.zig"),
@@ -143,41 +125,65 @@ pub fn build(b: *std.Build) !void {
         //     .optimize = optimize,
         // });
         // tboot_sign.linkLibC();
-        // // tboot_sign.linkLibrary(wolfssl_lib);
+        // tboot_sign.linkLibrary(mbedtls_lib);
         // tboot_sign.root_module.addImport("clap", clap.module("clap"));
         // b.installArtifact(tboot_sign);
-        //
-        // const tboot_keygen = b.addExecutable(.{
-        //     .name = "tboot-keygen",
-        //     .root_source_file = b.path("src/tboot-keygen.zig"),
-        //     .target = target,
-        //     .optimize = optimize,
-        // });
-        // tboot_keygen.linkLibC();
-        // // tboot_keygen.linkLibrary(wolfssl_lib);
-        // tboot_keygen.root_module.addImport("clap", clap.module("clap"));
-        // b.installArtifact(tboot_keygen);
-        //
-        // const tboot_nixos_install = b.addExecutable(.{
-        //     .name = "tboot-nixos-install",
-        //     .root_source_file = b.path("src/tboot-nixos-install.zig"),
-        //     .target = target,
-        //     .optimize = optimize,
-        // });
-        // tboot_nixos_install.linkLibC();
-        // // tboot_nixos_install.linkLibrary(wolfssl_lib);
-        // tboot_nixos_install.root_module.addImport("clap", clap.module("clap"));
-        // b.installArtifact(tboot_nixos_install);
 
-        const tboot_ymodem = b.addExecutable(.{
-            .name = "tboot-ymodem",
-            .root_source_file = b.path("src/ymodem.zig"),
+        const tboot_keygen = b.addExecutable(.{
+            .name = "tboot-keygen",
+            .root_source_file = b.path("src/tboot-keygen.zig"),
             .target = target,
             .optimize = optimize,
         });
-        tboot_ymodem.root_module.addImport("linux_headers", linux_headers_module);
-        tboot_ymodem.root_module.addImport("clap", clap.module("clap"));
-        b.installArtifact(tboot_ymodem);
+        tboot_keygen.linkLibC();
+        tboot_keygen.linkLibrary(mbedtls_lib);
+        tboot_keygen.root_module.addImport("clap", clap.module("clap"));
+        b.installArtifact(tboot_keygen);
+
+        if (target.result.os.tag != .windows) {
+            // tboot-bless-boot, tboot-bless-boot-generator, and
+            // tboot-nixos-install (for nixos machines run on the machine using
+            // tboot-loader, so it doesn't make sense to build for windows.
+            const tboot_bless_boot = b.addExecutable(.{
+                .name = "tboot-bless-boot",
+                .root_source_file = b.path("src/tboot-bless-boot.zig"),
+                .target = target,
+                .optimize = optimize,
+            });
+            tboot_bless_boot.root_module.addImport("clap", clap.module("clap"));
+            b.installArtifact(tboot_bless_boot);
+
+            const tboot_bless_boot_generator = b.addExecutable(.{
+                .name = "tboot-bless-boot-generator",
+                .root_source_file = b.path("src/tboot-bless-boot-generator.zig"),
+                .target = target,
+                .optimize = optimize,
+            });
+            tboot_bless_boot_generator.root_module.addImport("clap", clap.module("clap"));
+            b.installArtifact(tboot_bless_boot_generator);
+
+            // const tboot_nixos_install = b.addExecutable(.{
+            //     .name = "tboot-nixos-install",
+            //     .root_source_file = b.path("src/tboot-nixos-install.zig"),
+            //     .target = target,
+            //     .optimize = optimize,
+            // });
+            // tboot_nixos_install.linkLibC();
+            // tboot_nixos_install.linkLibrary(mbedtls_lib);
+            // tboot_nixos_install.root_module.addImport("clap", clap.module("clap"));
+            // b.installArtifact(tboot_nixos_install);
+
+            // TODO(jared): get this compiling for windows
+            const tboot_ymodem = b.addExecutable(.{
+                .name = "tboot-ymodem",
+                .root_source_file = b.path("src/ymodem.zig"),
+                .target = target,
+                .optimize = optimize,
+            });
+            tboot_ymodem.root_module.addImport("linux_headers", linux_headers_module);
+            tboot_ymodem.root_module.addImport("clap", clap.module("clap"));
+            b.installArtifact(tboot_ymodem);
+        }
 
         const tboot_vpd = b.addExecutable(.{
             .name = "tboot-vpd",

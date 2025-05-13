@@ -1,12 +1,33 @@
 const std = @import("std");
 const posix = std.posix;
 const process = std.process;
-const esc = std.ascii.control_code.esc;
 pub const IN = posix.STDIN_FILENO;
 const builtin = @import("builtin");
 
 const BootLoader = @import("./boot/bootloader.zig");
 const system = @import("./system.zig");
+
+const ack = std.ascii.control_code.ack;
+const bel = std.ascii.control_code.bel;
+const bs = std.ascii.control_code.bs;
+const cr = std.ascii.control_code.cr;
+const dc2 = std.ascii.control_code.dc2;
+const dc4 = std.ascii.control_code.dc4;
+const del = std.ascii.control_code.del;
+const dle = std.ascii.control_code.dle;
+const enq = std.ascii.control_code.enq;
+const eot = std.ascii.control_code.eot;
+const esc = std.ascii.control_code.esc;
+const etb = std.ascii.control_code.etb;
+const etx = std.ascii.control_code.etx;
+const ff = std.ascii.control_code.ff;
+const ht = std.ascii.control_code.ht;
+const lf = std.ascii.control_code.lf;
+const nak = std.ascii.control_code.nak;
+const so = std.ascii.control_code.so;
+const soh = std.ascii.control_code.soh;
+const stx = std.ascii.control_code.stx;
+const vt = std.ascii.control_code.vt;
 
 const ArgsIterator = process.ArgIteratorGeneral(.{});
 
@@ -126,13 +147,13 @@ const Shell = struct {
 
         const needs_flush = switch (char) {
             // C-k
-            0x0b => b: {
+            vt => b: {
                 eraseToEndOfLine();
                 self.input_end = self.input_cursor;
                 break :b true;
             },
             // C-a
-            0x01 => b: {
+            soh => b: {
                 if (self.input_cursor > 0) {
                     cursorLeft(self.input_cursor);
                     self.input_cursor = 0;
@@ -142,9 +163,9 @@ const Shell = struct {
                 break :b false;
             },
             // C-b
-            0x02 => self.moveLeft(),
+            stx => self.moveLeft(),
             // C-c
-            0x03 => b: {
+            etx => b: {
                 writeAll("\n");
                 self.input_cursor = 0;
                 self.input_end = 0;
@@ -152,7 +173,7 @@ const Shell = struct {
                 break :b true;
             },
             // C-d
-            0x04 => b: {
+            eot => b: {
                 if (self.input_cursor < self.input_end) {
                     eraseInputAndUpdateCursor(&self.input_buffer, self.input_cursor, &self.input_end, 1);
                     break :b true;
@@ -161,7 +182,7 @@ const Shell = struct {
                 break :b false;
             },
             // C-e
-            0x05 => b: {
+            enq => b: {
                 if (self.input_cursor < self.input_end) {
                     cursorRight(self.input_end -| self.input_cursor);
                     self.input_cursor = self.input_end;
@@ -171,11 +192,11 @@ const Shell = struct {
                 break :b false;
             },
             // C-f
-            0x06 => self.moveRight(),
+            ack => self.moveRight(),
             // Bell
-            0x07 => false,
+            bel => false,
             // C-h, Backspace
-            0x08, 0x7f => b: {
+            bs, del => b: {
                 if (self.input_cursor > 0) {
                     std.mem.copyForwards(
                         u8,
@@ -194,9 +215,9 @@ const Shell = struct {
                 break :b false;
             },
             // Tab
-            0x09 => false,
+            ht => false,
             // C-l
-            0x0c => b: {
+            ff => b: {
                 clearScreen();
                 self.prompt(context);
                 writeAll(self.input_buffer[0..self.input_end]);
@@ -204,19 +225,19 @@ const Shell = struct {
                 break :b true;
             },
             // \r, \n; \n is also known as C-j
-            0x0d, 0x0a => b: {
+            cr, lf => b: {
                 writeAll("\n");
                 done = true;
                 break :b true;
             },
             // C-n
-            0x0e => self.historyNext(),
+            so => self.historyNext(),
             // C-p
-            0x10 => self.historyPrev(),
+            dle => self.historyPrev(),
             // C-r
-            0x12 => false,
+            dc2 => false,
             // C-t
-            0x14 => b: {
+            dc4 => b: {
                 if (0 < self.input_cursor and self.input_cursor < self.input_end) {
                     std.mem.swap(
                         u8,
@@ -232,7 +253,7 @@ const Shell = struct {
                 break :b false;
             },
             // C-u
-            0x15 => b: {
+            nak => b: {
                 if (self.input_cursor > 0) {
                     cursorLeft(self.input_cursor);
                     writeAll(self.input_buffer[self.input_cursor..self.input_end]);
@@ -246,7 +267,7 @@ const Shell = struct {
                 break :b false;
             },
             // C-w
-            0x17 => b: {
+            etb => b: {
                 if (self.input_cursor > 0) {
                     const old_cursor = self.input_cursor;
 
@@ -313,7 +334,7 @@ const Shell = struct {
                 break :b false;
             },
             // Escape sequence
-            0x1b => b: {
+            esc => b: {
                 switch (try self.stdin.readByte()) {
                     0x5b => {
                         switch (try self.stdin.readByte()) {
