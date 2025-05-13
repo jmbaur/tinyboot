@@ -118,16 +118,16 @@ pub fn build(b: *std.Build) !void {
     if (with_tools) {
         b.installArtifact(maybe_tboot_initrd_tool.?);
 
-        // const tboot_sign = b.addExecutable(.{
-        //     .name = "tboot-sign",
-        //     .root_source_file = b.path("src/tboot-sign.zig"),
-        //     .target = target,
-        //     .optimize = optimize,
-        // });
-        // tboot_sign.linkLibC();
-        // tboot_sign.linkLibrary(mbedtls_lib);
-        // tboot_sign.root_module.addImport("clap", clap.module("clap"));
-        // b.installArtifact(tboot_sign);
+        const tboot_sign = b.addExecutable(.{
+            .name = "tboot-sign",
+            .root_source_file = b.path("src/tboot-sign.zig"),
+            .target = target,
+            .optimize = optimize,
+        });
+        tboot_sign.linkLibC();
+        tboot_sign.linkLibrary(mbedtls_lib);
+        tboot_sign.root_module.addImport("clap", clap.module("clap"));
+        b.installArtifact(tboot_sign);
 
         const tboot_keygen = b.addExecutable(.{
             .name = "tboot-keygen",
@@ -139,6 +139,27 @@ pub fn build(b: *std.Build) !void {
         tboot_keygen.linkLibrary(mbedtls_lib);
         tboot_keygen.root_module.addImport("clap", clap.module("clap"));
         b.installArtifact(tboot_keygen);
+
+        const tboot_vpd = b.addExecutable(.{
+            .name = "tboot-vpd",
+            .root_source_file = b.path("src/vpd.zig"),
+            .target = target,
+            .optimize = optimize,
+        });
+        tboot_vpd.root_module.addImport("linux_headers", linux_headers_module);
+        tboot_vpd.root_module.addImport("clap", clap.module("clap"));
+        b.installArtifact(tboot_vpd);
+
+        // TODO(jared): get this compiling for windows
+        const tboot_ymodem = b.addExecutable(.{
+            .name = "tboot-ymodem",
+            .root_source_file = b.path("src/ymodem.zig"),
+            .target = target,
+            .optimize = optimize,
+        });
+        tboot_ymodem.root_module.addImport("linux_headers", linux_headers_module);
+        tboot_ymodem.root_module.addImport("clap", clap.module("clap"));
+        b.installArtifact(tboot_ymodem);
 
         if (target.result.os.tag != .windows) {
             // tboot-bless-boot, tboot-bless-boot-generator, and
@@ -162,38 +183,17 @@ pub fn build(b: *std.Build) !void {
             tboot_bless_boot_generator.root_module.addImport("clap", clap.module("clap"));
             b.installArtifact(tboot_bless_boot_generator);
 
-            // const tboot_nixos_install = b.addExecutable(.{
-            //     .name = "tboot-nixos-install",
-            //     .root_source_file = b.path("src/tboot-nixos-install.zig"),
-            //     .target = target,
-            //     .optimize = optimize,
-            // });
-            // tboot_nixos_install.linkLibC();
-            // tboot_nixos_install.linkLibrary(mbedtls_lib);
-            // tboot_nixos_install.root_module.addImport("clap", clap.module("clap"));
-            // b.installArtifact(tboot_nixos_install);
-
-            // TODO(jared): get this compiling for windows
-            const tboot_ymodem = b.addExecutable(.{
-                .name = "tboot-ymodem",
-                .root_source_file = b.path("src/ymodem.zig"),
+            const tboot_nixos_install = b.addExecutable(.{
+                .name = "tboot-nixos-install",
+                .root_source_file = b.path("src/tboot-nixos-install.zig"),
                 .target = target,
                 .optimize = optimize,
             });
-            tboot_ymodem.root_module.addImport("linux_headers", linux_headers_module);
-            tboot_ymodem.root_module.addImport("clap", clap.module("clap"));
-            b.installArtifact(tboot_ymodem);
+            tboot_nixos_install.linkLibC();
+            tboot_nixos_install.linkLibrary(mbedtls_lib);
+            tboot_nixos_install.root_module.addImport("clap", clap.module("clap"));
+            b.installArtifact(tboot_nixos_install);
         }
-
-        const tboot_vpd = b.addExecutable(.{
-            .name = "tboot-vpd",
-            .root_source_file = b.path("src/vpd.zig"),
-            .target = target,
-            .optimize = optimize,
-        });
-        tboot_vpd.root_module.addImport("linux_headers", linux_headers_module);
-        tboot_vpd.root_module.addImport("clap", clap.module("clap"));
-        b.installArtifact(tboot_vpd);
     }
 
     if (with_loader) {
