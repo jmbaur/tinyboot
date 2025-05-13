@@ -83,6 +83,7 @@
       devShells = mapAttrs (system: pkgs: {
         default = pkgs.mkShell {
           packages = [
+            pkgs.lldb
             pkgs.qemu
             pkgs.swtpm
             pkgs.zig_0_14

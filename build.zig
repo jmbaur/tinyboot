@@ -87,15 +87,10 @@ pub fn build(b: *std.Build) !void {
     const clap = clap_dependency.module("clap");
     const wolfssl_dependency = b.dependency("wolfssl", .{ .target = target, .optimize = optimize });
     const wolfssl = wolfssl_dependency.artifact("wolfssl");
-    // const mbedtls_dependency = b.dependency("mbedtls", .{ .target = target, .optimize = optimize });
-    // const mbedtls = mbedtls_dependency.artifact("mbedtls");
     const zstd_dependency = b.dependency("zstd", .{ .target = target, .optimize = optimize });
     const zstd = zstd_dependency.artifact("zstd");
     const build_zstd_dependency = b.dependency("zstd", .{ .target = b.graph.host, .optimize = .Debug });
     const build_zstd = build_zstd_dependency.artifact("zstd");
-
-    b.installArtifact(wolfssl);
-    b.getInstallStep().dependOn(&wolfssl.step);
 
     const linux_h = b.addWriteFile("linux.h",
         \\#include <asm-generic/setup.h>

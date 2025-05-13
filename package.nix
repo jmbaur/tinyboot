@@ -11,21 +11,21 @@
 let
   deps = linkFarm "tinyboot-deps" [
     {
-      name = "12204387e122dd8b6828847165a7153c5d624b0a77217fd907c7f4f718ecce36e217";
+      name = "clap-0.10.0-oBajB434AQBDh-Ei3YtoKIRxZacVPF1iSwp3IX_ZB8f0";
       path = fetchzip {
         url = "https://github.com/Hejsil/zig-clap/archive/e47028deaefc2fb396d3d9e9f7bd776ae0b2a43a.tar.gz";
         hash = "sha256-leXnA97ITdvmBhD2YESLBZAKjBg+G4R/+PPPRslz/ec=";
       };
     }
     {
-      name = "12208ccec046f4145e785104436a61ca837b944f14d7135412f80fee38d8ceee7495";
+      name = "N-V-__8AALz5KQamow5n9wAvwaK0uDKpMHqe5hV4mL1zNHtI";
       path = fetchzip {
-        url = "https://github.com/MBED-TLS/mbedtls/archive/v3.6.3.1.tar.gz";
-        hash = "sha256-koZAtExQguvfQ2Jf8xidKyLzCQoWrVIY73AYFjG0tMg=";
+        url = "https://github.com/wolfSSL/wolfssl/archive/v5.8.0-stable.tar.gz";
+        hash = "sha256-Rws9LN7hNDLc8rr1tyjzSQ8GJl8bEH4CjGuWpI3shSo=";
       };
     }
     {
-      name = "122060e09a02cccff4a3603cc311f686c5147a25358ae66fe772f9587c0be5971418";
+      name = "N-V-__8AAPZ7fwBg4JoCzM_0o2A8wxH2hsUUeiU1iuZv53L5";
       path = fetchzip {
         url = "https://github.com/facebook/zstd/archive/v1.5.7.tar.gz";
         hash = "sha256-tNFWIT9ydfozB8dWcmTMuZLCQmQudTFJIkSr0aG7S44=";
