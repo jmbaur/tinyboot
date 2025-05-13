@@ -1,5 +1,4 @@
 const std = @import("std");
-const Path = std.Build.LazyPath;
 
 fn isX86(target: std.Build.ResolvedTarget) bool {
     return switch (target.result.cpu.arch) {

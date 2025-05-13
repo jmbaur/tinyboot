@@ -1,10 +1,11 @@
 const std = @import("std");
 const posix = std.posix;
 const linux = std.os.linux;
-const system = std.posix.system;
 const MS = std.os.linux.MS;
 
 const linux_headers = @import("linux_headers");
+
+const ioctl = std.posix.system.ioctl;
 
 fn mountPseudoFs(
     path: [*:0]const u8,
@@ -121,12 +122,12 @@ pub const Tty = struct {
         _ = linux.tcdrain(self.fd);
 
         // flush input queue
-        _ = system.ioctl(self.fd, TCFLSH, TCIOFLUSH);
+        _ = ioctl(self.fd, TCFLSH, TCIOFLUSH);
 
         posix.tcsetattr(self.fd, posix.TCSA.DRAIN, self.original) catch {};
 
         // restart output
-        _ = system.ioctl(self.fd, TCXONC, TCOON);
+        _ = ioctl(self.fd, TCXONC, TCOON);
     }
 };
 
@@ -212,14 +213,14 @@ pub fn setupTty(fd: posix.fd_t, mode: Tty.Mode) !Tty {
     _ = linux.tcdrain(fd);
 
     // flush input queue
-    _ = system.ioctl(fd, TCFLSH, TCIOFLUSH);
+    _ = ioctl(fd, TCFLSH, TCIOFLUSH);
 
     try posix.tcsetattr(fd, posix.TCSA.DRAIN, termios);
 
     // restart output
-    _ = system.ioctl(fd, TCXONC, TCOON);
+    _ = ioctl(fd, TCXONC, TCOON);
 
-    const err = posix.system.ioctl(fd, posix.T.IOCGWINSZ, @intFromPtr(&tty.winsize));
+    const err = ioctl(fd, posix.T.IOCGWINSZ, @intFromPtr(&tty.winsize));
     if ((posix.errno(err) != .SUCCESS) or (tty.winsize.row == 0 and tty.winsize.col == 0)) {
         std.log.debug("failed to determine terminal size; using conservative guess 80x25", .{});
         tty.winsize.col = 80;
@@ -242,12 +243,12 @@ pub fn printKernelLogs(
     filter: u3,
     writer: std.io.AnyWriter,
 ) !void {
-    const bytes_available = std.os.linux.syscall3(system.SYS.syslog, SYSLOG_ACTION_UNREAD, 0, 0);
+    const bytes_available = std.os.linux.syscall3(.syslog, SYSLOG_ACTION_UNREAD, 0, 0);
     const buf = try allocator.alloc(u8, bytes_available);
     defer allocator.free(buf);
 
     switch (posix.errno(std.os.linux.syscall3(
-        system.SYS.syslog,
+        .syslog,
         SYSLOG_ACTION_READ_ALL,
         @intFromPtr(buf.ptr),
         buf.len,
@@ -277,7 +278,7 @@ pub fn printKernelLogs(
 
 pub fn setConsole(toggle: enum { on, off }) !void {
     switch (posix.errno(std.os.linux.syscall3(
-        system.SYS.syslog,
+        .syslog,
         switch (toggle) {
             .on => SYSLOG_ACTION_CONSOLE_ON,
             .off => SYSLOG_ACTION_CONSOLE_OFF,
