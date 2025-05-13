@@ -32,4 +32,5 @@ test {
     _ = @import("./watch.zig");
     _ = @import("./wolfssl.zig");
     _ = @import("./ymodem.zig");
+    _ = @import("./zstd.zig");
 }

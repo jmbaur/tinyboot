@@ -2,10 +2,7 @@ const builtin = @import("builtin");
 const std = @import("std");
 const clap = @import("clap");
 const CpioArchive = @import("./cpio.zig");
-
-const C = @cImport({
-    @cInclude("zstd.h");
-});
+const zstd = @import("./zstd.zig");
 
 pub const std_options = std.Options{ .log_level = if (builtin.mode == .Debug) .debug else .info };
 
@@ -31,22 +28,8 @@ fn compress(
     try archive_file.seekTo(0);
 
     const archive_file_buf = try archive_file.readToEndAlloc(arena.allocator(), std.math.maxInt(usize));
-    const compressed_size = C.ZSTD_compressBound(archive_file_buf.len);
-    const compressed_buf = try arena.allocator().alloc(u8, compressed_size);
-
-    const rc = C.ZSTD_compress(
-        @ptrCast(compressed_buf),
-        compressed_size,
-        @ptrCast(archive_file_buf),
-        archive_file_buf.len,
-        1,
-    );
-    if (C.ZSTD_isError(rc) == 1) {
-        std.log.err("failed to compress: {s}", .{C.ZSTD_getErrorName(rc)});
-        return error.CompressFail;
-    }
-
-    const actual_compressed_size = rc;
+    const compressed = try zstd.compress(arena.allocator(), archive_file_buf);
+    defer compressed.deinit();
 
     const compressed_output = try std.fmt.allocPrint(
         arena.allocator(),
@@ -57,7 +40,7 @@ fn compress(
     var compressed_file = try std.fs.cwd().createFile(compressed_output, .{ .mode = 0o444 });
     defer compressed_file.close();
 
-    try compressed_file.writer().writeAll(compressed_buf[0..actual_compressed_size]);
+    try compressed_file.writer().writeAll(compressed.content());
 
     try std.fs.cwd().rename(compressed_output, output);
 }
