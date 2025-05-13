@@ -161,10 +161,10 @@ pub fn build(b: *std.Build) !void {
         tboot_ymodem.root_module.addImport("clap", clap.module("clap"));
         b.installArtifact(tboot_ymodem);
 
+        // tboot-bless-boot, tboot-bless-boot-generator, and
+        // tboot-nixos-install (for nixos machines run on the machine using
+        // tboot-loader, so it doesn't make sense to build for windows.
         if (target.result.os.tag != .windows) {
-            // tboot-bless-boot, tboot-bless-boot-generator, and
-            // tboot-nixos-install (for nixos machines run on the machine using
-            // tboot-loader, so it doesn't make sense to build for windows.
             const tboot_bless_boot = b.addExecutable(.{
                 .name = "tboot-bless-boot",
                 .root_source_file = b.path("src/tboot-bless-boot.zig"),
