@@ -2,25 +2,12 @@ const builtin = @import("builtin");
 const std = @import("std");
 const clap = @import("clap");
 
-const openssl = @import("./wolfssl.zig");
-
-const C = @cImport({
-    @cDefine("struct_XSTAT", "");
-    @cInclude("wolfssl/options.h");
-    @cInclude("wolfssl/openssl/bio.h");
-    @cInclude("wolfssl/openssl/engine.h");
-    @cInclude("wolfssl/openssl/evp.h");
-    @cInclude("wolfssl/openssl/opensslv.h");
-    @cInclude("wolfssl/openssl/pem.h");
-    @cInclude("wolfssl/openssl/pkcs7.h");
-});
+const wolfssl = @import("./wolfssl.zig");
 
 pub const std_options = std.Options{ .log_level = if (builtin.mode == .Debug) .debug else .info };
 
 const MODULE_SIG_STRING = "~Module signature appended~\n";
 
-// not defined in wolfssl (for some reason?)
-const PKCS7_NOATTR = 0x100;
 
 // https://github.com/torvalds/linux/blob/ec9eeb89e60d86fcc0243f47c2383399ce0de8f8/include/linux/module_signature.h#L17
 const PkeyIdType = enum(u2) {
@@ -49,78 +36,37 @@ const ModuleSignature = extern struct {
     sig_len: u32, // be32
 };
 
-var key_pass: ?[]const u8 = null;
 
-fn pemPasswordCallback(buff: [*c]u8, len: c_int, w: c_int, v: ?*anyopaque) callconv(.C) c_int {
-    _ = w;
-    _ = v;
-
-    if (key_pass) |pass| {
-        if (pass.len >= len) {
-            return -1;
-        }
-
-        const buff_slice: []u8 = @ptrCast(buff[0..@as(usize, @intCast(len))]);
-        std.mem.copyForwards(u8, buff_slice, pass);
-
-        // If it's wrong, don't keep trying it.
-        key_pass = null;
-
-        return @as(c_int, @intCast(pass.len));
-    } else {
-        return -1;
-    }
-}
-
-fn readPrivateKey(arena_alloc: std.mem.Allocator, filepath: []const u8) !*anyopaque {
+fn readPrivateKey(arena_alloc: std.mem.Allocator, filepath: []const u8) !*wolfssl.EVP_PKEY {
     const full_filepath = try std.fs.cwd().realpathAlloc(arena_alloc, filepath);
     const filepathZ = try arena_alloc.dupeZ(u8, full_filepath);
 
-    const b = C.BIO_new_file(filepathZ, "rb") orelse {
-        openssl.displayOpensslErrors(@src());
-        return error.OpensslError;
-    };
-    defer _ = C.BIO_free(b);
+    const b = try wolfssl.bioNewFile(filepathZ, "rb");
+    defer wolfssl.bioFree(b);
 
-    return C.PEM_read_bio_PrivateKey(b, null, pemPasswordCallback, null) orelse {
-        openssl.displayOpensslErrors(@src());
-        return error.OpensslError;
-    };
+    return try wolfssl.pemReadBioPrivateKey(b);
 }
 
-fn readX509(arena_alloc: std.mem.Allocator, filepath: []const u8) !*anyopaque {
+fn readX509(arena_alloc: std.mem.Allocator, filepath: []const u8) !*wolfssl.X509 {
     const full_filepath = try std.fs.cwd().realpathAlloc(arena_alloc, filepath);
     const filepathZ = try arena_alloc.dupeZ(u8, full_filepath);
 
-    const bio = C.BIO_new_file(filepathZ, "rb") orelse {
-        openssl.displayOpensslErrors(@src());
-        return error.OpensslError;
-    };
-    defer _ = C.BIO_free(bio);
+    const bio = try wolfssl.bioNewFile(filepathZ, "rb");
+    defer wolfssl.bioFree(bio);
 
     var buf: [2]u8 = undefined;
-    const n_read = C.BIO_read(bio, &buf, 2);
+    const n_read = try wolfssl.bioRead(bio, &buf);
     if (n_read != 2) {
-        openssl.displayOpensslErrors(@src());
-        return error.OpensslError;
+        return error.ReadError;
     }
 
-    if (C.BIO_reset(bio) != 0) {
-        openssl.displayOpensslErrors(@src());
-        return error.OpensslError;
-    }
+    try wolfssl.bioReset(bio);
 
     if (buf[0] == 0x30 and buf[1] >= 0x81 and buf[1] <= 0x84) {
         // Using DER encoding
-        return C.d2i_X509_bio(bio, null) orelse {
-            openssl.displayOpensslErrors(@src());
-            return error.OpensslError;
-        };
+        return try wolfssl.d2iX509Bio(bio);
     } else {
-        return C.PEM_read_bio_X509(bio, null, null, null) orelse {
-            openssl.displayOpensslErrors(@src());
-            return error.OpensslError;
-        };
+        return try wolfssl.pemReadBioX509(bio);
     }
 }
 
@@ -131,74 +77,44 @@ pub fn signFile(
     private_key_filepath: []const u8,
     certificate_filepath: []const u8,
 ) !void {
-    _ = C.OPENSSL_init_crypto(C.OPENSSL_INIT_ADD_ALL_CIPHERS | C.OPENSSL_INIT_ADD_ALL_DIGESTS, null);
-    _ = C.OPENSSL_init_crypto(C.OPENSSL_INIT_LOAD_CRYPTO_STRINGS, null);
-    C.ERR_clear_error();
+    wolfssl.init();
 
-    var env = try std.process.getEnvMap(arena_alloc);
-
-    key_pass = env.get("TBOOT_SIGN_PIN");
-
-    const in_bio = C.BIO_new_file(
+    const in_bio = try wolfssl.bioNewFile(
         try arena_alloc.dupeZ(u8, try std.fs.cwd().realpathAlloc(
             arena_alloc,
             in_file,
         )),
         "rb",
-    ) orelse {
-        openssl.displayOpensslErrors(@src());
-        return error.OpensslError;
-    };
-    defer _ = C.BIO_free(in_bio);
+    );
+    defer wolfssl.bioFree(in_bio);
 
     const private_key = try readPrivateKey(arena_alloc, private_key_filepath);
 
     const certificate = try readX509(arena_alloc, certificate_filepath);
 
-    _ = C.OPENSSL_init_crypto(C.OPENSSL_INIT_ADD_ALL_DIGESTS, null);
-    openssl.displayOpensslErrors(@src());
+    const pkcs7 = try wolfssl.pkcs7Sign(certificate, private_key, in_bio);
 
-    const pkcs7 = C.PKCS7_sign(
-        @ptrCast(certificate),
-        @ptrCast(private_key),
-        null,
-        in_bio,
-        C.PKCS7_NOCERTS | C.PKCS7_BINARY | C.PKCS7_DETACHED | PKCS7_NOATTR,
-    );
-
-    const out_bio = C.BIO_new_file(try arena_alloc.dupeZ(u8, out_file), "wb") orelse {
-        openssl.displayOpensslErrors(@src());
-        return error.OpensslError;
-    };
-    defer _ = C.BIO_free(out_bio);
+    const out_bio = try wolfssl.bioNewFile(try arena_alloc.dupeZ(u8, out_file), "wb");
+    defer wolfssl.bioFree(out_bio);
 
     // Append the marker and the PKCS#7 message to the destination file
-    if (C.BIO_reset(in_bio) < 0) {
-        openssl.displayOpensslErrors(@src());
-        return error.OpensslError;
-    }
+    try wolfssl.bioReset(in_bio);
 
-    var buff = [_]u8{0} ** 4096;
+    var buf = [_]u8{0} ** 4096;
     while (true) {
-        const n_read = C.BIO_read(in_bio, @ptrCast(&buff), buff.len);
+        const n_read = try wolfssl.bioRead(in_bio, &buf);
         if (n_read == 0) {
             break;
         }
 
-        if (C.BIO_write(out_bio, @ptrCast(&buff), n_read) < 0) {
-            openssl.displayOpensslErrors(@src());
-            return error.OpensslError;
-        }
+        try wolfssl.bioWrite(out_bio, buf[0..n_read]);
     }
 
-    const out_size = C.BIO_number_written(out_bio);
+    const out_size = wolfssl.bioNumberWritten(out_bio);
 
-    if (C.i2d_PKCS7_bio(out_bio, pkcs7) != 1) {
-        openssl.displayOpensslErrors(@src());
-        return error.OpensslError;
-    }
+    try wolfssl.i2dPkcs7Bio(out_bio, pkcs7);
 
-    const sig_size = C.BIO_number_written(out_bio) - out_size;
+    const sig_size = wolfssl.bioNumberWritten(out_bio) - out_size;
 
     const sig_info = ModuleSignature{
         .sig_len = std.mem.nativeToBig(u32, @intCast(sig_size)),
@@ -210,15 +126,8 @@ pub fn signFile(
         .key_id_len = 0,
     };
 
-    if (C.BIO_write(out_bio, std.mem.asBytes(&sig_info), @sizeOf(@TypeOf(sig_info))) < 0) {
-        openssl.displayOpensslErrors(@src());
-        return error.OpensslError;
-    }
-
-    if (C.BIO_write(out_bio, MODULE_SIG_STRING, MODULE_SIG_STRING.len) < 0) {
-        openssl.displayOpensslErrors(@src());
-        return error.OpensslError;
-    }
+    try wolfssl.bioWrite(out_bio, std.mem.asBytes(&sig_info));
+    try wolfssl.bioWrite(out_bio, MODULE_SIG_STRING);
 }
 
 pub fn main() !void {

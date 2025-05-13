@@ -85,22 +85,22 @@ pub fn main() !void {
 
     try wolfssl.x509Sign(x509, pkey);
 
-    const private_key_pem_file = try wolfssl.bioNewFile("tboot-private.pem");
+    const private_key_pem_file = try wolfssl.bioNewFile("tboot-private.pem", "wb");
     defer wolfssl.bioFree(private_key_pem_file);
 
     try wolfssl.pemWriteBioPrivateKey(private_key_pem_file, pkey);
 
-    const public_key_pem_file = try wolfssl.bioNewFile("tboot-public.pem");
+    const public_key_pem_file = try wolfssl.bioNewFile("tboot-public.pem", "wb");
     defer wolfssl.bioFree(public_key_pem_file);
 
     try wolfssl.pemWriteBioPubkey(public_key_pem_file, pkey);
 
-    const cert_pem_file = try wolfssl.bioNewFile("tboot-certificate.pem");
+    const cert_pem_file = try wolfssl.bioNewFile("tboot-certificate.pem", "wb");
     defer wolfssl.bioFree(cert_pem_file);
 
     try wolfssl.pemWriteBioX509(cert_pem_file, x509);
 
-    const cert_der_file = try wolfssl.bioNewFile("tboot-certificate.der");
+    const cert_der_file = try wolfssl.bioNewFile("tboot-certificate.der", "wb");
     defer wolfssl.bioFree(cert_der_file);
 
     try wolfssl.i2dX509Bio(cert_der_file, x509);

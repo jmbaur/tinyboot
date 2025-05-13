@@ -117,16 +117,16 @@ pub fn build(b: *std.Build) !void {
 
     b.installArtifact(tbootInitrd(b, target, optimize, zstd, clap));
 
-    // const tboot_sign = b.addExecutable(.{
-    //     .name = "tboot-sign",
-    //     .root_source_file = b.path("src/tboot-sign.zig"),
-    //     .target = target,
-    //     .optimize = optimize,
-    // });
-    // tboot_sign.linkLibC();
-    // tboot_sign.linkLibrary(wolfssl);
-    // tboot_sign.root_module.addImport("clap", clap);
-    // b.installArtifact(tboot_sign);
+    const tboot_sign = b.addExecutable(.{
+        .name = "tboot-sign",
+        .root_source_file = b.path("src/tboot-sign.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    tboot_sign.linkLibC();
+    tboot_sign.linkLibrary(wolfssl);
+    tboot_sign.root_module.addImport("clap", clap);
+    b.installArtifact(tboot_sign);
 
     const tboot_keygen = b.addExecutable(.{
         .name = "tboot-keygen",
@@ -182,16 +182,16 @@ pub fn build(b: *std.Build) !void {
         tboot_bless_boot_generator.root_module.addImport("clap", clap);
         b.installArtifact(tboot_bless_boot_generator);
 
-        // const tboot_nixos_install = b.addExecutable(.{
-        //     .name = "tboot-nixos-install",
-        //     .root_source_file = b.path("src/tboot-nixos-install.zig"),
-        //     .target = target,
-        //     .optimize = optimize,
-        // });
-        // tboot_nixos_install.linkLibC();
-        // tboot_nixos_install.linkLibrary(wolfssl);
-        // tboot_nixos_install.root_module.addImport("clap", clap);
-        // b.installArtifact(tboot_nixos_install);
+        const tboot_nixos_install = b.addExecutable(.{
+            .name = "tboot-nixos-install",
+            .root_source_file = b.path("src/tboot-nixos-install.zig"),
+            .target = target,
+            .optimize = optimize,
+        });
+        tboot_nixos_install.linkLibC();
+        tboot_nixos_install.linkLibrary(wolfssl);
+        tboot_nixos_install.root_module.addImport("clap", clap);
+        b.installArtifact(tboot_nixos_install);
     }
 
     const tboot_loader = b.addExecutable(.{
