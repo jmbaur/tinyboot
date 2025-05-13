@@ -1,13 +1,10 @@
 {
   firmwareDirectory ? null,
-  withLoader,
-  withTools,
 
   fetchzip,
   lib,
   linkFarm,
-  stdenv,
-  tinybootTools,
+  stdenvNoCC,
   zig_0_14,
 }:
 
@@ -21,10 +18,10 @@ let
       };
     }
     {
-      name = "1220a6a30e67f7002fc1a2b4b832a9307a9ee6157898bd73347b485d1cd17b60a6d4";
+      name = "12208ccec046f4145e785104436a61ca837b944f14d7135412f80fee38d8ceee7495";
       path = fetchzip {
-        url = "https://github.com/wolfssl/wolfssl/archive/v5.8.0-stable.tar.gz";
-        hash = "sha256-Rws9LN7hNDLc8rr1tyjzSQ8GJl8bEH4CjGuWpI3shSo";
+        url = "https://github.com/MBED-TLS/mbedtls/archive/v3.6.3.1.tar.gz";
+        hash = "sha256-koZAtExQguvfQ2Jf8xidKyLzCQoWrVIY73AYFjG0tMg=";
       };
     }
     {
@@ -36,10 +33,8 @@ let
     }
   ];
 in
-assert withTools != withLoader;
-assert withTools -> firmwareDirectory == null;
-stdenv.mkDerivation {
-  pname = "tinyboot-${if withTools then "tools" else "loader"}";
+stdenvNoCC.mkDerivation {
+  pname = "tinyboot";
   version = "0.1.0";
 
   src = lib.fileset.toSource {
@@ -55,10 +50,19 @@ stdenv.mkDerivation {
   strictDeps = true;
 
   depsBuildBuild = [ zig_0_14 ];
-  nativeBuildInputs = lib.optional (!withTools) tinybootTools;
 
   dontInstall = true;
   doCheck = true;
+
+  zigBuildFlags =
+    [
+      "--color off"
+      "-Doptimize=ReleaseSafe"
+      "-Dtarget=${stdenvNoCC.hostPlatform.qemuArch}-${stdenvNoCC.hostPlatform.parsed.kernel.name}"
+    ]
+    ++ lib.optionals (firmwareDirectory != null) [
+      "-Dfirmware-directory=${firmwareDirectory}"
+    ];
 
   configurePhase = ''
     runHook preConfigure
@@ -66,17 +70,6 @@ stdenv.mkDerivation {
     export ZIG_GLOBAL_CACHE_DIR=$TEMPDIR
 
     ln -s ${deps} $ZIG_GLOBAL_CACHE_DIR/p
-
-    zigBuildFlags=(
-      "-Dloader=${lib.boolToString withLoader}"
-      "-Dtools=${lib.boolToString withTools}"
-      "-Doptimize=ReleaseSafe"
-      "-Dtarget=${stdenv.hostPlatform.qemuArch}-linux"
-    )
-
-    ${lib.optionalString (firmwareDirectory != null) ''
-      zigBuildFlags+=("-Dfirmware-directory=${firmwareDirectory}")
-    ''}
 
     runHook postConfigure
   '';
@@ -93,7 +86,7 @@ stdenv.mkDerivation {
     runHook postCheck
   '';
 
-  passthru = lib.optionalAttrs withLoader { initrdFile = "tboot-loader.cpio.zst"; };
+  passthru.initrdFile = "tboot-loader.cpio.zst";
 
   meta.platforms = lib.platforms.linux;
 }

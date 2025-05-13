@@ -121,7 +121,7 @@ in
     );
 
     build = {
-      initrd = pkgs.tinybootLoader.override { firmwareDirectory = config.linux.firmware; };
+      initrd = pkgs.tinyboot.override { firmwareDirectory = config.linux.firmware; };
       linux = config.linux.package;
     };
   };

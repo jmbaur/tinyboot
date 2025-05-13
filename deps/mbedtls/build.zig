@@ -15,7 +15,7 @@ pub fn build(b: *std.Build) !void {
 
     lib.linkLibC();
 
-    if (target.result.os.tag == .windows) {
+    if (lib.rootModuleTarget().isMinGW()) {
         lib.linkSystemLibrary("ws2_32"); // inet_pton and friends
         lib.linkSystemLibrary("bcrypt"); // BCryptGenRandom
     }

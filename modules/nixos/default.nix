@@ -75,7 +75,7 @@ in
           ${
             toString (
               [
-                (getExe' pkgs.tinybootTools "tboot-nixos-install")
+                (getExe' pkgs.tinyboot "tboot-nixos-install")
                 "--esp-mnt=${config.boot.loader.efi.efiSysMountPoint}"
                 "--timeout=${toString config.boot.loader.timeout}"
                 "--max-tries=${toString cfg.maxFailedBootAttempts}"
@@ -90,7 +90,7 @@ in
         '';
       };
       systemd.additionalUpstreamSystemUnits = [ "boot-complete.target" ];
-      systemd.generators.tboot-bless-boot-generator = getExe' pkgs.tinybootTools "tboot-bless-boot-generator";
+      systemd.generators.tboot-bless-boot-generator = getExe' pkgs.tinyboot "tboot-bless-boot-generator";
       systemd.services.tboot-bless-boot = {
         description = "Mark the current boot loader entry as good";
         documentation = [ "https://github.com/jmbaur/tinyboot" ];
@@ -106,7 +106,7 @@ in
         serviceConfig = {
           Type = "oneshot";
           RemainAfterExit = true;
-          ExecStart = "${getExe' pkgs.tinybootTools "tboot-bless-boot"} --esp-mnt=${config.boot.loader.efi.efiSysMountPoint} good";
+          ExecStart = "${getExe' pkgs.tinyboot "tboot-bless-boot"} --esp-mnt=${config.boot.loader.efi.efiSysMountPoint} good";
         };
       };
     }

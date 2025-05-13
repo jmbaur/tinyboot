@@ -2,7 +2,7 @@
   lib,
   lrzsz,
   testers,
-  tinybootTools,
+  tinyboot,
 }:
 
 testers.runNixOSTest {
@@ -31,7 +31,7 @@ testers.runNixOSTest {
           f.write("init=${nodes.machine.system.build.toplevel}/init ${toString nodes.machine.boot.kernelParams}")
 
       def tboot_ymodem(pty):
-          subprocess.run(["${lib.getExe' tinybootTools "tboot-ymodem"}", "send", "--tty", pty, "--directory", host_boot_dir.name])
+          subprocess.run(["${lib.getExe' tinyboot "tboot-ymodem"}", "send", "--tty", pty, "--directory", host_boot_dir.name])
 
       def lrzsz(pty):
           subprocess.run(f"${lib.getExe' lrzsz "sx"} --ymodem --1k --binary {linux} {initrd} {params} > {pty} < {pty}", shell=True)

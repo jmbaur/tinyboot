@@ -2,18 +2,25 @@ const builtin = @import("builtin");
 const std = @import("std");
 const clap = @import("clap");
 
+const openssl = @import("./wolfssl.zig");
+
 const C = @cImport({
-    @cInclude("wolfssl/openssl/opensslv.h");
+    @cDefine("struct_XSTAT", "");
+    @cInclude("wolfssl/options.h");
     @cInclude("wolfssl/openssl/bio.h");
-    @cInclude("wolfssl/openssl/evp.h");
-    @cInclude("wolfssl/openssl/pem.h");
-    @cInclude("wolfssl/openssl/err.h");
     @cInclude("wolfssl/openssl/engine.h");
+    @cInclude("wolfssl/openssl/evp.h");
+    @cInclude("wolfssl/openssl/opensslv.h");
+    @cInclude("wolfssl/openssl/pem.h");
+    @cInclude("wolfssl/openssl/pkcs7.h");
 });
 
 pub const std_options = std.Options{ .log_level = if (builtin.mode == .Debug) .debug else .info };
 
 const MODULE_SIG_STRING = "~Module signature appended~\n";
+
+// not defined in wolfssl (for some reason?)
+const PKCS7_NOATTR = 0x100;
 
 // https://github.com/torvalds/linux/blob/ec9eeb89e60d86fcc0243f47c2383399ce0de8f8/include/linux/module_signature.h#L17
 const PkeyIdType = enum(u2) {
@@ -69,46 +76,16 @@ fn readPrivateKey(arena_alloc: std.mem.Allocator, filepath: []const u8) !*anyopa
     const full_filepath = try std.fs.cwd().realpathAlloc(arena_alloc, filepath);
     const filepathZ = try arena_alloc.dupeZ(u8, full_filepath);
 
-    if (std.mem.startsWith(u8, filepath, "pkcs11:")) {
-        C.ENGINE_load_builtin_engines();
+    const b = C.BIO_new_file(filepathZ, "rb") orelse {
+        openssl.displayOpensslErrors(@src());
+        return error.OpensslError;
+    };
+    defer _ = C.BIO_free(b);
 
-        openssl.drainOpensslErrors();
-
-        const engine = C.ENGINE_by_id("pkcs11") orelse {
-            openssl.displayOpensslErrors(@src());
-            return error.OpensslError;
-        };
-
-        if (C.ENGINE_init(engine) == 0) {
-            openssl.drainOpensslErrors();
-        } else {
-            openssl.displayOpensslErrors(@src());
-            return error.OpensslError;
-        }
-
-        if (key_pass) |pass| {
-            if (C.ENGINE_ctrl_cmd_string(engine, "PIN", try arena_alloc.dupeZ(u8, pass), 0) == 0) {
-                openssl.displayOpensslErrors(@src());
-                return error.OpensslError;
-            }
-        }
-
-        return C.ENGINE_load_private_key(engine, filepathZ, null, null) orelse {
-            openssl.displayOpensslErrors(@src());
-            return error.OpensslError;
-        };
-    } else {
-        const b = C.BIO_new_file(filepathZ, "rb") orelse {
-            openssl.displayOpensslErrors(@src());
-            return error.OpensslError;
-        };
-        defer _ = C.BIO_free(b);
-
-        return C.PEM_read_bio_PrivateKey(b, null, pemPasswordCallback, null) orelse {
-            openssl.displayOpensslErrors(@src());
-            return error.OpensslError;
-        };
-    }
+    return C.PEM_read_bio_PrivateKey(b, null, pemPasswordCallback, null) orelse {
+        openssl.displayOpensslErrors(@src());
+        return error.OpensslError;
+    };
 }
 
 fn readX509(arena_alloc: std.mem.Allocator, filepath: []const u8) !*anyopaque {
@@ -180,18 +157,13 @@ pub fn signFile(
 
     _ = C.OPENSSL_init_crypto(C.OPENSSL_INIT_ADD_ALL_DIGESTS, null);
     openssl.displayOpensslErrors(@src());
-    const digest_algo = C.EVP_get_digestbyname("sha256") orelse {
-        openssl.displayOpensslErrors(@src());
-        return error.OpensslError;
-    };
-    _ = digest_algo;
 
     const pkcs7 = C.PKCS7_sign(
         @ptrCast(certificate),
         @ptrCast(private_key),
         null,
         in_bio,
-        C.PKCS7_NOCERTS | C.PKCS7_BINARY | C.PKCS7_DETACHED | C.PKCS7_NOATTR,
+        C.PKCS7_NOCERTS | C.PKCS7_BINARY | C.PKCS7_DETACHED | PKCS7_NOATTR,
     );
 
     const out_bio = C.BIO_new_file(try arena_alloc.dupeZ(u8, out_file), "wb") orelse {
