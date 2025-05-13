@@ -2,23 +2,12 @@ const std = @import("std");
 const clap = @import("clap");
 const builtin = @import("builtin");
 
-const openssl = @import("./wolfssl.zig");
-
-const handleOpensslError = openssl.handleOpensslError;
-const displayOpensslErrors = openssl.displayOpensslErrors;
-
-const C = @cImport({
-    @cDefine("struct_XSTAT", "");
-    @cInclude("wolfssl/options.h");
-    @cInclude("wolfssl/openssl/ssl.h");
-    @cInclude("wolfssl/openssl/evp.h");
-    @cInclude("wolfssl/openssl/pem.h");
-});
+const wolfssl = @import("./wolfssl.zig");
 
 // https://stackoverflow.com/questions/256405/programmatically-create-x509-certificate-using-openssl
 pub fn main() !void {
     if (builtin.mode == .Debug) {
-        _ = C.wolfSSL_Debugging_ON();
+        wolfssl.enableDebugging();
     }
 
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -69,96 +58,50 @@ pub fn main() !void {
         return;
     };
 
-    const pkey = C.EVP_PKEY_new() orelse {
-        displayOpensslErrors(@src());
-        return error.OpensslError;
-    };
-    defer C.EVP_PKEY_free(pkey);
+    const pkey = try wolfssl.evpPkeyNew();
+    defer wolfssl.evpPkeyFree(pkey);
 
     // No need to free the *RSA, it is freed when *PKEY is freed.
-    const rsa = C.RSA_generate_key(4096, C.RSA_F4, null, null) orelse {
-        displayOpensslErrors(@src());
-        return error.OpensslError;
-    };
+    const rsa = try wolfssl.rsaGenerateKey(4096);
 
-    if (C.EVP_PKEY_assign_RSA(pkey, rsa) != 1) {
-        displayOpensslErrors(@src());
-        return error.OpensslError;
-    }
+    try wolfssl.evpPkeyAssignRsa(pkey, rsa);
 
-    const x509 = C.X509_new() orelse {
-        displayOpensslErrors(@src());
-        return error.OpensslError;
-    };
-    defer C.X509_free(x509);
+    const x509 = try wolfssl.x509New();
+    defer wolfssl.x509Free(x509);
 
-    try handleOpensslError(C.ASN1_INTEGER_set(C.X509_get_serialNumber(x509), 1));
-    _ = C.X509_gmtime_adj(C.X509_get_notBefore(x509), 0);
-    _ = C.X509_gmtime_adj(C.X509_get_notAfter(x509), valid_seconds);
+    try wolfssl.asn1IntegerSet(try wolfssl.x509GetSerialNumber(x509), 1);
+    wolfssl.x509GmtimeAdj(wolfssl.x509GetNotBefore(x509), 0);
+    wolfssl.x509GmtimeAdj(wolfssl.x509GetNotAfter(x509), valid_seconds);
 
-    try handleOpensslError(C.X509_set_pubkey(x509, pkey));
+    try wolfssl.x509SetPubkey(x509, pkey);
 
-    const name = C.wolfSSL_X509_get_subject_name(x509) orelse {
-        displayOpensslErrors(@src());
-        return error.OpensslError;
-    };
+    const name = wolfssl.x509GetSubjectName(x509);
 
-    try handleOpensslError(
-        C.X509_NAME_add_entry_by_txt(name, "C", C.MBSTRING_ASC, country.ptr, @intCast(country.len), -1, 0),
-    );
+    try wolfssl.x509NameAddEntryByTxt(name, .country, country);
+    try wolfssl.x509NameAddEntryByTxt(name, .common_name, common_name);
+    try wolfssl.x509NameAddEntryByTxt(name, .organization, organization);
 
-    try handleOpensslError(
-        C.X509_NAME_add_entry_by_txt(name, "CN", C.MBSTRING_ASC, common_name.ptr, @intCast(common_name.len), -1, 0),
-    );
+    try wolfssl.x509SetIssuerName(x509, name);
 
-    try handleOpensslError(
-        C.X509_NAME_add_entry_by_txt(name, "O", C.MBSTRING_ASC, organization.ptr, @intCast(organization.len), -1, 0),
-    );
+    try wolfssl.x509Sign(x509, pkey);
 
-    try handleOpensslError(C.X509_set_issuer_name(x509, name));
+    const private_key_pem_file = try wolfssl.bioNewFile("tboot-private.pem");
+    defer wolfssl.bioFree(private_key_pem_file);
 
-    try handleOpensslError(C.X509_sign(x509, pkey, C.EVP_sha512()));
+    try wolfssl.pemWriteBioPrivateKey(private_key_pem_file, pkey);
 
-    const private_key_pem_file = C.BIO_new_file("tboot-private.pem", "wb") orelse {
-        displayOpensslErrors(@src());
-        return error.OpensslError;
-    };
-    defer _ = C.BIO_free(private_key_pem_file);
+    const public_key_pem_file = wolfssl.bioNewFile("tboot-public.pem");
+    defer wolfssl.bioFree(public_key_pem_file);
 
-    try handleOpensslError(C.PEM_write_bio_PrivateKey(
-        private_key_pem_file, // write the key to the file we've opened
-        pkey, // our key from earlier
-        null, // default cipher for encrypting the key on disk
-        null, // passphrase required for decrypting the key on disk
-        0, // length of the passphrase string
-        null, // callback for requesting a password
-        null, // data to pass to the callback
-    ));
+    try wolfssl.pemWriteBioPubkey(public_key_pem_file, pkey);
 
-    const public_key_pem_file = C.BIO_new_file("tboot-public.pem", "wb") orelse {
-        displayOpensslErrors(@src());
-        return error.OpensslError;
-    };
-    defer _ = C.BIO_free(public_key_pem_file);
+    const cert_pem_file = try wolfssl.bioNewFile("tboot-certificate.pem");
+    defer wolfssl.bioFree(cert_pem_file);
 
-    try handleOpensslError(C.PEM_write_bio_PUBKEY(public_key_pem_file, pkey));
+    try wolfssl.pemWriteBioX509(cert_pem_file, x509);
 
-    const cert_pem_file = C.fopen("tboot-certificate.pem", "wb") orelse {
-        displayOpensslErrors(@src());
-        return error.OpensslError;
-    };
-    defer _ = C.fclose(cert_pem_file);
+    const cert_der_file = try wolfssl.bioNewFile("tboot-certificate.der");
+    defer wolfssl.bioFree(cert_der_file);
 
-    try handleOpensslError(C.PEM_write_X509(
-        cert_pem_file, // write the certificate to the file we've opened
-        x509, // our certificate
-    ));
-
-    const cert_der_file = C.BIO_new_file("tboot-certificate.der", "wb") orelse {
-        displayOpensslErrors(@src());
-        return error.OpensslError;
-    };
-    defer _ = C.BIO_free(cert_der_file);
-
-    try handleOpensslError(C.i2d_X509_bio(cert_der_file, x509));
+    try wolfssl.i2dX509Bio(cert_der_file, x509);
 }
