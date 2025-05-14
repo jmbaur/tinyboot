@@ -6,9 +6,7 @@ const wolfssl = @import("./wolfssl.zig");
 
 // https://stackoverflow.com/questions/256405/programmatically-create-x509-certificate-using-openssl
 pub fn main() !void {
-    if (builtin.mode == .Debug) {
-        wolfssl.enableDebugging();
-    }
+    wolfssl.enableLogging();
 
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
@@ -18,7 +16,7 @@ pub fn main() !void {
         \\-n, --common-name <STR>     Common name for certificate.
         \\-o, --organization <STR>    Organization for certificate.
         \\-c, --country <STR>         Country for certificate.
-        \\-v, --valid-seconds <NUM>   Number of seconds the certificate is valid for (defaults to 31536000, 1 year).
+        \\-s, --valid-seconds <NUM>   Number of seconds the certificate is valid for (defaults to 31536000, 1 year).
         \\
     );
 

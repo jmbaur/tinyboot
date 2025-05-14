@@ -85,7 +85,14 @@ pub fn build(b: *std.Build) !void {
 
     const clap_dependency = b.dependency("clap", .{});
     const clap = clap_dependency.module("clap");
-    const wolfssl_dependency = b.dependency("wolfssl", .{ .target = target, .optimize = optimize });
+    const wolfssl_dependency = b.dependency("wolfssl", .{
+        .target = target,
+        .optimize = optimize,
+        // Bump up the max filesize a bunch. This is a big footgun that
+        // defaults to 4MiB, so many operations on the BIO type will fail if we
+        // are working with files larger than that.
+        .max_file_size = 1024 * 1024 * 1024,
+    });
     const wolfssl = wolfssl_dependency.artifact("wolfssl");
     const zstd_dependency = b.dependency("zstd", .{ .target = target, .optimize = optimize });
     const zstd = zstd_dependency.artifact("zstd");

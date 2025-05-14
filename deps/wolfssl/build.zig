@@ -8,6 +8,7 @@ fn isX86(target: std.Build.ResolvedTarget) bool {
 }
 
 const base_cflags = [_][]const u8{
+    "-DDEBUG_WOLFSSL",
     "-DTFM_TIMING_RESISTANT",
     "-DECC_TIMING_RESISTANT",
     "-DWC_RSA_BLINDING",
@@ -181,6 +182,7 @@ const wolfcrypt_sources = &[_][]const u8{
 pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+    const max_file_size = b.option(usize, "max_file_size", "The max file size (in bytes) WolfSSL will be capable of handling");
 
     const upstream = b.dependency("wolfssl", .{});
 
@@ -248,12 +250,10 @@ pub fn build(b: *std.Build) !void {
     lib.root_module.addIncludePath(upstream.path("."));
 
     var cflags = std.ArrayList([]const u8).init(b.allocator);
-    defer cflags.deinit();
-
     try cflags.appendSlice(&base_cflags);
 
-    if (optimize == .Debug) {
-        try cflags.append("-DDEBUG_WOLFSSL");
+    if (max_file_size) |size| {
+        try cflags.append(try std.fmt.allocPrint(b.allocator, "-DMAX_WOLFSSL_FILE_SIZE={}", .{size}));
     }
 
     lib.root_module.addCSourceFiles(.{

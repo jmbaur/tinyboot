@@ -1,8 +1,13 @@
 const std = @import("std");
 
 const C = @cImport({
+    // Must come first
+    @cInclude("wolfssl/options.h");
+
+    // TODO(jared): missing for some reason?
     @cDefine("struct_XSTAT", "");
-    @cInclude("wolfssl/options.h"); // must come first
+
+    @cInclude("wolfssl/wolfcrypt/logging.h");
     @cInclude("wolfssl/openssl/bio.h");
     @cInclude("wolfssl/openssl/engine.h");
     @cInclude("wolfssl/openssl/evp.h");
@@ -19,7 +24,16 @@ pub const BIO = C.BIO;
 // not defined in wolfssl (for some reason?)
 const PKCS7_NOATTR = 0x100;
 
-pub fn enableDebugging() void {
+// WolfSSL has an "info" log level, but it is much too noisy.
+fn loggingCallback(log_level: c_int, log_message: [*c]const u8) callconv(.c) void {
+    switch (log_level) {
+        C.ERROR_LOG => std.log.err("{s}", .{log_message}),
+        else => std.log.debug("{s}", .{log_message}),
+    }
+}
+
+pub fn enableLogging() void {
+    _ = C.wolfSSL_SetLoggingCb(&loggingCallback);
     _ = C.wolfSSL_Debugging_ON();
 }
 
@@ -178,7 +192,7 @@ pub fn i2dX509Bio(bio: *BIO, x509: *X509) !void {
 }
 
 pub fn bioReset(bio: *BIO) !void {
-    if (C.BIO_reset(bio) != 0) {
+    if (C.BIO_reset(bio) != C.WOLFSSL_SUCCESS) {
         displayWolfsslErrors(@src());
         return error.WolfsslError;
     }
@@ -222,7 +236,8 @@ pub fn pkcs7Sign(certificate: *X509, private_key: *EVP_PKEY, in_bio: *BIO) !*C.P
         @ptrCast(private_key),
         null,
         in_bio,
-        C.PKCS7_NOCERTS | C.PKCS7_BINARY | C.PKCS7_DETACHED | PKCS7_NOATTR,
+        // PKCS7_NOCERTS not supported by wolfssl (https://github.com/wolfSSL/wolfssl/blob/336b374b9c16ae9e465fa1aa5a6724d227751873/src/ssl_p7p12.c#L468)
+        C.PKCS7_BINARY | C.PKCS7_DETACHED | PKCS7_NOATTR,
     ) orelse
         {
             displayWolfsslErrors(@src());

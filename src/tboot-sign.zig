@@ -4,10 +4,7 @@ const clap = @import("clap");
 
 const wolfssl = @import("./wolfssl.zig");
 
-pub const std_options = std.Options{ .log_level = if (builtin.mode == .Debug) .debug else .info };
-
 const MODULE_SIG_STRING = "~Module signature appended~\n";
-
 
 // https://github.com/torvalds/linux/blob/ec9eeb89e60d86fcc0243f47c2383399ce0de8f8/include/linux/module_signature.h#L17
 const PkeyIdType = enum(u2) {
@@ -36,7 +33,6 @@ const ModuleSignature = extern struct {
     sig_len: u32, // be32
 };
 
-
 fn readPrivateKey(arena_alloc: std.mem.Allocator, filepath: []const u8) !*wolfssl.EVP_PKEY {
     const full_filepath = try std.fs.cwd().realpathAlloc(arena_alloc, filepath);
     const filepathZ = try arena_alloc.dupeZ(u8, full_filepath);
@@ -55,8 +51,7 @@ fn readX509(arena_alloc: std.mem.Allocator, filepath: []const u8) !*wolfssl.X509
     defer wolfssl.bioFree(bio);
 
     var buf: [2]u8 = undefined;
-    const n_read = try wolfssl.bioRead(bio, &buf);
-    if (n_read != 2) {
+    if (try wolfssl.bioRead(bio, &buf) != buf.len) {
         return error.ReadError;
     }
 
@@ -64,8 +59,10 @@ fn readX509(arena_alloc: std.mem.Allocator, filepath: []const u8) !*wolfssl.X509
 
     if (buf[0] == 0x30 and buf[1] >= 0x81 and buf[1] <= 0x84) {
         // Using DER encoding
+        std.log.debug("detected x509 in DER form", .{});
         return try wolfssl.d2iX509Bio(bio);
     } else {
+        std.log.debug("detected x509 in PEM form", .{});
         return try wolfssl.pemReadBioX509(bio);
     }
 }
@@ -131,6 +128,8 @@ pub fn signFile(
 }
 
 pub fn main() !void {
+    wolfssl.enableLogging();
+
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
 

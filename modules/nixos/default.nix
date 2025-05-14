@@ -55,7 +55,7 @@ in
           message = "Bootloader install program depends on bootspec";
         }
       ];
-      boot.kernelPatches = [
+      boot.kernelPatches = lib.optionals false [
         pkgs.kernelPatches.ima_tpm_early_init
         {
           name = "enable-ima";
