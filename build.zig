@@ -85,6 +85,8 @@ pub fn build(b: *std.Build) !void {
 
     const clap_dependency = b.dependency("clap", .{});
     const clap = clap_dependency.module("clap");
+    const mbedtls_dependency = b.dependency("mbedtls", .{ .target = target, .optimize = optimize });
+    const mbedtls = mbedtls_dependency.artifact("mbedtls");
     const wolfssl_dependency = b.dependency("wolfssl", .{
         .target = target,
         .optimize = optimize,
@@ -127,6 +129,7 @@ pub fn build(b: *std.Build) !void {
     });
     tboot_sign.linkLibC();
     tboot_sign.linkLibrary(wolfssl);
+    tboot_sign.linkLibrary(mbedtls);
     tboot_sign.root_module.addImport("clap", clap);
     b.installArtifact(tboot_sign);
 

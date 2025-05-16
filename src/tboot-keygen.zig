@@ -1,6 +1,5 @@
 const std = @import("std");
 const clap = @import("clap");
-const builtin = @import("builtin");
 
 const wolfssl = @import("./wolfssl.zig");
 

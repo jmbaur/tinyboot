@@ -134,8 +134,11 @@ fn handleConsoleResize(self: *TbootLoader) void {
 
 fn handleConsoleInput(self: *TbootLoader) !?posix.RebootCommand {
     if (self.state != .user_input) {
-        // Transition into user input mode if we aren't already there.
+        // Transition into user input mode if we aren't
+        // already there.
         try self.userInputModeTransition();
+        try self.console.tty.setMode(.user_input);
+        self.console.prompt();
     }
 
     const outcome = try self.console.handleStdin(boot_loaders.items) orelse return null;

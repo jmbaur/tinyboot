@@ -245,6 +245,10 @@ pub fn pkcs7Sign(certificate: *X509, private_key: *EVP_PKEY, in_bio: *BIO) !*C.P
         };
 }
 
+pub fn pkcs7Free(p7: *C.PKCS7) void {
+    C.PKCS7_free(p7);
+}
+
 inline fn wrapWolfsslError(openssl_error: c_int) !void {
     if (openssl_error == 0) {
         displayWolfsslErrors(@src());

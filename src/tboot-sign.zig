@@ -1,8 +1,11 @@
-const builtin = @import("builtin");
 const std = @import("std");
 const clap = @import("clap");
 
 const wolfssl = @import("./wolfssl.zig");
+
+const C = @cImport({
+    @cInclude("mbedtls/x509_crt.h");
+});
 
 const MODULE_SIG_STRING = "~Module signature appended~\n";
 
@@ -90,6 +93,7 @@ pub fn signFile(
     const certificate = try readX509(arena_alloc, certificate_filepath);
 
     const pkcs7 = try wolfssl.pkcs7Sign(certificate, private_key, in_bio);
+    defer wolfssl.pkcs7Free(pkcs7);
 
     const out_bio = try wolfssl.bioNewFile(try arena_alloc.dupeZ(u8, out_file), "wb");
     defer wolfssl.bioFree(out_bio);
@@ -125,6 +129,40 @@ pub fn signFile(
 
     try wolfssl.bioWrite(out_bio, std.mem.asBytes(&sig_info));
     try wolfssl.bioWrite(out_bio, MODULE_SIG_STRING);
+}
+
+fn mbedtls(allocator: std.mem.Allocator, cert_filepath: []const u8) void {
+    const file = std.fs.cwd().openFile(cert_filepath, .{}) catch unreachable;
+    defer file.close();
+
+    const bytes = file.readToEndAlloc(allocator, std.math.maxInt(usize)) catch unreachable;
+    defer allocator.free(bytes);
+
+    var x509: C.mbedtls_x509_crt = undefined;
+    C.mbedtls_x509_crt_init(&x509);
+    if (C.mbedtls_x509_crt_parse(&x509, @ptrCast(bytes), bytes.len) != 0) {
+        unreachable;
+    }
+
+    std.debug.print("serial={any}\n", .{x509.serial.p[0..x509.serial.len]});
+
+    var issuer = x509.issuer;
+    while (true) {
+        if (std.crypto.Certificate.Attribute.map.get(issuer.oid.p[0..issuer.oid.len])) |attribute| {
+            switch (attribute) {
+                .commonName => std.debug.print("CN={s}\n", .{issuer.val.p[0..issuer.val.len]}),
+                .organizationName => std.debug.print("O={s}\n", .{issuer.val.p[0..issuer.val.len]}),
+                .countryName => std.debug.print("C={s}\n", .{issuer.val.p[0..issuer.val.len]}),
+                else => {},
+            }
+        }
+
+        if (issuer.next == null) {
+            break;
+        } else {
+            issuer = issuer.next.*;
+        }
+    }
 }
 
 pub fn main() !void {
@@ -177,6 +215,11 @@ pub fn main() !void {
     const out_file = res.positionals[1].?;
     const private_key_filepath = res.args.@"private-key".?;
     const certificate_filepath = res.args.certificate.?;
+
+    mbedtls(arena.allocator(), certificate_filepath);
+    if (true) {
+        return;
+    }
 
     return signFile(
         arena.allocator(),

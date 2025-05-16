@@ -586,15 +586,14 @@ arena: std.heap.ArenaAllocator = std.heap.ArenaAllocator.init(std.heap.page_allo
 context: ?*BootLoader = null,
 resize_signal: posix.fd_t,
 shell: Shell = .{},
-tty: ?system.Tty = null,
+tty: system.Tty,
 
 pub fn init() !Console {
     // Turn off local echo, making the ENTER key the only thing that shows a
     // sign of user input.
-    {
-        _ = try system.setupTty(IN, .no_echo);
-        writeAllAndFlush("\npress ENTER to interrupt\n\n");
-    }
+    var tty = system.Tty.init(IN);
+    try tty.setMode(.no_echo);
+    writeAllAndFlush("\npress ENTER to interrupt\n\n");
 
     var mask = std.mem.zeroes(posix.sigset_t);
     std.os.linux.sigaddset(&mask, posix.SIG.WINCH);
@@ -604,7 +603,12 @@ pub fn init() !Console {
 
     return .{
         .resize_signal = resize_signal,
+        .tty = tty,
     };
+}
+
+pub fn prompt(self: *Console) void {
+    self.shell.prompt(self.context);
 }
 
 fn flush() void {
@@ -677,26 +681,17 @@ pub fn deinit(self: *Console) void {
 
     self.shell.deinit();
 
-    if (self.tty) |*tty| {
-        tty.reset();
-    }
+    self.tty.deinit();
 
     posix.close(self.resize_signal);
 }
 
 pub fn handleResize(self: *Console) void {
     writeAll("\n");
-    self.shell.prompt(self.context);
+    self.prompt();
 }
 
 pub fn handleStdin(self: *Console, boot_loaders: []*BootLoader) !?Event {
-    // We may already have a prompt from a boot timeout, so don't print
-    // a prompt if we already have one.
-    if (self.tty == null) {
-        self.tty = try system.setupTty(IN, .user_input);
-        self.shell.prompt(self.context);
-    }
-
     const maybe_input = try self.shell.handleInput(self.context);
 
     if (maybe_input) |user_input| {
@@ -717,7 +712,7 @@ pub fn handleStdin(self: *Console, boot_loaders: []*BootLoader) !?Event {
             print("\nerror running command: {}\n", .{err});
         }
 
-        self.shell.prompt(self.context);
+        self.prompt();
         try self.shell.history.push(user_input, self.shell.arena.allocator());
     }
 
