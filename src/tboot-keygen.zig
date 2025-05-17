@@ -1,12 +1,51 @@
 const std = @import("std");
 const clap = @import("clap");
+const builtin = @import("builtin");
 
-const wolfssl = @import("./wolfssl.zig");
+const mbedtls = @import("./mbedtls.zig");
 
-// https://stackoverflow.com/questions/256405/programmatically-create-x509-certificate-using-openssl
+const C = @cImport({
+    @cInclude("mbedtls/ctr_drbg.h");
+    @cInclude("mbedtls/pk.h");
+    @cInclude("mbedtls/x509_crt.h");
+    @cInclude("mbedtls/x509_csr.h");
+    @cInclude("time.h");
+});
+
+/// Returns the generalized time (https://datatracker.ietf.org/doc/html/rfc5280#section-4.1.2.5.2) of an
+/// instant, requires the input buffer's length to be >= 15.
+fn generalizedTime(epoch_seconds: std.time.epoch.EpochSeconds, buf: []u8) ![]u8 {
+    const epoch_day = epoch_seconds.getEpochDay();
+    const day_seconds = epoch_seconds.getDaySeconds();
+    const year_day = epoch_day.calculateYearDay();
+    const month_day = year_day.calculateMonthDay();
+
+    // YYYYMMDDHHMMSSZ
+    return std.fmt.bufPrint(buf, "{:0>4}{:0>2}{:0>2}{:0>2}{:0>2}{:0>2}Z", .{
+        year_day.year,
+        month_day.month.numeric(),
+        month_day.day_index,
+        day_seconds.getHoursIntoDay(),
+        day_seconds.getMinutesIntoHour(),
+        day_seconds.getSecondsIntoMinute(),
+    });
+}
+
+test "generalized time" {
+    var buf = [_]u8{0} ** "YYYYMMDDHHMMSSZ".len;
+
+    try std.testing.expectEqualStrings(
+        "19700100000000Z",
+        try generalizedTime(.{ .secs = 0 }, &buf),
+    );
+
+    try std.testing.expectEqualStrings(
+        "20250512050449Z",
+        try generalizedTime(.{ .secs = 1747112689 }, &buf),
+    );
+}
+
 pub fn main() !void {
-    wolfssl.enableLogging();
-
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
 
@@ -16,12 +55,13 @@ pub fn main() !void {
         \\-o, --organization <STR>    Organization for certificate.
         \\-c, --country <STR>         Country for certificate.
         \\-s, --valid-seconds <NUM>   Number of seconds the certificate is valid for (defaults to 31536000, 1 year).
+        \\-t, --time-now <NUM>        Number of seconds past the Unix epoch (defaults to current time, only set if reproducibility is needed).
         \\
     );
 
     const parsers = comptime .{
         .STR = clap.parsers.string,
-        .NUM = clap.parsers.int(c_long, 10),
+        .NUM = clap.parsers.int(u64, 10),
     };
 
     const stderr = std.io.getStdErr().writer();
@@ -41,7 +81,8 @@ pub fn main() !void {
         return clap.help(std.io.getStdErr().writer(), clap.Help, &params, .{});
     }
 
-    const valid_seconds: c_long = res.args.@"valid-seconds" orelse 60 * 60 * 24 * 365;
+    const time_now: u64 = res.args.@"time-now" orelse @intCast(C.time(null));
+    const valid_seconds: u64 = res.args.@"valid-seconds" orelse 60 * 60 * 24 * 365;
     const common_name: []const u8 = res.args.@"common-name" orelse {
         try clap.usage(stderr, clap.Help, &params);
         return;
@@ -55,50 +96,132 @@ pub fn main() !void {
         return;
     };
 
-    const pkey = try wolfssl.evpPkeyNew();
-    defer wolfssl.evpPkeyFree(pkey);
+    var entropy: C.mbedtls_entropy_context = undefined;
+    C.mbedtls_entropy_init(&entropy);
+    defer C.mbedtls_entropy_free(&entropy);
 
-    // No need to free the *RSA, it is freed when *PKEY is freed.
-    const rsa = try wolfssl.rsaGenerateKey(4096);
+    var ctr_drbg: C.mbedtls_ctr_drbg_context = undefined;
+    C.mbedtls_ctr_drbg_init(&ctr_drbg);
+    try mbedtls.wrap(C.mbedtls_ctr_drbg_seed(
+        &ctr_drbg,
+        C.mbedtls_entropy_func,
+        &entropy,
+        "tboot-keygen",
+        "tboot-keygen".len,
+    ));
+    defer C.mbedtls_ctr_drbg_free(&ctr_drbg);
 
-    try wolfssl.evpPkeyAssignRsa(pkey, rsa);
+    // generate RSA key
+    var key: C.mbedtls_pk_context = undefined;
+    C.mbedtls_pk_init(&key);
+    defer C.mbedtls_pk_free(&key);
 
-    const x509 = try wolfssl.x509New();
-    defer wolfssl.x509Free(x509);
+    try mbedtls.wrap(C.mbedtls_pk_setup(&key, C.mbedtls_pk_info_from_type(C.MBEDTLS_PK_RSA)));
 
-    try wolfssl.asn1IntegerSet(try wolfssl.x509GetSerialNumber(x509), 1);
-    wolfssl.x509GmtimeAdj(wolfssl.x509GetNotBefore(x509), 0);
-    wolfssl.x509GmtimeAdj(wolfssl.x509GetNotAfter(x509), valid_seconds);
+    try mbedtls.wrap(C.mbedtls_rsa_gen_key(C.mbedtls_pk_rsa(key), C.mbedtls_ctr_drbg_random, &ctr_drbg, 4096, 65537));
 
-    try wolfssl.x509SetPubkey(x509, pkey);
+    var key_buf = [_]u8{0} ** 16000;
 
-    const name = try wolfssl.x509GetSubjectName(x509);
+    // write out public key
+    {
+        try mbedtls.wrap(C.mbedtls_pk_write_pubkey_pem(&key, &key_buf, key_buf.len));
 
-    try wolfssl.x509NameAddEntryByTxt(name, .country, country);
-    try wolfssl.x509NameAddEntryByTxt(name, .common_name, common_name);
-    try wolfssl.x509NameAddEntryByTxt(name, .organization, organization);
+        const pub_out = try std.fs.cwd().createFile("tboot-public.pem", .{ .mode = 0o444 });
+        defer pub_out.close();
 
-    try wolfssl.x509SetIssuerName(x509, name);
+        try pub_out.writer().writeAll(std.mem.trim(u8, &key_buf, &.{0}));
+    }
 
-    try wolfssl.x509Sign(x509, pkey);
+    key_buf = std.mem.zeroes(@TypeOf(key_buf));
 
-    const private_key_pem_file = try wolfssl.bioNewFile("tboot-private.pem", "wb");
-    defer wolfssl.bioFree(private_key_pem_file);
+    // write out private key
+    {
+        try mbedtls.wrap(C.mbedtls_pk_write_key_pem(&key, &key_buf, key_buf.len));
 
-    try wolfssl.pemWriteBioPrivateKey(private_key_pem_file, pkey);
+        const priv_out = try std.fs.cwd().createFile("tboot-private.pem", .{ .mode = 0o444 });
+        defer priv_out.close();
 
-    const public_key_pem_file = try wolfssl.bioNewFile("tboot-public.pem", "wb");
-    defer wolfssl.bioFree(public_key_pem_file);
+        try priv_out.writer().writeAll(std.mem.trim(u8, &key_buf, &.{0}));
+    }
 
-    try wolfssl.pemWriteBioPubkey(public_key_pem_file, pkey);
+    // generate x509 cert
+    var issuer_crt: C.mbedtls_x509_crt = undefined;
+    C.mbedtls_x509_crt_init(&issuer_crt);
 
-    const cert_pem_file = try wolfssl.bioNewFile("tboot-certificate.pem", "wb");
-    defer wolfssl.bioFree(cert_pem_file);
+    var crt: C.mbedtls_x509write_cert = undefined;
+    C.mbedtls_x509write_crt_init(&crt);
 
-    try wolfssl.pemWriteBioX509(cert_pem_file, x509);
+    var csr: C.mbedtls_x509_csr = undefined;
+    C.mbedtls_x509_csr_init(&csr);
 
-    const cert_der_file = try wolfssl.bioNewFile("tboot-certificate.der", "wb");
-    defer wolfssl.bioFree(cert_der_file);
+    // self-signed
+    C.mbedtls_x509write_crt_set_subject_key(&crt, &key);
+    C.mbedtls_x509write_crt_set_issuer_key(&crt, &key);
 
-    try wolfssl.i2dX509Bio(cert_der_file, x509);
+    const name = try std.fmt.allocPrint(arena.allocator(), "CN={s},O={s},C={s}", .{ common_name, organization, country });
+    try mbedtls.wrap(C.mbedtls_x509write_crt_set_subject_name(&crt, try arena.allocator().dupeZ(u8, name)));
+    try mbedtls.wrap(C.mbedtls_x509write_crt_set_issuer_name(&crt, try arena.allocator().dupeZ(u8, name)));
+
+    C.mbedtls_x509write_crt_set_md_alg(&crt, C.MBEDTLS_MD_SHA256);
+
+    var serial = "1";
+    try mbedtls.wrap(C.mbedtls_x509write_crt_set_serial_raw(&crt, @ptrCast(&serial), 1));
+
+    const not_before_seconds = time_now;
+    const not_after_seconds = not_before_seconds + valid_seconds;
+
+    var before_buf = [_]u8{0} ** 15;
+    var after_buf = [_]u8{0} ** 15;
+
+    // mbedtls expects the 'Z' to not be present
+    const not_before_time = try arena.allocator().dupeZ(u8, (try generalizedTime(.{ .secs = not_before_seconds }, &before_buf))[0..14]);
+    const not_after_time = try arena.allocator().dupeZ(u8, (try generalizedTime(.{ .secs = not_after_seconds }, &after_buf))[0..14]);
+
+    try mbedtls.wrap(C.mbedtls_x509write_crt_set_validity(
+        &crt,
+        @ptrCast(not_before_time),
+        @ptrCast(not_after_time),
+    ));
+
+    try mbedtls.wrap(C.mbedtls_x509write_crt_set_basic_constraints(&crt, 1, -1));
+
+    try mbedtls.wrap(C.mbedtls_x509write_crt_set_subject_key_identifier(&crt));
+    try mbedtls.wrap(C.mbedtls_x509write_crt_set_authority_key_identifier(&crt));
+
+    var cert_buf = [_]u8{0} ** 4096;
+
+    // write out certificate in DER format
+    {
+        const len: usize = @intCast(try mbedtls.wrapMulti(C.mbedtls_x509write_crt_der(
+            &crt,
+            &cert_buf,
+            cert_buf.len,
+            C.mbedtls_ctr_drbg_random,
+            &ctr_drbg,
+        )));
+
+        const cert_der_out = try std.fs.cwd().createFile("tboot-certificate.der", .{ .mode = 0o444 });
+        defer cert_der_out.close();
+
+        const start: usize = cert_buf.len - len;
+        try cert_der_out.writer().writeAll(std.mem.trim(u8, cert_buf[start .. start + len], &.{0}));
+    }
+
+    cert_buf = std.mem.zeroes(@TypeOf(cert_buf));
+
+    // write out certificate in PEM format
+    {
+        try mbedtls.wrap(C.mbedtls_x509write_crt_pem(
+            &crt,
+            &cert_buf,
+            cert_buf.len,
+            C.mbedtls_ctr_drbg_random,
+            &ctr_drbg,
+        ));
+
+        const cert_pem_out = try std.fs.cwd().createFile("tboot-certificate.pem", .{ .mode = 0o444 });
+        defer cert_pem_out.close();
+
+        try cert_pem_out.writer().writeAll(std.mem.trim(u8, &cert_buf, &.{0}));
+    }
 }

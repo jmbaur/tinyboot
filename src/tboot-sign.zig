@@ -1,9 +1,17 @@
 const std = @import("std");
 const clap = @import("clap");
 
+const asn1 = std.crypto.asn1;
+const sha2 = std.crypto.hash.sha2;
+
 const wolfssl = @import("./wolfssl.zig");
+const Pkcs7 = @import("./pkcs7.zig");
 
 const C = @cImport({
+    @cInclude("mbedtls/ctr_drbg.h");
+    @cInclude("mbedtls/entropy.h");
+    @cInclude("mbedtls/pk.h");
+    @cInclude("mbedtls/rsa.h");
     @cInclude("mbedtls/x509_crt.h");
 });
 
@@ -70,55 +78,180 @@ fn readX509(arena_alloc: std.mem.Allocator, filepath: []const u8) !*wolfssl.X509
     }
 }
 
+const country_name_oid = asn1.Oid.fromDotComptime("2.5.4.6");
+const common_name_oid = asn1.Oid.fromDotComptime("2.5.4.3");
+const organization_name_oid = asn1.Oid.fromDotComptime("2.5.4.10");
+
 pub fn signFile(
     arena_alloc: std.mem.Allocator,
-    in_file: []const u8,
-    out_file: []const u8,
+    in_filepath: []const u8,
+    out_filepath: []const u8,
     private_key_filepath: []const u8,
     certificate_filepath: []const u8,
 ) !void {
-    wolfssl.init();
+    var scratch_buf = [_]u8{0} ** 4096;
 
-    const in_bio = try wolfssl.bioNewFile(
-        try arena_alloc.dupeZ(u8, try std.fs.cwd().realpathAlloc(
-            arena_alloc,
-            in_file,
-        )),
-        "rb",
-    );
-    defer wolfssl.bioFree(in_bio);
+    const input_file = try std.fs.cwd().openFile(in_filepath, .{});
+    defer input_file.close();
 
-    const private_key = try readPrivateKey(arena_alloc, private_key_filepath);
+    errdefer std.fs.cwd().deleteFile(out_filepath) catch {};
 
-    const certificate = try readX509(arena_alloc, certificate_filepath);
+    const output_file = try std.fs.cwd().createFile(out_filepath, .{});
+    defer output_file.close();
 
-    const pkcs7 = try wolfssl.pkcs7Sign(certificate, private_key, in_bio);
-    defer wolfssl.pkcs7Free(pkcs7);
+    var entropy: C.mbedtls_entropy_context = undefined;
+    C.mbedtls_entropy_init(&entropy);
+    defer C.mbedtls_entropy_free(&entropy);
 
-    const out_bio = try wolfssl.bioNewFile(try arena_alloc.dupeZ(u8, out_file), "wb");
-    defer wolfssl.bioFree(out_bio);
+    var ctr_drbg: C.mbedtls_ctr_drbg_context = undefined;
+    C.mbedtls_ctr_drbg_init(&ctr_drbg);
+    defer C.mbedtls_ctr_drbg_free(&ctr_drbg);
 
-    // Append the marker and the PKCS#7 message to the destination file
-    try wolfssl.bioReset(in_bio);
+    var pk: C.mbedtls_pk_context = undefined;
+    C.mbedtls_pk_init(&pk);
+    defer C.mbedtls_pk_free(&pk);
 
-    var buf = [_]u8{0} ** 4096;
+    if (C.mbedtls_ctr_drbg_seed(
+        &ctr_drbg,
+        C.mbedtls_entropy_func,
+        &entropy,
+        "tinyboot",
+        "tinyboot".len,
+    ) != 0) {
+        return error.EntropyFailure;
+    }
+
+    const certificate_file = try std.fs.cwd().openFile(certificate_filepath, .{});
+    defer certificate_file.close();
+    const certificate_bytes = try certificate_file.readToEndAlloc(arena_alloc, std.math.maxInt(usize));
+
+    var x509: C.mbedtls_x509_crt = undefined;
+    if (C.mbedtls_x509_crt_parse(&x509, @ptrCast(certificate_bytes), certificate_bytes.len) != 0) {
+        return error.InvalidCertificate;
+    }
+    defer C.mbedtls_x509_crt_free(&x509);
+
+    const common_name = getAttribute(&x509, .commonName) orelse return error.MissingCommonName;
+    const organization_name = getAttribute(&x509, .organizationName) orelse return error.MissingOrganizationName;
+    const country_name = getAttribute(&x509, .countryName) orelse return error.MissingCountryName;
+    const serial_number = try std.fmt.parseInt(u8, x509.serial.p[0..x509.serial.len], 10);
+
+    const private_key_file = try std.fs.cwd().openFile(private_key_filepath, .{});
+    defer private_key_file.close();
+    const private_key_bytes = try private_key_file.readToEndAlloc(arena_alloc, std.math.maxInt(usize));
+
+    if (C.mbedtls_pk_parse_key(
+        &pk,
+        @ptrCast(private_key_bytes),
+        private_key_bytes.len,
+        null,
+        0,
+        null,
+        null,
+    ) != 0) {
+        std.log.err("", .{});
+        return error.InvalidPrivateKey;
+    }
+
+    if (C.mbedtls_pk_can_do(&pk, C.MBEDTLS_PK_RSA) == 0) {
+        std.log.err("detected non RSA key", .{});
+        return error.InvalidPrivateKey;
+    }
+
+    if (C.mbedtls_rsa_set_padding(
+        C.mbedtls_pk_rsa(pk),
+        C.MBEDTLS_RSA_PKCS_V21,
+        C.MBEDTLS_MD_SHA256,
+    ) != 0) {
+        std.log.err("failed to set padding", .{});
+        return error.InvalidPadding;
+    }
+
+    var hash = [_]u8{0} ** sha2.Sha256.digest_length;
+    var hasher = sha2.Sha256.init(.{});
     while (true) {
-        const n_read = try wolfssl.bioRead(in_bio, &buf);
-        if (n_read == 0) {
+        const bytes_read = try input_file.reader().read(&scratch_buf);
+        if (bytes_read == 0) {
             break;
         }
 
-        try wolfssl.bioWrite(out_bio, buf[0..n_read]);
+        hasher.update(scratch_buf[0..bytes_read]);
+    }
+    hasher.final(&hash);
+
+    scratch_buf = std.mem.zeroes(@TypeOf(scratch_buf));
+
+    var signature_len: usize = 0;
+    var signature_buf = [_]u8{0} ** C.MBEDTLS_MPI_MAX_SIZE;
+    if (C.mbedtls_pk_sign(
+        &pk,
+        C.MBEDTLS_MD_SHA256,
+        &hash,
+        hash.len,
+        &signature_buf,
+        signature_buf.len,
+        &signature_len,
+        null,
+        null,
+    ) != 0) {
+        std.log.err("failed to sign hash", .{});
+        return error.RsaSignFail;
     }
 
-    const out_size = wolfssl.bioNumberWritten(out_bio);
+    const signature = signature_buf[0..signature_len];
 
-    try wolfssl.i2dPkcs7Bio(out_bio, pkcs7);
+    var encoder = asn1.der.Encoder.init(arena_alloc);
+    defer encoder.deinit();
 
-    const sig_size = wolfssl.bioNumberWritten(out_bio) - out_size;
+    try encoder.any(Pkcs7{
+        .content_type = .signed_data,
+        .content = .{
+            .signed_data = .{
+                .version = 1,
+                .digest_algorithms = .{ .inner = .{ .algorithm = .sha256, .parameters = .{} } },
+                .encapsulated_content_info = .{ .content_type = .pkcs7 },
+                .signer_infos = .{
+                    .inner = &.{
+                        .{
+                            .version = 1,
+                            .issuer_and_serial_number = .{
+                                .serial_number = serial_number,
+                                .rdn_sequence = .{
+                                    .relative_distinguished_name = .{
+                                        .inner = &.{
+                                            .{ .inner = .{ .type = organization_name_oid, .value = organization_name } },
+                                            .{ .inner = .{ .type = common_name_oid, .value = common_name } },
+                                            .{ .inner = .{ .type = country_name_oid, .value = country_name } },
+                                        },
+                                    },
+                                },
+                            },
+                            .digest_algorithm = .{ .algorithm = .sha256, .parameters = .{} },
+                            .signature_algorithm = .{ .algorithm = .rsa, .parameters = .{} },
+                            .signature = .{ .data = signature },
+                        },
+                    },
+                },
+            },
+        },
+    });
+
+    const pkcs7_encoded = encoder.buffer.data;
+
+    try input_file.seekTo(0);
+    while (true) {
+        const bytes_read = try input_file.reader().read(&scratch_buf);
+        if (bytes_read == 0) {
+            break;
+        }
+
+        try output_file.writer().writeAll(scratch_buf[0..bytes_read]);
+    }
+
+    try output_file.writer().writeAll(pkcs7_encoded);
 
     const sig_info = ModuleSignature{
-        .sig_len = std.mem.nativeToBig(u32, @intCast(sig_size)),
+        .sig_len = std.mem.nativeToBig(u32, @intCast(pkcs7_encoded.len)),
         .id_type = @intFromEnum(PkeyIdType.PkeyIdPkcs7),
         .algo = 0,
         .hash = 0,
@@ -127,33 +260,17 @@ pub fn signFile(
         .key_id_len = 0,
     };
 
-    try wolfssl.bioWrite(out_bio, std.mem.asBytes(&sig_info));
-    try wolfssl.bioWrite(out_bio, MODULE_SIG_STRING);
+    try output_file.writer().writeAll(std.mem.asBytes(&sig_info));
+    try output_file.writer().writeAll(MODULE_SIG_STRING);
 }
 
-fn mbedtls(allocator: std.mem.Allocator, cert_filepath: []const u8) void {
-    const file = std.fs.cwd().openFile(cert_filepath, .{}) catch unreachable;
-    defer file.close();
-
-    const bytes = file.readToEndAlloc(allocator, std.math.maxInt(usize)) catch unreachable;
-    defer allocator.free(bytes);
-
-    var x509: C.mbedtls_x509_crt = undefined;
-    C.mbedtls_x509_crt_init(&x509);
-    if (C.mbedtls_x509_crt_parse(&x509, @ptrCast(bytes), bytes.len) != 0) {
-        unreachable;
-    }
-
-    std.debug.print("serial={any}\n", .{x509.serial.p[0..x509.serial.len]});
-
+fn getAttribute(x509: *C.mbedtls_x509_crt, attribute: std.crypto.Certificate.Attribute) ?[]const u8 {
     var issuer = x509.issuer;
+
     while (true) {
-        if (std.crypto.Certificate.Attribute.map.get(issuer.oid.p[0..issuer.oid.len])) |attribute| {
-            switch (attribute) {
-                .commonName => std.debug.print("CN={s}\n", .{issuer.val.p[0..issuer.val.len]}),
-                .organizationName => std.debug.print("O={s}\n", .{issuer.val.p[0..issuer.val.len]}),
-                .countryName => std.debug.print("C={s}\n", .{issuer.val.p[0..issuer.val.len]}),
-                else => {},
+        if (std.crypto.Certificate.Attribute.map.get(issuer.oid.p[0..issuer.oid.len])) |a| {
+            if (a == attribute) {
+                return issuer.val.p[0..issuer.val.len];
             }
         }
 
@@ -163,6 +280,8 @@ fn mbedtls(allocator: std.mem.Allocator, cert_filepath: []const u8) void {
             issuer = issuer.next.*;
         }
     }
+
+    return null;
 }
 
 pub fn main() !void {
@@ -215,11 +334,6 @@ pub fn main() !void {
     const out_file = res.positionals[1].?;
     const private_key_filepath = res.args.@"private-key".?;
     const certificate_filepath = res.args.certificate.?;
-
-    mbedtls(arena.allocator(), certificate_filepath);
-    if (true) {
-        return;
-    }
 
     return signFile(
         arena.allocator(),
