@@ -117,8 +117,8 @@ pub fn signFile(
         private_key_bytes.len,
         null,
         0,
-        null,
-        null,
+        C.mbedtls_ctr_drbg_random,
+        &ctr_drbg,
     ) != 0) {
         return error.InvalidPrivateKey;
     }
