@@ -6,6 +6,8 @@ const sha2 = std.crypto.hash.sha2;
 
 const Pkcs7 = @import("./pkcs7.zig");
 
+const mbedtls = @import("./mbedtls.zig");
+
 const C = @cImport({
     @cInclude("mbedtls/ctr_drbg.h");
     @cInclude("mbedtls/entropy.h");
@@ -76,15 +78,13 @@ pub fn signFile(
     C.mbedtls_pk_init(&pk);
     defer C.mbedtls_pk_free(&pk);
 
-    if (C.mbedtls_ctr_drbg_seed(
+    try mbedtls.wrap(C.mbedtls_ctr_drbg_seed(
         &ctr_drbg,
         C.mbedtls_entropy_func,
         &entropy,
         "tinyboot",
         "tinyboot".len,
-    ) != 0) {
-        return error.EntropyFailure;
-    }
+    ));
 
     const certificate_file = try std.fs.cwd().openFile(certificate_filepath, .{});
     defer certificate_file.close();
@@ -92,9 +92,7 @@ pub fn signFile(
 
     var x509: C.mbedtls_x509_crt = undefined;
     C.mbedtls_x509_crt_init(&x509);
-    if (C.mbedtls_x509_crt_parse(&x509, @ptrCast(certificate_bytes), certificate_bytes.len) != 0) {
-        return error.InvalidCertificate;
-    }
+    try mbedtls.wrap(C.mbedtls_x509_crt_parse(&x509, @ptrCast(certificate_bytes), certificate_bytes.len));
     defer C.mbedtls_x509_crt_free(&x509);
 
     const common_name = getAttribute(&x509, .commonName) orelse return error.MissingCommonName;
@@ -111,7 +109,7 @@ pub fn signFile(
     defer private_key_file.close();
     const private_key_bytes = try private_key_file.readToEndAlloc(arena_alloc, std.math.maxInt(usize));
 
-    if (C.mbedtls_pk_parse_key(
+    try mbedtls.wrap(C.mbedtls_pk_parse_key(
         &pk,
         @ptrCast(private_key_bytes),
         private_key_bytes.len,
@@ -119,23 +117,18 @@ pub fn signFile(
         0,
         C.mbedtls_ctr_drbg_random,
         &ctr_drbg,
-    ) != 0) {
-        return error.InvalidPrivateKey;
-    }
+    ));
 
     if (C.mbedtls_pk_can_do(&pk, C.MBEDTLS_PK_RSA) == 0) {
         std.log.err("detected non RSA key", .{});
         return error.InvalidPrivateKey;
     }
 
-    if (C.mbedtls_rsa_set_padding(
+    try mbedtls.wrap(C.mbedtls_rsa_set_padding(
         C.mbedtls_pk_rsa(pk),
         C.MBEDTLS_RSA_PKCS_V21,
         C.MBEDTLS_MD_SHA256,
-    ) != 0) {
-        std.log.err("failed to set padding", .{});
-        return error.InvalidPadding;
-    }
+    ));
 
     var hash = [_]u8{0} ** sha2.Sha256.digest_length;
     var hasher = sha2.Sha256.init(.{});
@@ -153,7 +146,7 @@ pub fn signFile(
 
     var signature_len: usize = 0;
     var signature_buf = [_]u8{0} ** C.MBEDTLS_MPI_MAX_SIZE;
-    if (C.mbedtls_pk_sign(
+    try mbedtls.wrap(C.mbedtls_pk_sign(
         &pk,
         C.MBEDTLS_MD_SHA256,
         &hash,
@@ -161,12 +154,9 @@ pub fn signFile(
         &signature_buf,
         signature_buf.len,
         &signature_len,
-        null,
-        null,
-    ) != 0) {
-        std.log.err("failed to sign hash", .{});
-        return error.RsaSignFail;
-    }
+        C.mbedtls_ctr_drbg_random,
+        &ctr_drbg,
+    ));
 
     const signature = signature_buf[0..signature_len];
 
