@@ -4,7 +4,6 @@ const clap = @import("clap");
 const asn1 = std.crypto.asn1;
 const sha2 = std.crypto.hash.sha2;
 
-const wolfssl = @import("./wolfssl.zig");
 const Pkcs7 = @import("./pkcs7.zig");
 
 const C = @cImport({
@@ -43,40 +42,6 @@ const ModuleSignature = extern struct {
     /// Length of signature data
     sig_len: u32, // be32
 };
-
-fn readPrivateKey(arena_alloc: std.mem.Allocator, filepath: []const u8) !*wolfssl.EVP_PKEY {
-    const full_filepath = try std.fs.cwd().realpathAlloc(arena_alloc, filepath);
-    const filepathZ = try arena_alloc.dupeZ(u8, full_filepath);
-
-    const b = try wolfssl.bioNewFile(filepathZ, "rb");
-    defer wolfssl.bioFree(b);
-
-    return try wolfssl.pemReadBioPrivateKey(b);
-}
-
-fn readX509(arena_alloc: std.mem.Allocator, filepath: []const u8) !*wolfssl.X509 {
-    const full_filepath = try std.fs.cwd().realpathAlloc(arena_alloc, filepath);
-    const filepathZ = try arena_alloc.dupeZ(u8, full_filepath);
-
-    const bio = try wolfssl.bioNewFile(filepathZ, "rb");
-    defer wolfssl.bioFree(bio);
-
-    var buf: [2]u8 = undefined;
-    if (try wolfssl.bioRead(bio, &buf) != buf.len) {
-        return error.ReadError;
-    }
-
-    try wolfssl.bioReset(bio);
-
-    if (buf[0] == 0x30 and buf[1] >= 0x81 and buf[1] <= 0x84) {
-        // Using DER encoding
-        std.log.debug("detected x509 in DER form", .{});
-        return try wolfssl.d2iX509Bio(bio);
-    } else {
-        std.log.debug("detected x509 in PEM form", .{});
-        return try wolfssl.pemReadBioX509(bio);
-    }
-}
 
 const country_name_oid = asn1.Oid.fromDotComptime("2.5.4.6");
 const common_name_oid = asn1.Oid.fromDotComptime("2.5.4.3");
@@ -285,8 +250,6 @@ fn getAttribute(x509: *C.mbedtls_x509_crt, attribute: std.crypto.Certificate.Att
 }
 
 pub fn main() !void {
-    wolfssl.enableLogging();
-
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
 

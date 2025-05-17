@@ -30,7 +30,6 @@ test {
     _ = @import("./utils.zig");
     _ = @import("./vpd.zig");
     _ = @import("./watch.zig");
-    _ = @import("./wolfssl.zig");
     _ = @import("./ymodem.zig");
     _ = @import("./zstd.zig");
 }
