@@ -19,9 +19,9 @@ let
     }
     {
       name = "N-V-__8AAMrlvQKMzsBG9BReeFEEQ2phyoN7lE8U1xNUEvgP";
-      patch = fetchzip {
+      path = fetchzip {
         url = "https://github.com/MBED-TLS/mbedtls/archive/v3.6.3.1.tar.gz";
-        hash = "";
+        hash = "sha256-koZAtExQguvfQ2Jf8xidKyLzCQoWrVIY73AYFjG0tMg=";
       };
     }
     {
