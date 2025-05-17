@@ -122,6 +122,9 @@ pub fn main() !void {
 
     var key_buf = [_]u8{0} ** 16000;
 
+    // NOTE: When we write out PEM files, ensure there is a trailing null byte
+    // so that MBEDTLS detects these as PEM files, see https://github.com/Mbed-TLS/mbedtls/blob/6fb5120fde4ab889bea402f5ab230c720b0a3b9a/library/pkparse.c#L994.
+
     // write out public key
     {
         try mbedtls.wrap(C.mbedtls_pk_write_pubkey_pem(&key, &key_buf, key_buf.len));
@@ -130,6 +133,7 @@ pub fn main() !void {
         defer pub_out.close();
 
         try pub_out.writer().writeAll(std.mem.trim(u8, &key_buf, &.{0}));
+        try pub_out.writer().writeByte(0);
     }
 
     key_buf = std.mem.zeroes(@TypeOf(key_buf));
@@ -142,6 +146,7 @@ pub fn main() !void {
         defer priv_out.close();
 
         try priv_out.writer().writeAll(std.mem.trim(u8, &key_buf, &.{0}));
+        try priv_out.writer().writeByte(0);
     }
 
     // generate x509 cert
@@ -205,6 +210,7 @@ pub fn main() !void {
 
         const start: usize = cert_buf.len - len;
         try cert_der_out.writer().writeAll(std.mem.trim(u8, cert_buf[start .. start + len], &.{0}));
+        try cert_der_out.writer().writeByte(0);
     }
 
     cert_buf = std.mem.zeroes(@TypeOf(cert_buf));
@@ -222,6 +228,6 @@ pub fn main() !void {
         const cert_pem_out = try std.fs.cwd().createFile("tboot-certificate.pem", .{ .mode = 0o444 });
         defer cert_pem_out.close();
 
-        try cert_pem_out.writer().writeAll(std.mem.trim(u8, &cert_buf, &.{0}));
+        try cert_pem_out.writer().writeAll(&cert_buf);
     }
 }

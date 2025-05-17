@@ -99,10 +99,12 @@ pub fn signFile(
     const organization_name = getAttribute(&x509, .organizationName) orelse return error.MissingOrganizationName;
     const country_name = getAttribute(&x509, .countryName) orelse return error.MissingCountryName;
     const serial_number = b: {
-        if (x509.serial.len != 1) {
+        if (x509.serial.len > @sizeOf(u64)) {
             return error.InvalidSerial;
         }
-        break :b x509.serial.p[0];
+        var buf = [_]u8{0} ** @sizeOf(u64);
+        std.mem.copyForwards(u8, &buf, x509.serial.p[0..x509.serial.len]);
+        break :b std.mem.readInt(u64, &buf, .big);
     };
 
     const private_key_file = try std.fs.cwd().openFile(private_key_filepath, .{});

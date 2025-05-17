@@ -5,21 +5,6 @@ const sequence_of_tag = asn1.Tag.universal(.sequence_of, true);
 const string_printable_tag = asn1.Tag.universal(.string_printable, false);
 const octetstring_tag = asn1.Tag.universal(.octetstring, false);
 
-// with the help of https://lapo.it/asn1js
-pub fn main() !void {
-    const stdout = std.io.getStdOut().writer();
-
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-
-    var encoder = asn1.der.Encoder.init(arena.allocator());
-    defer encoder.deinit();
-
-    try encoder.any();
-
-    stdout.writeAll(encoder.buffer.data) catch {};
-}
-
 const DigestAlgorithmIdentifier = struct {
     const Algorithm = enum {
         sha256,
@@ -123,7 +108,7 @@ const Content = union(ContentType) {
                     };
 
                     rdn_sequence: Name,
-                    serial_number: u8,
+                    serial_number: u64,
                 };
 
                 const SignatureValue = struct {
