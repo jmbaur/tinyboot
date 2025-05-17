@@ -91,6 +91,7 @@ pub fn signFile(
     const certificate_bytes = try certificate_file.readToEndAlloc(arena_alloc, std.math.maxInt(usize));
 
     var x509: C.mbedtls_x509_crt = undefined;
+    C.mbedtls_x509_crt_init(&x509);
     if (C.mbedtls_x509_crt_parse(&x509, @ptrCast(certificate_bytes), certificate_bytes.len) != 0) {
         return error.InvalidCertificate;
     }
@@ -99,7 +100,12 @@ pub fn signFile(
     const common_name = getAttribute(&x509, .commonName) orelse return error.MissingCommonName;
     const organization_name = getAttribute(&x509, .organizationName) orelse return error.MissingOrganizationName;
     const country_name = getAttribute(&x509, .countryName) orelse return error.MissingCountryName;
-    const serial_number = try std.fmt.parseInt(u8, x509.serial.p[0..x509.serial.len], 10);
+    const serial_number = b: {
+        if (x509.serial.len != 1) {
+            return error.InvalidSerial;
+        }
+        break :b x509.serial.p[0];
+    };
 
     const private_key_file = try std.fs.cwd().openFile(private_key_filepath, .{});
     defer private_key_file.close();
@@ -114,7 +120,6 @@ pub fn signFile(
         null,
         null,
     ) != 0) {
-        std.log.err("", .{});
         return error.InvalidPrivateKey;
     }
 
