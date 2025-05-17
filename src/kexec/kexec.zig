@@ -34,21 +34,22 @@ pub const KexecSegment = struct {
 
 /// Wait for up to 10 seconds for kernel to report for kexec to be loaded.
 fn waitForKexecKernelLoaded() !void {
-    const sleep_interval = 100 * std.time.ns_per_ms;
-
-    var time_slept: u64 = 0;
     var f = try std.fs.cwd().openFile(KEXEC_LOADED, .{});
     defer f.close();
 
-    while (time_slept < 10 * std.time.ns_per_s) {
-        if (try f.reader().readByte() == '1') {
+    var time_slept: usize = 0;
+    while (time_slept < 10 * std.time.ns_per_s) : (time_slept += std.time.ns_per_s) {
+        try f.seekTo(0);
+
+        const status_byte = try f.reader().readByte();
+
+        std.log.debug("{}", .{status_byte});
+
+        if (status_byte == '1') {
             return;
         }
 
-        try f.seekTo(0);
-
-        std.time.sleep(sleep_interval);
-        time_slept += sleep_interval;
+        std.time.sleep(std.time.ns_per_s);
     }
 
     return error.Timeout;

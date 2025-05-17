@@ -112,10 +112,8 @@ in
   config = {
     linux.kconfig.CMDLINE = kernel.freeform (
       toString (
-        [
-          "printk.devkmsg=on"
-          "loglevel=${if config.debug then "7" else "4"}"
-        ]
+        [ "printk.devkmsg=on" ]
+        ++ optionals config.debug [ "debug" ]
         ++ map (c: "console=${c}") config.linux.consoles
       )
     );
