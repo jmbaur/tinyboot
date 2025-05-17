@@ -87,15 +87,6 @@ pub fn build(b: *std.Build) !void {
     const clap = clap_dependency.module("clap");
     const mbedtls_dependency = b.dependency("mbedtls", .{ .target = target, .optimize = optimize });
     const mbedtls = mbedtls_dependency.artifact("mbedtls");
-    const wolfssl_dependency = b.dependency("wolfssl", .{
-        .target = target,
-        .optimize = optimize,
-        // Bump up the max filesize a bunch. This is a big footgun that
-        // defaults to 4MiB, so many operations on the BIO type will fail if we
-        // are working with files larger than that.
-        .max_file_size = 1024 * 1024 * 1024,
-    });
-    const wolfssl = wolfssl_dependency.artifact("wolfssl");
     const zstd_dependency = b.dependency("zstd", .{ .target = target, .optimize = optimize });
     const zstd = zstd_dependency.artifact("zstd");
     const build_zstd_dependency = b.dependency("zstd", .{ .target = b.graph.host, .optimize = .Debug });
@@ -128,7 +119,6 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
     });
     tboot_sign.linkLibC();
-    tboot_sign.linkLibrary(wolfssl);
     tboot_sign.linkLibrary(mbedtls);
     tboot_sign.root_module.addImport("clap", clap);
     b.installArtifact(tboot_sign);
@@ -140,8 +130,7 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
     });
     tboot_keygen.linkLibC();
-    tboot_keygen.root_module.addCMacro("struct_XSTAT", "");
-    tboot_keygen.linkLibrary(wolfssl);
+    tboot_keygen.linkLibrary(mbedtls);
     tboot_keygen.root_module.addImport("clap", clap);
     b.installArtifact(tboot_keygen);
 
@@ -194,7 +183,7 @@ pub fn build(b: *std.Build) !void {
             .optimize = optimize,
         });
         tboot_nixos_install.linkLibC();
-        tboot_nixos_install.linkLibrary(wolfssl);
+        tboot_nixos_install.linkLibrary(mbedtls);
         tboot_nixos_install.root_module.addImport("clap", clap);
         b.installArtifact(tboot_nixos_install);
     }

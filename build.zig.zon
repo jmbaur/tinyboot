@@ -11,6 +11,5 @@
         },
         .mbedtls = .{ .path = "./deps/mbedtls/" },
         .zstd = .{ .path = "./deps/zstd/" },
-        .wolfssl = .{ .path = "./deps/wolfssl/" },
     },
 }

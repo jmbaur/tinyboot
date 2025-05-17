@@ -18,10 +18,10 @@ let
       };
     }
     {
-      name = "N-V-__8AALz5KQamow5n9wAvwaK0uDKpMHqe5hV4mL1zNHtI";
-      path = fetchzip {
-        url = "https://github.com/wolfSSL/wolfssl/archive/v5.8.0-stable.tar.gz";
-        hash = "sha256-Rws9LN7hNDLc8rr1tyjzSQ8GJl8bEH4CjGuWpI3shSo=";
+      name = "N-V-__8AAMrlvQKMzsBG9BReeFEEQ2phyoN7lE8U1xNUEvgP";
+      patch = fetchzip {
+        url = "https://github.com/MBED-TLS/mbedtls/archive/v3.6.3.1.tar.gz";
+        hash = "";
       };
     }
     {
