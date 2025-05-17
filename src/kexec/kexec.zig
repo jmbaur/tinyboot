@@ -41,11 +41,7 @@ fn waitForKexecKernelLoaded() !void {
     while (time_slept < 10 * std.time.ns_per_s) : (time_slept += std.time.ns_per_s) {
         try f.seekTo(0);
 
-        const status_byte = try f.reader().readByte();
-
-        std.log.debug("{}", .{status_byte});
-
-        if (status_byte == '1') {
+        if (try f.reader().readByte() == '1') {
             return;
         }
 
