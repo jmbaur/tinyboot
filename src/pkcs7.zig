@@ -2,6 +2,8 @@ const std = @import("std");
 const asn1 = std.crypto.asn1;
 
 const sequence_of_tag = asn1.Tag.universal(.sequence_of, true);
+const sequence_tag = asn1.Tag.universal(.sequence, true);
+const integer_tag = asn1.Tag.universal(.integer, false);
 const string_printable_tag = asn1.Tag.universal(.string_printable, false);
 const octetstring_tag = asn1.Tag.universal(.octetstring, false);
 
@@ -108,7 +110,17 @@ const Content = union(ContentType) {
                     };
 
                     rdn_sequence: Name,
-                    serial_number: u64,
+                    serial_number: []u8,
+
+                    pub fn encodeDer(self: @This(), encoder: *asn1.der.Encoder) !void {
+                        const start = encoder.buffer.data.len;
+
+                        try encoder.tagBytes(integer_tag, self.serial_number);
+                        try encoder.any(self.rdn_sequence);
+
+                        try encoder.length(encoder.buffer.data.len - start);
+                        try encoder.tag(sequence_tag);
+                    }
                 };
 
                 const SignatureValue = struct {

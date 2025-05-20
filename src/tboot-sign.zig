@@ -98,14 +98,7 @@ pub fn signFile(
     const common_name = getAttribute(&x509, .commonName) orelse return error.MissingCommonName;
     const organization_name = getAttribute(&x509, .organizationName) orelse return error.MissingOrganizationName;
     const country_name = getAttribute(&x509, .countryName) orelse return error.MissingCountryName;
-    const serial_number = b: {
-        if (x509.serial.len > @sizeOf(u64)) {
-            return error.InvalidSerial;
-        }
-        var buf = [_]u8{0} ** @sizeOf(u64);
-        std.mem.copyForwards(u8, &buf, x509.serial.p[0..x509.serial.len]);
-        break :b std.mem.readInt(u64, &buf, .big);
-    };
+    const serial_number = x509.serial.p[0..x509.serial.len];
 
     const private_key_file = try std.fs.cwd().openFile(private_key_filepath, .{});
     defer private_key_file.close();
@@ -128,7 +121,7 @@ pub fn signFile(
 
     try mbedtls.wrap(C.mbedtls_rsa_set_padding(
         C.mbedtls_pk_rsa(pk),
-        C.MBEDTLS_RSA_PKCS_V21,
+        C.MBEDTLS_RSA_PKCS_V15,
         C.MBEDTLS_MD_SHA256,
     ));
 
@@ -181,9 +174,9 @@ pub fn signFile(
                                 .rdn_sequence = .{
                                     .relative_distinguished_name = .{
                                         .inner = &.{
+                                            .{ .inner = .{ .type = country_name_oid, .value = country_name } },
                                             .{ .inner = .{ .type = organization_name_oid, .value = organization_name } },
                                             .{ .inner = .{ .type = common_name_oid, .value = common_name } },
-                                            .{ .inner = .{ .type = country_name_oid, .value = country_name } },
                                         },
                                     },
                                 },
@@ -199,6 +192,7 @@ pub fn signFile(
     });
 
     const pkcs7_encoded = encoder.buffer.data;
+    try std.io.getStdOut().writer().writeAll(pkcs7_encoded);
 
     try input_file.seekTo(0);
     while (true) {

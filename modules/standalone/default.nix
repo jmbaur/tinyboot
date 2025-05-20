@@ -112,8 +112,14 @@ in
   config = {
     linux.kconfig.CMDLINE = kernel.freeform (
       toString (
-        [ "printk.devkmsg=on" ]
-        ++ optionals config.debug [ "debug" ]
+        [
+          "printk.devkmsg=on"
+          "audit=on"
+        ]
+        ++ optionals config.debug [
+          "debug"
+          "integrity_audit=1"
+        ]
         ++ map (c: "console=${c}") config.linux.consoles
       )
     );
