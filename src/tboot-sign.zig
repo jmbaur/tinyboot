@@ -192,7 +192,6 @@ pub fn signFile(
     });
 
     const pkcs7_encoded = encoder.buffer.data;
-    try std.io.getStdOut().writer().writeAll(pkcs7_encoded);
 
     try input_file.seekTo(0);
     while (true) {
