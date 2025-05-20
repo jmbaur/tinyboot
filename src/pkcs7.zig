@@ -4,7 +4,8 @@ const asn1 = std.crypto.asn1;
 const sequence_of_tag = asn1.Tag.universal(.sequence_of, true);
 const sequence_tag = asn1.Tag.universal(.sequence, true);
 const integer_tag = asn1.Tag.universal(.integer, false);
-const string_printable_tag = asn1.Tag.universal(.string_printable, false);
+const printable_string_tag = asn1.Tag.universal(.string_printable, false);
+const utf8_string_tag = asn1.Tag.universal(.string_utf8, false);
 const octetstring_tag = asn1.Tag.universal(.octetstring, false);
 
 const DigestAlgorithmIdentifier = struct {
@@ -85,8 +86,21 @@ const Content = union(ContentType) {
                                     type: asn1.Oid,
                                     value: []const u8,
 
+                                    const common_name_oid = asn1.Oid.fromDotComptime("2.5.4.3");
+                                    const organization_name_oid = asn1.Oid.fromDotComptime("2.5.4.10");
+
                                     pub fn encodeDer(self: @This(), encoder: *asn1.der.Encoder) !void {
-                                        try encoder.tagBytes(string_printable_tag, self.value);
+                                        const tag = if (std.mem.eql(
+                                            u8,
+                                            self.type.encoded,
+                                            common_name_oid.encoded,
+                                        ) or std.mem.eql(
+                                            u8,
+                                            self.type.encoded,
+                                            organization_name_oid.encoded,
+                                        )) utf8_string_tag else printable_string_tag;
+
+                                        try encoder.tagBytes(tag, self.value);
                                         try encoder.any(self.type);
                                     }
                                 };
