@@ -12,8 +12,6 @@
       IMA_DEFAULT_HASH_SHA256 = yes;
       IMA_KEXEC = yes;
       IMA_MEASURE_ASYMMETRIC_KEYS = yes;
-      AUDIT = yes;
-      INTEGRITY_AUDIT = yes;
       KEXEC_FILE = yes;
       MODULE_SIG_FORMAT = yes;
       INTEGRITY = yes;
