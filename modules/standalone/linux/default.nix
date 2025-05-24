@@ -34,7 +34,7 @@ let
 in
 stdenv.mkDerivation (finalAttrs: {
   pname = "tinyboot-linux";
-  version = "6.14.7";
+  version = "6.14.8";
 
   src = fetchurl {
     url = "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-${finalAttrs.version}.tar.xz";
