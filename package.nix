@@ -1,49 +1,40 @@
 {
   firmwareDirectory ? null,
-  withLoader,
-  withTools,
 
   fetchzip,
   lib,
   linkFarm,
-  openssl,
-  pkg-config,
-  stdenv,
-  tinybootTools,
+  stdenvNoCC,
   zig_0_14,
-  writeText,
 }:
 
 let
   deps = linkFarm "tinyboot-deps" [
     {
-      name = "12204387e122dd8b6828847165a7153c5d624b0a77217fd907c7f4f718ecce36e217";
+      name = "clap-0.10.0-oBajB434AQBDh-Ei3YtoKIRxZacVPF1iSwp3IX_ZB8f0";
       path = fetchzip {
         url = "https://github.com/Hejsil/zig-clap/archive/e47028deaefc2fb396d3d9e9f7bd776ae0b2a43a.tar.gz";
         hash = "sha256-leXnA97ITdvmBhD2YESLBZAKjBg+G4R/+PPPRslz/ec=";
       };
     }
     {
-      name = "122008a7c2435438a09afd5a05773d9029e83908e2f4c631cf3d8aa118603b1ff84a";
+      name = "N-V-__8AAMrlvQKMzsBG9BReeFEEQ2phyoN7lE8U1xNUEvgP";
       path = fetchzip {
-        url = "https://github.com/tukaani-project/xz/archive/v5.8.1.tar.gz";
-        hash = "sha256-vGUNoX5VTM0aQ5GmBPXip97WGN9vaVrQLE9msToZyKs=";
+        url = "https://github.com/MBED-TLS/mbedtls/archive/v3.6.3.1.tar.gz";
+        hash = "sha256-koZAtExQguvfQ2Jf8xidKyLzCQoWrVIY73AYFjG0tMg=";
+      };
+    }
+    {
+      name = "N-V-__8AAPZ7fwBg4JoCzM_0o2A8wxH2hsUUeiU1iuZv53L5";
+      path = fetchzip {
+        url = "https://github.com/facebook/zstd/archive/v1.5.7.tar.gz";
+        hash = "sha256-tNFWIT9ydfozB8dWcmTMuZLCQmQudTFJIkSr0aG7S44=";
       };
     }
   ];
-
-  libcFile = writeText "zig-libc-file" ''
-    include_dir=${lib.getDev stdenv.cc.libc}/include
-    sys_include_dir=${lib.getDev stdenv.cc.libc}/include
-    crt_dir=${lib.getLib stdenv.cc.libc}/lib
-    msvc_lib_dir=
-    kernel32_lib_dir=
-    gcc_dir=
-  '';
 in
-assert withTools != withLoader;
-stdenv.mkDerivation {
-  pname = "tinyboot-${if withTools then "tools" else "loader"}";
+stdenvNoCC.mkDerivation {
+  pname = "tinyboot";
   version = "0.1.0";
 
   src = lib.fileset.toSource {
@@ -59,12 +50,19 @@ stdenv.mkDerivation {
   strictDeps = true;
 
   depsBuildBuild = [ zig_0_14 ];
-  nativeBuildInputs = [ pkg-config ] ++ lib.optional (!withTools) tinybootTools;
-
-  buildInputs = lib.optional withTools openssl; # tboot-sign
 
   dontInstall = true;
   doCheck = true;
+
+  zigBuildFlags =
+    [
+      "--color off"
+      "-Doptimize=ReleaseSafe"
+      "-Dtarget=${stdenvNoCC.hostPlatform.qemuArch}-${stdenvNoCC.hostPlatform.parsed.kernel.name}"
+    ]
+    ++ lib.optionals (firmwareDirectory != null) [
+      "-Dfirmware-directory=${firmwareDirectory}"
+    ];
 
   configurePhase = ''
     runHook preConfigure
@@ -72,24 +70,6 @@ stdenv.mkDerivation {
     export ZIG_GLOBAL_CACHE_DIR=$TEMPDIR
 
     ln -s ${deps} $ZIG_GLOBAL_CACHE_DIR/p
-
-    zigBuildFlags=(
-      "-Dloader=${lib.boolToString withLoader}"
-      "-Dtools=${lib.boolToString withTools}"
-      "-Doptimize=ReleaseSafe"
-      "-Dtarget=${stdenv.hostPlatform.qemuArch}-linux-${
-        if stdenv.hostPlatform.isGnu then "gnu" else "musl"
-      }"
-      "-Ddynamic-linker=$(cat $NIX_CC/nix-support/dynamic-linker)"
-    )
-
-    ${lib.optionalString withTools ''
-      zigBuildFlags+=("--libc ${libcFile}")
-    ''}
-
-    ${lib.optionalString (firmwareDirectory != null) ''
-      zigBuildFlags+=("-Dfirmware-directory=${firmwareDirectory}")
-    ''}
 
     runHook postConfigure
   '';
@@ -106,7 +86,7 @@ stdenv.mkDerivation {
     runHook postCheck
   '';
 
-  passthru = lib.optionalAttrs withLoader { initrdFile = "tboot-loader.cpio"; };
+  passthru.initrdFile = "tboot-loader.cpio.zst";
 
   meta.platforms = lib.platforms.linux;
 }

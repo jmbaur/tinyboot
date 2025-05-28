@@ -20,14 +20,7 @@
       };
 
       overlays.default = final: prev: ({
-        tinybootTools = final.callPackage ./package.nix {
-          withLoader = false;
-          withTools = true;
-        };
-        tinybootLoader = final.callPackage ./package.nix {
-          withLoader = true;
-          withTools = false;
-        };
+        tinyboot = final.callPackage ./package.nix { };
         kernelPatches = prev.kernelPatches // {
           ima_tpm_early_init = {
             name = "ima_tpm_early_init";
@@ -36,7 +29,7 @@
         };
       });
 
-      legacyPackages = genAttrs [ "aarch64-linux" "x86_64-linux" ] (
+      legacyPackages = genAttrs [ "armv7l-linux" "aarch64-linux" "x86_64-linux" ] (
         system:
         import inputs.nixpkgs {
           inherit system;
@@ -89,14 +82,12 @@
 
       devShells = mapAttrs (system: pkgs: {
         default = pkgs.mkShell {
-          inputsFrom = [
-            pkgs.tinybootLoader
-            pkgs.tinybootTools
-          ];
           packages = [
+            pkgs.lldb
             pkgs.qemu
             pkgs.swtpm
-          ] ++ pkgs.tinybootLoader.depsBuildBuild; # depsBuildBuild not inherited by inputsFrom
+            pkgs.zig_0_14
+          ];
           env.TINYBOOT_KERNEL =
             with inputs.self.checks.${system}.disk.nodes.machine.tinyboot.build;
             ''${linux}/${linux.kernelFile}'';
@@ -106,19 +97,19 @@
       checks = mapAttrs (
         _: pkgs:
         let
-          cross = if pkgs.stdenv.hostPlatform.isx86_64 then "aarch64-multiplatform" else "gnu64";
+          cross =
+            {
+              "x86_64-linux" = "gnu64";
+              "aarch64-linux" = "aarch64-multiplatform";
+              "armv7l-linux" = "armv7l-hf-multiplatform";
+            }
+            .${pkgs.stdenv.hostPlatform.system};
         in
         {
           disk = pkgs.callPackage ./tests/disk { };
           ymodem = pkgs.callPackage ./tests/ymodem { };
-          tinybootTools = pkgs.tinybootTools;
-          tinybootLoader = pkgs.tinybootLoader;
-          tinybootToolsStatic = pkgs.pkgsStatic.tinybootTools;
-          tinybootLoaderStatic = pkgs.pkgsStatic.tinybootLoader;
-          tinybootToolsCross = pkgs.pkgsCross.${cross}.tinybootTools;
-          tinybootLoaderCross = pkgs.pkgsCross.${cross}.tinybootLoader;
-          tinybootToolsCrossStatic = pkgs.pkgsCross.${cross}.pkgsStatic.tinybootTools;
-          tinybootLoaderCrossStatic = pkgs.pkgsCross.${cross}.pkgsStatic.tinybootLoader;
+          tinyboot = pkgs.tinyboot;
+          tinybootCross = pkgs.pkgsCross.${cross}.tinyboot;
         }
       ) inputs.self.legacyPackages;
 

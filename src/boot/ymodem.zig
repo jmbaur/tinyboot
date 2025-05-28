@@ -96,14 +96,16 @@ pub fn probe(self: *YmodemBootLoader, entries: *std.ArrayList(BootLoader.Entry),
     var serial = try std.fs.cwd().openFile(serial_path, .{ .mode = .read_write });
     defer serial.close();
 
-    var tty = try system.setupTty(serial.handle, .file_transfer);
+    var tty = system.Tty.init(serial.handle);
     defer {
-        tty.reset();
+        tty.deinit();
 
         // If the TTY is being used for user input, this will allow for the
         // next message printed to the TTY to be legible.
         tty.writer().writeByte('\n') catch {};
     }
+
+    try tty.setMode(.file_transfer);
 
     self.tmpdir = try TmpDir.create(.{});
 

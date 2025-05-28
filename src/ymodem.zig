@@ -2,7 +2,6 @@
 // See https://en.wikipedia.org/wiki/YMODEM#1k and http://wiki.synchro.net/ref:ymodem#figure_4ymodem_batch_transmission_session-1k_blocks
 
 const std = @import("std");
-const posix = std.posix;
 const Crc16Xmodem = std.hash.crc.Crc16Xmodem;
 const Progress = std.Progress;
 
@@ -85,29 +84,13 @@ pub fn send(
     const file = opts.?.file;
     const filename = opts.?.filename;
 
+    try file.seekTo(0);
+
     const stat = try file.stat();
     const file_size: usize = @intCast(stat.size);
 
     var file_node = parent_node.start(filename, file_size / 1024);
     defer file_node.end();
-
-    var buf: []align(std.heap.page_size_min) u8 = if (file_size > 0)
-        try posix.mmap(
-            null,
-            file_size,
-            posix.PROT.READ,
-            .{ .TYPE = .PRIVATE },
-            file.handle,
-            0,
-        )
-    else
-        &.{};
-
-    defer {
-        if (file_size > 0) {
-            defer posix.munmap(buf);
-        }
-    }
 
     {
         var payload = [_]u8{PAD} ** 128;
@@ -129,26 +112,25 @@ pub fn send(
         }
     }
 
-    var unsent_bytes = file_size;
-    var buf_index: usize = 0;
-
     var chunk = Chunk1K{ .start = STX };
 
-    while (unsent_bytes > 0) {
-        var chunk_len: usize = 0;
+    var chunk_buf = [_]u8{0} ** 1024;
 
-        chunk_len = std.mem.min(usize, &.{ unsent_bytes, chunk.payload.len });
-        std.mem.copyForwards(u8, &chunk.payload, buf[buf_index .. buf_index + chunk_len]);
-        @memset(chunk.payload[chunk_len..], PAD);
+    while (true) {
+        const bytes_read = try file.reader().readAll(&chunk_buf);
+        @memset(chunk_buf[bytes_read..], PAD);
+        @memcpy(&chunk.payload, &chunk_buf);
 
         chunk.block +%= 1;
 
         try finalizeAndWriteChunk(Chunk1K, &chunk, tty);
 
-        unsent_bytes -= chunk_len;
-        buf_index += chunk_len;
-
         file_node.completeOne();
+
+        // reached end of file
+        if (bytes_read < chunk_buf.len) {
+            break;
+        }
     }
 
     try tty.writer().writeByte(EOF);
@@ -431,8 +413,10 @@ pub fn main() !void {
     );
     defer tty_file.close();
 
-    var tty = try system.setupTty(tty_file.handle, .file_transfer);
-    defer tty.reset();
+    var tty = system.Tty.init(tty_file.handle);
+    defer tty.deinit();
+
+    try tty.setMode(.file_transfer);
 
     var dir = try std.fs.cwd().openDir(res.args.directory.?, .{});
     defer dir.close();

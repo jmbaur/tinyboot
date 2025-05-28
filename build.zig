@@ -4,7 +4,24 @@ const std = @import("std");
 // build.zig.zon.
 const version = std.SemanticVersion.parse("0.1.0") catch @compileError("invalid version");
 
-const tboot_initrd_name = "tboot-initrd";
+fn tbootInitrd(
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    zstd: *std.Build.Step.Compile,
+    clap: *std.Build.Module,
+) *std.Build.Step.Compile {
+    const tboot_initrd = b.addExecutable(.{
+        .name = "tboot-initrd",
+        .root_source_file = b.path("src/tboot-initrd.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    tboot_initrd.linkLibC();
+    tboot_initrd.linkLibrary(zstd);
+    tboot_initrd.root_module.addImport("clap", clap);
+    return tboot_initrd;
+}
 
 pub fn build(b: *std.Build) !void {
     const tboot_builtin = b.addOptions();
@@ -19,20 +36,19 @@ pub fn build(b: *std.Build) !void {
 
     const target = b.standardTargetOptions(.{ .default_target = .{ .cpu_model = .baseline } });
 
-    // tboot-loader is a fully-native, linux-only Zig program, so we can
-    // hardcode the OS to linux, statically link it and don't need an ABI
-    // specified.
-    var target_no_abi_query = target.query;
-    target_no_abi_query.abi = null;
-    target_no_abi_query.os_tag = .linux;
-    const target_linux_no_abi = b.resolveTargetQuery(target_no_abi_query);
+    const linux_target = b: {
+        var linux_target = target.query;
+        linux_target.abi = .musl;
+        linux_target.os_tag = .linux;
+        break :b b.resolveTargetQuery(linux_target);
+    };
 
-    var target_efi_query = target.query;
-    target_efi_query.os_tag = .uefi;
-    target_efi_query.abi = .msvc;
-    const target_efi = b.resolveTargetQuery(target_efi_query);
-
-    const is_native_build = b.graph.host.result.cpu.arch == target.result.cpu.arch;
+    const uefi_target = b: {
+        var uefi_target = target.query;
+        uefi_target.os_tag = .uefi;
+        uefi_target.abi = .msvc;
+        break :b b.resolveTargetQuery(uefi_target);
+    };
 
     const optimize = b.standardOptimizeOption(.{});
 
@@ -45,10 +61,6 @@ pub fn build(b: *std.Build) !void {
         std.builtin.OptimizeMode.Debug
     else
         std.builtin.OptimizeMode.ReleaseSmall;
-
-    const with_tools = b.option(bool, "tools", "With tools") orelse false;
-
-    const with_loader = b.option(bool, "loader", "With boot loader") orelse true;
 
     const with_loader_efi_stub = b.option(
         bool,
@@ -71,8 +83,14 @@ pub fn build(b: *std.Build) !void {
 
     const runner_kernel = b.option([]const u8, "kernel", "Kernel to use when spawning VM runner") orelse env.get("TINYBOOT_KERNEL");
 
-    const clap = b.dependency("clap", .{});
-    const xz = b.lazyDependency("xz", .{ .target = target, .optimize = optimize });
+    const clap_dependency = b.dependency("clap", .{});
+    const clap = clap_dependency.module("clap");
+    const mbedtls_dependency = b.dependency("mbedtls", .{ .target = target, .optimize = optimize });
+    const mbedtls = mbedtls_dependency.artifact("mbedtls");
+    const zstd_dependency = b.dependency("zstd", .{ .target = target, .optimize = optimize });
+    const zstd = zstd_dependency.artifact("zstd");
+    const build_zstd_dependency = b.dependency("zstd", .{ .target = b.graph.host, .optimize = .Debug });
+    const build_zstd = build_zstd_dependency.artifact("zstd");
 
     const linux_h = b.addWriteFile("linux.h",
         \\#include <asm-generic/setup.h>
@@ -85,35 +103,60 @@ pub fn build(b: *std.Build) !void {
     );
 
     const linux_headers = b.addTranslateC(.{
-        .root_source_file = .{ .generated = .{
-            .file = &linux_h.generated_directory,
-            .sub_path = "linux.h",
-        } },
-        .target = target_linux_no_abi,
+        .root_source_file = .{ .generated = .{ .file = &linux_h.generated_directory, .sub_path = "linux.h" } },
+        .target = linux_target,
         .optimize = .ReleaseSafe, // This doesn't seem to do anything when translating pure headers
     });
 
     const linux_headers_module = linux_headers.addModule("linux_headers");
 
-    // For re-usage with building the tboot-loader initrd, if we are also
-    // building tools.
-    var maybe_tboot_initrd_tool: ?*std.Build.Step.Compile = null;
+    b.installArtifact(tbootInitrd(b, target, optimize, zstd, clap));
 
-    if ((with_loader and is_native_build) or with_tools) {
-        maybe_tboot_initrd_tool = b.addExecutable(.{
-            .name = tboot_initrd_name,
-            .root_source_file = b.path("src/tboot-initrd.zig"),
+    const tboot_sign = b.addExecutable(.{
+        .name = "tboot-sign",
+        .root_source_file = b.path("src/tboot-sign.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    tboot_sign.linkLibC();
+    tboot_sign.linkLibrary(mbedtls);
+    tboot_sign.root_module.addImport("clap", clap);
+    b.installArtifact(tboot_sign);
+
+    const tboot_keygen = b.addExecutable(.{
+        .name = "tboot-keygen",
+        .root_source_file = b.path("src/tboot-keygen.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    tboot_keygen.linkLibC();
+    tboot_keygen.linkLibrary(mbedtls);
+    tboot_keygen.root_module.addImport("clap", clap);
+    b.installArtifact(tboot_keygen);
+
+    const tboot_vpd = b.addExecutable(.{
+        .name = "tboot-vpd",
+        .root_source_file = b.path("src/vpd.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    tboot_vpd.root_module.addImport("clap", clap);
+    b.installArtifact(tboot_vpd);
+
+    // tboot-ymodem, tboot-bless-boot, tboot-bless-boot-generator, and
+    // tboot-nixos-install (for nixos machines) run on the machine using
+    // tboot-loader, so it doesn't make sense to build for non-linux targets.
+    if (target.result.os.tag == .linux) {
+        // TODO(jared): get tboot-ymodem working on non-linux targets
+        const tboot_ymodem = b.addExecutable(.{
+            .name = "tboot-ymodem",
+            .root_source_file = b.path("src/ymodem.zig"),
             .target = target,
             .optimize = optimize,
         });
-        var tboot_initrd_tool = maybe_tboot_initrd_tool.?;
-        tboot_initrd_tool.linkLibC();
-        tboot_initrd_tool.linkLibrary(xz.?.artifact("xz"));
-        tboot_initrd_tool.root_module.addImport("clap", clap.module("clap"));
-    }
-
-    if (with_tools) {
-        b.installArtifact(maybe_tboot_initrd_tool.?);
+        tboot_ymodem.root_module.addImport("linux_headers", linux_headers_module);
+        tboot_ymodem.root_module.addImport("clap", clap);
+        b.installArtifact(tboot_ymodem);
 
         const tboot_bless_boot = b.addExecutable(.{
             .name = "tboot-bless-boot",
@@ -121,7 +164,7 @@ pub fn build(b: *std.Build) !void {
             .target = target,
             .optimize = optimize,
         });
-        tboot_bless_boot.root_module.addImport("clap", clap.module("clap"));
+        tboot_bless_boot.root_module.addImport("clap", clap);
         b.installArtifact(tboot_bless_boot);
 
         const tboot_bless_boot_generator = b.addExecutable(.{
@@ -130,32 +173,8 @@ pub fn build(b: *std.Build) !void {
             .target = target,
             .optimize = optimize,
         });
-        tboot_bless_boot_generator.root_module.addImport("clap", clap.module("clap"));
+        tboot_bless_boot_generator.root_module.addImport("clap", clap);
         b.installArtifact(tboot_bless_boot_generator);
-
-        const tboot_sign = b.addExecutable(.{
-            .name = "tboot-sign",
-            .root_source_file = b.path("src/tboot-sign.zig"),
-            .target = target,
-            .optimize = optimize,
-        });
-        tboot_sign.linkLibC();
-        tboot_sign.each_lib_rpath = !target.result.isMuslLibC();
-        tboot_sign.linkSystemLibrary("libcrypto");
-        tboot_sign.root_module.addImport("clap", clap.module("clap"));
-        b.installArtifact(tboot_sign);
-
-        const tboot_keygen = b.addExecutable(.{
-            .name = "tboot-keygen",
-            .root_source_file = b.path("src/tboot-keygen.zig"),
-            .target = target,
-            .optimize = optimize,
-        });
-        tboot_keygen.linkLibC();
-        tboot_keygen.each_lib_rpath = !target.result.isMuslLibC();
-        tboot_keygen.linkSystemLibrary("libcrypto");
-        tboot_keygen.root_module.addImport("clap", clap.module("clap"));
-        b.installArtifact(tboot_keygen);
 
         const tboot_nixos_install = b.addExecutable(.{
             .name = "tboot-nixos-install",
@@ -164,125 +183,95 @@ pub fn build(b: *std.Build) !void {
             .optimize = optimize,
         });
         tboot_nixos_install.linkLibC();
-        tboot_nixos_install.each_lib_rpath = !target.result.isMuslLibC();
-        tboot_nixos_install.linkSystemLibrary("libcrypto");
-        tboot_nixos_install.root_module.addImport("clap", clap.module("clap"));
+        tboot_nixos_install.linkLibrary(mbedtls);
+        tboot_nixos_install.root_module.addImport("clap", clap);
         b.installArtifact(tboot_nixos_install);
-
-        const tboot_ymodem = b.addExecutable(.{
-            .name = "tboot-ymodem",
-            .root_source_file = b.path("src/ymodem.zig"),
-            .target = target,
-            .optimize = optimize,
-        });
-        tboot_ymodem.root_module.addImport("linux_headers", linux_headers_module);
-        tboot_ymodem.root_module.addImport("clap", clap.module("clap"));
-        b.installArtifact(tboot_ymodem);
-
-        const tboot_vpd = b.addExecutable(.{
-            .name = "tboot-vpd",
-            .root_source_file = b.path("src/vpd.zig"),
-            .target = target,
-            .optimize = optimize,
-        });
-        tboot_vpd.root_module.addImport("linux_headers", linux_headers_module);
-        tboot_vpd.root_module.addImport("clap", clap.module("clap"));
-        b.installArtifact(tboot_vpd);
     }
 
-    if (with_loader) {
-        const tboot_loader = b.addExecutable(.{
-            .name = "tboot-loader",
-            .root_source_file = b.path("src/tboot-loader.zig"),
-            .target = target_linux_no_abi,
-            .optimize = optimize_prefer_small,
+    const tboot_loader = b.addExecutable(.{
+        .name = "tboot-loader",
+        .root_source_file = b.path("src/tboot-loader.zig"),
+        .target = linux_target,
+        .optimize = optimize_prefer_small,
+        .strip = do_strip,
+    });
+    tboot_loader.root_module.addOptions("tboot_builtin", tboot_builtin);
+    b.installArtifact(tboot_loader);
+    tboot_loader.root_module.addImport("linux_headers", linux_headers_module);
+
+    // Use tboot-initrd built for the build host.
+    var run_tboot_initrd = b.addRunArtifact(tbootInitrd(b, b.graph.host, .Debug, build_zstd, clap));
+
+    // TODO(jared): Would be nicer to have generic
+    // --file=tboot_loader:/init CLI interface, but don't know how to
+    // obtain path and string format it into that form. Further, would
+    // be nicer to not shell-out to a separate tool at all and just do
+    // the CPIO generation in here.
+    run_tboot_initrd.addPrefixedFileArg("-i", tboot_loader.getEmittedBin());
+
+    if (firmware_directory) |directory| {
+        const directory_ = b.addWriteFiles().addCopyDirectory(
+            .{ .cwd_relative = directory },
+            "",
+            .{},
+        );
+
+        run_tboot_initrd.addPrefixedDirectoryArg("-d", directory_);
+    }
+
+    const initrd_output_file = run_tboot_initrd.addPrefixedOutputFileArg(
+        "-o",
+        "tboot-loader.cpio.zst",
+    );
+
+    run_tboot_initrd.expectExitCode(0);
+
+    const initrd_file = b.addInstallFile(
+        initrd_output_file,
+        "tboot-loader.cpio.zst",
+    );
+
+    // install the cpio archive during "zig build install"
+    b.getInstallStep().dependOn(&initrd_file.step);
+
+    if (with_loader_efi_stub) {
+        const tboot_efi_stub = b.addExecutable(.{
+            .name = "tboot-efi-stub",
+            .target = uefi_target,
+            .root_source_file = b.path("src/tboot-efi-stub.zig"),
             .strip = do_strip,
+            .optimize = optimize_prefer_small,
         });
-        tboot_loader.root_module.addOptions("tboot_builtin", tboot_builtin);
-        b.installArtifact(tboot_loader);
-        tboot_loader.root_module.addImport("linux_headers", linux_headers_module);
-
-        // If we are performing a native build (i.e. the platform we are
-        // building on is the same as the platform we are building to), look
-        // for a local build of tboot-initrd to use, as it is helpful for
-        // iteration on the tool itself. Otherwise, use the tboot-initrd that
-        // exists on $PATH.
-        var run_tboot_initrd = if (is_native_build)
-            b.addRunArtifact(maybe_tboot_initrd_tool.?)
-        else
-            b.addSystemCommand(&.{tboot_initrd_name});
-
-        // TODO(jared): Would be nicer to have generic
-        // --file=tboot_loader:/init CLI interface, but don't know how to
-        // obtain path and string format it into that form. Further, would
-        // be nicer to not shell-out to a separate tool at all and just do
-        // the CPIO generation in here.
-        run_tboot_initrd.addPrefixedFileArg("-i", tboot_loader.getEmittedBin());
-
-        if (firmware_directory) |directory| {
-            const directory_ = b.addWriteFiles().addCopyDirectory(
-                .{ .cwd_relative = directory },
-                "",
-                .{},
-            );
-
-            run_tboot_initrd.addPrefixedDirectoryArg("-d", directory_);
-        }
-
-        const cpio_output_file = run_tboot_initrd.addPrefixedOutputFileArg(
-            "-o",
-            "tboot-loader.cpio",
-        );
-
-        run_tboot_initrd.expectExitCode(0);
-
-        const cpio_archive = b.addInstallFile(
-            cpio_output_file,
-            "tboot-loader.cpio",
-        );
-
-        // install the cpio archive during "zig build install"
-        b.getInstallStep().dependOn(&cpio_archive.step);
-
-        if (with_loader_efi_stub) {
-            const tboot_efi_stub = b.addExecutable(.{
-                .name = "tboot-efi-stub",
-                .target = target_efi,
-                .root_source_file = b.path("src/tboot-efi-stub.zig"),
-                .strip = do_strip,
-                .optimize = optimize_prefer_small,
-            });
-            const tboot_efi_stub_artifact = b.addInstallArtifact(tboot_efi_stub, .{
-                .dest_dir = .{ .override = .{ .custom = "efi" } },
-            });
-            b.getInstallStep().dependOn(&tboot_efi_stub_artifact.step);
-        }
-
-        const tboot_runner = b.addExecutable(.{
-            .name = "tboot-runner",
-            .target = b.graph.host,
-            .root_source_file = b.path("src/runner.zig"),
+        const tboot_efi_stub_artifact = b.addInstallArtifact(tboot_efi_stub, .{
+            .dest_dir = .{ .override = .{ .custom = "efi" } },
         });
-        tboot_runner.root_module.addImport("clap", clap.module("clap"));
-        const runner_tool = b.addRunArtifact(tboot_runner);
-        runner_tool.step.dependOn(&cpio_archive.step);
-        runner_tool.addArg(@tagName(target.result.cpu.arch));
-        runner_tool.addArg(b.makeTempPath());
-        runner_tool.addArg(if (runner_keydir) |keydir| keydir else "");
-        runner_tool.addFileArg(cpio_archive.source);
-        runner_tool.addArg(if (runner_kernel) |kernel| kernel else "");
-
-        // Extra arguments passed through to qemu. We add our own '--' since
-        // zig-clap will accept variadic extra arguments only after the
-        // '--', which `zig build ...` already excepts.
-        if (b.args) |args| {
-            runner_tool.addArg("--");
-            runner_tool.addArgs(args);
-        }
-
-        const run_step = b.step("run", "Run in qemu");
-        run_step.dependOn(&runner_tool.step);
+        b.getInstallStep().dependOn(&tboot_efi_stub_artifact.step);
     }
+
+    const tboot_runner = b.addExecutable(.{
+        .name = "tboot-runner",
+        .target = b.graph.host,
+        .root_source_file = b.path("src/runner.zig"),
+    });
+    tboot_runner.root_module.addImport("clap", clap);
+    const runner_tool = b.addRunArtifact(tboot_runner);
+    runner_tool.step.dependOn(&initrd_file.step);
+    runner_tool.addArg(@tagName(target.result.cpu.arch));
+    runner_tool.addArg(b.makeTempPath());
+    runner_tool.addArg(if (runner_keydir) |keydir| keydir else "");
+    runner_tool.addFileArg(initrd_file.source);
+    runner_tool.addArg(if (runner_kernel) |kernel| kernel else "");
+
+    // Extra arguments passed through to qemu. We add our own '--' since
+    // zig-clap will accept variadic extra arguments only after the
+    // '--', which `zig build ...` already excepts.
+    if (b.args) |args| {
+        runner_tool.addArg("--");
+        runner_tool.addArgs(args);
+    }
+
+    const run_step = b.step("run", "Run in qemu");
+    run_step.dependOn(&runner_tool.step);
 
     const unit_tests = b.addTest(.{
         .root_source_file = b.path("src/test.zig"),

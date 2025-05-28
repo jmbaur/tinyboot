@@ -1,10 +1,12 @@
+const builtin = @import("builtin");
 const std = @import("std");
 const posix = std.posix;
 const linux = std.os.linux;
-const system = std.posix.system;
 const MS = std.os.linux.MS;
 
 const linux_headers = @import("linux_headers");
+
+const ioctl = std.posix.system.ioctl;
 
 fn mountPseudoFs(
     path: [*:0]const u8,
@@ -78,9 +80,11 @@ fn cfmakeraw(t: *posix.termios) void {
 }
 
 pub const Tty = struct {
-    fd: posix.fd_t,
-    original: posix.termios,
-    winsize: posix.winsize,
+    handle: std.fs.File.Handle,
+    original: ?State = null,
+    mode: ?Mode = null,
+
+    const State = posix.termios;
 
     pub const Mode = enum {
         no_echo,
@@ -88,11 +92,100 @@ pub const Tty = struct {
         file_transfer,
     };
 
+    pub fn init(handle: std.fs.File.Handle) @This() {
+        return .{ .handle = handle };
+    }
+
+    pub fn current(self: *@This()) !State {
+        return try posix.tcgetattr(self.handle);
+    }
+
+    pub fn setMode(self: *@This(), mode: Mode) !void {
+        if (self.original == null) {
+            self.original = try self.current();
+        }
+
+        var termios = self.original.?;
+
+        switch (mode) {
+            .no_echo => {
+                termios.lflag.ECHO = false;
+            },
+            .user_input => {
+                termios.cc[VINTR] = 3; // C-c
+                termios.cc[VQUIT] = 28; // C-\
+                termios.cc[VERASE] = 127; // C-?
+                termios.cc[VKILL] = 21; // C-u
+                termios.cc[VEOF] = 4; // C-d
+                termios.cc[VSTART] = 17; // C-q
+                termios.cc[VSTOP] = 19; // C-s
+                termios.cc[VSUSP] = 26; // C-z
+
+                termios.cflag.CSIZE = .CS8;
+                termios.cflag.CSTOPB = true;
+                termios.cflag.PARENB = true;
+                termios.cflag.PARODD = true;
+                termios.cflag.CREAD = true;
+                termios.cflag.HUPCL = true;
+                termios.cflag.CLOCAL = true;
+
+                // input modes
+                termios.iflag.ICRNL = true;
+                termios.iflag.IXON = true;
+                termios.iflag.IXOFF = true;
+
+                // output modes
+                termios.oflag.OPOST = true;
+                termios.oflag.ONLCR = true;
+
+                // local modes
+                termios.lflag.ISIG = true;
+                termios.lflag.ICANON = true;
+                termios.lflag.ECHO = true;
+                termios.lflag.ECHOE = true;
+                termios.lflag.ECHOK = true;
+                termios.lflag.IEXTEN = true;
+
+                cfmakeraw(&termios);
+
+                setBaudRate(&termios, posix.speed_t.B115200);
+            },
+            .file_transfer => {
+                termios.iflag = .{
+                    .IGNBRK = true,
+                    .IXOFF = true,
+                };
+
+                termios.lflag.ECHO = false;
+                termios.lflag.ICANON = false;
+                termios.lflag.ISIG = false;
+                termios.lflag.IEXTEN = false;
+
+                termios.oflag = .{};
+
+                termios.cflag.PARENB = false;
+                termios.cflag.CSIZE = .CS8;
+                termios.cflag.CREAD = true;
+                termios.cflag.CLOCAL = true;
+
+                // https://www.unixwiz.net/techtips/termios-vmin-vtime.html
+                termios.cc[VMIN] = 0; // allow timeout with zero bytes obtained
+                termios.cc[VTIME] = 50; // 5-second timeout
+
+                setBaudRate(&termios, posix.speed_t.B3000000);
+            },
+        }
+
+        self.setState(termios);
+
+        self.mode = mode;
+    }
+
     pub const ReadError = error{Timeout} || posix.ReadError;
     pub const Reader = std.io.GenericReader(*@This(), ReadError, read);
 
     pub fn read(self: *@This(), buffer: []u8) ReadError!usize {
-        const n_read = try posix.read(self.fd, buffer);
+        const n_read = try posix.read(self.handle, buffer);
 
         if (n_read == 0) {
             return ReadError.Timeout;
@@ -109,125 +202,32 @@ pub const Tty = struct {
     pub const Writer = std.io.GenericWriter(*@This(), WriteError, write);
 
     pub fn write(self: *@This(), bytes: []const u8) WriteError!usize {
-        return try posix.write(self.fd, bytes);
+        return try posix.write(self.handle, bytes);
     }
 
     pub fn writer(self: *@This()) Writer {
         return .{ .context = self };
     }
 
-    pub fn reset(self: *@This()) void {
+    fn setState(self: *@This(), state: State) void {
         // wait until everything is sent
-        _ = linux.tcdrain(self.fd);
+        _ = linux.tcdrain(self.handle);
 
         // flush input queue
-        _ = system.ioctl(self.fd, TCFLSH, TCIOFLUSH);
+        _ = ioctl(self.handle, TCFLSH, TCIOFLUSH);
 
-        posix.tcsetattr(self.fd, posix.TCSA.DRAIN, self.original) catch {};
+        posix.tcsetattr(self.handle, posix.TCSA.DRAIN, state) catch {};
 
         // restart output
-        _ = system.ioctl(self.fd, TCXONC, TCOON);
+        _ = ioctl(self.handle, TCXONC, TCOON);
+    }
+
+    pub fn deinit(self: *@This()) void {
+        if (self.original) |state| {
+            self.setState(state);
+        }
     }
 };
-
-pub fn setupTty(fd: posix.fd_t, mode: Tty.Mode) !Tty {
-    var tty = Tty{
-        .fd = fd,
-        .original = try posix.tcgetattr(fd),
-        .winsize = std.mem.zeroes(posix.winsize),
-    };
-
-    var termios = tty.original;
-
-    switch (mode) {
-        .no_echo => {
-            termios.lflag.ECHO = false;
-        },
-        .user_input => {
-            termios.cc[VINTR] = 3; // C-c
-            termios.cc[VQUIT] = 28; // C-\
-            termios.cc[VERASE] = 127; // C-?
-            termios.cc[VKILL] = 21; // C-u
-            termios.cc[VEOF] = 4; // C-d
-            termios.cc[VSTART] = 17; // C-q
-            termios.cc[VSTOP] = 19; // C-s
-            termios.cc[VSUSP] = 26; // C-z
-
-            termios.cflag.CSIZE = .CS8;
-            termios.cflag.CSTOPB = true;
-            termios.cflag.PARENB = true;
-            termios.cflag.PARODD = true;
-            termios.cflag.CREAD = true;
-            termios.cflag.HUPCL = true;
-            termios.cflag.CLOCAL = true;
-
-            // input modes
-            termios.iflag.ICRNL = true;
-            termios.iflag.IXON = true;
-            termios.iflag.IXOFF = true;
-
-            // output modes
-            termios.oflag.OPOST = true;
-            termios.oflag.ONLCR = true;
-
-            // local modes
-            termios.lflag.ISIG = true;
-            termios.lflag.ICANON = true;
-            termios.lflag.ECHO = true;
-            termios.lflag.ECHOE = true;
-            termios.lflag.ECHOK = true;
-            termios.lflag.IEXTEN = true;
-
-            cfmakeraw(&termios);
-
-            setBaudRate(&termios, posix.speed_t.B115200);
-        },
-        .file_transfer => {
-            termios.iflag = .{
-                .IGNBRK = true,
-                .IXOFF = true,
-            };
-
-            termios.lflag.ECHO = false;
-            termios.lflag.ICANON = false;
-            termios.lflag.ISIG = false;
-            termios.lflag.IEXTEN = false;
-
-            termios.oflag = .{};
-
-            termios.cflag.PARENB = false;
-            termios.cflag.CSIZE = .CS8;
-            termios.cflag.CREAD = true;
-            termios.cflag.CLOCAL = true;
-
-            // https://www.unixwiz.net/techtips/termios-vmin-vtime.html
-            termios.cc[VMIN] = 0; // allow timeout with zero bytes obtained
-            termios.cc[VTIME] = 50; // 5-second timeout
-
-            setBaudRate(&termios, posix.speed_t.B3000000);
-        },
-    }
-
-    // wait until everything is sent
-    _ = linux.tcdrain(fd);
-
-    // flush input queue
-    _ = system.ioctl(fd, TCFLSH, TCIOFLUSH);
-
-    try posix.tcsetattr(fd, posix.TCSA.DRAIN, termios);
-
-    // restart output
-    _ = system.ioctl(fd, TCXONC, TCOON);
-
-    const err = posix.system.ioctl(fd, posix.T.IOCGWINSZ, @intFromPtr(&tty.winsize));
-    if ((posix.errno(err) != .SUCCESS) or (tty.winsize.row == 0 and tty.winsize.col == 0)) {
-        std.log.debug("failed to determine terminal size; using conservative guess 80x25", .{});
-        tty.winsize.col = 80;
-        tty.winsize.row = 25;
-    }
-
-    return tty;
-}
 
 // These aren't defined in the UAPI linux headers for some odd reason.
 const SYSLOG_ACTION_READ_ALL = 3;
@@ -242,12 +242,12 @@ pub fn printKernelLogs(
     filter: u3,
     writer: std.io.AnyWriter,
 ) !void {
-    const bytes_available = std.os.linux.syscall3(system.SYS.syslog, SYSLOG_ACTION_UNREAD, 0, 0);
+    const bytes_available = std.os.linux.syscall3(.syslog, SYSLOG_ACTION_UNREAD, 0, 0);
     const buf = try allocator.alloc(u8, bytes_available);
     defer allocator.free(buf);
 
     switch (posix.errno(std.os.linux.syscall3(
-        system.SYS.syslog,
+        .syslog,
         SYSLOG_ACTION_READ_ALL,
         @intFromPtr(buf.ptr),
         buf.len,
@@ -277,7 +277,7 @@ pub fn printKernelLogs(
 
 pub fn setConsole(toggle: enum { on, off }) !void {
     switch (posix.errno(std.os.linux.syscall3(
-        system.SYS.syslog,
+        .syslog,
         switch (toggle) {
             .on => SYSLOG_ACTION_CONSOLE_ON,
             .off => SYSLOG_ACTION_CONSOLE_OFF,

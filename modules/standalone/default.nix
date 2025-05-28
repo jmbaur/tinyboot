@@ -112,16 +112,14 @@ in
   config = {
     linux.kconfig.CMDLINE = kernel.freeform (
       toString (
-        [
-          "printk.devkmsg=on"
-          "loglevel=${if config.debug then "7" else "4"}"
-        ]
+        [ "printk.devkmsg=on" ]
+        ++ optionals config.debug [ "debug" ]
         ++ map (c: "console=${c}") config.linux.consoles
       )
     );
 
     build = {
-      initrd = pkgs.tinybootLoader.override { firmwareDirectory = config.linux.firmware; };
+      initrd = pkgs.tinyboot.override { firmwareDirectory = config.linux.firmware; };
       linux = config.linux.package;
     };
   };

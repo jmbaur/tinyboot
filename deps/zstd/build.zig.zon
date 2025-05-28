@@ -1,0 +1,11 @@
+.{
+    .name = .zstd,
+    .version = "1.5.7",
+    .paths = .{"build.zig"},
+    .dependencies = .{
+        .zstd = .{
+            .url = "https://github.com/facebook/zstd/archive/v1.5.7.tar.gz",
+            .hash = "N-V-__8AAPZ7fwBg4JoCzM_0o2A8wxH2hsUUeiU1iuZv53L5",
+        },
+    },
+}

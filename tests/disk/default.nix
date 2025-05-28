@@ -1,6 +1,6 @@
 {
   testers,
-  tinybootTools,
+  tinyboot,
   runCommand,
 }:
 
@@ -26,12 +26,11 @@ testers.runNixOSTest {
   testScript =
     { nodes, ... }:
     let
-      testArtifacts = runCommand "tinyboot-test-artifacts" { nativeBuildInputs = [ tinybootTools ]; } ''
-        mkdir -p $out; pushd $out
-        tboot-keygen --common-name test --organization org.tboot -c US
+      testArtifacts = runCommand "tinyboot-test-artifacts" { nativeBuildInputs = [ tinyboot ]; } ''
+        tboot-keygen --common-name test --organization org.tboot --country US
         tboot-sign --private-key tboot-private.pem --certificate tboot-certificate.pem ${nodes.machine.system.build.kernel}/${nodes.machine.system.boot.loader.kernelFile} kernel.signed
         tboot-sign --private-key tboot-private.pem --certificate tboot-certificate.pem ${nodes.machine.system.build.initialRamdisk}/${nodes.machine.system.boot.loader.initrdFile} initrd.signed
-        popd
+        install -Dm0444 -t $out *.der *.pem *.signed
       '';
     in
     ''

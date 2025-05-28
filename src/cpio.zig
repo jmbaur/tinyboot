@@ -275,8 +275,6 @@ pub fn walkDirectory(
     const full_directory_path = try directory.realpath(".", &fullpath_buf);
     const directory_path = try std.fs.path.relative(arena.allocator(), starting_directory, full_directory_path);
 
-    std.log.debug("walking directory {s}", .{full_directory_path});
-
     // We don't need to add the root directory, as it will already exist.
     if (!std.mem.eql(u8, directory_path, "")) {
         // Before iterating through the directory, add the directory itself to

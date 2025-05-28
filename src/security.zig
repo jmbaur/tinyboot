@@ -1,7 +1,6 @@
 const std = @import("std");
 const base64 = std.base64.standard;
 const posix = std.posix;
-const system = std.posix.system;
 
 const kexec_file_load_available = @import("./kexec/kexec.zig").kexec_file_load_available;
 
@@ -207,7 +206,7 @@ fn addKeyring(name: [*:0]const u8, key_serial: KeySerial) !usize {
     const key_content: ?[*:0]const u8 = null;
 
     const rc = std.os.linux.syscall5(
-        system.SYS.add_key,
+        .add_key,
         @intFromPtr(key_type),
         @intFromPtr(name),
         @intFromPtr(key_content),
@@ -232,7 +231,7 @@ fn addKey(keyring_id: usize, key_content: []const u8) !usize {
 
     // see https://github.com/torvalds/linux/blob/59f3fd30af355dc893e6df9ccb43ace0b9033faa/security/keys/keyctl.c#L74
     const rc = std.os.linux.syscall5(
-        system.SYS.add_key,
+        .add_key,
         @intFromPtr(key_type),
         @intFromPtr(key_desc),
         @intFromPtr(key_content.ptr),

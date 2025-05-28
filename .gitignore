@@ -1,7 +1,9 @@
+*.der
 *.iso
+*.pem
 *.qcow2
 .nixos-test-history
-/.direnv
 .zig-cache
-zig-out
+/.direnv
 result*
+zig-out

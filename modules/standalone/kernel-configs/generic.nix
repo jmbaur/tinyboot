@@ -36,7 +36,7 @@
     FUTEX = yes;
     FW_LOADER = yes;
     FW_LOADER_COMPRESS = yes;
-    FW_LOADER_COMPRESS_XZ = yes;
+    FW_LOADER_COMPRESS_ZSTD = yes;
     GPIOLIB = yes;
     HAS_IOMEM = yes;
     HID = yes;
@@ -72,7 +72,7 @@
     PM_SLEEP_SMP = yes;
     PRINTK = yes;
     PROC_FS = yes;
-    RD_XZ = yes;
+    RD_ZSTD = yes;
     RELOCATABLE = lib.mkIf pkgs.stdenv.hostPlatform.is64bit yes; # allows for this kernel itself to be kexec'ed
     RTC_CLASS = yes;
     SCSI = yes;
