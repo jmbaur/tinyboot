@@ -119,6 +119,7 @@ fn init(is_pid1: bool) !TbootLoader {
 // the timer, we go immediately into user input mode.
 fn userInputModeTransition(self: *TbootLoader) !void {
     try posix.epoll_ctl(self.epoll, std.os.linux.EPOLL.CTL_DEL, self.timer, null);
+    try self.console.tty.setMode(.user_input);
     self.state = .user_input;
 
     // Going into user input mode also means that we need to turn off the
@@ -137,7 +138,6 @@ fn handleConsoleInput(self: *TbootLoader) !?posix.RebootCommand {
         // Transition into user input mode if we aren't
         // already there.
         try self.userInputModeTransition();
-        try self.console.tty.setMode(.user_input);
         self.console.prompt();
     }
 
