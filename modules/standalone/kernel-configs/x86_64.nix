@@ -10,6 +10,7 @@
       ACPI_WMI = yes;
       ATA_ACPI = yes;
       CMDLINE_BOOL = yes;
+      CMDLINE_OVERRIDE = yes;
       CPU_MITIGATIONS = yes;
       CPU_SUP_AMD = yes;
       CRYPTO_SHA256_SSSE3 = yes;

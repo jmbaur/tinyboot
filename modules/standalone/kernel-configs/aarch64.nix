@@ -31,7 +31,7 @@
       ARM_SCPI_PROTOCOL = yes;
       ARM_SMMU = yes;
       ARM_SMMU_V3 = yes;
-      CMDLINE_FROM_BOOTLOADER = yes;
+      CMDLINE_FORCE = yes;
       CPU_FREQ = yes;
       CPU_IDLE = yes;
       CRYPTO_SHA256_ARM64 = yes;

@@ -3,8 +3,8 @@
   linux.kconfig = lib.mkIf pkgs.stdenv.hostPlatform.isAarch32 (
     with lib.kernel;
     {
-      USE_OF = yes;
       ARCH_MULTI_V7 = yes;
+      CMDLINE_FORCE = yes;
       OF = yes;
       OF_ADDRESS = yes;
       OF_EARLY_FLATTREE = yes;
@@ -14,6 +14,7 @@
       OF_RESERVED_MEM = yes;
       SERIAL_8250 = yes;
       SERIAL_OF_PLATFORM = yes;
+      USE_OF = yes;
 
       #
       ARCH_ACTIONS = yes;
