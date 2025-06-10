@@ -43,7 +43,7 @@ in
         message = "Bootloader install program depends on bootspec";
       }
     ];
-    boot.kernelPatches = optionals false [
+    boot.kernelPatches = [
       {
         name = "enable-ima";
         patch = null;
