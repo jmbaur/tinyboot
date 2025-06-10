@@ -21,6 +21,14 @@ var log_buf: [PRINTKRB_RECORD_MAX]u8 = undefined;
 var stream = std.io.fixedBufferStream(&log_buf);
 
 pub fn init() !void {
+    const printk_devkmsg = try std.fs.cwd().openFile(
+        "/proc/sys/kernel/printk_devkmsg",
+        .{ .mode = .write_only },
+    );
+    defer printk_devkmsg.close();
+
+    printk_devkmsg.writer().writeAll("on\n") catch {};
+
     kmsg = try std.fs.cwd().openFile(KMSG, .{ .mode = .write_only });
 }
 

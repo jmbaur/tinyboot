@@ -76,7 +76,7 @@ pub fn main() !void {
 
     try qemu_args.appendSlice(&.{ "-machine", switch (arch) {
         .aarch64, .arm => "virt",
-        .x86_64 => "q35",
+        .x86_64 => "pc",
         else => return error.UnknownArchitecture,
     } });
 

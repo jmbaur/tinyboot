@@ -39,6 +39,7 @@ fn waitForKexecKernelLoaded() !void {
 
     var time_slept: usize = 0;
     while (time_slept < 10 * std.time.ns_per_s) : (time_slept += std.time.ns_per_s) {
+        std.log.debug("waiting for kexec load to finish", .{});
         try f.seekTo(0);
 
         if (try f.reader().readByte() == '1') {
@@ -125,7 +126,7 @@ pub fn kexecUnload() !void {
     );
 
     return switch (posix.errno(rc)) {
-        .SUCESS => {},
+        .SUCCESS => {},
         else => |err| return posix.unexpectedErrno(err),
     };
 }
@@ -162,7 +163,11 @@ pub fn kexec(
     const linux = try std.fs.cwd().openFile("/tinyboot/kernel", .{});
     defer linux.close();
 
-    const initrd: ?std.fs.File = if (initrd_filepath != null) try std.fs.cwd().openFile("/tinyboot/initrd", .{}) else null;
+    const initrd: ?std.fs.File = if (initrd_filepath != null)
+        try std.fs.cwd().openFile("/tinyboot/initrd", .{})
+    else
+        null;
+
     defer {
         if (initrd) |initrd_| {
             initrd_.close();

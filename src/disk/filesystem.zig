@@ -11,10 +11,7 @@ pub const Type = enum {
     /// Returns the filesystem type detected from a collection of bytes.
     pub fn detect(source: *std.io.StreamSource) !?@This() {
         try source.seekTo(vfat_signature_offset);
-        var signature: [2]u8 = undefined;
-        _ = try source.read(&signature);
-
-        if (std.mem.eql(u8, &signature, &vfat_signature)) {
+        if (try source.reader().readByte() == vfat_signature[0] and try source.reader().readByte() == vfat_signature[1]) {
             return .Vfat;
         }
 
