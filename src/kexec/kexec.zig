@@ -86,7 +86,7 @@ fn kexecFileLoad(
         flags,
     );
 
-    switch (posix.errno(rc)) {
+    switch (std.os.linux.E.init(rc)) {
         .SUCCESS => {},
         // IMA appraisal failed
         .ACCES => return error.PermissionDenied,
@@ -125,7 +125,7 @@ pub fn kexecUnload() !void {
         0,
     );
 
-    return switch (posix.errno(rc)) {
+    return switch (std.os.linux.E.init(rc)) {
         .SUCCESS => {},
         else => |err| return posix.unexpectedErrno(err),
     };

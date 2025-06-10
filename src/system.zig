@@ -15,7 +15,7 @@ fn mountPseudoFs(
 ) !void {
     const rc = linux.mount(fstype, path, fstype, flags, 0);
 
-    switch (posix.errno(rc)) {
+    switch (linux.E.init(rc)) {
         .SUCCESS => {},
         else => |err| return posix.unexpectedErrno(err),
     }
@@ -246,7 +246,7 @@ pub fn printKernelLogs(
     const buf = try allocator.alloc(u8, bytes_available);
     defer allocator.free(buf);
 
-    switch (posix.errno(std.os.linux.syscall3(
+    switch (linux.E.init(std.os.linux.syscall3(
         .syslog,
         SYSLOG_ACTION_READ_ALL,
         @intFromPtr(buf.ptr),
@@ -276,7 +276,7 @@ pub fn printKernelLogs(
 }
 
 pub fn setConsole(toggle: enum { on, off }) !void {
-    switch (posix.errno(std.os.linux.syscall3(
+    switch (std.os.linux.E.init(std.os.linux.syscall3(
         .syslog,
         switch (toggle) {
             .on => SYSLOG_ACTION_CONSOLE_ON,

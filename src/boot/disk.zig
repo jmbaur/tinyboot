@@ -253,7 +253,7 @@ fn mount(self: *DiskBootLoader, fstype: Filesystem.Type, path: []const u8) !void
     const what = try self.arena.allocator().dupeZ(u8, tmp_what);
     defer self.arena.allocator().free(what);
 
-    switch (posix.errno(std.os.linux.mount(
+    switch (std.os.linux.E.init(std.os.linux.mount(
         what,
         where,
         switch (fstype) {

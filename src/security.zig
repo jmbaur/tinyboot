@@ -214,7 +214,7 @@ fn addKeyring(name: [*:0]const u8, key_serial: KeySerial) !usize {
         @as(u32, @bitCast(keyring)),
     );
 
-    switch (posix.errno(rc)) {
+    switch (std.os.linux.E.init(rc)) {
         .SUCCESS => {
             return rc;
         },
@@ -239,7 +239,7 @@ fn addKey(keyring_id: usize, key_content: []const u8) !usize {
         keyring_id,
     );
 
-    switch (posix.errno(rc)) {
+    switch (std.os.linux.E.init(rc)) {
         .SUCCESS => {
             return rc;
         },

@@ -252,7 +252,7 @@ pub fn kexecLoad(
         linux_headers.KEXEC_ARCH_DEFAULT,
     );
 
-    return switch (posix.errno(rc)) {
+    return switch (std.os.linux.E.init(rc)) {
         .SUCCESS => {},
         else => |err| posix.unexpectedErrno(err),
     };

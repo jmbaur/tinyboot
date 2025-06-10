@@ -190,7 +190,7 @@ fn mknod(self: *DeviceWatcher, node_type: NodeType, major: u32, minor: u32) !voi
         makedev(major, minor),
     );
 
-    switch (posix.errno(rc)) {
+    switch (std.os.linux.E.init(rc)) {
         .SUCCESS => {},
         .EXIST => {},
         else => |err| return posix.unexpectedErrno(err),
