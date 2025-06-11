@@ -1,6 +1,6 @@
 const std = @import("std");
 
-pub fn pathExists(d: *std.fs.Dir, p: []const u8) bool {
+pub fn pathExists(d: *const std.fs.Dir, p: []const u8) bool {
     d.access(p, .{}) catch {
         return false;
     };
@@ -9,11 +9,7 @@ pub fn pathExists(d: *std.fs.Dir, p: []const u8) bool {
 }
 
 pub fn absolutePathExists(p: []const u8) bool {
-    std.fs.cwd().access(p, .{}) catch {
-        return false;
-    };
-
-    return true;
+    return pathExists(&std.fs.cwd(), p);
 }
 
 pub fn enumFromStr(T: anytype, value: []const u8) !T {
@@ -24,4 +20,17 @@ pub fn enumFromStr(T: anytype, value: []const u8) !T {
     }
 
     return error.NotFound;
+}
+
+pub fn dumpFile(writer: std.io.AnyWriter, path: []const u8) !void {
+    const file = try std.fs.cwd().openFile(path, .{});
+    defer file.close();
+
+    while (true) {
+        file.reader().streamUntilDelimiter(writer, '\n', null) catch |err| switch (err) {
+            error.EndOfStream => break,
+            else => return err,
+        };
+        try writer.writeByte('\n');
+    }
 }

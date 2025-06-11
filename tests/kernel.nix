@@ -18,18 +18,20 @@ linuxKernel.manualConfig {
       flex
       bison
     ];
-    extraConfig = 
+    extraConfig =
       (builtins.readFile ../doc/required.config)
       + ''
         CONFIG_64BIT=y
-        CONFIG_VIRTIO_MENU=y
-        CONFIG_VIRTIO_BLK=y
         CONFIG_FW_CFG_SYSFS=y
-        CONFIG_SCSI_VIRTIO=y
-        CONFIG_SCSI=y
         CONFIG_PCI=y
-        CONFIG_VIRTIO_PCI=y
+        CONFIG_SCSI=y
+        CONFIG_SCSI_VIRTIO=y
+        CONFIG_TCG_TIS=y
+        CONFIG_TCG_TPM=y
+        CONFIG_VIRTIO_BLK=y
         CONFIG_VIRTIO_CONSOLE=y
+        CONFIG_VIRTIO_MENU=y
+        CONFIG_VIRTIO_PCI=y
       ''
       + lib.optionalString stdenv.hostPlatform.isx86_64 ''
         CONFIG_ACPI=y

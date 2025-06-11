@@ -6,6 +6,7 @@ const builtin = @import("builtin");
 
 const BootLoader = @import("./boot/bootloader.zig");
 const system = @import("./system.zig");
+const utils = @import("./utils.zig");
 
 const ack = std.ascii.control_code.ack;
 const bel = std.ascii.control_code.bel;
@@ -786,6 +787,7 @@ pub const Command = struct {
         poweroff,
         reboot,
         select,
+        info,
     };
 
     const Context = enum {
@@ -1013,6 +1015,50 @@ pub const Command = struct {
             }
 
             return error.NotFound;
+        }
+    };
+
+    const info = struct {
+        const short_help = "show machine info";
+        const long_help =
+            \\Show machine info.
+            \\
+            \\Usage:
+            \\info
+        ;
+
+        fn run(console: *Console, args: *ArgsIterator, boot_loaders: []*BootLoader) !?Event {
+            _ = console;
+            _ = args;
+            _ = boot_loaders;
+
+            try utils.dumpFile(out.writer().any(), "/proc/version");
+
+            print("\nInit:\n", .{});
+            try utils.dumpFile(out.writer().any(), "/proc/1/stat");
+
+            // According to https://github.com/torvalds/linux/blob/aef17cb3d3c43854002956f24c24ec8e1a0e3546/Documentation/admin-guide/devices.txt,
+            // the first TPM will be at major number 10, minor number 224, and
+            // since the minor numbers are incremented for each following
+            // device, we have at least one TPM if this path exists.
+            print("\nTPM: {s}\n", .{if (utils.absolutePathExists("/dev/char/10:224")) "yes" else "no"});
+
+            print("\nKeys:\n", .{});
+            utils.dumpFile(out.writer().any(), "/proc/keys") catch {
+                print("?\n",.{});
+            };
+
+            print("\nMTD:\n", .{});
+            utils.dumpFile(out.writer().any(), "/proc/mtd") catch {
+                print("?\n", .{});
+            };
+
+            print("\nPartitions:\n", .{});
+            utils.dumpFile(out.writer().any(), "/proc/partitions") catch {
+                print("?\n", .{});
+            };
+
+            return null;
         }
     };
 
