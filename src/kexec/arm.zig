@@ -1,3 +1,4 @@
+const builtin = @import("builtin");
 const std = @import("std");
 const posix = std.posix;
 
@@ -213,6 +214,17 @@ pub fn kexecLoad(
 
             try fdt.upsertU32Property("/chosen/linux,initrd-start", initrd_start);
             try fdt.upsertU32Property("/chosen/linux,initrd-end", initrd_end);
+
+            // Insert KASLR seed if a hardware RNG is available
+            if (std.fs.cwd().openFile("/dev/char/10:183", .{})) |hwrng| {
+                defer hwrng.close();
+
+                const seed = try hwrng.reader().readInt(u64, builtin.cpu.arch.endian);
+                try fdt.upsertU64Property("/chosen/kaslr-seed", seed);
+            } else |err| {
+                std.log.warn("unable to add KASLR seed: {}", .{err});
+            }
+
             try addSegment(&segments, page_size, initrd_buf.?, initrd_buf.?.len, initrd_base, initrd_buf.?.len);
             break :b initrd_buf.?.len;
         } else break :b 0;
