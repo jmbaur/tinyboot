@@ -7,7 +7,10 @@
     inputs:
     let
       inherit (inputs.nixpkgs.lib)
+        attrNames
+        filter
         genAttrs
+        listToAttrs
         mapAttrs
         ;
     in
@@ -21,7 +24,7 @@
         tinyboot = final.callPackage ./package.nix { };
       });
 
-      legacyPackages = genAttrs [ "armv7l-linux" "aarch64-linux" "x86_64-linux" ] (
+      legacyPackages = genAttrs [ "riscv64-linux" "armv7l-linux" "aarch64-linux" "x86_64-linux" ] (
         system:
         import inputs.nixpkgs {
           inherit system;
@@ -44,22 +47,33 @@
       }) inputs.self.legacyPackages;
 
       checks = mapAttrs (
-        _: pkgs:
-        let
-          cross =
-            {
-              "x86_64-linux" = "gnu64";
-              "aarch64-linux" = "aarch64-multiplatform";
-              "armv7l-linux" = "armv7l-hf-multiplatform";
-            }
-            .${pkgs.stdenv.hostPlatform.system};
-        in
+        system: pkgs:
         {
           disk = pkgs.callPackage ./tests/disk { };
           ymodem = pkgs.callPackage ./tests/ymodem { };
-          tinyboot = pkgs.tinyboot;
-          tinybootCross = pkgs.pkgsCross.${cross}.tinyboot;
+          tinybootNative = pkgs.tinyboot;
         }
+        // listToAttrs (
+          map (
+            system:
+            let
+              pkgs' =
+                pkgs.pkgsCross.${
+                  {
+                    "riscv64-linux" = "riscv64";
+                    "x86_64-linux" = "gnu64";
+                    "aarch64-linux" = "aarch64-multiplatform";
+                    "armv7l-linux" = "armv7l-hf-multiplatform";
+                  }
+                  .${system}
+                };
+            in
+            {
+              name = "tinybootCross-${pkgs'.stdenv.hostPlatform.qemuArch}";
+              value = pkgs'.tinyboot;
+            }
+          ) (filter (s: s != system) (attrNames inputs.self.legacyPackages))
+        )
       ) inputs.self.legacyPackages;
 
       hydraJobs = inputs.self.checks;
