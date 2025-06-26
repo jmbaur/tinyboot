@@ -38,7 +38,7 @@ pub fn build(b: *std.Build) !void {
 
     const linux_target = b: {
         var linux_target = target.query;
-        linux_target.abi = .musl;
+        linux_target.abi = null;
         linux_target.os_tag = .linux;
         break :b b.resolveTargetQuery(linux_target);
     };

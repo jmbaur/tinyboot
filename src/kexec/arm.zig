@@ -219,7 +219,7 @@ pub fn kexecLoad(
             if (std.fs.cwd().openFile("/dev/char/10:183", .{})) |hwrng| {
                 defer hwrng.close();
 
-                const seed = try hwrng.reader().readInt(u64, builtin.cpu.arch.endian);
+                const seed = try hwrng.reader().readInt(u64, builtin.cpu.arch.endian());
                 try fdt.upsertU64Property("/chosen/kaslr-seed", seed);
             } else |err| {
                 std.log.warn("unable to add KASLR seed: {}", .{err});
