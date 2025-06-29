@@ -34,3 +34,20 @@ pub fn dumpFile(writer: std.io.AnyWriter, path: []const u8) !void {
         try writer.writeByte('\n');
     }
 }
+
+pub fn realpathAllocMany(
+    dir: std.fs.Dir,
+    allocator: std.mem.Allocator,
+    path_options: []const []const u8,
+) ![]u8 {
+    for (path_options) |path| {
+        const fullpath = dir.realpathAlloc(allocator, path) catch |err| switch (err) {
+            error.FileNotFound => continue,
+            else => return err,
+        };
+
+        return fullpath;
+    }
+
+    return error.FileNotFound;
+}

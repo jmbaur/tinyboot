@@ -6,6 +6,7 @@ const Device = @import("../device.zig");
 const TmpDir = @import("../tmpdir.zig");
 const system = @import("../system.zig");
 const ymodem = @import("../ymodem.zig");
+const utils = @import("../utils.zig");
 
 const linux_headers = @import("linux_headers");
 
@@ -120,34 +121,45 @@ pub fn probe(self: *YmodemBootLoader, entries: *std.ArrayList(BootLoader.Entry),
         try ymodem.recv(&tty, tmpdir.dir);
     }
 
-    var params_file = try tmpdir.dir.openFile("params", .{});
-    defer params_file.close();
-
-    const kernel_params_bytes = try params_file.readToEndAlloc(
+    const linux = try utils.realpathAllocMany(
+        tmpdir.dir,
         allocator,
-        linux_headers.COMMAND_LINE_SIZE,
+        &.{ "linux", "kernel" },
     );
 
-    const kernel_params = std.mem.trim(u8, kernel_params_bytes, &std.ascii.whitespace);
+    const initrd: ?[]const u8 = b: {
+        break :b utils.realpathAllocMany(
+            tmpdir.dir,
+            allocator,
+            &.{ "initrd", "initramfs" },
+        ) catch |err| switch (err) {
+            error.FileNotFound => break :b null,
+            else => return err,
+        };
+    };
 
-    const linux = try tmpdir.dir.realpathAlloc(allocator, "linux");
-    const initrd = b: {
-        if (tmpdir.dir.realpathAlloc(allocator, "initrd")) |initrd| {
-            break :b initrd;
-        } else |err| {
-            if (err == error.FileNotFound) {
-                break :b null;
-            } else {
-                return err;
-            }
-        }
+    const cmdline: ?[]const u8 = b: {
+        const fullpath = utils.realpathAllocMany(
+            tmpdir.dir,
+            allocator,
+            &.{ "kernel-params", "params", "options" },
+        ) catch |err| switch (err) {
+            error.FileNotFound => break :b null,
+            else => return err,
+        };
+
+        const cmdline_file = try tmpdir.dir.openFile(fullpath, .{});
+        defer cmdline_file.close();
+
+        const cmdline_bytes = try cmdline_file.readToEndAlloc(allocator, linux_headers.COMMAND_LINE_SIZE);
+        break :b std.mem.trim(u8, cmdline_bytes, &std.ascii.whitespace);
     };
 
     try entries.append(.{
         .context = try allocator.create(struct {}),
         .linux = linux,
         .initrd = initrd,
-        .cmdline = if (kernel_params.len > 0) kernel_params else null,
+        .cmdline = cmdline,
     });
 }
 

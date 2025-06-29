@@ -52,7 +52,7 @@ pub fn send(
     parent_node: *Progress.Node,
     tty: *system.Tty,
     opts: ?struct {
-        filename: []const u8,
+        name: []const u8,
         file: std.fs.File,
     },
 ) !void {
@@ -60,12 +60,12 @@ pub fn send(
 
     std.log.debug("waiting for receiver ping", .{});
 
-    while (true) {
-        if (try reader.readByte() == CRC) {
-            break;
-        } else {
-            return error.IllegalByte;
-        }
+    while (try reader.readByte() != CRC) {
+        // The receiver might send invalid bytes, but this could just be
+        // something as innocuous as keyboard input during setup of the ymodem
+        // client. We should be forgiving to this input, and continue with
+        // sending the file once we receive a valid receiver ping.
+        std.log.debug("got invalid receiver ping", .{});
     }
 
     if (opts == null) {
@@ -82,14 +82,14 @@ pub fn send(
 
     std.debug.assert(opts != null);
     const file = opts.?.file;
-    const filename = opts.?.filename;
+    const name = opts.?.name;
 
     try file.seekTo(0);
 
     const stat = try file.stat();
-    const file_size: usize = @intCast(stat.size);
+    const size: usize = @intCast(stat.size);
 
-    var file_node = parent_node.start(filename, file_size / 1024);
+    var file_node = parent_node.start(name, size / 1024);
     defer file_node.end();
 
     {
@@ -97,7 +97,7 @@ pub fn send(
         _ = try std.fmt.bufPrint(
             &payload,
             "{s}{c}{d}{c}",
-            .{ filename, 0x0, file_size, 0x20 },
+            .{ name, 0x0, size, 0x20 },
         );
         var chunk: Chunk128 = .{
             .block = 0,
@@ -418,7 +418,10 @@ pub fn main() !void {
 
     try tty.setMode(.file_transfer);
 
-    var dir = try std.fs.cwd().openDir(res.args.directory.?, .{});
+    var dir = try std.fs.cwd().openDir(
+        res.args.directory.?,
+        .{ .iterate = true },
+    );
     defer dir.close();
 
     const action = res.positionals[0].?;
@@ -428,27 +431,22 @@ pub fn main() !void {
             var progress = Progress.start(.{ .root_name = "ymodem" });
             defer progress.end();
 
-            const files_to_send = [_][]const u8{ "linux", "initrd", "params" };
-            for (files_to_send) |filename| {
-                var file = dir.openFile(filename, .{}) catch |err| {
-                    if (err == error.FileNotFound and std.mem.eql(u8, filename, "initrd")) {
-                        continue;
-                    } else {
-                        return err;
-                    }
-                };
+            var iter = dir.iterate();
+
+            while (try iter.next()) |entry| {
+                if (entry.kind != .file and entry.kind != .sym_link) {
+                    continue;
+                }
+
+                const file = try dir.openFile(entry.name, .{});
                 defer file.close();
 
-                std.log.debug("sending file '{s}'", .{filename});
+                std.log.debug("sending file '{s}'", .{entry.name});
 
-                try send(
-                    &progress,
-                    &tty,
-                    .{
-                        .filename = filename,
-                        .file = file,
-                    },
-                );
+                try send(&progress, &tty, .{
+                    .name = entry.name,
+                    .file = file,
+                });
             }
 
             try send(&progress, &tty, null);
