@@ -67,6 +67,7 @@ pub const Subsystem = enum {
     mtd,
     net,
     rtc,
+    tpm,
     tty,
     watchdog,
 
