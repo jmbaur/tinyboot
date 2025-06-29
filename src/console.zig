@@ -1045,7 +1045,7 @@ pub const Command = struct {
 
             print("\nKeys:\n", .{});
             utils.dumpFile(out.writer().any(), "/proc/keys") catch {
-                print("?\n",.{});
+                print("?\n", .{});
             };
 
             print("\nMTD:\n", .{});
