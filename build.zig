@@ -260,7 +260,7 @@ pub fn build(b: *std.Build) !void {
     runner_tool.addArg(b.makeTempPath());
     runner_tool.addArg(if (runner_keydir) |keydir| keydir else "");
     runner_tool.addFileArg(initrd_file.source);
-    runner_tool.addArg(if (runner_kernel) |kernel| kernel else "");
+    runner_tool.addArg(if (runner_kernel) |kernel| try std.fs.cwd().realpathAlloc(b.allocator, kernel) else "");
 
     // Extra arguments passed through to qemu. We add our own '--' since
     // zig-clap will accept variadic extra arguments only after the
