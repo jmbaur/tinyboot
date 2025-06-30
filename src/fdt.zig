@@ -762,12 +762,56 @@ pub fn main() !void {
             .Prop => |prop| {
                 const prop_name = try fdt.getString(prop.inner.name_offset);
                 try stdout.writeByteNTimes('\t', depth);
-                try stdout.print("{s}={x}\n", .{ prop_name, prop.value });
+                try stdout.print("{s}=", .{prop_name});
+                try printValue(stdout, prop.value);
+                try stdout.print("\n", .{});
             },
         }
 
         node = node.next orelse return error.InvalidFdt;
     }
+}
+
+fn printValue(writer: anytype, value: []const u8) !void {
+    if (value.len == 0) {
+        try writer.print("true", .{});
+        return;
+    }
+
+    if (value[0] != 0 and value[value.len - 1] == 0) {
+        var is_stringlike = true;
+
+        var split = std.mem.splitScalar(u8, value[0 .. value.len - 1], 0);
+
+        while (split.next()) |maybe_string| {
+            for (maybe_string) |byte| {
+                if (!std.ascii.isPrint(byte)) {
+                    is_stringlike = false;
+                    break;
+                }
+            }
+        }
+
+        if (is_stringlike) {
+            split.reset();
+            while (split.next()) |string| {
+                try writer.print("{s} ", .{string});
+            }
+            return;
+        }
+    }
+
+    if (@mod(value.len, 4) == 0) {
+        var window = std.mem.window(u8, value, 4, 4);
+        while (window.next()) |next| {
+            var arr: [@sizeOf(u32)]u8 = undefined;
+            @memcpy(&arr, next);
+            try writer.print("0x{x:0>8} ", .{std.mem.readInt(u32, &arr, .big)});
+        }
+        return;
+    }
+
+    try writer.print("{x}", .{value});
 }
 
 // /dts-v1/;
