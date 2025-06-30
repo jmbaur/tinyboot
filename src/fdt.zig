@@ -306,7 +306,7 @@ fn _findProperty(
     }
 }
 
-fn getString(self: *@This(), offset: u32) ![]const u8 {
+pub fn getString(self: *@This(), offset: u32) ![]const u8 {
     const start = self.strings.items[offset..];
     for (start, 0..) |char, i| {
         if (char == 0) {
@@ -772,7 +772,7 @@ pub fn main() !void {
     }
 }
 
-fn printValue(writer: anytype, value: []const u8) !void {
+pub fn printValue(writer: anytype, value: []const u8) !void {
     if (value.len == 0) {
         try writer.print("true", .{});
         return;
