@@ -712,66 +712,6 @@ pub fn save(self: *@This(), writer: anytype) !void {
     try writer.writeAll(self.strings.items);
 }
 
-// Outputs a simple representation of the FDT heirarchy, including the raw
-// values of each property. Output is not valid DeviceTree source and is only
-// intended to be a debug tool, not a replacement for the `dtc` tool.
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer {
-        _ = gpa.deinit();
-    }
-
-    var args = try std.process.argsWithAllocator(gpa.allocator());
-    defer args.deinit();
-
-    _ = args.next() orelse return error.InvalidArgument; // skip argv[0]
-    const dtb_filepath = args.next() orelse return error.InvalidArgument;
-
-    const dtb_file = try std.fs.cwd().openFile(dtb_filepath, .{});
-    defer dtb_file.close();
-
-    var stream = std.io.StreamSource{ .file = dtb_file };
-
-    var fdt = try Fdt.init(&stream, gpa.allocator());
-    defer fdt.deinit();
-
-    var stdout_ = std.io.bufferedWriter(std.io.getStdOut().writer());
-    defer stdout_.flush() catch {};
-    var stdout = stdout_.writer();
-
-    var node = fdt.list.first orelse return error.InvalidFdt;
-
-    var depth: usize = 0;
-
-    while (true) {
-        switch (node.data) {
-            .Nop => {},
-            .BeginNode => |node_name| {
-                if (node_name.len != 0) {
-                    try stdout.writeByte('\n');
-                    try stdout.writeByteNTimes('\t', depth);
-                    try stdout.print("{s}:\n", .{node_name});
-
-                    depth += 1;
-                }
-            },
-            .EndNode => {
-                depth -%= 1;
-            },
-            .End => break,
-            .Prop => |prop| {
-                const prop_name = try fdt.getString(prop.inner.name_offset);
-                try stdout.writeByteNTimes('\t', depth);
-                try stdout.print("{s}=", .{prop_name});
-                try printValue(stdout, prop.value);
-                try stdout.print("\n", .{});
-            },
-        }
-
-        node = node.next orelse return error.InvalidFdt;
-    }
-}
-
 pub fn printValue(writer: anytype, value: []const u8) !void {
     if (value.len == 0) {
         try writer.print("true", .{});

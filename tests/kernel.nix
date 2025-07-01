@@ -23,6 +23,7 @@ linuxKernel.manualConfig {
       + ''
         CONFIG_64BIT=y
         CONFIG_FW_CFG_SYSFS=y
+        CONFIG_IKCONFIG=y
         CONFIG_PCI=y
         CONFIG_SCSI=y
         CONFIG_SCSI_VIRTIO=y
@@ -42,11 +43,11 @@ linuxKernel.manualConfig {
         CONFIG_SERIAL_8250_CONSOLE=y
       ''
       + lib.optionalString stdenv.hostPlatform.isAarch64 ''
-        ARM_SCMI_TRANSPORT_VIRTIO = yes;
+        CONFIG_ARM_SCMI_TRANSPORT_VIRTIO=y
         CONFIG_CMDLINE_FORCE=y
         CONFIG_CMDLINE="debug console=ttyAMA0,115200"
-        SERIAL_AMBA_PL011 = yes;
-        SERIAL_AMBA_PL011_CONSOLE = yes;
+        CONFIG_SERIAL_AMBA_PL011=y
+        CONFIG_SERIAL_AMBA_PL011_CONSOLE=y
       '';
     passAsFile = [ "extraConfig" ];
     env = {

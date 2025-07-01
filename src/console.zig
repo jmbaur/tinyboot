@@ -5,6 +5,7 @@ pub const IN = posix.STDIN_FILENO;
 const builtin = @import("builtin");
 
 const BootLoader = @import("./boot/bootloader.zig");
+const Fdt = @import("./fdt.zig");
 const system = @import("./system.zig");
 const utils = @import("./utils.zig");
 
@@ -781,13 +782,14 @@ pub const Command = struct {
     const NoContext = enum {
         autoboot,
         clear,
+        fdt,
         history,
+        info,
         list,
         logs,
         poweroff,
         reboot,
         select,
-        info,
     };
 
     const Context = enum {
@@ -910,6 +912,65 @@ pub const Command = struct {
                 @intCast(filter),
                 out.writer().any(),
             );
+
+            return null;
+        }
+    };
+
+    const fdt = struct {
+        const short_help = "show flattened devicetree";
+        const long_help =
+            \\Show flattened devicetree. Unavailable on ACPI platforms.
+            \\
+            \\Usage:
+            \\fdt
+        ;
+
+        fn run(console: *Console, _: *ArgsIterator, _: []*BootLoader) !?Event {
+            const sys_firmware_fdt = std.fs.cwd().openFile("/sys/firmware/fdt", .{}) catch {
+                writeAll("FDT not found\n");
+                return null;
+            };
+
+            defer sys_firmware_fdt.close();
+
+            var sys_firmware_fdt_stream = std.io.StreamSource{ .file = sys_firmware_fdt };
+            var fdt_ = try Fdt.init(&sys_firmware_fdt_stream, console.arena.allocator());
+            defer fdt_.deinit();
+
+            var node = fdt_.list.first orelse return error.InvalidFdt;
+
+            var depth: usize = 0;
+
+            while (true) {
+                switch (node.data) {
+                    .Nop => {},
+                    .BeginNode => |node_name| {
+                        if (node_name.len != 0) {
+                            if (depth == 0) {
+                                try out.writer().writeByte('\n');
+                            }
+                            try out.writer().writeByteNTimes('\t', depth);
+                            try out.writer().print("{s}:\n", .{node_name});
+
+                            depth += 1;
+                        }
+                    },
+                    .EndNode => {
+                        depth -%= 1;
+                    },
+                    .End => break,
+                    .Prop => |prop| {
+                        const prop_name = try fdt_.getString(prop.inner.name_offset);
+                        try out.writer().writeByteNTimes('\t', depth);
+                        try out.writer().print("{s}=", .{prop_name});
+                        try Fdt.printValue(out.writer(), prop.value);
+                        try out.writer().print("\n", .{});
+                    },
+                }
+
+                node = node.next orelse return error.InvalidFdt;
+            }
 
             return null;
         }
