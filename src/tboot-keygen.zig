@@ -24,7 +24,7 @@ fn generalizedTime(epoch_seconds: std.time.epoch.EpochSeconds, buf: []u8) ![]u8 
     return std.fmt.bufPrint(buf, "{:0>4}{:0>2}{:0>2}{:0>2}{:0>2}{:0>2}Z", .{
         year_day.year,
         month_day.month.numeric(),
-        month_day.day_index,
+        month_day.day_index + 1,
         day_seconds.getHoursIntoDay(),
         day_seconds.getMinutesIntoHour(),
         day_seconds.getSecondsIntoMinute(),
@@ -35,12 +35,12 @@ test "generalized time" {
     var buf = [_]u8{0} ** "YYYYMMDDHHMMSSZ".len;
 
     try std.testing.expectEqualStrings(
-        "19700100000000Z",
+        "19700101000000Z",
         try generalizedTime(.{ .secs = 0 }, &buf),
     );
 
     try std.testing.expectEqualStrings(
-        "20250512050449Z",
+        "20250513050449Z",
         try generalizedTime(.{ .secs = 1747112689 }, &buf),
     );
 }

@@ -27,7 +27,7 @@ testers.runNixOSTest {
     { nodes, ... }:
     let
       testArtifacts = runCommand "tinyboot-test-artifacts" { nativeBuildInputs = [ tinyboot ]; } ''
-        tboot-keygen --common-name test --organization org.tboot --country US
+        tboot-keygen --common-name test --organization org.tboot --time-now $SOURCE_DATE_EPOCH --country US
         tboot-sign --private-key tboot-private.pem --certificate tboot-certificate.pem ${nodes.machine.system.build.kernel}/${nodes.machine.system.boot.loader.kernelFile} kernel.signed
         tboot-sign --private-key tboot-private.pem --certificate tboot-certificate.pem ${nodes.machine.system.build.initialRamdisk}/${nodes.machine.system.boot.loader.initrdFile} initrd.signed
         install -Dm0444 -t $out *.der *.pem *.signed
