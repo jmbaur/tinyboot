@@ -222,8 +222,6 @@ fn handleFile(
             const stat = try file.stat();
             var source = std.io.StreamSource{ .file = file };
 
-            std.log.debug("adding file to archive at {s}", .{entry_path});
-
             try archive.addFile(entry_path, &source, @intCast(stat.mode));
         },
         .sym_link => {
