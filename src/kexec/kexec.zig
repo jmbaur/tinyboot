@@ -151,17 +151,39 @@ pub fn kexec(
 
     var boot_dir = try std.fs.cwd().openDir("/tinyboot", .{});
     defer {
+        boot_dir.deleteTree(".") catch {};
         boot_dir.close();
-        std.fs.cwd().deleteTree("/tinyboot") catch {};
     }
 
-    try std.fs.cwd().copyFile(linux_filepath, std.fs.cwd(), "/tinyboot/kernel", .{});
+    const kernel_file = try std.fs.cwd().openFile(linux_filepath, .{});
+    defer kernel_file.close();
+
     if (initrd_filepath) |initrd| {
         try std.fs.cwd().copyFile(initrd, std.fs.cwd(), "/tinyboot/initrd", .{});
     }
 
-    const linux = try std.fs.cwd().openFile("/tinyboot/kernel", .{});
+    const linux = try std.fs.cwd().createFile("/tinyboot/kernel", .{});
     defer linux.close();
+
+    if (detectCompression(kernel_file)) |compression| {
+        switch (compression) {
+            .gzip => try std.compress.gzip.decompress(kernel_file.reader(), linux.writer()),
+        }
+    } else {
+        // Would be nice if we had something like std.io.copy that just copied
+        // all of a reader to a writer.
+        var buf = std.mem.zeroes([4096]u8);
+
+        while (true) {
+            const bytes_read = try kernel_file.reader().readAll(&buf);
+
+            try linux.writer().writeAll(buf[0..bytes_read]);
+
+            if (bytes_read == 0) {
+                break;
+            }
+        }
+    }
 
     const initrd: ?std.fs.File = if (initrd_filepath != null)
         try std.fs.cwd().openFile("/tinyboot/initrd", .{})
@@ -183,4 +205,25 @@ pub fn kexec(
     try waitForKexecKernelLoaded();
 
     std.log.info("kexec loaded", .{});
+}
+
+const gzip_magic = [_]u8{ 0x1f, 0x8b };
+const Compression = enum { gzip };
+
+fn detectCompression(file: std.fs.File) ?Compression {
+    defer file.seekTo(0) catch {};
+
+    file.seekTo(0) catch return null;
+
+    var magic: [2]u8 = undefined;
+    const bytes_read = file.reader().readAll(&magic) catch return null;
+    if (bytes_read != magic.len) {
+        return null;
+    }
+
+    if (std.mem.eql(u8, &magic, &gzip_magic)) {
+        return .gzip;
+    }
+
+    return null;
 }
