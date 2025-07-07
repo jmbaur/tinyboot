@@ -162,27 +162,22 @@ pub fn kexec(
         try std.fs.cwd().copyFile(initrd, std.fs.cwd(), "/tinyboot/initrd", .{});
     }
 
-    const linux = try std.fs.cwd().createFile("/tinyboot/kernel", .{});
-    defer linux.close();
+    var linux: ?std.fs.File = null;
+    defer {
+        if (linux) |l| {
+            l.close();
+        }
+    }
 
     if (detectCompression(kernel_file)) |compression| {
+        linux = try std.fs.cwd().createFile("/tinyboot/kernel", .{});
+
         switch (compression) {
-            .gzip => try std.compress.gzip.decompress(kernel_file.reader(), linux.writer()),
+            .gzip => try std.compress.gzip.decompress(kernel_file.reader(), linux.?.writer()),
         }
     } else {
-        // Would be nice if we had something like std.io.copy that just copied
-        // all of a reader to a writer.
-        var buf = std.mem.zeroes([4096]u8);
-
-        while (true) {
-            const bytes_read = try kernel_file.reader().readAll(&buf);
-
-            try linux.writer().writeAll(buf[0..bytes_read]);
-
-            if (bytes_read == 0) {
-                break;
-            }
-        }
+        try std.fs.cwd().copyFile(linux_filepath, std.fs.cwd(), "/tinyboot/kernel", .{});
+        linux = try std.fs.cwd().openFile("/tinyboot/kernel", .{});
     }
 
     const initrd: ?std.fs.File = if (initrd_filepath != null)
@@ -197,9 +192,9 @@ pub fn kexec(
     }
 
     if (kexec_file_load_available) {
-        try kexecFileLoad(allocator, linux, initrd, cmdline);
+        try kexecFileLoad(allocator, linux.?, initrd, cmdline);
     } else {
-        try kexecLoad(allocator, linux, initrd, cmdline);
+        try kexecLoad(allocator, linux.?, initrd, cmdline);
     }
 
     try waitForKexecKernelLoaded();
