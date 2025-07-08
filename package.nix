@@ -18,10 +18,10 @@ let
       };
     }
     {
-      name = "N-V-__8AAMrlvQKMzsBG9BReeFEEQ2phyoN7lE8U1xNUEvgP";
+      name = "N-V-__8AADE9jALWhPS2ykOLbf8gUmr9r-SBwyzzpccbtBAv";
       path = fetchzip {
-        url = "https://github.com/MBED-TLS/mbedtls/archive/v3.6.3.1.tar.gz";
-        hash = "sha256-koZAtExQguvfQ2Jf8xidKyLzCQoWrVIY73AYFjG0tMg=";
+        url = "https://github.com/MBED-TLS/mbedtls/archive/v3.6.4.tar.gz";
+        hash = "sha256-lSIdoqfIeBYJPQDBuKvXpPADZEqEuuFaJxM9LPhlgZ4=";
       };
     }
     {
