@@ -1103,6 +1103,11 @@ pub const Command = struct {
                 print("?\n", .{});
             };
 
+            print("\nMemory:\n", .{});
+            utils.dumpFile(out.writer().any(), "/proc/meminfo") catch {
+                print("?\n", .{});
+            };
+
             // According to https://github.com/torvalds/linux/blob/aef17cb3d3c43854002956f24c24ec8e1a0e3546/Documentation/admin-guide/devices.txt,
             // the first TPM will be at major number 10, minor number 224, and
             // since the minor numbers are incremented for each following
