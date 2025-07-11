@@ -184,7 +184,7 @@ pub fn probe(
 }
 
 pub fn entryLoaded(self: *DiskBootLoader, ctx: *anyopaque) void {
-    self._entryLoaded(ctx) catch |err| {
+    self.diskEntryLoaded(ctx) catch |err| {
         std.log.err(
             "failed to finalize BLS boot counter for chosen entry: {}",
             .{err},
@@ -192,7 +192,7 @@ pub fn entryLoaded(self: *DiskBootLoader, ctx: *anyopaque) void {
     };
 }
 
-fn _entryLoaded(self: *@This(), ctx: *anyopaque) !void {
+fn diskEntryLoaded(self: *@This(), ctx: *anyopaque) !void {
     var bls_entry_file: *BlsEntryFile = @ptrCast(@alignCast(ctx));
 
     var tmpdir = self.tmpdir orelse return;
