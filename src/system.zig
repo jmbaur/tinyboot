@@ -172,7 +172,7 @@ pub const Tty = struct {
                 termios.cc[VMIN] = 0; // allow timeout with zero bytes obtained
                 termios.cc[VTIME] = 50; // 5-second timeout
 
-                setBaudRate(&termios, posix.speed_t.B3000000);
+                setBaudRate(&termios, posix.speed_t.B4000000);
             },
         }
 

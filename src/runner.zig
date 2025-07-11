@@ -81,24 +81,16 @@ pub fn main() !void {
     } });
 
     try qemu_args.appendSlice(&.{
-        "-display",
-        "none",
-        "-serial",
-        "mon:stdio",
-        "-cpu",
-        "max",
-        "-smp",
-        "1",
-        "-m",
-        "1G",
-        "-netdev",
-        "user,id=n1",
-        "-device",
-        "virtio-net-pci,netdev=n1",
-        "-initrd",
-        initrd,
-        "-kernel",
-        kernel,
+        "-display", "none",
+        "-serial",  "mon:stdio",
+        "-cpu",     "max",
+        "-smp",     "1",
+        "-m",       "1G",
+        "-netdev",  "user,id=n1",
+        "-device",  "virtio-net-pci,netdev=n1",
+        "-device",  "virtio-serial",
+        "-initrd",  initrd,
+        "-kernel",  kernel,
     });
 
     if (!std.mem.eql(u8, keydir, "")) {
