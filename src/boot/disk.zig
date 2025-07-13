@@ -244,10 +244,14 @@ fn mount(self: *DiskBootLoader, fstype: Filesystem.Type, path: []const u8) !void
     try tmpdir.dir.makePath(mountpath);
 
     var where_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const where = try tmpdir.dir.realpathZ(mountpath, &where_buf);
+    const tmp_where = try tmpdir.dir.realpath(mountpath, &where_buf);
+    const where = try self.arena.allocator().dupeZ(u8, tmp_where);
+    defer self.arena.allocator().free(where);
 
     var what_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const what = try std.fs.cwd().realpathZ(path, &what_buf);
+    const tmp_what = try std.fs.cwd().realpath(path, &what_buf);
+    const what = try self.arena.allocator().dupeZ(u8, tmp_what);
+    defer self.arena.allocator().free(what);
 
     switch (std.os.linux.E.init(std.os.linux.mount(
         what,
