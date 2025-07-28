@@ -221,10 +221,9 @@ fn nextToken(stream: *std.io.StreamSource) !Token {
     return try Token.parse(token_value);
 }
 
-/// Returns a tuple representing if the full path was found, the remaining path
-/// members not found (non-empty if the full path was not found), and the last
-/// node that was used (this will be an EndNode token node if the full path was
-/// not found).
+/// Returns a tuple representing if the full path was found and the last node
+/// that was used (this will be an EndNode token node if the full path was not
+/// found).
 fn findProperty(
     self: *@This(),
     node: ?*LinkedList.Node,
