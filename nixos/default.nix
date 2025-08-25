@@ -47,7 +47,7 @@ in
       {
         name = "enable-ima";
         patch = null;
-        extraStructuredConfig = {
+        structuredExtraConfig = {
           IMA = kernel.yes;
           IMA_DEFAULT_HASH_SHA256 = kernel.yes;
         };
