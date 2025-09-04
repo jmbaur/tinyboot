@@ -76,7 +76,6 @@ in
         ${cfg.extraInstallCommands}
       '';
     };
-    systemd.additionalUpstreamSystemUnits = [ "boot-complete.target" ];
     systemd.generators.tboot-bless-boot-generator = getExe' pkgs.tinyboot "tboot-bless-boot-generator";
     systemd.services.tboot-bless-boot = {
       description = "Mark the current boot loader entry as good";
