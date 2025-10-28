@@ -77,7 +77,7 @@ pub fn logFn(
     defer mutex.unlock();
 
     stream.writer().print(
-        "<" ++ syslog_prefix ++ ">" ++ LOG_PREFIX ++ ": " ++ format,
+        "<" ++ syslog_prefix ++ ">" ++ LOG_PREFIX ++ ": " ++ format ++ "\n",
         args,
     ) catch {};
 
