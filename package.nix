@@ -5,7 +5,7 @@
   lib,
   linkFarm,
   stdenvNoCC,
-  zig_0_14,
+  zig_0_15,
 }:
 
 let
@@ -49,7 +49,7 @@ stdenvNoCC.mkDerivation {
 
   strictDeps = true;
 
-  depsBuildBuild = [ zig_0_14 ];
+  depsBuildBuild = [ zig_0_15 ];
 
   dontInstall = true;
   doCheck = true;

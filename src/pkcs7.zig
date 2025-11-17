@@ -1,5 +1,5 @@
 const std = @import("std");
-const asn1 = std.crypto.asn1;
+const asn1 = std.crypto.codecs.asn1;
 
 const sequence_of_tag = asn1.Tag.universal(.sequence_of, true);
 const sequence_tag = asn1.Tag.universal(.sequence, true);
