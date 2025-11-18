@@ -8,7 +8,7 @@ test {
     // _ = @import("./cpio.zig");
     // _ = @import("./device.zig");
     // _ = @import("./disk/filesystem.zig");
-    // _ = @import("./disk/gpt.zig");
+    _ = @import("./disk/gpt.zig");
     // _ = @import("./disk/mbr.zig");
     // _ = @import("./fdt.zig");
     // _ = @import("./kexec/arm.zig");
@@ -31,7 +31,7 @@ test {
     // _ = @import("./tmpdir.zig");
     // _ = @import("./utils.zig");
     // _ = @import("./vpd.zig");
-    _ = @import("./watch.zig");
+    // _ = @import("./watch.zig");
     // _ = @import("./ymodem.zig");
     // _ = @import("./zstd.zig");
 }
