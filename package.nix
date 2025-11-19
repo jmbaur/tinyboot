@@ -54,15 +54,14 @@ stdenvNoCC.mkDerivation {
   dontInstall = true;
   doCheck = true;
 
-  zigBuildFlags =
-    [
-      "--color off"
-      "-Doptimize=ReleaseSafe"
-      "-Dtarget=${stdenvNoCC.hostPlatform.qemuArch}-${stdenvNoCC.hostPlatform.parsed.kernel.name}"
-    ]
-    ++ lib.optionals (firmwareDirectory != null) [
-      "-Dfirmware-directory=${firmwareDirectory}"
-    ];
+  zigBuildFlags = [
+    "--color off"
+    "-Doptimize=ReleaseSmall"
+    "-Dtarget=${stdenvNoCC.hostPlatform.qemuArch}-${stdenvNoCC.hostPlatform.parsed.kernel.name}"
+  ]
+  ++ lib.optionals (firmwareDirectory != null) [
+    "-Dfirmware-directory=${firmwareDirectory}"
+  ];
 
   configurePhase = ''
     runHook preConfigure

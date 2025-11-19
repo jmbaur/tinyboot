@@ -8,6 +8,7 @@ fn tbootInitrd(
     b: *std.Build,
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
+    strip: bool,
     zstd: *std.Build.Step.Compile,
     clap: *std.Build.Module,
 ) *std.Build.Step.Compile {
@@ -16,6 +17,7 @@ fn tbootInitrd(
         .root_source_file = b.path("src/tboot-initrd.zig"),
         .target = target,
         .optimize = optimize,
+        .strip = strip,
     });
     tboot_initrd.linkLibC();
     tboot_initrd.linkLibrary(zstd);
@@ -110,13 +112,14 @@ pub fn build(b: *std.Build) !void {
 
     const linux_headers_module = linux_headers.addModule("linux_headers");
 
-    b.installArtifact(tbootInitrd(b, target, optimize, zstd, clap));
+    b.installArtifact(tbootInitrd(b, target, optimize, do_strip, zstd, clap));
 
     const tboot_sign = b.addExecutable(.{
         .name = "tboot-sign",
         .root_source_file = b.path("src/tboot-sign.zig"),
         .target = target,
         .optimize = optimize,
+        .strip = do_strip,
     });
     tboot_sign.linkLibC();
     tboot_sign.linkLibrary(mbedtls);
@@ -128,6 +131,7 @@ pub fn build(b: *std.Build) !void {
         .root_source_file = b.path("src/tboot-keygen.zig"),
         .target = target,
         .optimize = optimize,
+        .strip = do_strip,
     });
     tboot_keygen.linkLibC();
     tboot_keygen.linkLibrary(mbedtls);
@@ -139,6 +143,7 @@ pub fn build(b: *std.Build) !void {
         .root_source_file = b.path("src/vpd.zig"),
         .target = target,
         .optimize = optimize,
+        .strip = do_strip,
     });
     tboot_vpd.root_module.addImport("clap", clap);
     b.installArtifact(tboot_vpd);
@@ -153,6 +158,7 @@ pub fn build(b: *std.Build) !void {
             .root_source_file = b.path("src/ymodem.zig"),
             .target = target,
             .optimize = optimize,
+            .strip = do_strip,
         });
         tboot_ymodem.root_module.addImport("linux_headers", linux_headers_module);
         tboot_ymodem.root_module.addImport("clap", clap);
@@ -172,6 +178,7 @@ pub fn build(b: *std.Build) !void {
             .root_source_file = b.path("src/tboot-bless-boot-generator.zig"),
             .target = target,
             .optimize = optimize,
+            .strip = do_strip,
         });
         tboot_bless_boot_generator.root_module.addImport("clap", clap);
         b.installArtifact(tboot_bless_boot_generator);
@@ -181,6 +188,7 @@ pub fn build(b: *std.Build) !void {
             .root_source_file = b.path("src/tboot-nixos-install.zig"),
             .target = target,
             .optimize = optimize,
+            .strip = do_strip,
         });
         tboot_nixos_install.linkLibC();
         tboot_nixos_install.linkLibrary(mbedtls);
@@ -196,11 +204,10 @@ pub fn build(b: *std.Build) !void {
         .strip = do_strip,
     });
     tboot_loader.root_module.addOptions("tboot_builtin", tboot_builtin);
-    b.installArtifact(tboot_loader);
     tboot_loader.root_module.addImport("linux_headers", linux_headers_module);
 
     // Use tboot-initrd built for the build host.
-    var run_tboot_initrd = b.addRunArtifact(tbootInitrd(b, b.graph.host, .Debug, build_zstd, clap));
+    var run_tboot_initrd = b.addRunArtifact(tbootInitrd(b, b.graph.host, .Debug, false, build_zstd, clap));
 
     // TODO(jared): Would be nicer to have generic
     // --file=tboot_loader:/init CLI interface, but don't know how to
@@ -239,8 +246,8 @@ pub fn build(b: *std.Build) !void {
             .name = "tboot-efi-stub",
             .target = uefi_target,
             .root_source_file = b.path("src/tboot-efi-stub.zig"),
-            .strip = do_strip,
             .optimize = optimize_prefer_small,
+            .strip = do_strip,
         });
         const tboot_efi_stub_artifact = b.addInstallArtifact(tboot_efi_stub, .{
             .dest_dir = .{ .override = .{ .custom = "efi" } },
