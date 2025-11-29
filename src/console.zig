@@ -50,11 +50,13 @@ const NON_WORD_CHARS = std.ascii.whitespace ++ [_]u8{ '.', ';', ',' };
 
 var out = std.io.bufferedWriter(std.io.getStdOut().writer());
 
+var in_buf = [_]u8{0};
+
 const Shell = struct {
     arena: std.heap.ArenaAllocator = std.heap.ArenaAllocator.init(std.heap.page_allocator),
     input_cursor: usize = 0,
     input_end: usize = 0,
-    stdin: std.fs.File.Reader = std.io.getStdIn().reader(),
+    stdin: std.fs.File.Reader = std.fs.File.stdin().reader(&in_buf),
     input_buffer: [std.math.maxInt(u9)]u8 = undefined,
     history: History = .{},
 
@@ -145,7 +147,7 @@ const Shell = struct {
 
         var done = false;
 
-        const char = try self.stdin.readByte();
+        const char = try self.stdin.interface.takeByte();
 
         const needs_flush = switch (char) {
             // C-k
@@ -337,9 +339,9 @@ const Shell = struct {
             },
             // Escape sequence
             esc => b: {
-                switch (try self.stdin.readByte()) {
+                switch (try self.stdin.interface.takeByte()) {
                     0x5b => {
-                        switch (try self.stdin.readByte()) {
+                        switch (try self.stdin.interface.takeByte()) {
                             // Up arrow
                             0x41 => break :b self.historyPrev(),
                             // Down arrow

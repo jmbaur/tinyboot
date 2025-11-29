@@ -237,26 +237,24 @@ pub fn main() !void {
         .ACTION = clap.parsers.enumeration(Action),
     };
 
-    const stderr = std.io.getStdErr().writer();
-
     var diag = clap.Diagnostic{};
     var res = clap.parse(clap.Help, &params, &parsers, .{
         .diagnostic = &diag,
         .allocator = arena.allocator(),
     }) catch |err| {
-        try diag.report(stderr, err);
-        try clap.usage(stderr, clap.Help, &params);
+        try diag.reportToFile(.stderr(), err);
+        try clap.usageToFile(.stderr(), clap.Help, &params);
         return;
     };
     defer res.deinit();
 
     if (res.args.help != 0) {
-        return clap.help(std.io.getStdErr().writer(), clap.Help, &params, .{});
+        return clap.helpToFile(.stderr(), clap.Help, &params, .{});
     }
 
     if (res.positionals[0] == null or res.args.file == null) {
-        try diag.report(stderr, error.InvalidArgument);
-        try clap.usage(std.io.getStdErr().writer(), clap.Help, &params);
+        try diag.reportToFile(.stderr(), error.InvalidArgument);
+        try clap.usageToFile(.stderr(), clap.Help, &params);
         return;
     }
 
@@ -264,8 +262,8 @@ pub fn main() !void {
     switch (action) {
         .get, .set, .delete => {
             if (res.args.key == null or (action == .set and res.args.value == null and res.args.@"value-from-file" == null)) {
-                try diag.report(stderr, error.InvalidArgument);
-                try clap.usage(std.io.getStdErr().writer(), clap.Help, &params);
+                try diag.reportToFile(.stderr(), error.InvalidArgument);
+                try clap.usageToFile(.stderr(), clap.Help, &params);
                 return;
             }
         },

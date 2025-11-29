@@ -38,21 +38,21 @@ pub const BootSpecV1 = struct {
         }
     }
 
-    fn ensureRequiredStringSlice(a: std.mem.Allocator, val: ?json.Value) ![]const []const u8 {
+    fn ensureRequiredStringSlice(allocator: std.mem.Allocator, val: ?json.Value) ![]const []const u8 {
         if (val) |value| {
             switch (value) {
                 .array => |array| {
-                    var new_list = std.ArrayList([]const u8).init(a);
-                    defer new_list.deinit();
+                    var new_list = std.ArrayList([]const u8){};
+                    defer new_list.deinit(allocator);
 
                     for (array.items) |inner_val| {
                         switch (inner_val) {
-                            .string => |string| try new_list.append(string),
+                            .string => |string| try new_list.append(allocator, string),
                             else => return Error.Invalid,
                         }
                     }
 
-                    return new_list.toOwnedSlice();
+                    return new_list.toOwnedSlice(allocator);
                 },
                 else => return Error.Invalid,
             }
@@ -134,8 +134,8 @@ pub const BootJson = struct {
         const specialisations: ?[]BootSpecV1 = s: {
             if (toplevel_object.get("org.nixos.specialisation.v1")) |special| switch (special) {
                 .object => |obj| {
-                    var special_list = std.ArrayList(BootSpecV1).init(allocator);
-                    defer special_list.deinit();
+                    var special_list = std.ArrayList(BootSpecV1){};
+                    defer special_list.deinit(allocator);
 
                     var it = obj.iterator();
 
@@ -154,10 +154,10 @@ pub const BootJson = struct {
                             next.key_ptr.*,
                             sub_obj.get("org.nixos.bootspec.v1") orelse return Error.Invalid,
                         );
-                        try special_list.append(special_spec);
+                        try special_list.append(allocator, special_spec);
                     }
 
-                    break :s try special_list.toOwnedSlice();
+                    break :s try special_list.toOwnedSlice(allocator);
                 },
                 else => return Error.Invalid,
             } else {

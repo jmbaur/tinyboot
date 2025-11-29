@@ -155,8 +155,9 @@ pub fn kexecLoad(
 
     const proc_iomem = try std.fs.cwd().openFile("/proc/iomem", .{});
     defer proc_iomem.close();
-    var proc_iomem_stream = std.io.StreamSource{ .file = proc_iomem };
-    const memory_ranges = try getMemoryRanges(allocator, &proc_iomem_stream);
+    var buffer = [_]u8{0} * 1024;
+    var proc_iomem_reader = proc_iomem.reader(&buffer);
+    const memory_ranges = try getMemoryRanges(allocator, &proc_iomem_reader);
     defer allocator.free(memory_ranges);
 
     // Prevent the need to relocate prior to decompression.
@@ -390,23 +391,23 @@ test "locate hole" {
 }
 
 // parses memory ranges from a /proc/iomem stream
-fn getMemoryRanges(allocator: std.mem.Allocator, stream: *std.io.StreamSource) ![]MemoryRange {
-    var memory_ranges = std.ArrayList(MemoryRange).init(allocator);
-    errdefer memory_ranges.deinit();
+fn getMemoryRanges(allocator: std.mem.Allocator, reader: *std.Io.Reader) ![]MemoryRange {
+    var memory_ranges = std.ArrayList(MemoryRange){};
+    errdefer memory_ranges.deinit(allocator);
 
     var buf = [_]u8{0} ** 255; // unlikely to encounter a line this large
-    var buf_stream = std.io.fixedBufferStream(&buf);
 
     while (true) {
-        stream.reader().streamUntilDelimiter(buf_stream.writer(), '\n', null) catch |err| {
-            switch (err) {
-                error.EndOfStream => break,
-                else => return err,
-            }
-        };
-        defer buf_stream.reset();
+        var buf_writer: std.Io.Writer = .fixed(&buf);
 
-        const written = buf_stream.getWritten();
+        _ = reader.streamDelimiter(&buf_writer, '\n') catch |err| switch (err) {
+            std.Io.Reader.StreamError.EndOfStream => break,
+            else => return err,
+        };
+
+        try reader.streamExact(&buf_writer, 1); // skip newline
+
+        const written = buf_writer.buffered();
         const memory_range, const name = b: {
             var split = std.mem.splitScalar(u8, written, ':');
             const left = split.next() orelse continue;
@@ -437,14 +438,14 @@ fn getMemoryRanges(allocator: std.mem.Allocator, stream: *std.io.StreamSource) !
             };
         };
 
-        try memory_ranges.append(.{
+        try memory_ranges.append(allocator, .{
             .start = start,
             .end = end,
             .type = memory_type,
         });
     }
 
-    return memory_ranges.toOwnedSlice();
+    return memory_ranges.toOwnedSlice(allocator);
 }
 
 test "getMemoryRanges" {
@@ -506,8 +507,8 @@ test "getMemoryRanges" {
             \\f1200000-f12fffff : f1200000.bm-bppi bm-bppi
         ;
 
-        var stream = std.io.StreamSource{ .const_buffer = std.io.fixedBufferStream(proc_iomem[0..]) };
-        const ranges = try getMemoryRanges(std.testing.allocator, &stream);
+        var reader: std.Io.Reader = .fixed(proc_iomem[0..]);
+        const ranges = try getMemoryRanges(std.testing.allocator, &reader);
         defer std.testing.allocator.free(ranges);
 
         try std.testing.expectEqual(5, ranges.len);
@@ -548,8 +549,8 @@ test "getMemoryRanges" {
             \\  42900000-42c58797 : Kernel data
         ;
 
-        var stream = std.io.StreamSource{ .const_buffer = std.io.fixedBufferStream(proc_iomem[0..]) };
-        const ranges = try getMemoryRanges(std.testing.allocator, &stream);
+        var reader: std.Io.Reader = .fixed(proc_iomem[0..]);
+        const ranges = try getMemoryRanges(std.testing.allocator, &reader);
         defer std.testing.allocator.free(ranges);
 
         try std.testing.expectEqual(1, ranges.len);

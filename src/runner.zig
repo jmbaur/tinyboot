@@ -30,21 +30,19 @@ pub fn main() !void {
         .QEMU_ARGS = clap.parsers.string,
     };
 
-    const stderr = std.io.getStdErr().writer();
-
     var diag = clap.Diagnostic{};
     var res = clap.parse(clap.Help, &params, &parsers, .{
         .diagnostic = &diag,
         .allocator = arena.allocator(),
     }) catch |err| {
-        try diag.report(stderr, err);
-        try clap.usage(stderr, clap.Help, &params);
+        try diag.reportToFile(.stderr(), err);
+        try clap.usageToFile(.stderr(), clap.Help, &params);
         return;
     };
     defer res.deinit();
 
     if (res.args.help != 0) {
-        return clap.help(std.io.getStdErr().writer(), clap.Help, &params, .{});
+        return clap.helpToFile(.stderr(), clap.Help, &params, .{});
     }
 
     const arch = res.positionals[0].?;

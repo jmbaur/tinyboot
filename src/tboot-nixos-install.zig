@@ -287,21 +287,19 @@ pub fn main() !void {
         .NUM = clap.parsers.int(u8, 10),
     };
 
-    const stderr = std.io.getStdErr().writer();
-
     var diag = clap.Diagnostic{};
     var res = clap.parse(clap.Help, &params, &parsers, .{
         .diagnostic = &diag,
         .allocator = arena_alloc,
     }) catch |err| {
-        try diag.report(stderr, err);
-        try clap.usage(stderr, clap.Help, &params);
+        try diag.reportToFile(.stderr(), err);
+        try clap.usageToFile(.stderr(), clap.Help, &params);
         return;
     };
     defer res.deinit();
 
     if (res.args.help != 0) {
-        return clap.help(std.io.getStdErr().writer(), clap.Help, &params, .{});
+        return clap.helpToFile(.stderr(), clap.Help, &params, .{});
     }
 
     if (res.positionals[0] == null or
@@ -310,8 +308,8 @@ pub fn main() !void {
         ((res.args.@"private-key" == null) !=
             (res.args.certificate == null)))
     {
-        try diag.report(stderr, error.InvalidArgument);
-        try clap.usage(stderr, clap.Help, &params);
+        try diag.reportToFile(.stderr(), error.InvalidArgument);
+        try clap.usageToFile(.stderr(), clap.Help, &params);
         return;
     }
 
