@@ -308,7 +308,7 @@ fn run(self: *TbootLoader) !posix.RebootCommand {
 
 pub fn main() !void {
     if (std.os.linux.geteuid() != 0) {
-        std.io.getStdErr().writer().writeAll("tboot-loader must run as root\n\n") catch {};
+        std.debug.print("tboot-loader must run as root\n\n");
         std.process.exit(1);
     }
 
@@ -388,10 +388,10 @@ pub fn main() !void {
             // `systemctl kexec`).
             try std.posix.kill(1, SIGRTMIN + 6);
         } else {
-            std.io.getStdErr().writer().print(
+            std.debug.print(
                 "tboot-loader is not PID1, refusing to run reboot type {s}\n",
                 .{@tagName(reboot_cmd)},
-            ) catch {};
+            );
         }
     }
 

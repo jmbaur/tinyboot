@@ -79,24 +79,28 @@ fn printStatus(
     original_entry_filename: []const u8,
     bls_entry_file: BlsEntryFile,
 ) !void {
-    var stdout = std.io.getStdOut().writer();
+    var stdout_file = std.fs.File.stdout();
+    var buf = [_]u8{0} ** 1024;
+    var stdout_writer = stdout_file.writer(&buf);
+    var writer = &stdout_writer.interface;
+    defer writer.flush() catch {};
 
-    try stdout.print("{s}:\n", .{original_entry_filename});
+    try writer.print("{s}:\n", .{original_entry_filename});
 
     if (bls_entry_file.tries_left) |tries_left| {
         if (tries_left > 0) {
-            try stdout.print("\t{} tries left until entry is bad\n", .{tries_left});
+            try writer.print("\t{} tries left until entry is bad\n", .{tries_left});
         } else if (bls_entry_file.tries_done) |tries_done| {
-            try stdout.print("\tentry is bad, {} tries attempted\n", .{tries_done});
+            try writer.print("\tentry is bad, {} tries attempted\n", .{tries_done});
         } else {
-            try stdout.print("\tentry is bad\n", .{});
+            try writer.print("\tentry is bad\n", .{});
         }
 
         if (bls_entry_file.tries_done) |tries_done| {
-            try stdout.print("\t{} tries done\n", .{tries_done});
+            try writer.print("\t{} tries done\n", .{tries_done});
         }
     } else {
-        try stdout.print("\tentry is good\n", .{});
+        try writer.print("\tentry is good\n", .{});
     }
 }
 

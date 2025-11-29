@@ -96,7 +96,7 @@ pub const Tty = struct {
         return .{ .handle = handle };
     }
 
-    pub fn current(self: *@This()) !State {
+    fn current(self: *@This()) !State {
         return try posix.tcgetattr(self.handle);
     }
 

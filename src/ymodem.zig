@@ -353,11 +353,11 @@ pub fn recv(tty: *system.Tty, dir: std.fs.Dir) !void {
     return error.TooManyNaks;
 }
 
-fn ack(writer: system.Tty.Writer) !void {
+inline fn ack(writer: *std.Io.Writer) !void {
     try writer.writeByte(ACK);
 }
 
-fn nak(writer: system.Tty.Writer) !void {
+inline fn nak(writer: *std.Io.Writer) !void {
     try writer.writeByte(NAK);
 }
 
