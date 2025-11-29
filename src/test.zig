@@ -5,7 +5,7 @@ test {
     // _ = @import("./boot/ymodem.zig");
     _ = @import("./bootspec.zig");
     _ = @import("./console.zig");
-    // _ = @import("./cpio.zig");
+    _ = @import("./cpio.zig");
     _ = @import("./device.zig");
     // _ = @import("./disk/filesystem.zig");
     _ = @import("./disk/gpt.zig");

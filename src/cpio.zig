@@ -36,7 +36,7 @@ const CpioEntryType = enum {
 
 pub const CpioArchive = @This();
 
-destination: *std.io.StreamSource,
+writer: *std.Io.Writer,
 ino: u32 = 0,
 total_written: usize = 0,
 
@@ -45,8 +45,8 @@ const Error = error{
     UnexpectedSource,
 };
 
-pub fn init(destination: *std.io.StreamSource) !@This() {
-    return @This(){ .destination = destination };
+pub fn init(writer: *std.Io.Writer) !@This() {
+    return @This(){ .writer = writer };
 }
 
 pub fn addEntry(
@@ -103,7 +103,7 @@ pub fn addEntry(
             .namesize = @intCast(filepath_len),
         };
 
-        try self.destination.writer().print("{X:0>6}{X:0>8}{X:0>8}{X:0>8}{X:0>8}{X:0>8}{X:0>8}{X:0>8}{X:0>8}{X:0>8}{X:0>8}{X:0>8}{X:0>8}{X:0>8}", .{
+        try self.writer.print("{X:0>6}{X:0>8}{X:0>8}{X:0>8}{X:0>8}{X:0>8}{X:0>8}{X:0>8}{X:0>8}{X:0>8}{X:0>8}{X:0>8}{X:0>8}{X:0>8}", .{
             header.magic,
             header.ino,
             header.mode,
@@ -121,13 +121,13 @@ pub fn addEntry(
         });
         self.total_written += ASCII_CPIO_HEADER_SIZE;
 
-        try self.destination.writer().writeAll(path);
-        try self.destination.writer().writeByte(0); // null terminator
+        try self.writer.writeAll(path);
+        try self.writer.writeByte(0); // null terminator
         self.total_written += filepath_len;
 
         // pad the file name
         const header_padding = (4 - ((ASCII_CPIO_HEADER_SIZE + filepath_len) % 4)) % 4;
-        try self.destination.writer().writeByteNTimes(0, header_padding);
+        try self.writer.splatByteAll(0, header_padding);
         self.total_written += header_padding;
 
         if (source) |source_| {
@@ -139,14 +139,14 @@ pub fn addEntry(
             while (pos < end) {
                 try source_.seekTo(pos);
                 const bytes_read = try source_.read(&buf);
-                try self.destination.writer().writeAll(buf[0..bytes_read]);
+                try self.writer.writeAll(buf[0..bytes_read]);
                 self.total_written += bytes_read;
                 pos += bytes_read;
             }
 
             // pad the file data
             const filedata_padding: usize = @intCast((4 - (end % 4)) % 4);
-            try self.destination.writer().writeByteNTimes(0, filedata_padding);
+            try self.writer.splatByteAll(0, filedata_padding);
             self.total_written += filedata_padding;
         }
     }
@@ -184,7 +184,7 @@ pub fn finalize(self: *@This()) !void {
 
     // Maintain a block size of 512 by adding padding to the end of the
     // archive.
-    try self.destination.writer().writeByteNTimes(0, (512 - (self.total_written % 512)) % 512);
+    try self.writer.splatByteAll(0, (512 - (self.total_written % 512)) % 512);
 }
 
 fn handleFile(
