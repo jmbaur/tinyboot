@@ -1,7 +1,7 @@
 test {
     _ = @import("./autoboot.zig");
     _ = @import("./boot/bootloader.zig");
-    // _ = @import("./boot/disk.zig");
+    _ = @import("./boot/disk.zig");
     // _ = @import("./boot/ymodem.zig");
     _ = @import("./bootspec.zig");
     _ = @import("./console.zig");

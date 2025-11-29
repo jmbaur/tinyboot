@@ -130,8 +130,8 @@ pub fn main() !void {
         const pub_out = try std.fs.cwd().createFile("tboot-public.pem", .{ .mode = 0o444 });
         defer pub_out.close();
 
-        try pub_out.writer().writeAll(std.mem.trim(u8, &key_buf, &.{0}));
-        try pub_out.writer().writeByte(0);
+        try pub_out.writeAll(std.mem.trim(u8, &key_buf, &.{0}));
+        try pub_out.writeAll(&.{0});
     }
 
     key_buf = std.mem.zeroes(@TypeOf(key_buf));
@@ -143,8 +143,8 @@ pub fn main() !void {
         const priv_out = try std.fs.cwd().createFile("tboot-private.pem", .{ .mode = 0o444 });
         defer priv_out.close();
 
-        try priv_out.writer().writeAll(std.mem.trim(u8, &key_buf, &.{0}));
-        try priv_out.writer().writeByte(0);
+        try priv_out.writeAll(std.mem.trim(u8, &key_buf, &.{0}));
+        try priv_out.writeAll(&.{0});
     }
 
     // generate x509 cert
@@ -207,8 +207,8 @@ pub fn main() !void {
         defer cert_der_out.close();
 
         const start: usize = cert_buf.len - len;
-        try cert_der_out.writer().writeAll(std.mem.trim(u8, cert_buf[start .. start + len], &.{0}));
-        try cert_der_out.writer().writeByte(0);
+        try cert_der_out.writeAll(std.mem.trim(u8, cert_buf[start .. start + len], &.{0}));
+        try cert_der_out.writeAll(&.{0});
     }
 
     cert_buf = std.mem.zeroes(@TypeOf(cert_buf));
@@ -226,6 +226,6 @@ pub fn main() !void {
         const cert_pem_out = try std.fs.cwd().createFile("tboot-certificate.pem", .{ .mode = 0o444 });
         defer cert_pem_out.close();
 
-        try cert_pem_out.writer().writeAll(&cert_buf);
+        try cert_pem_out.writeAll(&cert_buf);
     }
 }

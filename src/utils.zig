@@ -22,17 +22,14 @@ pub fn enumFromStr(T: anytype, value: []const u8) !T {
     return error.NotFound;
 }
 
-pub fn dumpFile(writer: std.io.AnyWriter, path: []const u8) !void {
+pub fn dumpFile(writer: *std.Io.Writer, path: []const u8) !void {
     const file = try std.fs.cwd().openFile(path, .{});
     defer file.close();
 
-    while (true) {
-        file.reader().streamUntilDelimiter(writer, '\n', null) catch |err| switch (err) {
-            error.EndOfStream => break,
-            else => return err,
-        };
-        try writer.writeByte('\n');
-    }
+    var buffer = [_]u8{0} ** 1024;
+    var file_reader = file.reader(&buffer);
+    var reader = &file_reader.interface;
+    try reader.stream(writer, .unlimited);
 }
 
 pub fn realpathAllocMany(

@@ -240,7 +240,7 @@ const SYSLOG_ACTION_UNREAD = 9;
 pub fn printKernelLogs(
     allocator: std.mem.Allocator,
     filter: u3,
-    writer: std.io.AnyWriter,
+    writer: *std.Io.Writer,
 ) !void {
     const bytes_available = std.os.linux.syscall3(.syslog, SYSLOG_ACTION_UNREAD, 0, 0);
     const buf = try allocator.alloc(u8, bytes_available);

@@ -88,7 +88,7 @@ pub fn timeout(self: *YmodemBootLoader) u8 {
     return 0;
 }
 
-pub fn probe(self: *YmodemBootLoader, entries: *std.ArrayList(BootLoader.Entry), device: Device) !void {
+pub fn probe(self: *YmodemBootLoader, entries: *std.array_list.Managed(BootLoader.Entry), device: Device) !void {
     const allocator = self.arena.allocator();
 
     var serial_path_buf: [std.fs.max_path_bytes]u8 = undefined;

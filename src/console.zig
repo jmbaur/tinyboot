@@ -48,9 +48,12 @@ const Console = @This();
 
 const NON_WORD_CHARS = std.ascii.whitespace ++ [_]u8{ '.', ';', ',' };
 
-var out = std.io.bufferedWriter(std.io.getStdOut().writer());
-
 var in_buf = [_]u8{0};
+var out_buf = [_]u8{0} ** 1024;
+
+const stdout: std.fs.File = .stdout();
+var out_writer = stdout.writer(&out_buf);
+var out = &out_writer.interface;
 
 const Shell = struct {
     arena: std.heap.ArenaAllocator = std.heap.ArenaAllocator.init(std.heap.page_allocator),
@@ -622,11 +625,11 @@ fn flush() void {
 /// Flushes occur transparently. Do not use if control over when flushes occur
 /// is needed.
 fn print(comptime fmt: []const u8, args: anytype) void {
-    out.writer().print(fmt, args) catch {};
+    out.print(fmt, args) catch {};
 }
 
 fn writeAll(bytes: []const u8) void {
-    out.writer().writeAll(bytes) catch {};
+    out.writeAll(bytes) catch {};
 }
 
 fn writeAllAndFlush(bytes: []const u8) void {
@@ -651,33 +654,33 @@ fn eraseInputAndUpdateCursor(input: []u8, start: usize, end: *usize, n: usize) v
 /// Caller required to flush
 fn cursorLeft(n: usize) void {
     if (n > 0) {
-        out.writer().print(.{esc} ++ "[{d:0>5}D", .{n}) catch {};
+        out.print(.{esc} ++ "[{d:0>5}D", .{n}) catch {};
     }
 }
 
 /// Caller required to flush
 fn cursorRight(n: usize) void {
     if (n > 0) {
-        out.writer().print(.{esc} ++ "[{d}C", .{n}) catch {};
+        out.print(.{esc} ++ "[{d}C", .{n}) catch {};
     }
 }
 
 /// Caller required to flush
 fn eraseToEndOfLine() void {
-    out.writer().writeAll(.{esc} ++ "[0K") catch {};
+    out.writeAll(.{esc} ++ "[0K") catch {};
 }
 
 /// Caller required to flush
 fn eraseToCursor() void {
-    out.writer().writeAll(.{esc} ++ "[1K") catch {};
+    out.writeAll(.{esc} ++ "[1K") catch {};
 }
 
 /// Empties the display and moves the cursor to absolute position 0, 0.
 fn clearScreen() void {
     // empties the display
-    out.writer().writeAll(.{esc} ++ "[2J") catch {};
+    out.writeAll(.{esc} ++ "[2J") catch {};
     // moves the cursor to 0, 0
-    out.writer().writeAll(.{esc} ++ "[0;0H") catch {};
+    out.writeAll(.{esc} ++ "[0;0H") catch {};
 }
 
 pub fn deinit(self: *Console) void {
@@ -912,7 +915,7 @@ pub const Command = struct {
             try system.printKernelLogs(
                 console.arena.allocator(),
                 @intCast(filter),
-                out.writer().any(),
+                out,
             );
 
             return null;
@@ -950,10 +953,10 @@ pub const Command = struct {
                     .BeginNode => |node_name| {
                         if (node_name.len != 0) {
                             if (depth == 0) {
-                                try out.writer().writeByte('\n');
+                                try out.writeByte('\n');
                             }
-                            try out.writer().writeByteNTimes('\t', depth);
-                            try out.writer().print("{s}:\n", .{node_name});
+                            try out.splatByteAll('\t', depth);
+                            try out.print("{s}:\n", .{node_name});
 
                             depth += 1;
                         }
@@ -964,10 +967,10 @@ pub const Command = struct {
                     .End => break,
                     .Prop => |prop| {
                         const prop_name = try fdt_.getString(prop.inner.name_offset);
-                        try out.writer().writeByteNTimes('\t', depth);
-                        try out.writer().print("{s}=", .{prop_name});
-                        try Fdt.printValue(out.writer(), prop.value);
-                        try out.writer().print("\n", .{});
+                        try out.splatByteAll('\t', depth);
+                        try out.print("{s}=", .{prop_name});
+                        try Fdt.printValue(out, prop.value);
+                        try out.print("\n", .{});
                     },
                 }
 
@@ -1095,18 +1098,18 @@ pub const Command = struct {
             _ = args;
             _ = boot_loaders;
 
-            try utils.dumpFile(out.writer().any(), "/proc/version");
+            try utils.dumpFile(out, "/proc/version");
 
             print("\nInit:\n", .{});
-            try utils.dumpFile(out.writer().any(), "/proc/1/stat");
+            try utils.dumpFile(out, "/proc/1/stat");
 
             print("\nConsoles:\n", .{});
-            utils.dumpFile(out.writer().any(), "/proc/consoles") catch {
+            utils.dumpFile(out, "/proc/consoles") catch {
                 print("?\n", .{});
             };
 
             print("\nMemory:\n", .{});
-            utils.dumpFile(out.writer().any(), "/proc/meminfo") catch {
+            utils.dumpFile(out, "/proc/meminfo") catch {
                 print("?\n", .{});
             };
 
@@ -1117,17 +1120,17 @@ pub const Command = struct {
             print("\nTPM: {s}\n", .{if (utils.absolutePathExists("/dev/char/10:224")) "yes" else "no"});
 
             print("\nKeys:\n", .{});
-            utils.dumpFile(out.writer().any(), "/proc/keys") catch {
+            utils.dumpFile(out, "/proc/keys") catch {
                 print("?\n", .{});
             };
 
             print("\nMTD:\n", .{});
-            utils.dumpFile(out.writer().any(), "/proc/mtd") catch {
+            utils.dumpFile(out, "/proc/mtd") catch {
                 print("?\n", .{});
             };
 
             print("\nPartitions:\n", .{});
-            utils.dumpFile(out.writer().any(), "/proc/partitions") catch {
+            utils.dumpFile(out, "/proc/partitions") catch {
                 print("?\n", .{});
             };
 

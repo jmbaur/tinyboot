@@ -711,7 +711,7 @@ pub fn save(self: *@This(), writer: anytype) !void {
     try writer.writeAll(self.strings.items);
 }
 
-pub fn printValue(writer: anytype, value: []const u8) !void {
+pub fn printValue(writer: *std.Io.Writer, value: []const u8) !void {
     if (value.len == 0) {
         try writer.print("true", .{});
         return;
