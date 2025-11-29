@@ -9,7 +9,7 @@ test {
     // _ = @import("./device.zig");
     // _ = @import("./disk/filesystem.zig");
     _ = @import("./disk/gpt.zig");
-    // _ = @import("./disk/mbr.zig");
+    _ = @import("./disk/mbr.zig");
     // _ = @import("./fdt.zig");
     // _ = @import("./kexec/arm.zig");
     // _ = @import("./kexec/kexec.zig");

@@ -8,10 +8,10 @@ const boot_magic = std.mem.bigToNative(u16, 0x55aa);
 header: Header,
 
 /// Caller is responsible for source.
-pub fn init(stream: *std.io.StreamSource) !Mbr {
+pub fn init(reader: *std.Io.Reader) !Mbr {
     comptime std.debug.assert(@sizeOf(Header) == 512);
 
-    const header = try stream.reader().readStructEndian(Header, .little);
+    const header = try reader.takeStruct(Header, .little);
 
     if (header.signature != boot_magic) {
         return error.InvalidMbr;
@@ -87,7 +87,7 @@ test "mbr parsing" {
     //
     // Device     Boot Start     End Sectors  Size Id Type
     // /dev/sda1  *       63 1032191 1032129  504M  6 FAT16
-    const partition_table= [_]u8{
+    const partition_table = [_]u8{
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -122,9 +122,9 @@ test "mbr parsing" {
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x55, 0xaa,
     };
 
-    var stream = std.io.StreamSource{ .const_buffer = std.io.fixedBufferStream(&partition_table) };
+    var reader: std.Io.Reader = .fixed(&partition_table);
 
-    var disk = try Mbr.init(&stream);
+    var disk = try Mbr.init(&reader);
 
     try std.testing.expectEqual(@as(u32, 0xbe1afdfa), disk.identifier());
     const mbr_partitions = disk.partitions();
