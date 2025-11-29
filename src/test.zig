@@ -7,7 +7,7 @@ test {
     _ = @import("./console.zig");
     _ = @import("./cpio.zig");
     _ = @import("./device.zig");
-    // _ = @import("./disk/filesystem.zig");
+    _ = @import("./disk/filesystem.zig");
     _ = @import("./disk/gpt.zig");
     _ = @import("./disk/mbr.zig");
     // _ = @import("./fdt.zig");
