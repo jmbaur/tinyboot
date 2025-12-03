@@ -30,15 +30,16 @@ fn Chunk(comptime size: usize) type {
 const Chunk128 = Chunk(128);
 const Chunk1K = Chunk(1024);
 
-fn finalizeAndWriteChunk(comptime chunk_type: type, chunk: *chunk_type, tty: *system.Tty) !void {
+fn finalizeAndWriteChunk(comptime chunk_type: type, chunk: *chunk_type, reader: *std.Io.Reader, writer: *std.Io.Writer) !void {
     chunk.crc = std.mem.nativeToBig(u16, Crc16Xmodem.hash(&chunk.payload));
     chunk.block_neg = 0xff - chunk.block;
 
     var naks: u8 = 0;
     while (naks < 10) : (naks += 1) {
-        try tty.writer().writeAll(std.mem.asBytes(chunk));
+        try writer.writeAll(std.mem.asBytes(chunk));
+        try writer.flush();
 
-        switch (try tty.reader().readByte()) {
+        switch (try reader.takeByte()) {
             NAK => continue,
             ACK => return,
             else => return error.IllegalByte,
@@ -56,11 +57,16 @@ pub fn send(
         file: std.fs.File,
     },
 ) !void {
-    var reader = tty.reader();
+    var reader_buffer: [1024]u8 = undefined;
+    var writer_buffer: [1024]u8 = undefined;
+    var file_reader = tty.file.reader(&reader_buffer);
+    var file_writer = tty.file.writer(&writer_buffer);
+    var reader = &file_reader.interface;
+    var writer = &file_writer.interface;
 
     std.log.debug("waiting for receiver ping", .{});
 
-    while (try reader.readByte() != CRC) {
+    while (try reader.takeByte() != CRC) {
         // The receiver might send invalid bytes, but this could just be
         // something as innocuous as keyboard input during setup of the ymodem
         // client. We should be forgiving to this input, and continue with
@@ -75,7 +81,7 @@ pub fn send(
             .payload = [_]u8{0x0} ** 128,
         };
 
-        try finalizeAndWriteChunk(Chunk128, &chunk, tty);
+        try finalizeAndWriteChunk(Chunk128, &chunk, reader, writer);
 
         return;
     }
@@ -105,9 +111,9 @@ pub fn send(
             .payload = payload,
         };
 
-        try finalizeAndWriteChunk(Chunk128, &chunk, tty);
+        try finalizeAndWriteChunk(Chunk128, &chunk, reader, writer);
 
-        if (try reader.readByte() != CRC) {
+        if (try reader.takeByte() != CRC) {
             return error.IllegalByte;
         }
     }
@@ -117,13 +123,13 @@ pub fn send(
     var chunk_buf = [_]u8{0} ** 1024;
 
     while (true) {
-        const bytes_read = try file.reader().readAll(&chunk_buf);
+        const bytes_read = try file.readAll(&chunk_buf);
         @memset(chunk_buf[bytes_read..], PAD);
         @memcpy(&chunk.payload, &chunk_buf);
 
         chunk.block +%= 1;
 
-        try finalizeAndWriteChunk(Chunk1K, &chunk, tty);
+        try finalizeAndWriteChunk(Chunk1K, &chunk, reader, writer);
 
         file_node.completeOne();
 
@@ -133,9 +139,10 @@ pub fn send(
         }
     }
 
-    try tty.writer().writeByte(EOF);
+    try writer.writeByte(EOF);
+    try writer.flush();
 
-    if (try reader.readByte() != ACK) {
+    if (try reader.takeByte() != ACK) {
         return error.IllegalByte;
     }
 }
@@ -160,8 +167,12 @@ fn crcPasses(comptime chunk_type: type, chunk: *const chunk_type) bool {
 }
 
 pub fn recv(tty: *system.Tty, dir: std.fs.Dir) !void {
-    var tty_buffered_reader = std.io.bufferedReader(tty.reader());
-    var reader = tty_buffered_reader.reader();
+    var reader_buffer: [1024]u8 = undefined;
+    var writer_buffer: [1024]u8 = undefined;
+    var file_reader = tty.file.reader(&reader_buffer);
+    var file_writer = tty.file.writer(&writer_buffer);
+    var reader = &file_reader.interface;
+    var writer = &file_writer.interface;
 
     var state: RecvState = .filename;
 
@@ -184,11 +195,12 @@ pub fn recv(tty: *system.Tty, dir: std.fs.Dir) !void {
 
     while (num_errors < 10) {
         if (!started) {
-            try tty.writer().writeByte(CRC);
+            try writer.writeByte(CRC);
+            try writer.flush();
         }
 
-        const start = reader.readByte() catch |err| {
-            if (err == error.Timeout and !started) {
+        const start = reader.takeByte() catch |err| {
+            if (err == error.EndOfStream and !started) {
                 std.log.debug("start transfer timeout, initiating transfer again", .{});
                 num_timeouts += 1;
                 if (num_timeouts >= 5) {
@@ -208,8 +220,7 @@ pub fn recv(tty: *system.Tty, dir: std.fs.Dir) !void {
                     var chunk = Chunk128{};
                     var chunk_buf: [@sizeOf(Chunk128)]u8 = undefined;
                     chunk_buf[0] = start;
-                    const n_read = try reader.readAll(chunk_buf[1..]);
-                    std.debug.assert(n_read + 1 == @sizeOf(Chunk128));
+                    try reader.readSliceAll(chunk_buf[1..]);
                     @memcpy(std.mem.asBytes(&chunk), &chunk_buf);
                     break :b chunk;
                 };
@@ -224,14 +235,14 @@ pub fn recv(tty: *system.Tty, dir: std.fs.Dir) !void {
 
                 processBlock(Chunk128, &chunk, &block_index) catch {
                     num_errors += 1;
-                    try nak(tty.writer());
+                    try nak(writer);
                     continue;
                 };
 
                 if (!crcPasses(Chunk128, &chunk)) {
                     std.log.err("invalid crc", .{});
                     num_errors += 1;
-                    try nak(tty.writer());
+                    try nak(writer);
                     continue;
                 }
 
@@ -239,11 +250,11 @@ pub fn recv(tty: *system.Tty, dir: std.fs.Dir) !void {
                     .filename => {
                         if (chunk.payload[0] == 0x0) {
                             // If there is no filename, then we are done.
-                            try ack(tty.writer());
+                            try ack(writer);
                             return;
                         }
 
-                        var filename_buf: [std.fs.MAX_NAME_BYTES]u8 = undefined;
+                        var filename_buf: [std.fs.max_name_bytes]u8 = undefined;
 
                         var payload_index: usize = 0;
                         for (chunk.payload[payload_index..], 0..) |byte, i| {
@@ -279,23 +290,25 @@ pub fn recv(tty: *system.Tty, dir: std.fs.Dir) !void {
 
                         const filesize_str = filesize_buf[0 .. payload_index - filename.len - 2];
 
-                        try ack(tty.writer());
-                        try tty.writer().writeByte(CRC);
+                        try ack(writer);
+                        try writer.writeByte(CRC);
+                        try writer.flush();
 
                         state = .data;
 
                         filesize = try std.fmt.parseInt(usize, filesize_str, 10);
 
                         out_file = try dir.createFile(std.fs.path.basename(filename), .{});
-                        std.log.info("fetching {:.2} to '{s}'", .{ std.fmt.fmtIntSizeBin(filesize), filename });
+
+                        std.log.info("fetching {Bi:.02} to '{s}'", .{ filesize, filename });
                     },
                     .data => {
-                        std.debug.assert(filesize > bytes_written);
+                        std.debug.assert(filesize >= bytes_written);
                         const bytes_to_write = @min(filesize - bytes_written, chunk.payload.len);
                         var file = out_file orelse return error.MissingFile;
-                        try file.writer().writeAll(chunk.payload[0..bytes_to_write]);
+                        try file.writeAll(chunk.payload[0..bytes_to_write]);
                         bytes_written += bytes_to_write;
-                        try ack(tty.writer());
+                        try ack(writer);
                     },
                 }
             },
@@ -308,38 +321,37 @@ pub fn recv(tty: *system.Tty, dir: std.fs.Dir) !void {
                     var chunk = Chunk1K{};
                     var chunk_buf: [@sizeOf(Chunk1K)]u8 = undefined;
                     chunk_buf[0] = start;
-                    const n_read = try reader.readAll(chunk_buf[1..]);
-                    std.debug.assert(n_read + 1 == @sizeOf(Chunk1K));
+                    try reader.readSliceAll(chunk_buf[1..]);
                     @memcpy(std.mem.asBytes(&chunk), &chunk_buf);
                     break :b chunk;
                 };
 
                 processBlock(Chunk1K, &chunk, &block_index) catch {
                     num_errors += 1;
-                    try nak(tty.writer());
+                    try nak(writer);
                     continue;
                 };
 
                 if (!crcPasses(Chunk1K, &chunk)) {
                     std.log.err("invalid crc", .{});
                     num_errors += 1;
-                    try nak(tty.writer());
+                    try nak(writer);
                     continue;
                 }
 
-                std.debug.assert(filesize > bytes_written);
+                std.debug.assert(filesize >= bytes_written);
                 const bytes_to_write = @min(filesize - bytes_written, chunk.payload.len);
                 var file = out_file orelse return error.MissingFile;
-                try file.writer().writeAll(chunk.payload[0..bytes_to_write]);
+                try file.writeAll(chunk.payload[0..bytes_to_write]);
                 bytes_written += bytes_to_write;
-                try ack(tty.writer());
+                try ack(writer);
             },
             EOF => {
                 if (bytes_written != filesize) {
                     return error.InvalidFilesize;
                 }
 
-                try ack(tty.writer());
+                try ack(writer);
 
                 return recv(tty, dir);
             },
@@ -353,12 +365,14 @@ pub fn recv(tty: *system.Tty, dir: std.fs.Dir) !void {
     return error.TooManyNaks;
 }
 
-fn ack(writer: system.Tty.Writer) !void {
+inline fn ack(writer: *std.Io.Writer) !void {
     try writer.writeByte(ACK);
+    try writer.flush();
 }
 
-fn nak(writer: system.Tty.Writer) !void {
+inline fn nak(writer: *std.Io.Writer) !void {
     try writer.writeByte(NAK);
+    try writer.flush();
 }
 
 pub fn main() !void {
@@ -384,26 +398,24 @@ pub fn main() !void {
         .ACTION = clap.parsers.enumeration(Action),
     };
 
-    const stderr = std.io.getStdErr().writer();
-
     var diag = clap.Diagnostic{};
     var res = clap.parse(clap.Help, &params, &parsers, .{
         .diagnostic = &diag,
         .allocator = arena.allocator(),
     }) catch |err| {
-        try diag.report(stderr, err);
-        try clap.usage(stderr, clap.Help, &params);
+        try diag.reportToFile(.stderr(), err);
+        try clap.usageToFile(.stderr(), clap.Help, &params);
         return;
     };
     defer res.deinit();
 
     if (res.args.help != 0) {
-        return clap.help(std.io.getStdErr().writer(), clap.Help, &params, .{});
+        return clap.helpToFile(.stderr(), clap.Help, &params, .{});
     }
 
     if (res.positionals[0] == null or res.args.directory == null or res.args.tty == null) {
-        try diag.report(stderr, error.InvalidArgument);
-        try clap.usage(std.io.getStdErr().writer(), clap.Help, &params);
+        try diag.reportToFile(.stderr(), error.InvalidArgument);
+        try clap.usageToFile(.stderr(), clap.Help, &params);
         return;
     }
 
@@ -413,7 +425,7 @@ pub fn main() !void {
     );
     defer tty_file.close();
 
-    var tty = system.Tty.init(tty_file.handle);
+    var tty: system.Tty = .init(tty_file);
     defer tty.deinit();
 
     try tty.setMode(.file_transfer);

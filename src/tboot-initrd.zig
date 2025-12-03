@@ -40,7 +40,7 @@ fn compress(
     var compressed_file = try std.fs.cwd().createFile(compressed_output, .{ .mode = 0o444 });
     defer compressed_file.close();
 
-    try compressed_file.writer().writeAll(compressed.content());
+    try compressed_file.writeAll(compressed.content());
 
     try std.fs.cwd().rename(compressed_output, output);
 }
@@ -64,26 +64,24 @@ pub fn main() !void {
         .BOOL = clap.parsers.enumeration(BoolArgument),
     };
 
-    const stderr = std.io.getStdErr().writer();
-
     var diag = clap.Diagnostic{};
     var res = clap.parse(clap.Help, &params, &parsers, .{
         .diagnostic = &diag,
         .allocator = arena.allocator(),
     }) catch |err| {
-        try diag.report(stderr, err);
-        try clap.usage(stderr, clap.Help, &params);
+        try diag.reportToFile(.stderr(), err);
+        try clap.usageToFile(.stderr(), clap.Help, &params);
         return;
     };
     defer res.deinit();
 
     if (res.args.help != 0) {
-        return clap.help(std.io.getStdErr().writer(), clap.Help, &params, .{});
+        return clap.helpToFile(.stderr(), clap.Help, &params, .{});
     }
 
     if (res.args.init == null or res.args.output == null) {
-        try diag.report(stderr, error.InvalidArgument);
-        try clap.usage(std.io.getStdErr().writer(), clap.Help, &params);
+        try diag.reportToFile(.stderr(), error.InvalidArgument);
+        try clap.usageToFile(.stderr(), clap.Help, &params);
         return;
     }
 
@@ -98,14 +96,14 @@ pub fn main() !void {
     );
     defer archive_file.close();
 
-    var archive_file_source = std.io.StreamSource{ .file = archive_file };
-    var archive = try CpioArchive.init(&archive_file_source);
+    var writer_buffer: [1024]u8 = undefined;
+    var archive_file_writer = archive_file.writer(&writer_buffer);
+    var archive = try CpioArchive.init(&archive_file_writer.interface);
 
     var init_file = try std.fs.cwd().openFile(init, .{});
     defer init_file.close();
 
-    var init_source = std.io.StreamSource{ .file = init_file };
-    try archive.addFile("init", &init_source, 0o755);
+    try archive.addFile("init", init_file, 0o755);
 
     for (directories) |directory_path| {
         var dir = try std.fs.cwd().openDir(

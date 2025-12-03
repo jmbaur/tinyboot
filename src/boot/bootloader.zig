@@ -37,7 +37,7 @@ device: Device,
 
 /// Entries obtained from the underlying bootloader on the device. Obtained
 /// after a probe().
-entries: std.ArrayList(Entry),
+entries: std.array_list.Managed(Entry),
 
 /// The underlying bootloader.
 inner: *anyopaque,
@@ -45,7 +45,7 @@ inner: *anyopaque,
 /// Operations that can be ran on the underlying bootloader.
 vtable: *const struct {
     name: *const fn () []const u8,
-    probe: *const fn (*anyopaque, *std.ArrayList(Entry), Device) anyerror!void,
+    probe: *const fn (*anyopaque, *std.array_list.Managed(Entry), Device) anyerror!void,
     timeout: *const fn (*anyopaque) u8,
     entryLoaded: *const fn (*anyopaque, Entry) void,
     deinit: *const fn (*anyopaque, std.mem.Allocator) void,
@@ -74,7 +74,7 @@ pub fn init(
 
         pub fn probe(
             ctx: *anyopaque,
-            entries: *std.ArrayList(Entry),
+            entries: *std.array_list.Managed(Entry),
             d: Device,
         ) !void {
             const self: *T = @ptrCast(@alignCast(ctx));
@@ -100,7 +100,7 @@ pub fn init(
         .priority = opts.priority,
         .device = device,
         .allocator = allocator,
-        .entries = std.ArrayList(Entry).init(allocator),
+        .entries = std.array_list.Managed(Entry).init(allocator),
         .inner = inner,
         .vtable = &.{
             .name = T.name,
@@ -130,10 +130,10 @@ pub fn timeout(self: *BootLoader) !u8 {
 
 pub fn probe(self: *BootLoader) ![]const Entry {
     if (!self.probed) {
-        std.log.debug("bootloader not yet probed on {}", .{self.device});
+        std.log.debug("bootloader not yet probed on {f}", .{self.device});
         try self.vtable.probe(self.inner, &self.entries, self.device);
         self.probed = true;
-        std.log.debug("bootloader probed on {}", .{self.device});
+        std.log.debug("bootloader probed on {f}", .{self.device});
     }
 
     return self.entries.items;

@@ -42,15 +42,10 @@ pub fn nodeSysfsPath(device: *const Device, buf: []u8) ![]u8 {
 
 pub fn format(
     self: Device,
-    comptime fmt: []const u8,
-    options: std.fmt.FormatOptions,
-    writer: anytype,
+    writer: *std.Io.Writer,
 ) !void {
-    _ = fmt;
-    _ = options;
-
     switch (self.type) {
-        .ifindex => |ifindex| try writer.print("{s} {}", .{ "ifindex", ifindex }),
+        .ifindex => |ifindex| try writer.print("ifindex {}", .{ifindex}),
         .node => |node| {
             const major, const minor = node;
             try writer.print("node {}:{}", .{ major, minor });

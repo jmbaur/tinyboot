@@ -12,12 +12,15 @@ fn tbootInitrd(
     zstd: *std.Build.Step.Compile,
     clap: *std.Build.Module,
 ) *std.Build.Step.Compile {
-    const tboot_initrd = b.addExecutable(.{
-        .name = "tboot-initrd",
+    const tboot_initrd_module = b.createModule(.{
         .root_source_file = b.path("src/tboot-initrd.zig"),
         .target = target,
         .optimize = optimize,
         .strip = strip,
+    });
+    const tboot_initrd = b.addExecutable(.{
+        .name = "tboot-initrd",
+        .root_module = tboot_initrd_module,
     });
     tboot_initrd.linkLibC();
     tboot_initrd.linkLibrary(zstd);
@@ -30,7 +33,7 @@ pub fn build(b: *std.Build) !void {
     tboot_builtin.addOption(
         []const u8,
         "version",
-        try std.fmt.allocPrint(b.allocator, "{}", .{version}),
+        try std.fmt.allocPrint(b.allocator, "{f}", .{version}),
     );
 
     var env = try std.process.getEnvMap(b.allocator);
@@ -114,36 +117,45 @@ pub fn build(b: *std.Build) !void {
 
     b.installArtifact(tbootInitrd(b, target, optimize, do_strip, zstd, clap));
 
-    const tboot_sign = b.addExecutable(.{
-        .name = "tboot-sign",
+    const tboot_sign_module = b.createModule(.{
         .root_source_file = b.path("src/tboot-sign.zig"),
         .target = target,
         .optimize = optimize,
         .strip = do_strip,
     });
-    tboot_sign.linkLibC();
-    tboot_sign.linkLibrary(mbedtls);
+    const tboot_sign = b.addExecutable(.{
+        .name = "tboot-sign",
+        .root_module = tboot_sign_module,
+    });
+    tboot_sign.root_module.link_libc = true;
+    tboot_sign.root_module.linkLibrary(mbedtls);
     tboot_sign.root_module.addImport("clap", clap);
     b.installArtifact(tboot_sign);
 
-    const tboot_keygen = b.addExecutable(.{
-        .name = "tboot-keygen",
+    const tboot_keygen_module = b.createModule(.{
         .root_source_file = b.path("src/tboot-keygen.zig"),
         .target = target,
         .optimize = optimize,
         .strip = do_strip,
     });
-    tboot_keygen.linkLibC();
-    tboot_keygen.linkLibrary(mbedtls);
+    const tboot_keygen = b.addExecutable(.{
+        .name = "tboot-keygen",
+        .root_module = tboot_keygen_module,
+    });
+    tboot_keygen.root_module.link_libc = true;
+    tboot_keygen.root_module.linkLibrary(mbedtls);
     tboot_keygen.root_module.addImport("clap", clap);
     b.installArtifact(tboot_keygen);
 
-    const tboot_vpd = b.addExecutable(.{
-        .name = "tboot-vpd",
+    const tboot_vpd_module = b.createModule(.{
         .root_source_file = b.path("src/vpd.zig"),
         .target = target,
         .optimize = optimize,
         .strip = do_strip,
+    });
+    const tboot_vpd = b.addExecutable(.{
+        .name = "tboot-vpd",
+        .root_module = tboot_vpd_module,
     });
     tboot_vpd.root_module.addImport("clap", clap);
     b.installArtifact(tboot_vpd);
@@ -153,55 +165,70 @@ pub fn build(b: *std.Build) !void {
     // tboot-loader, so it doesn't make sense to build for non-linux targets.
     if (target.result.os.tag == .linux) {
         // TODO(jared): get tboot-ymodem working on non-linux targets
-        const tboot_ymodem = b.addExecutable(.{
-            .name = "tboot-ymodem",
+        const tboot_ymodem_module = b.createModule(.{
             .root_source_file = b.path("src/ymodem.zig"),
             .target = target,
             .optimize = optimize,
             .strip = do_strip,
         });
+        const tboot_ymodem = b.addExecutable(.{
+            .name = "tboot-ymodem",
+            .root_module = tboot_ymodem_module,
+        });
         tboot_ymodem.root_module.addImport("linux_headers", linux_headers_module);
         tboot_ymodem.root_module.addImport("clap", clap);
         b.installArtifact(tboot_ymodem);
 
-        const tboot_bless_boot = b.addExecutable(.{
-            .name = "tboot-bless-boot",
+        const tboot_bless_boot_module = b.createModule(.{
             .root_source_file = b.path("src/tboot-bless-boot.zig"),
             .target = target,
             .optimize = optimize,
         });
+        const tboot_bless_boot = b.addExecutable(.{
+            .name = "tboot-bless-boot",
+            .root_module = tboot_bless_boot_module,
+        });
         tboot_bless_boot.root_module.addImport("clap", clap);
         b.installArtifact(tboot_bless_boot);
 
-        const tboot_bless_boot_generator = b.addExecutable(.{
-            .name = "tboot-bless-boot-generator",
+        const tboot_bless_boot_generator_module = b.createModule(.{
             .root_source_file = b.path("src/tboot-bless-boot-generator.zig"),
             .target = target,
             .optimize = optimize,
             .strip = do_strip,
         });
+        const tboot_bless_boot_generator = b.addExecutable(.{
+            .name = "tboot-bless-boot-generator",
+            .root_module = tboot_bless_boot_generator_module,
+        });
         tboot_bless_boot_generator.root_module.addImport("clap", clap);
         b.installArtifact(tboot_bless_boot_generator);
 
-        const tboot_nixos_install = b.addExecutable(.{
-            .name = "tboot-nixos-install",
+        const tboot_nixos_install_module = b.createModule(.{
             .root_source_file = b.path("src/tboot-nixos-install.zig"),
             .target = target,
             .optimize = optimize,
             .strip = do_strip,
         });
-        tboot_nixos_install.linkLibC();
-        tboot_nixos_install.linkLibrary(mbedtls);
+        const tboot_nixos_install = b.addExecutable(.{
+            .name = "tboot-nixos-install",
+            .root_module = tboot_nixos_install_module,
+        });
+        tboot_nixos_install.root_module.link_libc = true;
+        tboot_nixos_install.root_module.linkLibrary(mbedtls);
         tboot_nixos_install.root_module.addImport("clap", clap);
         b.installArtifact(tboot_nixos_install);
     }
 
-    const tboot_loader = b.addExecutable(.{
-        .name = "tboot-loader",
+    const tboot_loader_module = b.createModule(.{
         .root_source_file = b.path("src/tboot-loader.zig"),
         .target = linux_target,
         .optimize = optimize_prefer_small,
         .strip = do_strip,
+    });
+    const tboot_loader = b.addExecutable(.{
+        .name = "tboot-loader",
+        .root_module = tboot_loader_module,
     });
     tboot_loader.root_module.addOptions("tboot_builtin", tboot_builtin);
     tboot_loader.root_module.addImport("linux_headers", linux_headers_module);
@@ -242,12 +269,15 @@ pub fn build(b: *std.Build) !void {
     b.getInstallStep().dependOn(&initrd_file.step);
 
     if (with_loader_efi_stub) {
-        const tboot_efi_stub = b.addExecutable(.{
-            .name = "tboot-efi-stub",
+        const tboot_efi_stub_module = b.createModule(.{
             .target = uefi_target,
             .root_source_file = b.path("src/tboot-efi-stub.zig"),
             .optimize = optimize_prefer_small,
             .strip = do_strip,
+        });
+        const tboot_efi_stub = b.addExecutable(.{
+            .name = "tboot-efi-stub",
+            .root_module = tboot_efi_stub_module,
         });
         const tboot_efi_stub_artifact = b.addInstallArtifact(tboot_efi_stub, .{
             .dest_dir = .{ .override = .{ .custom = "efi" } },
@@ -255,16 +285,18 @@ pub fn build(b: *std.Build) !void {
         b.getInstallStep().dependOn(&tboot_efi_stub_artifact.step);
     }
 
-    const tboot_runner = b.addExecutable(.{
-        .name = "tboot-runner",
+    const tboot_runner_module = b.createModule(.{
         .target = b.graph.host,
         .root_source_file = b.path("src/runner.zig"),
+    });
+    const tboot_runner = b.addExecutable(.{
+        .name = "tboot-runner",
+        .root_module = tboot_runner_module,
     });
     tboot_runner.root_module.addImport("clap", clap);
     const runner_tool = b.addRunArtifact(tboot_runner);
     runner_tool.step.dependOn(&initrd_file.step);
     runner_tool.addArg(@tagName(target.result.cpu.arch));
-    runner_tool.addArg(b.makeTempPath());
     runner_tool.addArg(if (runner_keydir) |keydir| keydir else "");
     runner_tool.addFileArg(initrd_file.source);
     runner_tool.addArg(if (runner_kernel) |kernel| try std.fs.cwd().realpathAlloc(b.allocator, kernel) else "");
@@ -280,10 +312,13 @@ pub fn build(b: *std.Build) !void {
     const run_step = b.step("run", "Run in qemu");
     run_step.dependOn(&runner_tool.step);
 
-    const unit_tests = b.addTest(.{
+    const unit_tests_module = b.createModule(.{
         .root_source_file = b.path("src/test.zig"),
         .target = target,
         .optimize = optimize,
+    });
+    const unit_tests = b.addTest(.{
+        .root_module = unit_tests_module,
     });
 
     unit_tests.root_module.addImport("linux_headers", linux_headers_module);

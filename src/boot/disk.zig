@@ -47,7 +47,11 @@ pub fn match(device: *const Device) ?u8 {
     var removable_file = sysfs_dir.openFile("removable", .{}) catch return null;
     defer removable_file.close();
 
-    const removable = (removable_file.reader().readByte() catch return null) == '1';
+    const removable = b: {
+        var buf = [_]u8{0};
+        _ = removable_file.read(&buf) catch return null;
+        break :b buf[0] == '1';
+    };
 
     // Prioritize removable devices over non-removable. This allows for
     // plugging in a USB-stick and having it "just work".
@@ -80,7 +84,7 @@ pub fn deinit(self: *DiskBootLoader) void {
 
 pub fn probe(
     self: *DiskBootLoader,
-    entries: *std.ArrayList(BootLoader.Entry),
+    entries: *std.array_list.Managed(BootLoader.Entry),
     disk_device: Device,
 ) !void {
     var disk_path_buf: [std.fs.max_path_bytes]u8 = undefined;
@@ -95,11 +99,12 @@ pub fn probe(
     var disk = try std.fs.cwd().openFile(disk_path, .{});
     defer disk.close();
 
-    var disk_source = std.io.StreamSource{ .file = disk };
+    var disk_buffer: [1024]u8 = undefined;
+    var disk_reader = disk.reader(&disk_buffer);
     // All GPTs also have an MBR, so we can invalidate the disk
     // entirely if it does not have an MBR.
-    var mbr = Mbr.init(&disk_source) catch |err| {
-        std.log.warn("no MBR found on disk {s}: {}", .{ disk_device, err });
+    var mbr = Mbr.init(&disk_reader.interface) catch |err| {
+        std.log.warn("no MBR found on disk {f}: {}", .{ disk_device, err });
         return;
     };
 
@@ -123,23 +128,24 @@ pub fn probe(
 
             // disk has a GPT
             if (!part.isBootable() and part_type == .ProtectedMbr) {
-                var gpt = Gpt.init(&disk_source) catch |err| switch (err) {
+                var gpt_buffer: [1024]u8 = undefined;
+                var gpt_reader = disk.reader(&gpt_buffer);
+                const gpt = Gpt.init(self.arena.allocator(), &gpt_reader.interface) catch |err| switch (err) {
                     Gpt.Error.MissingMagicNumber => {
-                        std.log.debug("disk {s} does not contain a GUID partition table", .{disk_device});
+                        std.log.debug("disk {f} does not contain a GUID partition table", .{disk_device});
                         continue;
                     },
                     Gpt.Error.HeaderCrcFail => {
-                        std.log.err("disk {s} CRC integrity check failed", .{disk_device});
+                        std.log.err("disk {f} CRC integrity check failed", .{disk_device});
                         continue;
                     },
                     else => {
-                        std.log.err("failed to read disk {s}: {}", .{ disk_device, err });
+                        std.log.err("failed to read disk {f}: {}", .{ disk_device, err });
                         continue;
                     },
                 };
 
-                const partitions = try gpt.partitions(self.arena.allocator());
-                for (partitions, 1..) |partition, gpt_partn| {
+                for (gpt.partitions, 1..) |partition, gpt_partn| {
                     if (partition.partType() orelse continue == .EfiSystem) {
                         break :b gpt_partn;
                     }
@@ -164,17 +170,18 @@ pub fn probe(
         },
     };
 
-    std.log.info("found boot partition on disk {s} partition {d}", .{ disk_device, boot_partition });
+    std.log.info("found boot partition on disk {f} partition {f}", .{ disk_device, boot_partition });
 
     var partition_path_buf: [std.fs.max_path_bytes]u8 = undefined;
     const partition_path = try boot_partition.nodePath(&partition_path_buf);
 
     var partition = try std.fs.cwd().openFile(partition_path, .{});
     defer partition.close();
+    var part_buffer: [1024]u8 = undefined;
+    var partition_reader = partition.reader(&part_buffer);
 
-    var esp_file_source = std.io.StreamSource{ .file = partition };
-    const fstype = try Filesystem.Type.detect(&esp_file_source) orelse {
-        std.log.err("could not detect filesystem on boot partition {}", .{boot_partition});
+    const fstype = try Filesystem.Type.detect(&partition_reader.interface) orelse {
+        std.log.err("could not detect filesystem on boot partition {f}", .{boot_partition});
         return;
     };
 
@@ -290,26 +297,24 @@ fn isValidVersionCharacter(char: u8) bool {
 }
 
 /// Version comparison as outlined in https://uapi-group.org/specifications/specs/version_format_specification/#version-comparison.
-fn compareVersion(left_buffer: []const u8, right_buffer: []const u8) std.math.Order {
-    var left_stream = std.io.fixedBufferStream(left_buffer);
-    var right_stream = std.io.fixedBufferStream(right_buffer);
-    const left = left_stream.reader();
-    const right = right_stream.reader();
+fn compareVersion(left: []const u8, right: []const u8) std.math.Order {
+    var left_reader: std.Io.Reader = .fixed(left);
+    var right_reader: std.Io.Reader = .fixed(right);
 
-    var left_char: u8 = left.readByte() catch 0;
-    var right_char: u8 = right.readByte() catch 0;
+    var left_char: u8 = left_reader.takeByte() catch 0;
+    var right_char: u8 = right_reader.takeByte() catch 0;
 
     // 128 bytes oughta be enough??
     var left_buf = [_]u8{0} ** 128;
     var right_buf = [_]u8{0} ** 128;
 
-    var left_fba = std.heap.FixedBufferAllocator.init(&left_buf);
-    var right_fba = std.heap.FixedBufferAllocator.init(&right_buf);
+    var left_writer: std.Io.Writer = .fixed(&left_buf);
+    var right_writer: std.Io.Writer = .fixed(&right_buf);
 
     while (true) {
         defer {
-            left_fba.reset();
-            right_fba.reset();
+            _ = left_writer.consumeAll();
+            _ = right_writer.consumeAll();
         }
 
         // Any characters which are outside of the set of listed above (a-z,
@@ -317,10 +322,10 @@ fn compareVersion(left_buffer: []const u8, right_buffer: []const u8) std.math.Or
         // this means that non-ASCII characters that are Unicode digits or
         // letters are skipped too.
         while (left_char != 0 and !isValidVersionCharacter(left_char)) {
-            left_char = left.readByte() catch 0;
+            left_char = left_reader.takeByte() catch 0;
         }
         while (right_char != 0 and !isValidVersionCharacter(right_char)) {
-            right_char = right.readByte() catch 0;
+            right_char = right_reader.takeByte() catch 0;
         }
 
         // If the remaining part of one of strings starts with ~: if other
@@ -332,8 +337,8 @@ fn compareVersion(left_buffer: []const u8, right_buffer: []const u8) std.math.Or
                 return ord;
             }
 
-            left_char = left.readByte() catch 0;
-            right_char = right.readByte() catch 0;
+            left_char = left_reader.takeByte() catch 0;
+            right_char = right_reader.takeByte() catch 0;
         }
 
         // If one of the strings has ended: if the other string hasn’t, the
@@ -352,8 +357,8 @@ fn compareVersion(left_buffer: []const u8, right_buffer: []const u8) std.math.Or
                 return ord;
             }
 
-            left_char = left.readByte() catch 0;
-            right_char = right.readByte() catch 0;
+            left_char = left_reader.takeByte() catch 0;
+            right_char = right_reader.takeByte() catch 0;
         }
 
         // If the remaining part of one of strings starts with ^: if the other
@@ -365,8 +370,8 @@ fn compareVersion(left_buffer: []const u8, right_buffer: []const u8) std.math.Or
                 return ord;
             }
 
-            left_char = left.readByte() catch 0;
-            right_char = right.readByte() catch 0;
+            left_char = left_reader.takeByte() catch 0;
+            right_char = right_reader.takeByte() catch 0;
         }
 
         // If the remaining part of one of strings starts with .: if the other
@@ -378,8 +383,8 @@ fn compareVersion(left_buffer: []const u8, right_buffer: []const u8) std.math.Or
                 return ord;
             }
 
-            left_char = left.readByte() catch 0;
-            right_char = right.readByte() catch 0;
+            left_char = left_reader.takeByte() catch 0;
+            right_char = right_reader.takeByte() catch 0;
         }
 
         // If either of the remaining parts starts with a digit: numerical
@@ -390,25 +395,23 @@ fn compareVersion(left_buffer: []const u8, right_buffer: []const u8) std.math.Or
         // number compares higher. Otherwise, the comparison continues at the
         // following characters at point 1.
         if (std.ascii.isDigit(left_char) or std.ascii.isDigit(right_char)) {
-            var left_num_buf = std.ArrayList(u8).init(left_fba.allocator());
             while (std.ascii.isDigit(left_char)) {
-                left_num_buf.append(left_char) catch unreachable;
-                left_char = left.readByte() catch 0;
+                left_writer.writeByte(left_char) catch unreachable;
+                left_char = left_reader.takeByte() catch 0;
             }
 
-            var right_num_buf = std.ArrayList(u8).init(right_fba.allocator());
             while (std.ascii.isDigit(right_char)) {
-                right_num_buf.append(right_char) catch unreachable;
-                right_char = right.readByte() catch 0;
+                right_writer.writeByte(right_char) catch unreachable;
+                right_char = right_reader.takeByte() catch 0;
             }
 
-            const non_empty_ord = std.math.order(@intFromBool(left_num_buf.items.len != 0), @intFromBool(right_num_buf.items.len != 0));
+            const non_empty_ord = std.math.order(@intFromBool(left_writer.end != 0), @intFromBool(right_writer.end != 0));
             if (non_empty_ord != .eq) {
                 return non_empty_ord;
             }
 
-            const left_trimmed = std.mem.trimLeft(u8, left_num_buf.items, "0");
-            const right_trimmed = std.mem.trimLeft(u8, right_num_buf.items, "0");
+            const left_trimmed = std.mem.trimLeft(u8, left_writer.buffered(), "0");
+            const right_trimmed = std.mem.trimLeft(u8, right_writer.buffered(), "0");
 
             const left_num = if (left_trimmed.len == 0) 0 else std.fmt.parseInt(
                 usize,
@@ -429,6 +432,9 @@ fn compareVersion(left_buffer: []const u8, right_buffer: []const u8) std.math.Or
             continue;
         }
 
+        _ = left_writer.consumeAll();
+        _ = right_writer.consumeAll();
+
         // Leading alphabetical prefixes are compared alphabetically. The
         // substrings are compared letter-by-letter. If both letters are the
         // same, the comparison continues with the next letter. All capital
@@ -438,25 +444,23 @@ fn compareVersion(left_buffer: []const u8, right_buffer: []const u8) std.math.Or
         // it compares higher. Otherwise, the comparison continues at the
         // following characters at point 1.
         {
-            var left_alpha_buf = std.ArrayList(u8).init(left_fba.allocator());
             while (std.ascii.isAlphabetic(left_char)) {
-                left_alpha_buf.append(left_char) catch unreachable;
-                left_char = left.readByte() catch 0;
+                left_writer.writeByte(left_char) catch unreachable;
+                left_char = left_reader.takeByte() catch 0;
             }
 
-            var right_alpha_buf = std.ArrayList(u8).init(right_fba.allocator());
             while (std.ascii.isAlphabetic(right_char)) {
-                right_alpha_buf.append(right_char) catch unreachable;
-                right_char = right.readByte() catch 0;
+                right_writer.writeByte(right_char) catch unreachable;
+                right_char = right_reader.takeByte() catch 0;
             }
 
-            const len_for_comparison = @min(left_alpha_buf.items.len, right_alpha_buf.items.len);
-            const lex_ord = std.mem.order(u8, left_alpha_buf.items[0..len_for_comparison], right_alpha_buf.items[0..len_for_comparison]);
+            const len_for_comparison = @min(left_writer.end, right_writer.end);
+            const lex_ord = std.mem.order(u8, left_writer.buffered()[0..len_for_comparison], right_writer.buffered()[0..len_for_comparison]);
             if (lex_ord != .eq) {
                 return lex_ord;
             }
 
-            const len_ord = std.math.order(left_alpha_buf.items.len, right_alpha_buf.items.len);
+            const len_ord = std.math.order(left_writer.end, right_writer.end);
             if (len_ord != .eq) {
                 return len_ord;
             }
@@ -801,7 +805,7 @@ test "boot entry sorting" {
 fn searchForEntries(
     self: *DiskBootLoader,
     disk_device: Device,
-    entries: *std.ArrayList(BootLoader.Entry),
+    entries: *std.array_list.Managed(BootLoader.Entry),
 ) !void {
     const allocator = self.arena.allocator();
 
@@ -815,17 +819,17 @@ fn searchForEntries(
     );
     defer entries_dir.close();
 
-    var bls_entries = std.ArrayList(BlsEntry).init(allocator);
-    defer bls_entries.deinit();
+    var bls_entries = std.ArrayList(BlsEntry){};
+    defer bls_entries.deinit(allocator);
 
     const loader_conf: LoaderConf = b: {
         var file = mount_dir.openFile("loader/loader.conf", .{}) catch {
-            std.log.debug("no loader.conf found on {s}, using defaults", .{disk_device});
+            std.log.debug("no loader.conf found on {f}, using defaults", .{disk_device});
             break :b .{};
         };
         defer file.close();
 
-        std.log.debug("found loader.conf on {s}", .{disk_device});
+        std.log.debug("found loader.conf on {f}", .{disk_device});
 
         const contents = try file.readToEndAlloc(allocator, 4096);
 
@@ -862,7 +866,7 @@ fn searchForEntries(
         var entry_file = entries_dir.openFile(dir_entry.name, .{}) catch continue;
         defer entry_file.close();
 
-        std.log.debug("inspecting BLS entry {s} on {s}", .{ dir_entry.name, disk_device });
+        std.log.debug("inspecting BLS entry {s} on {f}", .{ dir_entry.name, disk_device });
 
         // We should definitely not get any boot entry files larger than this.
         const entry_contents = try entry_file.readToEndAlloc(allocator, 1 << 16);
@@ -872,7 +876,7 @@ fn searchForEntries(
         };
         errdefer type1_entry.deinit();
 
-        try bls_entries.append(type1_entry);
+        try bls_entries.append(allocator, type1_entry);
     }
 
     std.log.debug("sorting BLS entries", .{});
@@ -887,7 +891,7 @@ fn searchForEntries(
         }) catch |err| switch (err) {
             error.OutOfMemory => return err,
             else => {
-                std.log.err("linux kernel \"{?s}\" not found on {s}", .{ entry.linux, disk_device });
+                std.log.err("linux kernel \"{?s}\" not found on {f}", .{ entry.linux, disk_device });
                 continue;
             },
         };
@@ -904,7 +908,7 @@ fn searchForEntries(
                 initrd = mount_dir.realpathAlloc(allocator, initrd_[0]) catch |err| switch (err) {
                     error.OutOfMemory => return err,
                     else => {
-                        std.log.err("initrd \"{s}\" not found on {s}", .{ initrd_[0], disk_device });
+                        std.log.err("initrd \"{s}\" not found on {f}", .{ initrd_[0], disk_device });
                         continue;
                     },
                 };
@@ -921,18 +925,18 @@ fn searchForEntries(
         }
 
         const cmdline = b: {
-            var final_cmdline = std.ArrayList(u8).init(allocator);
+            var final_cmdline: std.Io.Writer.Allocating = .init(allocator);
 
             if (entry.options) |opts| {
                 for (opts) |opt| {
-                    try final_cmdline.appendSlice(opt);
-                    try final_cmdline.append(' ');
+                    try final_cmdline.writer.writeAll(opt);
+                    try final_cmdline.writer.writeByte(' ');
                 }
             }
 
-            try final_cmdline.writer().print("tboot.bls-entry={s}", .{entry.id});
+            try final_cmdline.writer.print("tboot.bls-entry={s}", .{entry.id});
 
-            break :b try final_cmdline.toOwnedSlice();
+            break :b final_cmdline.written();
         };
 
         errdefer allocator.free(cmdline);
@@ -967,27 +971,30 @@ pub const BlsEntryFile = struct {
     };
 
     pub fn toFilename(self: *const @This(), allocator: std.mem.Allocator) ![]const u8 {
-        var filename = std.ArrayList(u8).init(allocator);
+        var filename_writer: std.Io.Writer.Allocating = .init(allocator);
+        errdefer filename_writer.deinit();
 
-        try filename.appendSlice(self.name);
+        var filename = &filename_writer.writer;
+
+        try filename.writeAll(self.name);
 
         if (self.tries_left) |tries_left| {
-            try filename.append('+');
-            try filename.append(
+            try filename.writeByte('+');
+            try filename.writeByte(
                 std.fmt.digitToChar(tries_left, std.fmt.Case.lower),
             );
         }
 
         if (self.tries_done) |tries_done| {
-            try filename.append('-');
-            try filename.append(
+            try filename.writeByte('-');
+            try filename.writeByte(
                 std.fmt.digitToChar(tries_done, std.fmt.Case.lower),
             );
         }
 
-        try filename.appendSlice(".conf");
+        try filename.writeAll(".conf");
 
-        return filename.toOwnedSlice();
+        return filename_writer.written();
     }
 
     pub fn init(entry_name: []const u8, opts: struct {
@@ -1411,11 +1418,14 @@ const BlsEntry = struct {
 
         var all_split = std.mem.splitSequence(u8, contents, "\n");
 
-        var initrd = std.ArrayList([]const u8).init(allocator);
-        errdefer initrd.deinit();
+        var initrd = std.ArrayList([]const u8){};
+        errdefer initrd.deinit(allocator);
 
-        var options = std.ArrayList([]const u8).init(allocator);
-        errdefer options.deinit();
+        var options = std.ArrayList([]const u8){};
+        errdefer options.deinit(allocator);
+
+        var devicetree_overlay = std.ArrayList([]const u8){};
+        errdefer devicetree_overlay.deinit(allocator);
 
         while (all_split.next()) |unprocessed_line| {
             if (std.mem.eql(u8, unprocessed_line, "")) {
@@ -1442,33 +1452,34 @@ const BlsEntry = struct {
             } else if (std.mem.eql(u8, key, "linux")) {
                 self.linux = try self.allocator.dupe(u8, std.mem.trimLeft(u8, line_split.rest(), "/"));
             } else if (std.mem.eql(u8, key, "initrd")) {
-                try initrd.append(try self.allocator.dupe(u8, std.mem.trimLeft(u8, line_split.rest(), "/")));
+                try initrd.append(allocator, try self.allocator.dupe(u8, std.mem.trimLeft(u8, line_split.rest(), "/")));
             } else if (std.mem.eql(u8, key, "efi")) {
                 self.efi = try self.allocator.dupe(u8, std.mem.trimLeft(u8, line_split.rest(), "/"));
             } else if (std.mem.eql(u8, key, "options")) {
                 while (line_split.next()) |next| {
-                    try options.append(try self.allocator.dupe(u8, next));
+                    try options.append(allocator, try self.allocator.dupe(u8, next));
                 }
             } else if (std.mem.eql(u8, key, "devicetree")) {
                 self.devicetree = try self.allocator.dupe(u8, std.mem.trimLeft(u8, line_split.rest(), "/"));
             } else if (std.mem.eql(u8, key, "devicetree-overlay")) {
-                var devicetree_overlay = std.ArrayList([]const u8).init(allocator);
-                errdefer devicetree_overlay.deinit();
                 while (line_split.next()) |next| {
-                    try devicetree_overlay.append(try self.allocator.dupe(u8, std.mem.trimLeft(u8, next, "/")));
+                    try devicetree_overlay.append(allocator, try self.allocator.dupe(u8, std.mem.trimLeft(u8, next, "/")));
                 }
-                self.devicetree_overlay = try devicetree_overlay.toOwnedSlice();
             } else if (std.mem.eql(u8, key, "architecture")) {
                 self.architecture = Architecture.parse(line_split.rest()) catch continue;
             }
         }
 
         if (initrd.items.len > 0) {
-            self.initrd = try initrd.toOwnedSlice();
+            self.initrd = try initrd.toOwnedSlice(allocator);
         }
 
         if (options.items.len > 0) {
-            self.options = try options.toOwnedSlice();
+            self.options = try options.toOwnedSlice(allocator);
+        }
+
+        if (devicetree_overlay.items.len > 0) {
+            self.devicetree_overlay = try devicetree_overlay.toOwnedSlice(allocator);
         }
 
         return self;

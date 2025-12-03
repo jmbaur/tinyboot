@@ -26,7 +26,7 @@ pub fn init() !void {
         .{ .mode = .write_only },
     )) |printk_devkmsg| {
         defer printk_devkmsg.close();
-        printk_devkmsg.writer().writeAll("on\n") catch {};
+        printk_devkmsg.writeAll("on\n") catch {};
     } else |_| {}
 
     kmsg = try std.fs.cwd().openFile(KMSG, .{ .mode = .write_only });
@@ -67,7 +67,7 @@ pub fn logFn(
             .debug => 7,
         });
 
-        std.fmt.formatIntValue(syslog_level, "", .{}, fbs.writer()) catch return;
+        fbs.writer().print("{d}", .{syslog_level}) catch return;
         break :b fbs.getWritten();
     };
 

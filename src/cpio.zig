@@ -36,7 +36,7 @@ const CpioEntryType = enum {
 
 pub const CpioArchive = @This();
 
-destination: *std.io.StreamSource,
+writer: *std.Io.Writer,
 ino: u32 = 0,
 total_written: usize = 0,
 
@@ -45,13 +45,14 @@ const Error = error{
     UnexpectedSource,
 };
 
-pub fn init(destination: *std.io.StreamSource) !@This() {
-    return @This(){ .destination = destination };
+pub fn init(writer: *std.Io.Writer) !@This() {
+    return @This(){ .writer = writer };
 }
 
 pub fn addEntry(
     self: *@This(),
-    source: ?*std.io.StreamSource,
+    source: ?*std.Io.Reader,
+    filesize: u32,
     path: []const u8,
     entry_type: CpioEntryType,
     perms: u32,
@@ -59,19 +60,6 @@ pub fn addEntry(
     if (entry_type == .Directory and source != null) {
         return Error.UnexpectedSource;
     }
-
-    const filesize = b: {
-        if (source) |s| {
-            const pos = try s.getEndPos();
-            if (pos >= 1 << 32) {
-                return Error.FileTooLarge;
-            } else {
-                break :b @as(u32, @intCast(pos));
-            }
-        } else {
-            break :b 0;
-        }
-    };
 
     const filepath_len = path.len + 1; // null terminator
 
@@ -103,7 +91,7 @@ pub fn addEntry(
             .namesize = @intCast(filepath_len),
         };
 
-        try self.destination.writer().print("{X:0>6}{X:0>8}{X:0>8}{X:0>8}{X:0>8}{X:0>8}{X:0>8}{X:0>8}{X:0>8}{X:0>8}{X:0>8}{X:0>8}{X:0>8}{X:0>8}", .{
+        try self.writer.print("{X:0>6}{X:0>8}{X:0>8}{X:0>8}{X:0>8}{X:0>8}{X:0>8}{X:0>8}{X:0>8}{X:0>8}{X:0>8}{X:0>8}{X:0>8}{X:0>8}", .{
             header.magic,
             header.ino,
             header.mode,
@@ -121,32 +109,29 @@ pub fn addEntry(
         });
         self.total_written += ASCII_CPIO_HEADER_SIZE;
 
-        try self.destination.writer().writeAll(path);
-        try self.destination.writer().writeByte(0); // null terminator
+        try self.writer.writeAll(path);
+        try self.writer.writeByte(0); // null terminator
         self.total_written += filepath_len;
 
         // pad the file name
         const header_padding = (4 - ((ASCII_CPIO_HEADER_SIZE + filepath_len) % 4)) % 4;
-        try self.destination.writer().writeByteNTimes(0, header_padding);
+        try self.writer.splatByteAll(0, header_padding);
         self.total_written += header_padding;
 
         if (source) |source_| {
-            var pos: usize = 0;
-            const end = try source_.getEndPos();
-
-            var buf = [_]u8{0} ** 4096;
-
-            while (pos < end) {
-                try source_.seekTo(pos);
-                const bytes_read = try source_.read(&buf);
-                try self.destination.writer().writeAll(buf[0..bytes_read]);
-                self.total_written += bytes_read;
-                pos += bytes_read;
+            var streamed_bytes: usize = 0;
+            while (source_.stream(self.writer, .unlimited)) |n| {
+                streamed_bytes += n;
+            } else |err| switch (err) {
+                error.EndOfStream => {},
+                else => return err,
             }
 
+            self.total_written += streamed_bytes;
+
             // pad the file data
-            const filedata_padding: usize = @intCast((4 - (end % 4)) % 4);
-            try self.destination.writer().writeByteNTimes(0, filedata_padding);
+            const filedata_padding: usize = @intCast((4 - (streamed_bytes % 4)) % 4);
+            try self.writer.splatByteAll(0, filedata_padding);
             self.total_written += filedata_padding;
         }
     }
@@ -154,37 +139,45 @@ pub fn addEntry(
     self.ino += 1;
 }
 
-pub fn addFile(self: *@This(), path: []const u8, source: *std.io.StreamSource, perms: u32) !void {
-    try self.addEntry(source, path, .File, perms);
+pub fn addFile(self: *@This(), path: []const u8, file: std.fs.File, perms: u32) !void {
+    const stat = try file.stat();
+    if (stat.size > std.math.maxInt(u32)) {
+        return Error.FileTooLarge;
+    }
+
+    var buffer: [1024]u8 = undefined;
+    var reader = file.reader(&buffer);
+
+    try self.addEntry(&reader.interface, @intCast(stat.size), path, .File, perms);
 }
 
 pub fn addDirectory(self: *@This(), path: []const u8, perms: u32) !void {
-    try self.addEntry(null, path, .Directory, perms);
+    try self.addEntry(null, 0, path, .Directory, perms);
 }
 
 pub fn addSymlink(
     self: *@This(),
-    dstPath: []const u8,
-    srcPath: []const u8,
+    dst_path: []const u8,
+    src_path: []const u8,
 ) !void {
-    var source = std.io.StreamSource{
-        .const_buffer = std.io.fixedBufferStream(srcPath),
-    };
+    var reader: std.Io.Reader = .fixed(src_path);
 
     try self.addEntry(
-        &source,
-        dstPath,
+        &reader,
+        @intCast(src_path.len),
+        dst_path,
         .Symlink,
         0o777, // make symlinks always have 777 perms
     );
 }
 
 pub fn finalize(self: *@This()) !void {
-    try self.addEntry(null, TRAILER, .File, 0);
+    try self.addEntry(null, 0, TRAILER, .File, 0);
 
     // Maintain a block size of 512 by adding padding to the end of the
     // archive.
-    try self.destination.writer().writeByteNTimes(0, (512 - (self.total_written % 512)) % 512);
+    try self.writer.splatByteAll(0, (512 - (self.total_written % 512)) % 512);
+    try self.writer.flush();
 }
 
 fn handleFile(
@@ -220,9 +213,8 @@ fn handleFile(
             defer file.close();
 
             const stat = try file.stat();
-            var source = std.io.StreamSource{ .file = file };
 
-            try archive.addFile(entry_path, &source, @intCast(stat.mode));
+            try archive.addFile(entry_path, file, @intCast(stat.mode));
         },
         .sym_link => {
             const resolved_path = try std.fs.path.resolve(
@@ -251,12 +243,10 @@ fn handleFile(
                 );
             }
         },
-        else => {
-            std.log.warn(
-                "Do not know how to add file {s} of kind {} to CPIO archive",
-                .{ full_entry_path, kind },
-            );
-        },
+        else => std.log.warn(
+            "Do not know how to add file {s} of kind {} to CPIO archive",
+            .{ full_entry_path, kind },
+        ),
     }
 }
 

@@ -45,25 +45,36 @@ const Token = enum(u32) {
     }
 };
 
-const LinkedList = std.DoublyLinkedList(union(Token) {
-    BeginNode: []const u8,
-    EndNode,
-    Prop: struct {
-        inner: Prop,
-        value: []const u8,
-    },
-    Nop,
-    End,
-});
+pub const Node = struct {
+    pub const Inner = std.DoublyLinkedList.Node;
+
+    pub const NodeToken = union(Token) {
+        BeginNode: []const u8,
+        EndNode,
+        Prop: struct {
+            inner: Prop,
+            value: []const u8,
+        },
+        Nop,
+        End,
+    };
+
+    inner: Inner = .{},
+    token: NodeToken,
+};
 
 allocator: std.mem.Allocator,
-stream: *std.io.StreamSource,
 header: Header,
-strings: std.ArrayList(u8),
-list: LinkedList,
+mem_rsvmap: []const u8,
+dt_strings: std.Io.Writer.Allocating,
+dt_struct: std.DoublyLinkedList = .{},
 
-pub fn init(stream: *std.io.StreamSource, allocator: std.mem.Allocator) !@This() {
-    const header = try stream.reader().readStructEndian(Header, .big);
+pub fn init(reader: *std.Io.Reader, allocator: std.mem.Allocator) !@This() {
+    const header = try reader.takeStruct(Header, .big);
+
+    std.debug.assert(header.off_mem_rsvmap >= @sizeOf(Header));
+    std.debug.assert(header.off_dt_struct > header.off_mem_rsvmap);
+    std.debug.assert(header.off_dt_strings > header.off_dt_struct);
 
     if (header.magic != magic) {
         return error.InvalidMagic;
@@ -73,26 +84,30 @@ pub fn init(stream: *std.io.StreamSource, allocator: std.mem.Allocator) !@This()
         return error.IncompatibleVersion;
     }
 
-    const strings = try parseStringTable(allocator, header, stream);
-    errdefer strings.deinit();
+    const mem_rsvmap = try reader.readAlloc(allocator, header.off_dt_struct - header.off_mem_rsvmap);
+    errdefer allocator.free(mem_rsvmap);
 
-    const list = try createLinkedList(allocator, header, stream);
-    errdefer deinitList(list);
+    const dt_struct = try parseDtStruct(allocator, reader);
+    errdefer deinitDtStruct(allocator, dt_struct);
+
+    const dt_strings = try parseDtStrings(allocator, header, reader);
+    errdefer dt_strings.deinit();
 
     return .{
         .allocator = allocator,
-        .stream = stream,
+        .mem_rsvmap = mem_rsvmap,
         .header = header,
-        .strings = strings,
-        .list = list,
+        .dt_strings = dt_strings,
+        .dt_struct = dt_struct,
     };
 }
 
-fn deinitList(allocator: std.mem.Allocator, list: LinkedList) void {
-    var node = list.first orelse return;
+fn deinitDtStruct(allocator: std.mem.Allocator, dt_struct: std.DoublyLinkedList) void {
+    var node = dt_struct.first orelse return;
 
     while (node.next) |next| {
-        switch (node.data) {
+        const node_data: *Node = @fieldParentPtr("inner", node);
+        switch (node_data.token) {
             .BeginNode => |name| {
                 allocator.free(name);
             },
@@ -102,123 +117,123 @@ fn deinitList(allocator: std.mem.Allocator, list: LinkedList) void {
             else => {},
         }
 
-        allocator.destroy(node);
+        allocator.destroy(node_data);
         node = next;
     }
 
-    allocator.destroy(node);
+    const node_data: *Node = @fieldParentPtr("inner", node);
+    allocator.destroy(node_data);
 }
 
 pub fn deinit(self: *@This()) void {
-    self.strings.deinit();
+    self.dt_strings.deinit();
 
-    deinitList(self.allocator, self.list);
+    self.allocator.free(self.mem_rsvmap);
+
+    deinitDtStruct(self.allocator, self.dt_struct);
 }
 
-fn parseStringTable(
+/// By the time this is called, `reader` is at the position of
+/// `off_dt_strings`.
+fn parseDtStrings(
     allocator: std.mem.Allocator,
     header: Header,
-    stream: *std.io.StreamSource,
-) !std.ArrayList(u8) {
-    try stream.seekTo(header.off_dt_strings);
+    reader: *std.Io.Reader,
+) !std.Io.Writer.Allocating {
+    var dt_strings: std.Io.Writer.Allocating = .init(allocator);
 
-    var list = std.ArrayList(u8).init(allocator);
-    errdefer list.deinit();
+    try reader.streamExact(&dt_strings.writer, header.size_dt_strings);
 
-    stream.reader().readAllArrayList(&list, header.size_dt_strings) catch |err| switch (err) {
-        error.StreamTooLong => {},
-        else => return err,
-    };
-
-    return list;
+    return dt_strings;
 }
 
-fn alignStream(stream: *std.io.StreamSource) !void {
-    try stream.reader().skipBytes(fdtPad(@intCast(try stream.getPos())), .{});
+inline fn alignReader(reader: *std.Io.Reader, len: usize) !void {
+    try reader.discardAll(fdtPad(@intCast(len)));
 }
 
-fn fdtPad(val: u32) u32 {
+inline fn fdtPad(val: u32) u32 {
     return std.mem.alignForward(u32, val, @sizeOf(u32)) - val;
 }
 
-fn createLinkedList(
+/// By the time this is called, the reader is at the position of
+/// `off_dt_struct`.
+fn parseDtStruct(
     allocator: std.mem.Allocator,
-    header: Header,
-    stream: *std.io.StreamSource,
-) !LinkedList {
-    try stream.seekTo(header.off_dt_struct);
+    reader: *std.Io.Reader,
+) !std.DoublyLinkedList {
+    var dt_struct = std.DoublyLinkedList{};
+    errdefer deinitDtStruct(allocator, dt_struct);
 
-    var list = LinkedList{};
-    errdefer deinitList(allocator, list);
-
-    var current_node: ?*LinkedList.Node = null;
+    var current_node: ?*Node = null;
 
     while (true) {
-        const new_node = try allocator.create(LinkedList.Node);
+        const new_node = try allocator.create(Node);
         errdefer allocator.destroy(new_node);
 
-        switch (try nextToken(stream)) {
+        switch (try nextToken(reader)) {
             .BeginNode => {
                 var node_name_buf = [_]u8{0} ** node_prop_name_max_chars;
-                var node_name_stream = std.io.fixedBufferStream(&node_name_buf);
-                try stream.reader().streamUntilDelimiter(node_name_stream.writer(), 0, null);
-                const node_name = node_name_stream.getWritten();
+                var node_name_writer: std.Io.Writer = .fixed(&node_name_buf);
+                const node_name_length = try reader.streamDelimiter(&node_name_writer, 0);
+                std.debug.assert(0 == try reader.takeByte()); // skip null byte
 
-                try alignStream(stream);
+                const node_name = node_name_writer.buffered();
 
-                new_node.* = LinkedList.Node{ .data = .{ .BeginNode = try allocator.dupe(u8, node_name) } };
+                try alignReader(reader, node_name_length + 1);
+
+                new_node.* = Node{
+                    .token = .{ .BeginNode = try allocator.dupe(u8, node_name) },
+                };
 
                 // We are at the root node
                 if (std.mem.eql(u8, node_name, "")) {
-                    if (list.first != null) {
+                    if (dt_struct.first != null) {
                         return error.InvalidFdt;
                     }
 
-                    list.prepend(new_node);
+                    dt_struct.prepend(&new_node.inner);
                 } else {
-                    list.insertAfter(current_node.?, new_node);
+                    dt_struct.insertAfter(&current_node.?.inner, &new_node.inner);
                 }
 
                 current_node = new_node;
             },
             .Prop => {
-                const prop = try stream.reader().readStructEndian(Prop, .big);
+                const prop = try reader.takeStruct(Prop, .big);
 
                 const value = try allocator.alloc(u8, prop.len);
-                _ = try stream.reader().readAll(value);
-                try alignStream(stream);
+                try reader.readSliceAll(value);
+                try alignReader(reader, prop.len);
 
-                new_node.* = LinkedList.Node{ .data = .{ .Prop = .{ .inner = prop, .value = value } } };
+                new_node.* = Node{ .token = .{ .Prop = .{ .inner = prop, .value = value } } };
 
-                list.insertAfter(current_node.?, new_node);
+                dt_struct.insertAfter(&current_node.?.inner, &new_node.inner);
                 current_node = new_node;
             },
             .EndNode => {
-                new_node.* = LinkedList.Node{ .data = .EndNode };
-                list.insertAfter(current_node.?, new_node);
+                new_node.* = Node{ .token = .EndNode };
+                dt_struct.insertAfter(&current_node.?.inner, &new_node.inner);
                 current_node = new_node;
             },
             .End => {
-                new_node.* = LinkedList.Node{ .data = .End };
-                list.insertAfter(current_node.?, new_node);
+                new_node.* = Node{ .token = .End };
+                dt_struct.insertAfter(&current_node.?.inner, &new_node.inner);
                 current_node = new_node;
                 break;
             },
             .Nop => {
-                new_node.* = LinkedList.Node{ .data = .Nop };
-                list.insertAfter(current_node.?, new_node);
+                new_node.* = Node{ .token = .Nop };
+                dt_struct.insertAfter(&current_node.?.inner, &new_node.inner);
                 current_node = new_node;
             },
         }
     }
 
-    return list;
+    return dt_struct;
 }
 
-fn nextToken(stream: *std.io.StreamSource) !Token {
-    const token_value = try stream.reader().readVarInt(u32, .big, @sizeOf(u32));
-
-    return try Token.parse(token_value);
+inline fn nextToken(reader: *std.Io.Reader) !Token {
+    return try Token.parse(try reader.takeVarInt(u32, .big, @sizeOf(u32)));
 }
 
 /// Returns a tuple representing if the full path was found and the last node
@@ -226,23 +241,25 @@ fn nextToken(stream: *std.io.StreamSource) !Token {
 /// found).
 fn findProperty(
     self: *@This(),
-    node: ?*LinkedList.Node,
+    node: ?*Node.Inner,
     path: []const u8,
-) !std.meta.Tuple(&.{ bool, *LinkedList.Node }) {
+) !std.meta.Tuple(&.{ bool, *Node.Inner }) {
     var split = std.mem.splitScalar(u8, path, '/');
 
     return self._findProperty(node orelse return error.PropertyNotFound, &split);
 }
 
-fn skipToFdtEndNode(start: *LinkedList.Node) !*LinkedList.Node {
-    std.debug.assert(start.data == .BeginNode);
+fn skipToFdtEndNode(start: *Node.Inner) !*Node.Inner {
+    const start_data: *Node = @fieldParentPtr("inner", start);
+    std.debug.assert(start_data.token == .BeginNode);
 
     var depth: usize = 0;
 
     var node = start;
 
     while (node.next) |next| {
-        switch (next.data) {
+        const node_data: *Node = @fieldParentPtr("inner", next);
+        switch (node_data.token) {
             .EndNode => {
                 if (depth == 0) {
                     return next;
@@ -263,13 +280,14 @@ fn skipToFdtEndNode(start: *LinkedList.Node) !*LinkedList.Node {
 
 fn _findProperty(
     self: *@This(),
-    root: *LinkedList.Node,
+    root: *Node.Inner,
     path: *std.mem.SplitIterator(u8, .scalar),
-) !std.meta.Tuple(&.{ bool, *LinkedList.Node }) {
+) !std.meta.Tuple(&.{ bool, *Node.Inner }) {
     var node = root;
 
     while (true) {
-        switch (node.data) {
+        const node_data: *Node = @fieldParentPtr("inner", node);
+        switch (node_data.token) {
             .BeginNode => |node_name| {
                 if (std.mem.eql(u8, node_name, path.peek() orelse return .{ false, node })) {
                     _ = path.next() orelse unreachable;
@@ -306,10 +324,13 @@ fn _findProperty(
 }
 
 pub fn getString(self: *@This(), offset: u32) ![]const u8 {
-    const start = self.strings.items[offset..];
+    const written = self.dt_strings.written();
+
+    const start = written[offset..];
+
     for (start, 0..) |char, i| {
         if (char == 0) {
-            return self.strings.items[offset .. offset + i];
+            return written[offset .. offset + i];
         }
     }
 
@@ -320,13 +341,16 @@ pub fn getStringProperty(
     self: *@This(),
     path: []const u8,
 ) ![]const u8 {
-    const found, const node = try self.findProperty(self.list.first, path);
+    const found, const node = try self.findProperty(self.dt_struct.first, path);
 
     if (!found) {
         return error.PropertyNotFound;
     }
 
-    switch (node.data) {
+    const node_data: *Node = @fieldParentPtr("inner", node);
+
+    std.debug.assert(node_data.token == .Prop);
+    switch (node_data.token) {
         .Prop => |prop| return prop.value[0 .. prop.value.len - 1], // omit null terminator
         else => unreachable,
     }
@@ -345,14 +369,16 @@ pub fn getStringListProperty(
     self: *@This(),
     path: []const u8,
 ) !std.mem.SplitIterator(u8, .scalar) {
-    const found, const node = try self.findProperty(self.list.first, path);
+    const found, const node = try self.findProperty(self.dt_struct.first, path);
 
     if (!found) {
         return error.PropertyNotFound;
     }
 
-    std.debug.assert(node.data == .Prop);
-    return std.mem.splitScalar(u8, switch (node.data) {
+    const node_data: *Node = @fieldParentPtr("inner", node);
+
+    std.debug.assert(node_data.token == .Prop);
+    return std.mem.splitScalar(u8, switch (node_data.token) {
         .Prop => |prop| prop.value[0 .. prop.value.len - 1], // omit the last null terminator
         else => unreachable,
     }, 0);
@@ -362,7 +388,7 @@ pub fn getBoolProperty(
     self: *@This(),
     path: []const u8,
 ) bool {
-    const found, const node = self.findProperty(self.list.first, path) catch return false;
+    const found, const node = self.findProperty(self.dt_struct.first, path) catch return false;
 
     _ = node;
 
@@ -370,14 +396,18 @@ pub fn getBoolProperty(
 }
 
 pub fn getU32Property(self: *@This(), path: []const u8) !u32 {
-    const found, const node = try self.findProperty(self.list.first, path);
+    const found, const node = try self.findProperty(self.dt_struct.first, path);
 
     if (!found) {
         return error.PropertyNotFound;
     }
 
+    const node_data: *Node = @fieldParentPtr("inner", node);
+
     var value = [_]u8{0} ** @sizeOf(u32);
-    @memcpy(&value, b: switch (node.data) {
+
+    std.debug.assert(node_data.token == .Prop);
+    @memcpy(&value, b: switch (node_data.token) {
         .Prop => |prop| {
             if (prop.inner.len != @sizeOf(u32)) {
                 return error.InvalidPropertyValue;
@@ -391,13 +421,16 @@ pub fn getU32Property(self: *@This(), path: []const u8) !u32 {
 }
 
 pub fn getU64Property(self: *@This(), path: []const u8) !u64 {
-    const found, const node = try self.findProperty(self.list.first, path);
+    const found, const node = try self.findProperty(self.dt_struct.first, path);
 
     if (!found) {
         return error.PropertyNotFound;
     }
 
-    const value = b: switch (node.data) {
+    const node_data: *Node = @fieldParentPtr("inner", node);
+
+    std.debug.assert(node_data.token == .Prop);
+    const value = b: switch (node_data.token) {
         .Prop => |prop| {
             if (prop.inner.len != @sizeOf(u64)) {
                 return error.InvalidPropertyValue;
@@ -416,14 +449,14 @@ pub fn getU64Property(self: *@This(), path: []const u8) !u64 {
 }
 
 fn addString(self: *@This(), value: []const u8) !std.meta.Tuple(&.{ bool, u32 }) {
-    if (std.mem.indexOf(u8, self.strings.items, value)) |offset| {
+    if (std.mem.indexOf(u8, self.dt_strings.written(), value)) |offset| {
         return .{ true, @intCast(offset) };
     }
 
-    const offset = self.strings.items.len;
+    const offset = self.dt_strings.written().len;
 
-    try self.strings.appendSlice(value);
-    try self.strings.append(0); // null terminator
+    try self.dt_strings.writer.writeAll(value);
+    try self.dt_strings.writer.writeByte(0); // null terminator
 
     return .{ false, @intCast(offset) };
 }
@@ -477,12 +510,13 @@ pub fn upsertBoolProperty(self: *@This(), path: []const u8, value: bool) !void {
 fn removeString(self: *@This(), name_offset: u32) !usize {
     // First visit all properties first to ensure no other properties are
     // referencing this string.
-    var node = self.list.first orelse return 0;
+    var node = self.dt_struct.first orelse return 0;
 
     var references: usize = 0;
 
     while (true) {
-        switch (node.data) {
+        const node_data: *Node = @fieldParentPtr("inner", node);
+        switch (node_data.token) {
             .Prop => |prop| {
                 if (prop.inner.name_offset == name_offset) {
                     references += 1;
@@ -498,15 +532,22 @@ fn removeString(self: *@This(), name_offset: u32) !usize {
         return 0;
     }
 
-    const null_index = std.mem.indexOfScalarPos(u8, self.strings.items, name_offset, 0) orelse return 0;
-    try self.strings.replaceRange(name_offset, null_index + 1 - name_offset, &.{});
+    const null_index = std.mem.indexOfScalarPos(u8, self.dt_strings.written(), name_offset, 0) orelse return 0;
+    var list = self.dt_strings.toArrayList();
+
+    try list.replaceRange(self.allocator, name_offset, null_index + 1 - name_offset, &.{});
+    self.dt_strings = std.Io.Writer.Allocating.fromArrayList(self.allocator, &list);
+
     return null_index + 1 - name_offset;
 }
 
 fn updateNameOffsets(self: *@This(), removed_name_offset: u32, bytes_removed: u32) void {
-    var node = self.list.first orelse return;
+    var node = self.dt_struct.first orelse return;
+
+    const node_data: *Node = @fieldParentPtr("inner", node);
+
     while (true) {
-        switch (node.data) {
+        switch (node_data.token) {
             .Prop => |*prop| {
                 if (prop.inner.name_offset > removed_name_offset) {
                     prop.inner.name_offset -= bytes_removed;
@@ -520,15 +561,16 @@ fn updateNameOffsets(self: *@This(), removed_name_offset: u32, bytes_removed: u3
 }
 
 fn removeProperty(self: *@This(), path: []const u8) !void {
-    const found, const node = try self.findProperty(self.list.first, path);
+    const found, const node = try self.findProperty(self.dt_struct.first, path);
 
     if (!found) {
         return;
     }
 
-    std.debug.assert(node.data == .Prop);
+    const node_data: *Node = @fieldParentPtr("inner", node);
 
-    const prop = switch (node.data) {
+    std.debug.assert(node_data.token == .Prop);
+    const prop = switch (node_data.token) {
         .Prop => |prop| prop,
         else => unreachable,
     };
@@ -536,8 +578,8 @@ fn removeProperty(self: *@This(), path: []const u8) !void {
     const strings_bytes_removed: u32 = @intCast(try self.removeString(prop.inner.name_offset));
     self.updateNameOffsets(prop.inner.name_offset, strings_bytes_removed);
 
-    self.list.remove(node);
-    self.allocator.destroy(node);
+    self.dt_struct.remove(node);
+    self.allocator.destroy(node_data);
     self.allocator.free(prop.value);
 
     const struct_bytes_removed: u32 = @intCast(
@@ -554,7 +596,7 @@ fn removeProperty(self: *@This(), path: []const u8) !void {
 
 fn upsertProperty(self: *@This(), path: []const u8, value_bytes: []const u8) !void {
     var split = std.mem.splitScalar(u8, path, '/');
-    const found, var node = try self._findProperty(self.list.first orelse return error.InvalidFdt, &split);
+    const found, var node = try self._findProperty(self.dt_struct.first orelse return error.InvalidFdt, &split);
 
     if (!found) {
         var property_added = false;
@@ -563,24 +605,20 @@ fn upsertProperty(self: *@This(), path: []const u8, value_bytes: []const u8) !vo
 
             if (at_end_of_path) {
                 // add the property
-                const new_node = try self.allocator.create(LinkedList.Node);
+                const new_node = try self.allocator.create(Node);
                 errdefer self.allocator.destroy(new_node);
 
                 const name_found, const name_offset = try self.addString(path_entry);
 
-                new_node.* = .{
-                    .data = .{
-                        .Prop = .{
-                            .inner = .{
-                                .len = @intCast(value_bytes.len),
-                                .name_offset = name_offset,
-                            },
-                            .value = value_bytes,
-                        },
+                new_node.* = .{ .token = .{ .Prop = .{
+                    .inner = .{
+                        .len = @intCast(value_bytes.len),
+                        .name_offset = name_offset,
                     },
-                };
+                    .value = value_bytes,
+                } } };
 
-                self.list.insertBefore(node, new_node);
+                self.dt_struct.insertBefore(node, &new_node.inner);
 
                 // adjust size/offset metadata
                 {
@@ -603,17 +641,20 @@ fn upsertProperty(self: *@This(), path: []const u8, value_bytes: []const u8) !vo
                 property_added = true;
             } else {
                 // add a missing node
-                const new_begin_node = try self.allocator.create(LinkedList.Node);
+                const new_begin_node = try self.allocator.create(Node);
                 errdefer self.allocator.destroy(new_begin_node);
+
                 const node_name = try self.allocator.dupe(u8, path_entry);
                 errdefer self.allocator.free(node_name);
-                new_begin_node.* = .{ .data = .{ .BeginNode = node_name } };
-                self.list.insertBefore(node, new_begin_node);
 
-                const new_end_node = try self.allocator.create(LinkedList.Node);
+                new_begin_node.* = .{ .token = .{ .BeginNode = node_name } };
+                self.dt_struct.insertBefore(node, &new_begin_node.inner);
+
+                const new_end_node = try self.allocator.create(Node);
                 errdefer self.allocator.destroy(new_end_node);
-                new_end_node.* = .{ .data = .EndNode };
-                self.list.insertBefore(node, new_end_node);
+
+                new_end_node.* = .{ .token = .EndNode };
+                self.dt_struct.insertBefore(node, &new_end_node.inner);
 
                 // adjust size/offset metadata
                 {
@@ -628,7 +669,7 @@ fn upsertProperty(self: *@This(), path: []const u8, value_bytes: []const u8) !vo
                     self.header.total_size += struct_bytes_added;
                 }
 
-                node = new_end_node;
+                node = &new_end_node.inner;
             }
         }
 
@@ -636,8 +677,9 @@ fn upsertProperty(self: *@This(), path: []const u8, value_bytes: []const u8) !vo
             return error.PropertyNotAdded;
         }
     } else {
-        std.debug.assert(node.data == .Prop);
-        switch (node.data) {
+        const node_data: *Node = @fieldParentPtr("inner", node);
+        std.debug.assert(node_data.token == .Prop);
+        switch (node_data.token) {
             .Prop => |*prop| {
                 self.allocator.free(prop.value); // free old value
 
@@ -664,54 +706,46 @@ pub fn size(self: *@This()) usize {
     return self.header.total_size;
 }
 
-fn writeListNode(writer: anytype, node: *LinkedList.Node) !void {
-    const tag_value = @intFromEnum(node.data);
+fn writeListNode(writer: *std.Io.Writer, node: *Node.Inner) !void {
+    const node_data: *Node = @fieldParentPtr("inner", node);
+    const tag_value = @intFromEnum(node_data.token);
     try writer.writeInt(u32, tag_value, .big);
 
-    switch (node.data) {
+    switch (node_data.token) {
         .BeginNode => |node_name| {
             try writer.writeAll(node_name);
             try writer.writeByte(0); // null terminator
-            try writer.writeByteNTimes(0, fdtPad(@intCast(node_name.len + 1))); // padding
+            try writer.splatByteAll(0, fdtPad(@intCast(node_name.len + 1))); // padding
         },
         .Prop => |prop| {
-            try writer.writeStructEndian(prop.inner, .big);
+            try writer.writeStruct(prop.inner, .big);
             try writer.writeAll(prop.value);
-            try writer.writeByteNTimes(0, fdtPad(@intCast(prop.value.len))); // padding
+            try writer.splatByteAll(0, fdtPad(@intCast(prop.value.len))); // padding
         },
         .EndNode, .Nop, .End => {},
     }
 }
 
-pub fn save(self: *@This(), writer: anytype) !void {
-    var node = self.list.first orelse return error.InvalidFdt;
+pub fn save(self: *@This(), writer: *std.Io.Writer) !void {
+    var node = self.dt_struct.first orelse return error.InvalidFdt;
 
-    try writer.writeStructEndian(self.header, .big);
+    try writer.writeStruct(self.header, .big);
 
-    try writer.writeByteNTimes(0, self.header.off_mem_rsvmap - @sizeOf(Header));
+    try writer.splatByteAll(0, self.header.off_mem_rsvmap - @sizeOf(Header));
 
-    try self.stream.seekTo(self.header.off_mem_rsvmap);
-
-    // TODO(jared): probably don't need to alloc here
-    {
-        const mem_rsvmap_bytes = self.header.off_dt_struct - self.header.off_mem_rsvmap;
-        const mem_rsvmap_buf = try self.allocator.alloc(u8, mem_rsvmap_bytes);
-        defer self.allocator.free(mem_rsvmap_buf);
-        _ = try self.stream.reader().readAll(mem_rsvmap_buf);
-        try writer.writeAll(mem_rsvmap_buf);
-    }
+    try writer.writeAll(self.mem_rsvmap);
 
     while (true) {
         try writeListNode(writer, node);
         node = node.next orelse break;
     }
 
-    try writer.writeByteNTimes(0, self.header.off_dt_strings - self.header.off_dt_struct - self.header.size_dt_struct);
+    try writer.splatByteAll(0, self.header.off_dt_strings - self.header.off_dt_struct - self.header.size_dt_struct);
 
-    try writer.writeAll(self.strings.items);
+    try writer.writeAll(self.dt_strings.written());
 }
 
-pub fn printValue(writer: anytype, value: []const u8) !void {
+pub fn printValue(writer: *std.Io.Writer, value: []const u8) !void {
     if (value.len == 0) {
         try writer.print("true", .{});
         return;
@@ -788,9 +822,9 @@ const test_fdt = [_]u8{
 };
 
 test "fdt read" {
-    var stream = std.io.StreamSource{ .const_buffer = std.io.fixedBufferStream(&test_fdt) };
+    var reader: std.Io.Reader = .fixed(&test_fdt);
 
-    var fdt = try Fdt.init(&stream, std.testing.allocator);
+    var fdt = try Fdt.init(&reader, std.testing.allocator);
     defer fdt.deinit();
 
     try std.testing.expectError(error.PropertyNotFound, fdt.getStringProperty("/chosen/not_present"));
@@ -822,9 +856,9 @@ test "fdt read" {
 }
 
 test "fdt write" {
-    var stream = std.io.StreamSource{ .const_buffer = std.io.fixedBufferStream(&test_fdt) };
+    var reader: std.Io.Reader = .fixed(&test_fdt);
 
-    var fdt = try Fdt.init(&stream, std.testing.allocator);
+    var fdt = try Fdt.init(&reader, std.testing.allocator);
     defer fdt.deinit();
 
     // ensure removing a property we started with works
@@ -867,8 +901,8 @@ test "fdt write" {
     // serialize back to FDT
     const buf = try std.testing.allocator.alloc(u8, fdt.size());
     defer std.testing.allocator.free(buf);
-    var update_stream = std.io.StreamSource{ .buffer = std.io.fixedBufferStream(buf) };
-    try fdt.save(update_stream.writer());
+    var writer: std.Io.Writer = .fixed(buf);
+    try fdt.save(&writer);
 
     // ensure the unique strings we removed don't appear
     try std.testing.expectEqual(null, std.mem.indexOf(u8, buf, "bool"));

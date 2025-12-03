@@ -4,7 +4,7 @@ const C = @cImport({
     @cInclude("mbedtls/error.h");
 });
 
-var err_buf = [_]u8{0} ** 1024;
+var err_buf: [1024]u8 = undefined;
 
 pub fn wrapMulti(return_code: c_int) !c_int {
     return wrapReturnCode(.negative, c_int, return_code);

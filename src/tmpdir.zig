@@ -16,7 +16,7 @@ pub fn cleanup(self: *TmpDir) void {
     self.* = undefined;
 }
 
-pub fn create(opts: std.fs.Dir.OpenDirOptions) !TmpDir {
+pub fn create(opts: std.fs.Dir.OpenOptions) !TmpDir {
     var random_bytes: [TmpDir.random_bytes_count]u8 = undefined;
     std.crypto.random.bytes(&random_bytes);
     var sub_path: [sub_path_len]u8 = undefined;

@@ -53,7 +53,9 @@ fn writeVpd(vpd_list: VpdList, file: std.fs.File) !void {
 
     try file.seekTo(GOOGLE_VPD_2_0_OFFSET + @sizeOf(GoogleVpdInfo));
 
-    var writer = file.writer();
+    var buffer: [1024]u8 = undefined;
+    var file_writer = file.writer(&buffer);
+    var writer = &file_writer.interface;
 
     for (vpd_list.items) |vpd_item| {
         const key, const value = vpd_item;
@@ -73,7 +75,7 @@ fn writeVpd(vpd_list: VpdList, file: std.fs.File) !void {
     try writer.writeByte(VPD_TYPE_TERMINATOR);
 
     const pos: usize = @intCast(try file.getPos());
-    try writer.writeByteNTimes(0xff, file_size - pos);
+    try writer.splatByteAll(0xff, file_size - pos);
 
     try file.seekTo(GOOGLE_VPD_2_0_OFFSET);
     const vpd_info: GoogleVpdInfo = .{
@@ -84,6 +86,8 @@ fn writeVpd(vpd_list: VpdList, file: std.fs.File) !void {
         ),
     };
     try writer.writeAll(std.mem.asBytes(&vpd_info));
+
+    try writer.flush();
 }
 
 fn vpdValueLength(size: usize, buf: []u8) []u8 {
@@ -138,16 +142,18 @@ test "calculate vpd value length" {
 }
 
 fn collectVpd(allocator: std.mem.Allocator, file: std.fs.File) !VpdList {
-    var vpd_list = VpdList.init(allocator);
-    errdefer vpd_list.deinit();
+    var vpd_list = VpdList{};
+    errdefer vpd_list.deinit(allocator);
 
     try file.seekTo(GOOGLE_VPD_2_0_OFFSET);
 
-    var reader = file.reader();
+    var buffer: [1024]u8 = undefined;
+    var file_reader = file.reader(&buffer);
+    var reader = &file_reader.interface;
 
     const total_size = b: {
         var vpd_info_buf: [@sizeOf(GoogleVpdInfo)]u8 = undefined;
-        if (try reader.readAll(&vpd_info_buf) != @sizeOf(GoogleVpdInfo)) {
+        if (try reader.readSliceShort(&vpd_info_buf) != @sizeOf(GoogleVpdInfo)) {
             return error.InvalidHeaderSize;
         }
 
@@ -163,7 +169,7 @@ fn collectVpd(allocator: std.mem.Allocator, file: std.fs.File) !VpdList {
     _ = total_size;
 
     while (true) {
-        const @"type" = try reader.readByte();
+        const @"type" = try reader.takeByte();
         if (@"type" == VPD_TYPE_TERMINATOR or @"type" == VPD_TYPE_IMPLICIT_TERMINATOR) {
             break;
         }
@@ -172,7 +178,7 @@ fn collectVpd(allocator: std.mem.Allocator, file: std.fs.File) !VpdList {
 
         var key = try allocator.alloc(u8, key_length);
         errdefer allocator.free(key);
-        if (try reader.readAll(key[0..]) != key.len) {
+        if (try reader.readSliceShort(key[0..]) != key.len) {
             return error.InvalidReadLength;
         }
 
@@ -180,21 +186,21 @@ fn collectVpd(allocator: std.mem.Allocator, file: std.fs.File) !VpdList {
 
         var value = try allocator.alloc(u8, value_length);
         errdefer allocator.free(value);
-        if (try reader.readAll(value[0..]) != value.len) {
+        if (try reader.readSliceShort(value[0..]) != value.len) {
             return error.InvalidReadLength;
         }
 
-        try vpd_list.append(.{ key, value });
+        try vpd_list.append(allocator, .{ key, value });
     }
 
     return vpd_list;
 }
 
-fn readLength(reader: std.fs.File.Reader) !usize {
+fn readLength(reader: *std.Io.Reader) !usize {
     var total: usize = 0;
 
     while (true) {
-        const byte = try reader.readByte();
+        const byte = try reader.takeByte();
 
         const more = byte & 0x80 == 0x80;
         const val = byte & 0x7f;
@@ -237,26 +243,24 @@ pub fn main() !void {
         .ACTION = clap.parsers.enumeration(Action),
     };
 
-    const stderr = std.io.getStdErr().writer();
-
     var diag = clap.Diagnostic{};
     var res = clap.parse(clap.Help, &params, &parsers, .{
         .diagnostic = &diag,
         .allocator = arena.allocator(),
     }) catch |err| {
-        try diag.report(stderr, err);
-        try clap.usage(stderr, clap.Help, &params);
+        try diag.reportToFile(.stderr(), err);
+        try clap.usageToFile(.stderr(), clap.Help, &params);
         return;
     };
     defer res.deinit();
 
     if (res.args.help != 0) {
-        return clap.help(std.io.getStdErr().writer(), clap.Help, &params, .{});
+        return clap.helpToFile(.stderr(), clap.Help, &params, .{});
     }
 
     if (res.positionals[0] == null or res.args.file == null) {
-        try diag.report(stderr, error.InvalidArgument);
-        try clap.usage(std.io.getStdErr().writer(), clap.Help, &params);
+        try diag.reportToFile(.stderr(), error.InvalidArgument);
+        try clap.usageToFile(.stderr(), clap.Help, &params);
         return;
     }
 
@@ -264,8 +268,8 @@ pub fn main() !void {
     switch (action) {
         .get, .set, .delete => {
             if (res.args.key == null or (action == .set and res.args.value == null and res.args.@"value-from-file" == null)) {
-                try diag.report(stderr, error.InvalidArgument);
-                try clap.usage(std.io.getStdErr().writer(), clap.Help, &params);
+                try diag.reportToFile(.stderr(), error.InvalidArgument);
+                try clap.usageToFile(.stderr(), clap.Help, &params);
                 return;
             }
         },
@@ -281,7 +285,7 @@ pub fn main() !void {
     defer file.close();
 
     var vpd_list = try collectVpd(arena.allocator(), file);
-    defer vpd_list.deinit();
+    defer vpd_list.deinit(arena.allocator());
 
     switch (action) {
         .list => {
@@ -324,7 +328,7 @@ pub fn main() !void {
                 }
 
                 // Otherwise, we add a new key/value
-                try vpd_list.append(.{ res.args.key.?, value });
+                try vpd_list.append(arena.allocator(), .{ res.args.key.?, value });
             }
 
             try writeVpd(vpd_list, file);

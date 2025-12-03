@@ -61,7 +61,7 @@ pub fn match(device: *const Device) ?u8 {
         serial_path,
         .{ .mode = .read_write },
     ) catch |err| {
-        std.log.err("failed to open {}: {}", .{ device, err });
+        std.log.err("failed to open {f}: {}", .{ device, err });
         return null;
     };
     defer serial.close();
@@ -88,7 +88,7 @@ pub fn timeout(self: *YmodemBootLoader) u8 {
     return 0;
 }
 
-pub fn probe(self: *YmodemBootLoader, entries: *std.ArrayList(BootLoader.Entry), device: Device) !void {
+pub fn probe(self: *YmodemBootLoader, entries: *std.array_list.Managed(BootLoader.Entry), device: Device) !void {
     const allocator = self.arena.allocator();
 
     var serial_path_buf: [std.fs.max_path_bytes]u8 = undefined;
@@ -97,13 +97,13 @@ pub fn probe(self: *YmodemBootLoader, entries: *std.ArrayList(BootLoader.Entry),
     var serial = try std.fs.cwd().openFile(serial_path, .{ .mode = .read_write });
     defer serial.close();
 
-    var tty = system.Tty.init(serial.handle);
+    var tty = system.Tty.init(serial);
     defer {
         tty.deinit();
 
         // If the TTY is being used for user input, this will allow for the
         // next message printed to the TTY to be legible.
-        tty.writer().writeByte('\n') catch {};
+        tty.file.writeAll(&.{'\n'}) catch {};
     }
 
     try tty.setMode(.file_transfer);

@@ -1,6 +1,5 @@
 const std = @import("std");
 const clap = @import("clap");
-const builtin = @import("builtin");
 
 const mbedtls = @import("./mbedtls.zig");
 
@@ -64,35 +63,33 @@ pub fn main() !void {
         .NUM = clap.parsers.int(u64, 10),
     };
 
-    const stderr = std.io.getStdErr().writer();
-
     var diag = clap.Diagnostic{};
     var res = clap.parse(clap.Help, &params, &parsers, .{
         .diagnostic = &diag,
         .allocator = arena.allocator(),
     }) catch |err| {
-        try diag.report(stderr, err);
-        try clap.usage(stderr, clap.Help, &params);
+        try diag.reportToFile(.stderr(), err);
+        try clap.usageToFile(.stderr(), clap.Help, &params);
         return;
     };
     defer res.deinit();
 
     if (res.args.help != 0) {
-        return clap.help(std.io.getStdErr().writer(), clap.Help, &params, .{});
+        return clap.helpToFile(.stderr(), clap.Help, &params, .{});
     }
 
     const time_now: u64 = res.args.@"time-now" orelse @intCast(C.time(null));
     const valid_seconds: u64 = res.args.@"valid-seconds" orelse 60 * 60 * 24 * 365;
     const common_name: []const u8 = res.args.@"common-name" orelse {
-        try clap.usage(stderr, clap.Help, &params);
+        try clap.usageToFile(.stderr(), clap.Help, &params);
         return;
     };
     const organization: []const u8 = res.args.organization orelse {
-        try clap.usage(stderr, clap.Help, &params);
+        try clap.usageToFile(.stderr(), clap.Help, &params);
         return;
     };
     const country: []const u8 = res.args.country orelse {
-        try clap.usage(stderr, clap.Help, &params);
+        try clap.usageToFile(.stderr(), clap.Help, &params);
         return;
     };
 
@@ -132,8 +129,8 @@ pub fn main() !void {
         const pub_out = try std.fs.cwd().createFile("tboot-public.pem", .{ .mode = 0o444 });
         defer pub_out.close();
 
-        try pub_out.writer().writeAll(std.mem.trim(u8, &key_buf, &.{0}));
-        try pub_out.writer().writeByte(0);
+        try pub_out.writeAll(std.mem.trim(u8, &key_buf, &.{0}));
+        try pub_out.writeAll(&.{0});
     }
 
     key_buf = std.mem.zeroes(@TypeOf(key_buf));
@@ -145,8 +142,8 @@ pub fn main() !void {
         const priv_out = try std.fs.cwd().createFile("tboot-private.pem", .{ .mode = 0o444 });
         defer priv_out.close();
 
-        try priv_out.writer().writeAll(std.mem.trim(u8, &key_buf, &.{0}));
-        try priv_out.writer().writeByte(0);
+        try priv_out.writeAll(std.mem.trim(u8, &key_buf, &.{0}));
+        try priv_out.writeAll(&.{0});
     }
 
     // generate x509 cert
@@ -209,8 +206,8 @@ pub fn main() !void {
         defer cert_der_out.close();
 
         const start: usize = cert_buf.len - len;
-        try cert_der_out.writer().writeAll(std.mem.trim(u8, cert_buf[start .. start + len], &.{0}));
-        try cert_der_out.writer().writeByte(0);
+        try cert_der_out.writeAll(std.mem.trim(u8, cert_buf[start .. start + len], &.{0}));
+        try cert_der_out.writeAll(&.{0});
     }
 
     cert_buf = std.mem.zeroes(@TypeOf(cert_buf));
@@ -228,6 +225,6 @@ pub fn main() !void {
         const cert_pem_out = try std.fs.cwd().createFile("tboot-certificate.pem", .{ .mode = 0o444 });
         defer cert_pem_out.close();
 
-        try cert_pem_out.writer().writeAll(&cert_buf);
+        try cert_pem_out.writeAll(&cert_buf);
     }
 }

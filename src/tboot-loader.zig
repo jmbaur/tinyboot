@@ -24,7 +24,7 @@ pub const std_options = std.Options{ .logFn = Log.logFn, .log_level = .debug };
 const TbootLoader = @This();
 
 var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-var boot_loaders = std.ArrayList(*BootLoader).init(arena.allocator());
+var boot_loaders = std.array_list.Managed(*BootLoader).init(arena.allocator());
 
 // Indicates if we are PID1. This allows for running tboot-loader as a non-PID1
 // program.
@@ -87,14 +87,14 @@ fn init(is_pid1: bool) !TbootLoader {
     );
 
     var console_event = epoll_event{
-        .data = .{ .fd = Console.IN },
+        .data = .{ .fd = posix.STDIN_FILENO },
         .events = std.os.linux.EPOLL.IN,
     };
 
     try posix.epoll_ctl(
         self.epoll,
         std.os.linux.EPOLL.CTL_ADD,
-        Console.IN,
+        posix.STDIN_FILENO,
         &console_event,
     );
 
@@ -176,7 +176,7 @@ fn handleDevice(self: *TbootLoader) !void {
 
         switch (event.action) {
             .add => {
-                std.log.debug("new device {} added", .{device});
+                std.log.debug("new device {f} added", .{device});
 
                 inline for (ALL_BOOTLOADERS) |bootloader_type| {
                     // If match() returns null, the device is not a match for
@@ -187,7 +187,7 @@ fn handleDevice(self: *TbootLoader) !void {
 
                     if (priority) |new_priority| {
                         std.log.info(
-                            "new device {} matched bootloader {s}",
+                            "new device {f} matched bootloader {s}",
                             .{ device, bootloader_type.name() },
                         );
 
@@ -216,7 +216,7 @@ fn handleDevice(self: *TbootLoader) !void {
                 }
             },
             .remove => {
-                std.log.debug("existing device {} removed", .{device});
+                std.log.debug("existing device {f} removed", .{device});
 
                 for (boot_loaders.items, 0..) |boot_loader, index| {
                     if (std.meta.eql(boot_loader.device, event.device)) {
@@ -277,7 +277,7 @@ fn run(self: *TbootLoader) !posix.RebootCommand {
         while (i_event < n_events) : (i_event += 1) {
             const event = events[i_event];
 
-            if (event.data.fd == Console.IN) {
+            if (event.data.fd == posix.STDIN_FILENO) {
                 if (try self.handleConsoleInput()) |outcome| {
                     return outcome;
                 }
@@ -308,7 +308,7 @@ fn run(self: *TbootLoader) !posix.RebootCommand {
 
 pub fn main() !void {
     if (std.os.linux.geteuid() != 0) {
-        std.io.getStdErr().writer().writeAll("tboot-loader must run as root\n\n") catch {};
+        std.debug.print("tboot-loader must run as root\n\n", .{});
         std.process.exit(1);
     }
 
@@ -324,8 +324,8 @@ pub fn main() !void {
 
     if (is_pid1) {
         // Prevent CTRL-C from doing anything
-        var mask = std.mem.zeroes(posix.sigset_t);
-        std.os.linux.sigaddset(&mask, posix.SIG.INT);
+        var mask = posix.sigemptyset();
+        posix.sigaddset(&mask, posix.SIG.INT);
         posix.sigprocmask(posix.SIG.BLOCK, &mask, null);
 
         // Ensure basic filesystems are available (/sys, /proc, /dev, etc.).
@@ -388,10 +388,10 @@ pub fn main() !void {
             // `systemctl kexec`).
             try std.posix.kill(1, SIGRTMIN + 6);
         } else {
-            std.io.getStdErr().writer().print(
+            std.debug.print(
                 "tboot-loader is not PID1, refusing to run reboot type {s}\n",
                 .{@tagName(reboot_cmd)},
-            ) catch {};
+            );
         }
     }
 

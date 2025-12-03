@@ -9,9 +9,9 @@ pub const Type = enum {
     const vfat_signature = [_]u8{ 0x55, 0xaa };
 
     /// Returns the filesystem type detected from a collection of bytes.
-    pub fn detect(source: *std.io.StreamSource) !?@This() {
-        try source.seekTo(vfat_signature_offset);
-        if (try source.reader().readByte() == vfat_signature[0] and try source.reader().readByte() == vfat_signature[1]) {
+    pub fn detect(reader: *std.Io.Reader) !?@This() {
+        try reader.discardAll(vfat_signature_offset);
+        if (try reader.takeByte() == vfat_signature[0] and try reader.takeByte() == vfat_signature[1]) {
             return .Vfat;
         }
 
@@ -125,16 +125,12 @@ test "vfat filesystem detection" {
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x55, 0xaa,
     };
 
-    var fat32_source = std.io.StreamSource{
-        .const_buffer = std.io.fixedBufferStream(FAT32_FILESYSTEM),
-    };
-    var fat16_source = std.io.StreamSource{
-        .const_buffer = std.io.fixedBufferStream(FAT16_FILESYSTEM),
-    };
-    var fat12_source = std.io.StreamSource{
-        .const_buffer = std.io.fixedBufferStream(FAT12_FILESYSTEM),
-    };
+    var null_source: std.Io.Reader = .fixed(&[_]u8{0} ** 512);
+    var fat32_source: std.Io.Reader = .fixed(FAT32_FILESYSTEM);
+    var fat16_source: std.Io.Reader = .fixed(FAT16_FILESYSTEM);
+    var fat12_source: std.Io.Reader = .fixed(FAT12_FILESYSTEM);
 
+    try std.testing.expectEqual(try Filesystem.Type.detect(&null_source), null);
     try std.testing.expectEqual(try Filesystem.Type.detect(&fat32_source), .Vfat);
     try std.testing.expectEqual(try Filesystem.Type.detect(&fat16_source), .Vfat);
     try std.testing.expectEqual(try Filesystem.Type.detect(&fat12_source), .Vfat);

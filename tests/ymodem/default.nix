@@ -36,7 +36,7 @@ testers.runNixOSTest {
       def lrzsz(pty):
           subprocess.run(f"${lib.getExe' lrzsz "sx"} --ymodem --1k --binary {linux} {initrd} {params} > {pty} < {pty}", shell=True)
 
-      for fn in [tboot_ymodem, lrzsz]:
+      for fn in [lrzsz, tboot_ymodem]:
           machine.start()
           chardev = machine.send_monitor_command("chardev-add pty,id=ymodem")
           machine.send_monitor_command("device_add virtconsole,chardev=ymodem")

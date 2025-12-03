@@ -11,8 +11,8 @@ linuxKernel.manualConfig {
   inherit (linux) src version;
   configfile = stdenv.mkDerivation {
     pname = linux.pname + "-config";
-    version = linux.version;
-    src = linux.src;
+    inherit (linux) version;
+    inherit (linux) src;
     dontConfigure = true;
     nativeBuildInputs = [
       flex

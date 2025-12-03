@@ -12,7 +12,10 @@ pub const Event = struct {
     device: Device,
 };
 
-const Queue = std.DoublyLinkedList(Event);
+pub const EventNode = struct {
+    event: Event,
+    inner: std.DoublyLinkedList.Node = .{},
+};
 
 fn makedev(major: u32, minor: u32) u32 {
     return std.math.shl(u32, major & 0xfffff000, 32) |
@@ -46,7 +49,7 @@ nl: posix.fd_t,
 event: posix.fd_t,
 
 mutex: std.Thread.Mutex = .{},
-queue: Queue = .{},
+queue: std.DoublyLinkedList = .{},
 
 pub fn init(is_pid1: bool) !DeviceWatcher {
     var self = DeviceWatcher{
@@ -157,9 +160,10 @@ pub fn nextEvent(self: *DeviceWatcher) ?Event {
     defer self.mutex.unlock();
 
     const node = self.queue.pop() orelse return null;
-    defer self.arena.allocator().destroy(node);
+    const event_node: *EventNode = @fieldParentPtr("inner", node);
+    defer self.arena.allocator().destroy(event_node);
 
-    return node.data;
+    return event_node.event;
 }
 
 pub fn deinit(self: *DeviceWatcher) void {
@@ -263,10 +267,10 @@ fn addDevice(self: *DeviceWatcher, event: Event) !void {
         self.mutex.lock();
         defer self.mutex.unlock();
 
-        const node = try self.arena.allocator().create(Queue.Node);
-        node.* = .{ .data = event };
+        const node = try self.arena.allocator().create(EventNode);
+        node.* = .{ .event = event };
 
-        self.queue.append(node);
+        self.queue.append(&node.inner);
 
         _ = try posix.write(self.event, std.mem.asBytes(&@as(u64, 1)));
     }
@@ -290,10 +294,10 @@ fn removeDevice(self: *DeviceWatcher, event: Event) !void {
         self.mutex.lock();
         defer self.mutex.unlock();
 
-        const node = try self.arena.allocator().create(Queue.Node);
+        const node = try self.arena.allocator().create(EventNode);
 
-        node.* = .{ .data = event };
-        self.queue.append(node);
+        node.* = .{ .event = event };
+        self.queue.append(&node.inner);
 
         _ = try posix.write(self.event, std.mem.asBytes(&@as(u64, 1)));
     }

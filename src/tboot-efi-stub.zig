@@ -7,7 +7,7 @@ var boot_services: *uefi.tables.BootServices = undefined;
 fn puts(msg: []const u8) void {
     for (msg) |c| {
         const c_ = [2]u16{ c, 0 }; // work around https://github.com/ziglang/zig/issues/4372
-        _ = con_out.outputString(@ptrCast(&c_));
+        _ = con_out.outputString(@ptrCast(&c_)) catch {};
     }
 }
 
@@ -49,14 +49,17 @@ const LINUX_INITRD_MEDIA_GUID align(8) = uefi.Guid{
     .node = [_]u8{ 0xca, 0x55, 0x52, 0x31, 0xcc, 0x68 },
 };
 
-const EFI_LOAD_FILE2_PROTOCOL_GUID align(8) = uefi.Guid{
-    .time_low = 0x4006c0c1,
-    .time_mid = 0xfcb3,
-    .time_high_and_version = 0x403e,
-    .clock_seq_high_and_reserved = 0x99,
-    .clock_seq_low = 0x6d,
-    .node = [_]u8{ 0x4a, 0x6c, 0x87, 0x24, 0xe0, 0x6d },
+const LoadFile2 = struct {
+    const guid align(8) = uefi.Guid{
+        .time_low = 0x4006c0c1,
+        .time_mid = 0xfcb3,
+        .time_high_and_version = 0x403e,
+        .clock_seq_high_and_reserved = 0x99,
+        .clock_seq_low = 0x6d,
+        .node = [_]u8{ 0x4a, 0x6c, 0x87, 0x24, 0xe0, 0x6d },
+    };
 };
+const EFI_LOAD_FILE2_PROTOCOL_GUID align(8) = uefi.Guid;
 
 const LoadFile = *const fn (
     *LoadFileProtocol,
@@ -130,17 +133,13 @@ const TbootStubError = error{
     OutOfMemory,
     EndOfStream,
     MissingPEHeader,
-} || uefi.Status.Error;
+} || uefi.Status.Error || uefi.tables.BootServices.StartImageError || uefi.tables.BootServices.HandleProtocolError;
 
 fn run() TbootStubError!void {
-    var self_loaded_image_: ?*uefi.protocol.LoadedImage = undefined;
-    try uefi.Status.err(boot_services.handleProtocol(
+    const self_loaded_image = try boot_services.handleProtocol(
+        uefi.protocol.LoadedImage,
         uefi.handle,
-        &uefi.protocol.LoadedImage.guid,
-        @ptrCast(&self_loaded_image_),
-    ));
-
-    const self_loaded_image = self_loaded_image_.?;
+    ) orelse return uefi.Status.Error.NotFound;
 
     const coff = try std.coff.Coff.init(
         self_loaded_image.image_base[0..self_loaded_image.image_size],
@@ -153,22 +152,18 @@ fn run() TbootStubError!void {
 
     const linux_data = coff.getSectionData(linux);
 
-    var linux_image_handle: ?uefi.Handle = null;
-    try uefi.Status.err(boot_services.loadImage(
+    const linux_image_handle = try boot_services.loadImage(
         false,
         uefi.handle,
-        null,
-        linux_data.ptr,
-        linux_data.len,
-        &linux_image_handle,
-    ));
+        .{ .buffer = linux_data },
+    );
 
-    var linux_loaded_image_: ?*uefi.protocol.LoadedImage = undefined;
-    try uefi.Status.err(boot_services.handleProtocol(
-        linux_image_handle.?,
-        &uefi.protocol.LoadedImage.guid,
-        @ptrCast(&linux_loaded_image_),
-    ));
+    // TODO(jared): do we need this?
+    const linux_loaded_image = try boot_services.handleProtocol(
+        uefi.protocol.LoadedImage,
+        linux_image_handle,
+    );
+    _ = linux_loaded_image;
 
     const initrd = coff.getSectionByName(".initrd") orelse {
         return TbootStubError.MissingSection;
@@ -191,24 +186,24 @@ fn run() TbootStubError!void {
     // See https://github.com/systemd/systemd/blob/0015502168b868e8b6380765bdce3abee33b856c/src/boot/initrd.c#L112.
     var initrd_image_handle: ?uefi.Handle = null;
 
-    const efi_initrd_device_path_: [*]uefi.protocol.DevicePath = @constCast(@ptrCast(&efi_initrd_device_path));
+    const efi_initrd_device_path_: [*]uefi.protocol.DevicePath = @ptrCast(@constCast(&efi_initrd_device_path));
 
     // TODO(jared): Use InstallMultipleProtocolInterfaces()
-    try uefi.Status.err(boot_services.installProtocolInterface(
+    try uefi.Status.err(boot_services._installProtocolInterface(
         @ptrCast(&initrd_image_handle),
         &uefi.protocol.DevicePath.guid,
-        .efi_native_interface,
+        .native,
         efi_initrd_device_path_,
     ));
 
-    try uefi.Status.err(boot_services.installProtocolInterface(
+    try uefi.Status.err(boot_services._installProtocolInterface(
         @ptrCast(&initrd_image_handle),
-        @alignCast(&EFI_LOAD_FILE2_PROTOCOL_GUID),
-        .efi_native_interface,
+        &LoadFile2.guid,
+        .native,
         loader,
     ));
 
-    try uefi.Status.err(boot_services.startImage(linux_image_handle.?, null, null));
+    _ = try boot_services.startImage(linux_image_handle);
 }
 
 pub fn main() uefi.Status {
@@ -220,6 +215,7 @@ pub fn main() uefi.Status {
         error.MissingPEHeader => .not_found,
         error.MissingSection => .not_found,
         error.OutOfMemory => .out_of_resources,
+        error.Unexpected => unreachable,
 
         // Errors from std.os.uefi.Status.Error
         error.LoadError => .load_error,
@@ -267,7 +263,7 @@ pub fn main() uefi.Status {
     println("Failed to run tinyboot EFI stub: {}", .{status});
 
     // Stall so that the user has some time to see what happened.
-    _ = boot_services.stall(5 * std.time.ms_per_s);
+    _ = boot_services.stall(5 * std.time.ms_per_s) catch {};
 
     return status;
 }

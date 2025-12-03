@@ -79,24 +79,28 @@ fn printStatus(
     original_entry_filename: []const u8,
     bls_entry_file: BlsEntryFile,
 ) !void {
-    var stdout = std.io.getStdOut().writer();
+    var stdout_file = std.fs.File.stdout();
+    var buf = [_]u8{0} ** 1024;
+    var stdout_writer = stdout_file.writer(&buf);
+    var writer = &stdout_writer.interface;
+    defer writer.flush() catch {};
 
-    try stdout.print("{s}:\n", .{original_entry_filename});
+    try writer.print("{s}:\n", .{original_entry_filename});
 
     if (bls_entry_file.tries_left) |tries_left| {
         if (tries_left > 0) {
-            try stdout.print("\t{} tries left until entry is bad\n", .{tries_left});
+            try writer.print("\t{} tries left until entry is bad\n", .{tries_left});
         } else if (bls_entry_file.tries_done) |tries_done| {
-            try stdout.print("\tentry is bad, {} tries attempted\n", .{tries_done});
+            try writer.print("\tentry is bad, {} tries attempted\n", .{tries_done});
         } else {
-            try stdout.print("\tentry is bad\n", .{});
+            try writer.print("\tentry is bad\n", .{});
         }
 
         if (bls_entry_file.tries_done) |tries_done| {
-            try stdout.print("\t{} tries done\n", .{tries_done});
+            try writer.print("\t{} tries done\n", .{tries_done});
         }
     } else {
-        try stdout.print("\tentry is good\n", .{});
+        try writer.print("\tentry is good\n", .{});
     }
 }
 
@@ -160,21 +164,19 @@ pub fn main() !void {
         .DIR = clap.parsers.string,
     };
 
-    const stderr = std.io.getStdErr().writer();
-
     var diag = clap.Diagnostic{};
     var res = clap.parse(clap.Help, &params, &parsers, .{
         .diagnostic = &diag,
         .allocator = arena.allocator(),
     }) catch |err| {
-        try diag.report(stderr, err);
-        try clap.usage(stderr, clap.Help, &params);
+        try diag.reportToFile(.stderr(), err);
+        try clap.usageToFile(.stderr(), clap.Help, &params);
         return;
     };
     defer res.deinit();
 
     if (res.args.help != 0) {
-        return clap.help(std.io.getStdErr().writer(), clap.Help, &params, .{});
+        return clap.helpToFile(.stderr(), clap.Help, &params, .{});
     }
 
     const esp_mnt = res.args.@"esp-mnt" orelse std.fs.path.sep_str ++ "boot";

@@ -53,7 +53,8 @@ fn installGeneration(
     generation: u32,
     args: *const Args,
 ) !void {
-    var entry_contents_list = std.ArrayList(u8).init(arena_alloc);
+    var entry_contents: std.Io.Writer.Allocating = .init(arena_alloc);
+    var entry_contents_writer = entry_contents.writer;
 
     const linux_target_filename = try std.fmt.allocPrint(
         arena_alloc,
@@ -174,13 +175,13 @@ fn installGeneration(
     else
         try arena_alloc.alloc(u8, 0);
 
-    try entry_contents_list.writer().print("title {s}{s}\n", .{ spec.label, sub_name });
-    try entry_contents_list.writer().print("version {s}\n", .{spec.label});
-    try entry_contents_list.writer().print("linux {s}\n", .{linux_target});
+    try entry_contents_writer.print("title {s}{s}\n", .{ spec.label, sub_name });
+    try entry_contents_writer.print("version {s}\n", .{spec.label});
+    try entry_contents_writer.print("linux {s}\n", .{linux_target});
     if (initrd_target) |initrd_target_| {
-        try entry_contents_list.writer().print("initrd {s}\n", .{initrd_target_});
+        try entry_contents_writer.print("initrd {s}\n", .{initrd_target_});
     }
-    try entry_contents_list.writer().print("options {s}\n", .{kernel_params});
+    try entry_contents_writer.print("options {s}\n", .{kernel_params});
 
     const sub_entry_name = if (spec.name) |name|
         try std.fmt.allocPrint(arena_alloc, "-specialisation-{s}", .{name})
@@ -219,7 +220,7 @@ fn installGeneration(
         var entry_file = try entries_dir.createFile(entry_filename_with_counters, .{});
         defer entry_file.close();
 
-        try entry_file.writeAll(try entry_contents_list.toOwnedSlice());
+        try entry_file.writeAll(entry_contents.written());
         try entries_known_files.put(entry_filename_with_counters, {});
     }
 
@@ -287,21 +288,19 @@ pub fn main() !void {
         .NUM = clap.parsers.int(u8, 10),
     };
 
-    const stderr = std.io.getStdErr().writer();
-
     var diag = clap.Diagnostic{};
     var res = clap.parse(clap.Help, &params, &parsers, .{
         .diagnostic = &diag,
         .allocator = arena_alloc,
     }) catch |err| {
-        try diag.report(stderr, err);
-        try clap.usage(stderr, clap.Help, &params);
+        try diag.reportToFile(.stderr(), err);
+        try clap.usageToFile(.stderr(), clap.Help, &params);
         return;
     };
     defer res.deinit();
 
     if (res.args.help != 0) {
-        return clap.help(std.io.getStdErr().writer(), clap.Help, &params, .{});
+        return clap.helpToFile(.stderr(), clap.Help, &params, .{});
     }
 
     if (res.positionals[0] == null or
@@ -310,8 +309,8 @@ pub fn main() !void {
         ((res.args.@"private-key" == null) !=
             (res.args.certificate == null)))
     {
-        try diag.report(stderr, error.InvalidArgument);
-        try clap.usage(stderr, clap.Help, &params);
+        try diag.reportToFile(.stderr(), error.InvalidArgument);
+        try clap.usageToFile(.stderr(), clap.Help, &params);
         return;
     }
 
@@ -404,7 +403,7 @@ pub fn main() !void {
         const boot_json_contents = try boot_json_file.readToEndAlloc(arena_alloc, 8192);
 
         const boot_json = BootJson.parse(arena_alloc, boot_json_contents) catch |err| {
-            std.log.err("failed to parse bootspec boot.json: {any}", .{err});
+            std.log.err("failed to parse bootspec boot.json: {}", .{err});
             continue;
         };
 

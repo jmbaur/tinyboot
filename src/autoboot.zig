@@ -14,7 +14,7 @@ pub fn init() Autoboot {
 
 pub fn run(
     self: *Autoboot,
-    boot_loaders: *std.ArrayList(*BootLoader),
+    boot_loaders: *std.array_list.Managed(*BootLoader),
     timerfd: posix.fd_t,
 ) !?Console.Event {
     if (self.boot_loader) |boot_loader| {
@@ -26,7 +26,7 @@ pub fn run(
             self.boot_loader = null;
         }
 
-        std.log.info("autobooting {s}", .{boot_loader.device});
+        std.log.info("autobooting {f}", .{boot_loader.device});
 
         const entries = try boot_loader.probe();
 

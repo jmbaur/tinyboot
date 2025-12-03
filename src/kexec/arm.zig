@@ -63,8 +63,8 @@ pub fn kexecLoad(
 ) !void {
     const page_size = std.heap.pageSize();
 
-    var segments = std.ArrayList(KexecSegment).init(allocator);
-    defer segments.deinit();
+    var segments = std.ArrayList(KexecSegment){};
+    defer segments.deinit(allocator);
 
     const linux_stat = try linux.stat();
 
@@ -155,8 +155,9 @@ pub fn kexecLoad(
 
     const proc_iomem = try std.fs.cwd().openFile("/proc/iomem", .{});
     defer proc_iomem.close();
-    var proc_iomem_stream = std.io.StreamSource{ .file = proc_iomem };
-    const memory_ranges = try getMemoryRanges(allocator, &proc_iomem_stream);
+    var buffer: [1024]u8 = undefined;
+    var proc_iomem_reader = proc_iomem.reader(&buffer);
+    const memory_ranges = try getMemoryRanges(allocator, &proc_iomem_reader.interface);
     defer allocator.free(memory_ranges);
 
     // Prevent the need to relocate prior to decompression.
@@ -181,8 +182,9 @@ pub fn kexecLoad(
     const sys_firmware_fdt = try std.fs.cwd().openFile("/sys/firmware/fdt", .{});
     defer sys_firmware_fdt.close();
 
-    var sys_firmware_fdt_stream = std.io.StreamSource{ .file = sys_firmware_fdt };
-    var fdt = try Fdt.init(&sys_firmware_fdt_stream, allocator);
+    var fdt_buffer: [1024]u8 = undefined;
+    var fdt_reader = sys_firmware_fdt.reader(&fdt_buffer);
+    var fdt = try Fdt.init(&fdt_reader.interface, allocator);
     defer fdt.deinit();
 
     if (cmdline) |cmdline_| {
@@ -219,13 +221,15 @@ pub fn kexecLoad(
             if (std.fs.cwd().openFile("/dev/char/10:183", .{})) |hwrng| {
                 defer hwrng.close();
 
-                const seed = try hwrng.reader().readInt(u64, builtin.cpu.arch.endian());
+                var hwrng_buf: [@sizeOf(u64)]u8 = undefined;
+                var hwrng_reader = hwrng.reader(&hwrng_buf);
+                const seed = try hwrng_reader.interface.takeInt(u64, builtin.cpu.arch.endian());
                 try fdt.upsertU64Property("/chosen/kaslr-seed", seed);
             } else |err| {
                 std.log.warn("unable to add KASLR seed: {}", .{err});
             }
 
-            try addSegment(&segments, page_size, initrd_buf.?, initrd_buf.?.len, initrd_base, initrd_buf.?.len);
+            try addSegment(allocator, &segments, page_size, initrd_buf.?, initrd_buf.?.len, initrd_base, initrd_buf.?.len);
             break :b initrd_buf.?.len;
         } else break :b 0;
     };
@@ -233,8 +237,8 @@ pub fn kexecLoad(
     const dtb_buf = try allocator.alloc(u8, fdt.size());
     defer allocator.free(dtb_buf);
 
-    var dtb_buf_stream = std.io.StreamSource{ .buffer = std.io.fixedBufferStream(dtb_buf) };
-    try fdt.save(dtb_buf_stream.writer());
+    var out_writer: std.Io.Writer = .fixed(dtb_buf);
+    try fdt.save(&out_writer);
 
     const dtb_offset = b: {
         var offset = std.mem.alignBackward(
@@ -252,9 +256,9 @@ pub fn kexecLoad(
     };
 
     std.log.debug("devicetree: address=0x{x} size=0x{x}", .{ dtb_offset, dtb_buf.len });
-    try addSegment(&segments, page_size, dtb_buf, dtb_buf.len, dtb_offset, dtb_buf.len);
+    try addSegment(allocator, &segments, page_size, dtb_buf, dtb_buf.len, dtb_offset, dtb_buf.len);
 
-    try addSegment(&segments, page_size, kernel_buf, kernel_buf_size, kernel_base, kernel_mem_size);
+    try addSegment(allocator, &segments, page_size, kernel_buf, kernel_buf_size, kernel_base, kernel_mem_size);
 
     const rc = std.os.linux.syscall4(
         .kexec_load,
@@ -271,6 +275,7 @@ pub fn kexecLoad(
 }
 
 fn addSegment(
+    allocator: std.mem.Allocator,
     segments: *std.ArrayList(KexecSegment),
     alignment: usize,
     buf: []u8,
@@ -290,7 +295,7 @@ fn addSegment(
         return error.UnalignedLoadAddress;
     }
 
-    try segments.append(.{
+    try segments.append(allocator, .{
         .buf = @ptrCast(buf.ptr),
         .buf_size = @min(buf_size, mem_size), // bufsz may not exceed the value of memsz, see kexec_load(2)
         .mem = @ptrFromInt(mem),
@@ -390,23 +395,23 @@ test "locate hole" {
 }
 
 // parses memory ranges from a /proc/iomem stream
-fn getMemoryRanges(allocator: std.mem.Allocator, stream: *std.io.StreamSource) ![]MemoryRange {
-    var memory_ranges = std.ArrayList(MemoryRange).init(allocator);
-    errdefer memory_ranges.deinit();
+fn getMemoryRanges(allocator: std.mem.Allocator, reader: *std.Io.Reader) ![]MemoryRange {
+    var memory_ranges = std.ArrayList(MemoryRange){};
+    errdefer memory_ranges.deinit(allocator);
 
     var buf = [_]u8{0} ** 255; // unlikely to encounter a line this large
-    var buf_stream = std.io.fixedBufferStream(&buf);
 
     while (true) {
-        stream.reader().streamUntilDelimiter(buf_stream.writer(), '\n', null) catch |err| {
-            switch (err) {
-                error.EndOfStream => break,
-                else => return err,
-            }
-        };
-        defer buf_stream.reset();
+        var buf_writer: std.Io.Writer = .fixed(&buf);
 
-        const written = buf_stream.getWritten();
+        _ = reader.streamDelimiter(&buf_writer, '\n') catch |err| switch (err) {
+            std.Io.Reader.StreamError.EndOfStream => break,
+            else => return err,
+        };
+
+        try reader.streamExact(&buf_writer, 1); // skip newline
+
+        const written = buf_writer.buffered();
         const memory_range, const name = b: {
             var split = std.mem.splitScalar(u8, written, ':');
             const left = split.next() orelse continue;
@@ -437,14 +442,14 @@ fn getMemoryRanges(allocator: std.mem.Allocator, stream: *std.io.StreamSource) !
             };
         };
 
-        try memory_ranges.append(.{
+        try memory_ranges.append(allocator, .{
             .start = start,
             .end = end,
             .type = memory_type,
         });
     }
 
-    return memory_ranges.toOwnedSlice();
+    return memory_ranges.toOwnedSlice(allocator);
 }
 
 test "getMemoryRanges" {
@@ -506,8 +511,8 @@ test "getMemoryRanges" {
             \\f1200000-f12fffff : f1200000.bm-bppi bm-bppi
         ;
 
-        var stream = std.io.StreamSource{ .const_buffer = std.io.fixedBufferStream(proc_iomem[0..]) };
-        const ranges = try getMemoryRanges(std.testing.allocator, &stream);
+        var reader: std.Io.Reader = .fixed(proc_iomem[0..]);
+        const ranges = try getMemoryRanges(std.testing.allocator, &reader);
         defer std.testing.allocator.free(ranges);
 
         try std.testing.expectEqual(5, ranges.len);
@@ -548,8 +553,8 @@ test "getMemoryRanges" {
             \\  42900000-42c58797 : Kernel data
         ;
 
-        var stream = std.io.StreamSource{ .const_buffer = std.io.fixedBufferStream(proc_iomem[0..]) };
-        const ranges = try getMemoryRanges(std.testing.allocator, &stream);
+        var reader: std.Io.Reader = .fixed(proc_iomem[0..]);
+        const ranges = try getMemoryRanges(std.testing.allocator, &reader);
         defer std.testing.allocator.free(ranges);
 
         try std.testing.expectEqual(1, ranges.len);

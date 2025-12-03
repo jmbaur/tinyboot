@@ -1,4 +1,3 @@
-const builtin = @import("builtin");
 const std = @import("std");
 const posix = std.posix;
 const linux = std.os.linux;
@@ -80,7 +79,7 @@ fn cfmakeraw(t: *posix.termios) void {
 }
 
 pub const Tty = struct {
-    handle: std.fs.File.Handle,
+    file: std.fs.File,
     original: ?State = null,
     mode: ?Mode = null,
 
@@ -92,12 +91,12 @@ pub const Tty = struct {
         file_transfer,
     };
 
-    pub fn init(handle: std.fs.File.Handle) @This() {
-        return .{ .handle = handle };
+    pub fn init(file: std.fs.File) @This() {
+        return .{ .file = file };
     }
 
-    pub fn current(self: *@This()) !State {
-        return try posix.tcgetattr(self.handle);
+    fn current(self: *@This()) !State {
+        return try posix.tcgetattr(self.file.handle);
     }
 
     pub fn setMode(self: *@This(), mode: Mode) !void {
@@ -181,45 +180,17 @@ pub const Tty = struct {
         self.mode = mode;
     }
 
-    pub const ReadError = error{Timeout} || posix.ReadError;
-    pub const Reader = std.io.GenericReader(*@This(), ReadError, read);
-
-    pub fn read(self: *@This(), buffer: []u8) ReadError!usize {
-        const n_read = try posix.read(self.handle, buffer);
-
-        if (n_read == 0) {
-            return ReadError.Timeout;
-        }
-
-        return n_read;
-    }
-
-    pub fn reader(self: *@This()) Reader {
-        return .{ .context = self };
-    }
-
-    pub const WriteError = posix.WriteError;
-    pub const Writer = std.io.GenericWriter(*@This(), WriteError, write);
-
-    pub fn write(self: *@This(), bytes: []const u8) WriteError!usize {
-        return try posix.write(self.handle, bytes);
-    }
-
-    pub fn writer(self: *@This()) Writer {
-        return .{ .context = self };
-    }
-
     fn setState(self: *@This(), state: State) void {
         // wait until everything is sent
-        _ = linux.tcdrain(self.handle);
+        _ = linux.tcdrain(self.file.handle);
 
         // flush input queue
-        _ = ioctl(self.handle, TCFLSH, TCIOFLUSH);
+        _ = ioctl(self.file.handle, TCFLSH, TCIOFLUSH);
 
-        posix.tcsetattr(self.handle, posix.TCSA.DRAIN, state) catch {};
+        posix.tcsetattr(self.file.handle, posix.TCSA.DRAIN, state) catch {};
 
         // restart output
-        _ = ioctl(self.handle, TCXONC, TCOON);
+        _ = ioctl(self.file.handle, TCXONC, TCOON);
     }
 
     pub fn deinit(self: *@This()) void {
@@ -240,7 +211,7 @@ const SYSLOG_ACTION_UNREAD = 9;
 pub fn printKernelLogs(
     allocator: std.mem.Allocator,
     filter: u3,
-    writer: std.io.AnyWriter,
+    writer: *std.Io.Writer,
 ) !void {
     const bytes_available = std.os.linux.syscall3(.syslog, SYSLOG_ACTION_UNREAD, 0, 0);
     const buf = try allocator.alloc(u8, bytes_available);

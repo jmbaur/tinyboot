@@ -1,7 +1,7 @@
 const std = @import("std");
 const clap = @import("clap");
 
-const asn1 = std.crypto.asn1;
+const asn1 = std.crypto.codecs.asn1;
 const sha2 = std.crypto.hash.sha2;
 
 const Pkcs7 = @import("./pkcs7.zig");
@@ -128,7 +128,7 @@ pub fn signFile(
     var hash = [_]u8{0} ** sha2.Sha256.digest_length;
     var hasher = sha2.Sha256.init(.{});
     while (true) {
-        const bytes_read = try input_file.reader().read(&scratch_buf);
+        const bytes_read = try input_file.read(&scratch_buf);
         if (bytes_read == 0) {
             break;
         }
@@ -195,15 +195,15 @@ pub fn signFile(
 
     try input_file.seekTo(0);
     while (true) {
-        const bytes_read = try input_file.reader().read(&scratch_buf);
+        const bytes_read = try input_file.read(&scratch_buf);
         if (bytes_read == 0) {
             break;
         }
 
-        try output_file.writer().writeAll(scratch_buf[0..bytes_read]);
+        try output_file.writeAll(scratch_buf[0..bytes_read]);
     }
 
-    try output_file.writer().writeAll(pkcs7_encoded);
+    try output_file.writeAll(pkcs7_encoded);
 
     const sig_info = ModuleSignature{
         .sig_len = std.mem.nativeToBig(u32, @intCast(pkcs7_encoded.len)),
@@ -215,8 +215,8 @@ pub fn signFile(
         .key_id_len = 0,
     };
 
-    try output_file.writer().writeAll(std.mem.asBytes(&sig_info));
-    try output_file.writer().writeAll(MODULE_SIG_STRING);
+    try output_file.writeAll(std.mem.asBytes(&sig_info));
+    try output_file.writeAll(MODULE_SIG_STRING);
 }
 
 fn getAttribute(x509: *C.mbedtls_x509_crt, attribute: std.crypto.Certificate.Attribute) ?[]const u8 {
@@ -256,21 +256,19 @@ pub fn main() !void {
         .FILE = clap.parsers.string,
     };
 
-    const stderr = std.io.getStdErr().writer();
-
     var diag = clap.Diagnostic{};
     var res = clap.parse(clap.Help, &params, &parsers, .{
         .diagnostic = &diag,
         .allocator = arena.allocator(),
     }) catch |err| {
-        try diag.report(stderr, err);
-        try clap.usage(stderr, clap.Help, &params);
+        try diag.reportToFile(.stderr(), err);
+        try clap.usageToFile(.stderr(), clap.Help, &params);
         return;
     };
     defer res.deinit();
 
     if (res.args.help != 0) {
-        return clap.help(std.io.getStdErr().writer(), clap.Help, &params, .{});
+        return clap.helpToFile(.stderr(), clap.Help, &params, .{});
     }
 
     if (res.positionals[0] == null or
@@ -278,8 +276,8 @@ pub fn main() !void {
         res.args.@"private-key" == null or
         res.args.certificate == null)
     {
-        try diag.report(stderr, error.InvalidArgument);
-        try clap.usage(stderr, clap.Help, &params);
+        try diag.reportToFile(.stderr(), error.InvalidArgument);
+        try clap.usageToFile(.stderr(), clap.Help, &params);
         return;
     }
 

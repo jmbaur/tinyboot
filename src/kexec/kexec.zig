@@ -37,16 +37,19 @@ fn waitForKexecKernelLoaded() !void {
     var f = try std.fs.cwd().openFile(KEXEC_LOADED, .{});
     defer f.close();
 
+    var buffer: [1]u8 = undefined;
+    var reader = f.reader(&buffer);
+
     var time_slept: usize = 0;
     while (time_slept < 10 * std.time.ns_per_s) : (time_slept += std.time.ns_per_s) {
         std.log.debug("waiting for kexec load to finish", .{});
         try f.seekTo(0);
 
-        if (try f.reader().readByte() == '1') {
+        if (try reader.interface.takeByte() == '1') {
             return;
         }
 
-        std.time.sleep(std.time.ns_per_s);
+        std.Thread.sleep(std.time.ns_per_s);
     }
 
     return error.Timeout;
@@ -151,8 +154,8 @@ pub fn kexec(
 
     var boot_dir = try std.fs.cwd().openDir("/tinyboot", .{});
     defer {
-        boot_dir.deleteTree(".") catch {};
         boot_dir.close();
+        std.fs.cwd().deleteTree("/tinyboot") catch {};
     }
 
     const kernel_file = try std.fs.cwd().openFile(linux_filepath, .{});
@@ -172,8 +175,23 @@ pub fn kexec(
     if (detectCompression(kernel_file)) |compression| {
         linux = try std.fs.cwd().createFile("/tinyboot/kernel", .{});
 
+        var reader_buffer: [1024]u8 = undefined;
+        var writer_buffer: [1024]u8 = undefined;
+        var reader = kernel_file.reader(&reader_buffer);
+        var writer = linux.?.writer(&writer_buffer);
         switch (compression) {
-            .gzip => try std.compress.gzip.decompress(kernel_file.reader(), linux.?.writer()),
+            .gzip => {
+                var decomp_buffer: [1024]u8 = undefined;
+                var decomp: std.compress.flate.Decompress = .init(&reader.interface, .gzip, &decomp_buffer);
+                var bytes_streamed: usize = 0;
+                while (decomp.reader.stream(&writer.interface, .unlimited)) |n| {
+                    bytes_streamed += n;
+                } else |err| switch (err) {
+                    error.EndOfStream => {},
+                    else => return err,
+                }
+                std.log.debug("decompressed {Bi:.02}", .{bytes_streamed});
+            },
         }
     } else {
         try std.fs.cwd().copyFile(linux_filepath, std.fs.cwd(), "/tinyboot/kernel", .{});
@@ -211,7 +229,7 @@ fn detectCompression(file: std.fs.File) ?Compression {
     file.seekTo(0) catch return null;
 
     var magic: [2]u8 = undefined;
-    const bytes_read = file.reader().readAll(&magic) catch return null;
+    const bytes_read = file.readAll(&magic) catch return null;
     if (bytes_read != magic.len) {
         return null;
     }

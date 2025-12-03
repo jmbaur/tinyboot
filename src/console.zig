@@ -1,7 +1,6 @@
 const std = @import("std");
 const posix = std.posix;
 const process = std.process;
-pub const IN = posix.STDIN_FILENO;
 const builtin = @import("builtin");
 
 const BootLoader = @import("./boot/bootloader.zig");
@@ -48,13 +47,18 @@ const Console = @This();
 
 const NON_WORD_CHARS = std.ascii.whitespace ++ [_]u8{ '.', ';', ',' };
 
-var out = std.io.bufferedWriter(std.io.getStdOut().writer());
+var in_buf = [_]u8{0};
+var out_buf = [_]u8{0} ** 1024;
+
+const stdout: std.fs.File = .stdout();
+var out_writer = stdout.writer(&out_buf);
+var out = &out_writer.interface;
 
 const Shell = struct {
     arena: std.heap.ArenaAllocator = std.heap.ArenaAllocator.init(std.heap.page_allocator),
     input_cursor: usize = 0,
     input_end: usize = 0,
-    stdin: std.fs.File.Reader = std.io.getStdIn().reader(),
+    stdin: std.fs.File.Reader = std.fs.File.stdin().reader(&in_buf),
     input_buffer: [std.math.maxInt(u9)]u8 = undefined,
     history: History = .{},
 
@@ -145,7 +149,7 @@ const Shell = struct {
 
         var done = false;
 
-        const char = try self.stdin.readByte();
+        const char = try self.stdin.interface.takeByte();
 
         const needs_flush = switch (char) {
             // C-k
@@ -337,9 +341,9 @@ const Shell = struct {
             },
             // Escape sequence
             esc => b: {
-                switch (try self.stdin.readByte()) {
+                switch (try self.stdin.interface.takeByte()) {
                     0x5b => {
-                        switch (try self.stdin.readByte()) {
+                        switch (try self.stdin.interface.takeByte()) {
                             // Up arrow
                             0x41 => break :b self.historyPrev(),
                             // Down arrow
@@ -593,12 +597,12 @@ tty: system.Tty,
 pub fn init() !Console {
     // Turn off local echo, making the ENTER key the only thing that shows a
     // sign of user input.
-    var tty = system.Tty.init(IN);
+    var tty = system.Tty.init(std.fs.File.stdin());
     try tty.setMode(.no_echo);
     writeAllAndFlush("\npress ENTER to interrupt\n\n");
 
-    var mask = std.mem.zeroes(posix.sigset_t);
-    std.os.linux.sigaddset(&mask, posix.SIG.WINCH);
+    var mask = posix.sigemptyset();
+    posix.sigaddset(&mask, posix.SIG.WINCH);
     posix.sigprocmask(posix.SIG.BLOCK, &mask, null);
 
     const resize_signal = try posix.signalfd(-1, &mask, 0);
@@ -620,11 +624,11 @@ fn flush() void {
 /// Flushes occur transparently. Do not use if control over when flushes occur
 /// is needed.
 fn print(comptime fmt: []const u8, args: anytype) void {
-    out.writer().print(fmt, args) catch {};
+    out.print(fmt, args) catch {};
 }
 
 fn writeAll(bytes: []const u8) void {
-    out.writer().writeAll(bytes) catch {};
+    out.writeAll(bytes) catch {};
 }
 
 fn writeAllAndFlush(bytes: []const u8) void {
@@ -649,33 +653,33 @@ fn eraseInputAndUpdateCursor(input: []u8, start: usize, end: *usize, n: usize) v
 /// Caller required to flush
 fn cursorLeft(n: usize) void {
     if (n > 0) {
-        out.writer().print(.{esc} ++ "[{d:0>5}D", .{n}) catch {};
+        out.print(.{esc} ++ "[{d:0>5}D", .{n}) catch {};
     }
 }
 
 /// Caller required to flush
 fn cursorRight(n: usize) void {
     if (n > 0) {
-        out.writer().print(.{esc} ++ "[{d}C", .{n}) catch {};
+        out.print(.{esc} ++ "[{d}C", .{n}) catch {};
     }
 }
 
 /// Caller required to flush
 fn eraseToEndOfLine() void {
-    out.writer().writeAll(.{esc} ++ "[0K") catch {};
+    out.writeAll(.{esc} ++ "[0K") catch {};
 }
 
 /// Caller required to flush
 fn eraseToCursor() void {
-    out.writer().writeAll(.{esc} ++ "[1K") catch {};
+    out.writeAll(.{esc} ++ "[1K") catch {};
 }
 
 /// Empties the display and moves the cursor to absolute position 0, 0.
 fn clearScreen() void {
     // empties the display
-    out.writer().writeAll(.{esc} ++ "[2J") catch {};
+    out.writeAll(.{esc} ++ "[2J") catch {};
     // moves the cursor to 0, 0
-    out.writer().writeAll(.{esc} ++ "[0;0H") catch {};
+    out.writeAll(.{esc} ++ "[0;0H") catch {};
 }
 
 pub fn deinit(self: *Console) void {
@@ -723,13 +727,8 @@ pub fn handleStdin(self: *Console, boot_loaders: []*BootLoader) !?Event {
 
 pub fn format(
     self: Console,
-    comptime fmt: []const u8,
-    options: std.fmt.FormatOptions,
-    writer: anytype,
+    writer: *std.Io.Writer,
 ) !void {
-    _ = fmt;
-    _ = options;
-
     try writer.print(
         "input_cursor={}" ++ "\n" ++ "input_end={}" ++ "\n" ++ "input_buffer={any}",
         .{
@@ -910,7 +909,7 @@ pub const Command = struct {
             try system.printKernelLogs(
                 console.arena.allocator(),
                 @intCast(filter),
-                out.writer().any(),
+                out,
             );
 
             return null;
@@ -934,24 +933,26 @@ pub const Command = struct {
 
             defer sys_firmware_fdt.close();
 
-            var sys_firmware_fdt_stream = std.io.StreamSource{ .file = sys_firmware_fdt };
-            var fdt_ = try Fdt.init(&sys_firmware_fdt_stream, console.arena.allocator());
+            var buffer: [1024]u8 = undefined;
+            var reader = sys_firmware_fdt.reader(&buffer);
+            var fdt_ = try Fdt.init(&reader.interface, console.arena.allocator());
             defer fdt_.deinit();
 
-            var node = fdt_.list.first orelse return error.InvalidFdt;
+            var node = fdt_.dt_struct.first orelse return error.InvalidFdt;
 
             var depth: usize = 0;
 
             while (true) {
-                switch (node.data) {
+                const node_data: *Fdt.Node = @fieldParentPtr("inner", node);
+                switch (node_data.token) {
                     .Nop => {},
                     .BeginNode => |node_name| {
                         if (node_name.len != 0) {
                             if (depth == 0) {
-                                try out.writer().writeByte('\n');
+                                try out.writeByte('\n');
                             }
-                            try out.writer().writeByteNTimes('\t', depth);
-                            try out.writer().print("{s}:\n", .{node_name});
+                            try out.splatByteAll('\t', depth);
+                            try out.print("{s}:\n", .{node_name});
 
                             depth += 1;
                         }
@@ -962,10 +963,10 @@ pub const Command = struct {
                     .End => break,
                     .Prop => |prop| {
                         const prop_name = try fdt_.getString(prop.inner.name_offset);
-                        try out.writer().writeByteNTimes('\t', depth);
-                        try out.writer().print("{s}=", .{prop_name});
-                        try Fdt.printValue(out.writer(), prop.value);
-                        try out.writer().print("\n", .{});
+                        try out.splatByteAll('\t', depth);
+                        try out.print("{s}=", .{prop_name});
+                        try Fdt.printValue(out, prop.value);
+                        try out.print("\n", .{});
                     },
                 }
 
@@ -1051,7 +1052,7 @@ pub const Command = struct {
                             if (have_major == major and have_minor == minor) {
                                 console.context = boot_loader;
                                 print(
-                                    "selected boot loader: {s} ({})\n",
+                                    "selected boot loader: {s} ({f})\n",
                                     .{ boot_loader.name(), boot_loader.device },
                                 );
                                 return null;
@@ -1067,7 +1068,7 @@ pub const Command = struct {
                     if (want_index == index) {
                         console.context = boot_loader;
                         print(
-                            "selected boot loader: {s} ({})\n",
+                            "selected boot loader: {s} ({f})\n",
                             .{ boot_loader.name(), boot_loader.device },
                         );
                         return null;
@@ -1093,18 +1094,18 @@ pub const Command = struct {
             _ = args;
             _ = boot_loaders;
 
-            try utils.dumpFile(out.writer().any(), "/proc/version");
+            try utils.dumpFile(out, "/proc/version");
 
             print("\nInit:\n", .{});
-            try utils.dumpFile(out.writer().any(), "/proc/1/stat");
+            try utils.dumpFile(out, "/proc/1/stat");
 
             print("\nConsoles:\n", .{});
-            utils.dumpFile(out.writer().any(), "/proc/consoles") catch {
+            utils.dumpFile(out, "/proc/consoles") catch {
                 print("?\n", .{});
             };
 
             print("\nMemory:\n", .{});
-            utils.dumpFile(out.writer().any(), "/proc/meminfo") catch {
+            utils.dumpFile(out, "/proc/meminfo") catch {
                 print("?\n", .{});
             };
 
@@ -1115,17 +1116,17 @@ pub const Command = struct {
             print("\nTPM: {s}\n", .{if (utils.absolutePathExists("/dev/char/10:224")) "yes" else "no"});
 
             print("\nKeys:\n", .{});
-            utils.dumpFile(out.writer().any(), "/proc/keys") catch {
+            utils.dumpFile(out, "/proc/keys") catch {
                 print("?\n", .{});
             };
 
             print("\nMTD:\n", .{});
-            utils.dumpFile(out.writer().any(), "/proc/mtd") catch {
+            utils.dumpFile(out, "/proc/mtd") catch {
                 print("?\n", .{});
             };
 
             print("\nPartitions:\n", .{});
-            utils.dumpFile(out.writer().any(), "/proc/partitions") catch {
+            utils.dumpFile(out, "/proc/partitions") catch {
                 print("?\n", .{});
             };
 
@@ -1147,7 +1148,7 @@ pub const Command = struct {
 
             for (boot_loaders, 0..) |bl, index| {
                 print(
-                    "{d}\t{s}\t{}{s}\n",
+                    "{d}\t{s}\t{f}{s}\n",
                     .{
                         index,
                         bl.name(),
@@ -1260,10 +1261,7 @@ pub const Command = struct {
             for (boot_loaders) |bl| {
                 if (bl.autoboot) {
                     const entries = bl.probe() catch |err| {
-                        std.log.err(
-                            "failed to probe {}: {}",
-                            .{ bl.device, err },
-                        );
+                        std.log.err("failed to probe {f}: {}", .{ bl.device, err });
                         continue;
                     };
 
@@ -1271,10 +1269,7 @@ pub const Command = struct {
                         if (bl.load(entry)) {
                             break;
                         } else |err| {
-                            std.log.err(
-                                "failed to probe {}: {}",
-                                .{ bl.device, err },
-                            );
+                            std.log.err("failed to probe {f}: {}", .{ bl.device, err });
                         }
                     }
                 }
