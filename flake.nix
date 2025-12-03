@@ -24,7 +24,7 @@
         tinyboot = final.callPackage ./package.nix { };
       };
 
-      legacyPackages = genAttrs [ "armv7l-linux" "aarch64-linux" "x86_64-linux" ] (
+      legacyPackages = genAttrs [ "aarch64-linux" "x86_64-linux" ] (
         system:
         import inputs.nixpkgs {
           inherit system;
@@ -72,7 +72,7 @@
               name = "tinybootCross-${pkgs'.stdenv.hostPlatform.qemuArch}";
               value = pkgs'.tinyboot;
             }
-          ) (filter (s: s != system) (attrNames inputs.self.legacyPackages))
+          ) (filter (s: s != system) ([ "armv7l-linux" ] ++ (attrNames inputs.self.legacyPackages)))
         )
       ) inputs.self.legacyPackages;
 
