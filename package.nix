@@ -5,16 +5,16 @@
   lib,
   linkFarm,
   stdenvNoCC,
-  zig_0_14,
+  zig_0_15,
 }:
 
 let
   deps = linkFarm "tinyboot-deps" [
     {
-      name = "clap-0.10.0-oBajB434AQBDh-Ei3YtoKIRxZacVPF1iSwp3IX_ZB8f0";
+      name = "clap-0.11.0-oBajB-PnAQCqvAVYMfzg2g4Cuhq_6vKYPKAVZR-r93fg";
       path = fetchzip {
-        url = "https://github.com/Hejsil/zig-clap/archive/e47028deaefc2fb396d3d9e9f7bd776ae0b2a43a.tar.gz";
-        hash = "sha256-leXnA97ITdvmBhD2YESLBZAKjBg+G4R/+PPPRslz/ec=";
+        url = "https://github.com/jmbaur/zig-clap/archive/0b8d340907c10dd91e5b7e7461e9ddc4fc39d4b9.tar.gz";
+        hash = "sha256-yEm5pGR9dL/dqVHVwYUiP9Cqq1Z+6NV/W2JBiSRA5kA=";
       };
     }
     {
@@ -49,7 +49,7 @@ stdenvNoCC.mkDerivation {
 
   strictDeps = true;
 
-  depsBuildBuild = [ zig_0_14 ];
+  depsBuildBuild = [ zig_0_15 ];
 
   dontInstall = true;
   doCheck = true;

@@ -38,7 +38,7 @@
             pkgs.lldb
             pkgs.qemu
             pkgs.swtpm
-            pkgs.zig_0_14
+            pkgs.zig_0_15
           ];
           env.TINYBOOT_KERNEL =
             with inputs.self.checks.${system}.disk.nodes.machine.system;
