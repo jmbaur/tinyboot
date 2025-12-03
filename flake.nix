@@ -24,7 +24,7 @@
         tinyboot = final.callPackage ./package.nix { };
       };
 
-      legacyPackages = genAttrs [ "riscv64-linux" "armv7l-linux" "aarch64-linux" "x86_64-linux" ] (
+      legacyPackages = genAttrs [ "armv7l-linux" "aarch64-linux" "x86_64-linux" ] (
         system:
         import inputs.nixpkgs {
           inherit system;
