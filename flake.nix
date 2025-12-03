@@ -20,9 +20,9 @@
         nixpkgs.overlays = [ inputs.self.overlays.default ];
       };
 
-      overlays.default = final: prev: ({
+      overlays.default = final: prev: {
         tinyboot = final.callPackage ./package.nix { };
-      });
+      };
 
       legacyPackages = genAttrs [ "riscv64-linux" "armv7l-linux" "aarch64-linux" "x86_64-linux" ] (
         system:
