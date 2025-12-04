@@ -11,10 +11,10 @@
 let
   deps = linkFarm "tinyboot-deps" [
     {
-      name = "clap-0.11.0-oBajB-PnAQCqvAVYMfzg2g4Cuhq_6vKYPKAVZR-r93fg";
+      name = "clap-0.11.0-oBajB-3nAQAWHQx0oqlPOm4KLcvO4xEEvxg31WMlFh_Q";
       path = fetchzip {
-        url = "https://github.com/jmbaur/zig-clap/archive/0b8d340907c10dd91e5b7e7461e9ddc4fc39d4b9.tar.gz";
-        hash = "sha256-yEm5pGR9dL/dqVHVwYUiP9Cqq1Z+6NV/W2JBiSRA5kA=";
+        url = "https://github.com/jmbaur/zig-clap/archive/76f87a072e1be64834829ccba625aef0f0bd4fdd.tar.gz";
+        hash = "sha256-scA/YZ0ttRn6jaI2HliBQFyufP0T5mOdu1Ega1yTV2A=";
       };
     }
     {
