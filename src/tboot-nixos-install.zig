@@ -27,16 +27,17 @@ fn ensureFilesystemState(
     try esp.makePath("loader/entries");
 
     if (!utils.pathExists(esp, "loader/entries.srel")) {
+        const srel_filepath = "loader/entries.srel";
         if (!args.dry_run) {
             var entries_srel_file = try esp.createFile(
-                "loader/entries.srel",
+                srel_filepath,
                 .{},
             );
             defer entries_srel_file.close();
 
             try entries_srel_file.writeAll("type1\n");
         }
-        std.log.info("installed entries.srel", .{});
+        std.log.info("installed {s}", .{srel_filepath});
     }
 
     std.log.debug("filesystem state is good", .{});
@@ -95,7 +96,7 @@ fn installGeneration(
             }
         }
 
-        std.log.info("installed {s}", .{linux_target_filename});
+        std.log.info("installed {s}", .{linux_target});
     }
 
     try nixos_known_files.put(linux_target_filename, {});
@@ -144,7 +145,7 @@ fn installGeneration(
                     }
                 }
 
-                std.log.info("installed {s}", .{initrd_target_filename});
+                std.log.info("installed {s}", .{initrd_target});
             }
 
             try nixos_known_files.put(initrd_target_filename, {});
@@ -223,7 +224,7 @@ fn installGeneration(
         try entries_known_files.put(entry_filename_with_counters, {});
     }
 
-    std.log.info("installed {s}", .{entry_filename_with_counters});
+    std.log.info("installed loader/entries/{s}", .{entry_filename_with_counters});
 }
 
 fn cleanupDir(
