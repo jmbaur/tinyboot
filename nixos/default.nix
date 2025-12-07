@@ -8,6 +8,7 @@ let
   cfg = config.boot.loader.tinyboot;
 
   inherit (lib)
+    escapeShellArgs
     getExe'
     kernel
     mkEnableOption
@@ -67,7 +68,7 @@ in
       installHook = pkgs.writeScript "install-bootloaderspec.sh" ''
         #!${pkgs.runtimeShell}
         ${
-          toString (
+          escapeShellArgs (
             [
               (getExe' pkgs.tinyboot "tboot-nixos-install")
               "--esp-mnt=${config.boot.loader.efi.efiSysMountPoint}"

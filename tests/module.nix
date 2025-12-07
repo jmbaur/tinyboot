@@ -15,6 +15,8 @@ in
 
   boot.kernelPackages = pkgs.linuxPackages_6_18;
 
+  system.switch.enable = true;
+
   boot.loader.tinyboot.enable = true;
 
   # can't use this cause this doesn't let us customize our kernel

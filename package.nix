@@ -53,6 +53,7 @@ stdenvNoCC.mkDerivation {
 
   dontInstall = true;
   doCheck = true;
+  dontStrip = true;
 
   zigBuildFlags = [
     "--color off"

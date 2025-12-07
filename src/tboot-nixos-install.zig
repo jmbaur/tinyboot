@@ -53,9 +53,6 @@ fn installGeneration(
     generation: u32,
     args: *const Args,
 ) !void {
-    var entry_contents: std.Io.Writer.Allocating = .init(arena_alloc);
-    var entry_contents_writer = entry_contents.writer;
-
     const linux_target_filename = try std.fmt.allocPrint(
         arena_alloc,
         "{s}-{s}",
@@ -175,14 +172,6 @@ fn installGeneration(
     else
         try arena_alloc.alloc(u8, 0);
 
-    try entry_contents_writer.print("title {s}{s}\n", .{ spec.label, sub_name });
-    try entry_contents_writer.print("version {s}\n", .{spec.label});
-    try entry_contents_writer.print("linux {s}\n", .{linux_target});
-    if (initrd_target) |initrd_target_| {
-        try entry_contents_writer.print("initrd {s}\n", .{initrd_target_});
-    }
-    try entry_contents_writer.print("options {s}\n", .{kernel_params});
-
     const sub_entry_name = if (spec.name) |name|
         try std.fmt.allocPrint(arena_alloc, "-specialisation-{s}", .{name})
     else
@@ -220,7 +209,17 @@ fn installGeneration(
         var entry_file = try entries_dir.createFile(entry_filename_with_counters, .{});
         defer entry_file.close();
 
-        try entry_file.writeAll(entry_contents.written());
+        var entry_buffer: [512]u8 = undefined;
+        var entry_writer = entry_file.writer(&entry_buffer);
+        try entry_writer.interface.print("title {s}{s}\n", .{ spec.label, sub_name });
+        try entry_writer.interface.print("version {s}\n", .{spec.label});
+        try entry_writer.interface.print("linux {s}\n", .{linux_target});
+        if (initrd_target) |initrd_target_| {
+            try entry_writer.interface.print("initrd {s}\n", .{initrd_target_});
+        }
+        try entry_writer.interface.print("options {s}\n", .{kernel_params});
+        try entry_writer.interface.flush();
+
         try entries_known_files.put(entry_filename_with_counters, {});
     }
 
