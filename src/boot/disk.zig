@@ -605,6 +605,8 @@ fn blsEntryLessThan(default_entry: ?[]const u8, a: BlsEntry, b: BlsEntry) bool {
     if (default_entry) |default_title| {
         if (std.mem.eql(u8, a.id, default_title)) {
             return true;
+        } else if (std.mem.eql(u8, b.id, default_title)) {
+            return false;
         }
     }
 
@@ -675,6 +677,18 @@ test "boot entry sorting" {
     // default entry set
     try std.testing.expect(blsEntryLessThan(
         "zzz",
+        BlsEntry{
+            .allocator = std.testing.allocator,
+            .id = "zzz",
+        },
+        BlsEntry{
+            .allocator = std.testing.allocator,
+            .id = "aaa",
+        },
+    ));
+
+    try std.testing.expect(!blsEntryLessThan(
+        "aaa",
         BlsEntry{
             .allocator = std.testing.allocator,
             .id = "zzz",
@@ -876,6 +890,7 @@ fn searchForEntries(
         };
         errdefer type1_entry.deinit();
 
+        std.log.debug("found type1 entry {f}", .{type1_entry});
         try bls_entries.append(allocator, type1_entry);
     }
 
@@ -1401,6 +1416,16 @@ const BlsEntry = struct {
     devicetree: ?[]const u8 = null,
     devicetree_overlay: ?[]const []const u8 = null,
     architecture: ?Architecture = null,
+
+    pub fn format(
+        self: *const BlsEntry,
+        writer: *std.Io.Writer,
+    ) !void {
+        try writer.print(
+            "id={s},left={?},done={?}",
+            .{ self.id, self.tries_left, self.tries_done },
+        );
+    }
 
     // Ensures all path options have their leading forward-slash trimmed so
     // that the paths can be used directly with the ESP mountpoint's std.fs.Dir
