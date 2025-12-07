@@ -12,6 +12,7 @@
         genAttrs
         listToAttrs
         mapAttrs
+        optionalAttrs
         ;
     in
     {
@@ -24,7 +25,7 @@
         tinyboot = final.callPackage ./package.nix { };
       };
 
-      legacyPackages = genAttrs [ "aarch64-linux" "x86_64-linux" ] (
+      legacyPackages = genAttrs [ "aarch64-linux" "x86_64-linux" "aarch64-darwin" ] (
         system:
         import inputs.nixpkgs {
           inherit system;
@@ -40,9 +41,14 @@
             pkgs.swtpm
             pkgs.zig_0_15
           ];
-          env.TINYBOOT_KERNEL =
-            with inputs.self.checks.${system}.disk.nodes.machine.system;
-            ''${build.tinybootKernel}/${boot.loader.kernelFile}'';
+          # NOTE: Optionally populating $TINYBOOT_KERNEL so that darwin
+          # builders can do zig builds without pulling in the linux kernel
+          # (which does not build on darwin).
+          env = optionalAttrs pkgs.stdenv.buildPlatform.isLinux {
+            TINYBOOT_KERNEL =
+              with inputs.self.checks.${system}.disk.nodes.machine.system;
+              ''${build.tinybootKernel}/${boot.loader.kernelFile}'';
+          };
         };
       }) inputs.self.legacyPackages;
 
@@ -54,25 +60,31 @@
           tinybootNative = pkgs.tinyboot;
         }
         // listToAttrs (
-          map (
-            system:
-            let
-              pkgs' =
-                pkgs.pkgsCross.${
-                  {
-                    "riscv64-linux" = "riscv64";
-                    "x86_64-linux" = "gnu64";
-                    "aarch64-linux" = "aarch64-multiplatform";
-                    "armv7l-linux" = "armv7l-hf-multiplatform";
-                  }
-                  .${system}
-                };
-            in
-            {
-              name = "tinybootCross-${pkgs'.stdenv.hostPlatform.qemuArch}";
-              value = pkgs'.tinyboot;
-            }
-          ) (filter (s: s != system) ([ "armv7l-linux" ] ++ (attrNames inputs.self.legacyPackages)))
+          map
+            (
+              system:
+              let
+                pkgs' =
+                  pkgs.pkgsCross.${
+                    {
+                      "riscv64-linux" = "riscv64";
+                      "x86_64-linux" = "gnu64";
+                      "aarch64-linux" = "aarch64-multiplatform";
+                      "armv7l-linux" = "armv7l-hf-multiplatform";
+                    }
+                    .${system}
+                  };
+              in
+              {
+                name = "tinybootCross-${pkgs'.stdenv.hostPlatform.qemuArch}";
+                value = pkgs'.tinyboot;
+              }
+            )
+            [
+              "armv7l-linux"
+              "aarch64-linux"
+              "x86_64-linux"
+            ]
         )
       ) inputs.self.legacyPackages;
 
