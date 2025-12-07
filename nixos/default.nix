@@ -44,8 +44,8 @@ in
         message = "Bootloader install program depends on bootspec";
       }
       {
-        assertion = versionAtLeast config.boot.kernelPackages.kernel.version "6.18";
-        message = "Must use Linux kernel 6.18 or newer";
+        assertion = versionAtLeast config.boot.kernelPackages.kernel.version "6.17";
+        message = "Must use Linux kernel 6.17 or newer for kexec handover";
       }
     ];
     boot.kernelParams = [ "kho=on" ];
