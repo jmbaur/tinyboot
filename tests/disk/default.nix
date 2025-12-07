@@ -1,88 +1,82 @@
 {
   testers,
-  tinyboot,
-  runCommand,
 }:
 
 testers.runNixOSTest {
   name = "disk";
   defaults.imports = [ ../module.nix ];
-  nodes.machine = {
-    virtualisation.fileSystems."/boot" = {
-      device = "/dev/disk/by-label/QEMU\\x20VVFAT";
-      fsType = "vfat";
+  nodes.machine =
+    {
+      config,
+      lib,
+      pkgs,
+      ...
+    }:
+    {
+      virtualisation.fileSystems."/boot" = {
+        device = "/dev/vda1";
+        fsType = "vfat";
+      };
+
+      # virtualisation.qemu.options = [ "-fw_cfg name=opt/org.tboot/pubkey,file=$TBOOT_CERT_DER" ];
+      # virtualisation.qemu.drives = [
+      #   {
+      #     file = "fat:rw:$ESP";
+      #     driveExtraOpts = {
+      #       "if" = "virtio";
+      #       format = "raw";
+      #     };
+      #   }
+      # ];
+
+      specialisation.hello.configuration = {
+        environment.systemPackages = [ pkgs.hello ];
+      };
+
+      system.build.diskImage = import "${pkgs.path}/nixos/lib/make-disk-image.nix" {
+        inherit config lib pkgs;
+        label = "nixos";
+        partitionTableType = "efi";
+        format = "raw";
+        bootSize = "128M";
+        additionalSpace = "0M";
+        copyChannel = false;
+      };
     };
-    virtualisation.qemu.options = [ "-fw_cfg name=opt/org.tboot/pubkey,file=$TBOOT_CERT_DER" ];
-    virtualisation.qemu.drives = [
-      {
-        file = "fat:rw:$ESP";
-        driveExtraOpts = {
-          "if" = "virtio";
-          format = "raw";
-        };
-      }
-    ];
-  };
   testScript =
     { nodes, ... }:
-    let
-      testArtifacts = runCommand "tinyboot-test-artifacts" { nativeBuildInputs = [ tinyboot ]; } ''
-        tboot-keygen --common-name test --organization org.tboot --time-now $SOURCE_DATE_EPOCH --country US
-        tboot-sign --private-key tboot-private.pem --certificate tboot-certificate.pem ${nodes.machine.system.build.kernel}/${nodes.machine.system.boot.loader.kernelFile} kernel.signed
-        tboot-sign --private-key tboot-private.pem --certificate tboot-certificate.pem ${nodes.machine.system.build.initialRamdisk}/${nodes.machine.system.boot.loader.initrdFile} initrd.signed
-        install -Dm0444 -t $out *.der *.pem *.signed
-      '';
-    in
     ''
       import os
       import shutil
+      import subprocess
       import tempfile
 
-      os.environ["TBOOT_CERT_DER"] = "${testArtifacts}/tboot-certificate.der"
+      tmp_disk_image = tempfile.NamedTemporaryFile()
+      shutil.copyfile("${nodes.machine.system.build.diskImage}/nixos.img", tmp_disk_image.name)
+      subprocess.run([
+        "${nodes.machine.virtualisation.qemu.package}/bin/qemu-img",
+        "resize",
+        "-f",
+        "raw",
+        tmp_disk_image.name,
+        "+32M",
+      ])
 
-      def populate_esp(tmpdir, title, tries_left=None, tries_done=None):
-          os.makedirs(os.path.join(tmpdir, "loader/entries"))
+      # Set NIX_DISK_IMAGE so that the qemu script finds the right disk image.
+      os.environ['NIX_DISK_IMAGE'] = tmp_disk_image.name
 
-          entry_name = title
-          if tries_left is not None:
-              entry_name = entry_name + f"+{tries_left}"
-          if tries_done is not None:
-              entry_name = entry_name + f"-{tries_done}"
-          entry_name = entry_name + ".conf"
+      machine.wait_for_unit("boot-complete.target")
+      assert "active" == machine.succeed("systemctl is-active tboot-bless-boot.service").strip()
+      machine.succeed("test -e /boot/loader/entries/nixos-generation-1.conf")
+      machine.fail("hello")
 
-          with open(os.path.join(tmpdir, "loader/entries", entry_name), "x") as entry:
-              entry.write(f"title {title}\n")
-              shutil.copyfile("${testArtifacts}/kernel.signed", os.path.join(tmpdir, "linux"))
-              entry.write("linux /linux\n")
-              shutil.copyfile("${testArtifacts}/initrd.signed", os.path.join(tmpdir, "initrd"))
-              entry.write("initrd /initrd\n")
-              entry.write("options init=${nodes.machine.system.build.toplevel}/init ${toString nodes.machine.boot.kernelParams}\n")
-
-      with subtest("simple"):
-          with tempfile.TemporaryDirectory() as esp:
-              os.environ["ESP"] = esp
-              populate_esp(
-                  esp,
-                  "foo",
-              )
-              machine.wait_for_unit("multi-user.target")
-
+      machine.succeed("sed -i 's/nixos-generation-1/nixos-generation-1-specialisation-hello/' /boot/loader/loader.conf")
       machine.shutdown()
       machine.wait_for_shutdown()
 
-      with subtest("boot-counting"):
-          # TODO(jared): qemu bug: https://gitlab.com/qemu-project/qemu/-/issues/2786
-          if False:
-              with tempfile.TemporaryDirectory() as esp:
-                  os.environ["ESP"] = esp
-                  populate_esp(
-                      esp,
-                      "foo",
-                      tries_left=3,
-                      tries_done=0,
-                  )
-                  machine.wait_for_unit("boot-complete.target")
-                  assert "active" == machine.succeed("systemctl is-active tboot-bless-boot.service").strip()
-                  machine.succeed("test -e /boot/loader/entries/foo.conf")
+      machine.wait_for_unit("boot-complete.target")
+      assert "active" == machine.succeed("systemctl is-active tboot-bless-boot.service").strip()
+      machine.succeed("test -e /boot/loader/entries/nixos-generation-1-specialisation-hello.conf")
+      print(machine.succeed("hello"))
     '';
 }

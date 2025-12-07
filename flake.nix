@@ -7,8 +7,6 @@
     inputs:
     let
       inherit (inputs.nixpkgs.lib)
-        attrNames
-        filter
         genAttrs
         listToAttrs
         mapAttrs
@@ -21,7 +19,7 @@
         nixpkgs.overlays = [ inputs.self.overlays.default ];
       };
 
-      overlays.default = final: prev: {
+      overlays.default = final: _prev: {
         tinyboot = final.callPackage ./package.nix { };
       };
 
@@ -53,7 +51,7 @@
       }) inputs.self.legacyPackages;
 
       checks = mapAttrs (
-        system: pkgs:
+        _system: pkgs:
         {
           disk = pkgs.callPackage ./tests/disk { };
           ymodem = pkgs.callPackage ./tests/ymodem { };

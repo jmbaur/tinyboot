@@ -25,7 +25,6 @@ in
   system.build = { inherit tinybootKernel; };
   virtualisation.graphics = false;
   virtualisation.tpm.enable = true;
-  virtualisation.qemu.consoles = config.tinyboot.linux.consoles;
   virtualisation.qemu.options = [
     "-kernel ${tinybootKernel}/${config.system.boot.loader.kernelFile}"
     "-initrd ${pkgs.tinyboot}/${pkgs.tinyboot.initrdFile}"
