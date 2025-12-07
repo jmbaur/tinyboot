@@ -1130,6 +1130,8 @@ pub const Command = struct {
                 print("?\n", .{});
             };
 
+            try out.flush();
+
             return null;
         }
     };

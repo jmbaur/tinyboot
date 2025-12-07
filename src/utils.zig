@@ -26,13 +26,19 @@ pub fn dumpFile(writer: *std.Io.Writer, path: []const u8) !void {
     const file = try std.fs.cwd().openFile(path, .{});
     defer file.close();
 
+    // Use readerStreaming() on files in proc, since reader() uses stat()
+    // information to determine how much we can stream, which is not useful for
+    // files in /proc.
     var buffer: [1024]u8 = undefined;
-    var file_reader = file.reader(&buffer);
+    var file_reader = if (std.mem.startsWith(
+        u8,
+        path,
+        std.fs.path.sep_str ++ "proc",
+    )) file.readerStreaming(&buffer) else file.reader(&buffer);
     while (file_reader.interface.stream(writer, .unlimited)) |_| {} else |err| switch (err) {
         error.EndOfStream => {},
         else => return err,
     }
-    try writer.flush();
 }
 
 pub fn realpathAllocMany(
