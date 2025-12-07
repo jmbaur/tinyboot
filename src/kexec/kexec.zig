@@ -60,6 +60,35 @@ const kexecLoad = switch (builtin.cpu.arch) {
     else => @compileError("kexec_load not implemented for target architecture"),
 };
 
+const kho_finalize_filepath = "/sys/kernel/debug/kho/out/finalize";
+const kho_active_filepath = "/sys/kernel/debug/kho/out/finalize";
+
+fn enableKHO() !void {
+    var kho = std.fs.cwd().openFile(kho_finalize_filepath, .{ .mode = .write_only }) catch |err| switch (err) {
+        error.FileNotFound => {
+            std.log.warn("kexec handover not enabled, tinyboot state will not persist to next kernel", .{});
+            return;
+        },
+        else => return err,
+    };
+    defer kho.close();
+
+    try kho.writeAll("1\n");
+}
+
+fn disableKHO() !void {
+    var kho = std.fs.cwd().openFile(kho_active_filepath, .{ .mode = .write_only }) catch |err| switch (err) {
+        error.FileNotFound => {
+            std.log.warn("kexec handover not enabled, skipping kho disable", .{});
+            return;
+        },
+        else => return err,
+    };
+    defer kho.close();
+
+    try kho.writeAll("0\n");
+}
+
 fn kexecFileLoad(
     allocator: std.mem.Allocator,
     linux: std.fs.File,
@@ -210,6 +239,8 @@ pub fn kexec(
     }
 
     if (kexec_file_load_available) {
+        try enableKHO();
+        errdefer disableKHO() catch {};
         try kexecFileLoad(allocator, linux.?, initrd, cmdline);
     } else {
         try kexecLoad(allocator, linux.?, initrd, cmdline);

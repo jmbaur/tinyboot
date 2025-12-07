@@ -16,6 +16,7 @@ let
     mkOption
     optionals
     types
+    versionAtLeast
     ;
 in
 {
@@ -42,14 +43,20 @@ in
         assertion = config.boot.bootspec.enable;
         message = "Bootloader install program depends on bootspec";
       }
+      {
+        assertion = versionAtLeast config.boot.kernelPackages.kernel.version "6.18";
+        message = "Must use Linux kernel 6.18 or newer";
+      }
     ];
+    boot.kernelParams = [ "kho=on" ];
     boot.kernelPatches = [
       {
-        name = "enable-ima";
+        name = "tinyboot-support";
         patch = null;
         structuredExtraConfig = {
           IMA = kernel.yes;
           IMA_DEFAULT_HASH_SHA256 = kernel.yes;
+          KEXEC_HANDOVER = kernel.yes;
         };
       }
     ];

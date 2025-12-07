@@ -1,18 +1,18 @@
 {
+  bison,
+  flex,
   lib,
   linuxKernel,
-  linux,
+  linux_6_18,
   stdenv,
-  flex,
-  bison,
 }:
 
 linuxKernel.manualConfig {
-  inherit (linux) src version;
+  inherit (linux_6_18) src version;
   configfile = stdenv.mkDerivation {
-    pname = linux.pname + "-config";
-    inherit (linux) version;
-    inherit (linux) src;
+    pname = linux_6_18.pname + "-config";
+    inherit (linux_6_18) version;
+    inherit (linux_6_18) src;
     dontConfigure = true;
     nativeBuildInputs = [
       flex
@@ -38,7 +38,7 @@ linuxKernel.manualConfig {
       ''
       + lib.optionalString stdenv.hostPlatform.isx86_64 ''
         CONFIG_ACPI=y
-        CONFIG_CMDLINE="debug console=ttyS0,115200"
+        CONFIG_CMDLINE="kho=on debug console=ttyS0,115200"
         CONFIG_CMDLINE_BOOL=y
         CONFIG_CMDLINE_OVERRIDE=y
         CONFIG_SERIAL_8250=y
@@ -46,7 +46,7 @@ linuxKernel.manualConfig {
       ''
       + lib.optionalString stdenv.hostPlatform.isAarch64 ''
         CONFIG_ARM_SCMI_TRANSPORT_VIRTIO=y
-        CONFIG_CMDLINE="debug console=ttyAMA0,115200"
+        CONFIG_CMDLINE="kho=on debug console=ttyAMA0,115200"
         CONFIG_CMDLINE_FORCE=y
         CONFIG_PCI_HOST_GENERIC=y
         CONFIG_SERIAL_AMBA_PL011=y
