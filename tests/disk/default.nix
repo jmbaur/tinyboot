@@ -12,25 +12,36 @@ testers.runNixOSTest {
       pkgs,
       ...
     }:
+
+    let
+      tbootKeys =
+        pkgs.runCommand "tboot-keys"
+          {
+            nativeBuildInputs = [ pkgs.buildPackages.tinyboot ];
+          }
+          ''
+            tboot-keygen -n evilcorpkeys -o evilcorp -c US -s 000000 -t 0
+            mkdir -p $out && mv *der *.pem $out
+          '';
+    in
     {
       virtualisation.fileSystems."/boot" = {
         device = "/dev/vda1";
         fsType = "vfat";
       };
 
-      # virtualisation.qemu.options = [ "-fw_cfg name=opt/org.tboot/pubkey,file=$TBOOT_CERT_DER" ];
-      # virtualisation.qemu.drives = [
-      #   {
-      #     file = "fat:rw:$ESP";
-      #     driveExtraOpts = {
-      #       "if" = "virtio";
-      #       format = "raw";
-      #     };
-      #   }
-      # ];
+      virtualisation.qemu.options = [
+        "-fw_cfg name=opt/org.tboot/pubkey,file=${tbootKeys}/tboot-certificate.der"
+      ];
 
-      specialisation.hello.configuration = {
-        environment.systemPackages = [ pkgs.hello ];
+      specialisation.hello.configuration.environment.systemPackages = [ pkgs.hello ];
+
+      boot.loader.tinyboot.verifiedBoot = {
+        enable = true;
+        # NOTE: These are just test fixtures, actually using private keys that
+        # get copied to the nix store is not secure!
+        privateKey = "${tbootKeys}/tboot-private.pem";
+        certificate = "${tbootKeys}/tboot-certificate.der";
       };
 
       system.build.diskImage = import "${pkgs.path}/nixos/lib/make-disk-image.nix" {

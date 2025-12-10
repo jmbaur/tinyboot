@@ -1,3 +1,4 @@
+- put bootloader information into NixOS bootspec
 - documentation
 - make recovery firmware allow booting non-signed kernels
 - network booting

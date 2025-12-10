@@ -85,7 +85,7 @@ fn installGeneration(
                     sign.public_key,
                 );
 
-                std.log.info("signed {s}", .{linux_target_filename});
+                std.log.info("signed {s}", .{linux_target});
             } else {
                 try std.fs.cwd().copyFile(
                     spec.kernel,
@@ -134,7 +134,7 @@ fn installGeneration(
                             sign.public_key,
                         );
 
-                        std.log.info("signed {s}", .{initrd_target_filename});
+                        std.log.info("signed {s}", .{initrd_target});
                     } else {
                         try std.fs.cwd().copyFile(
                             initrd,

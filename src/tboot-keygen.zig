@@ -44,16 +44,28 @@ test "generalized time" {
     );
 }
 
+fn fixed_seed(ctx: ?*anyopaque, buffer: [*c]u8, len: usize) callconv(.c) c_int {
+    const seed: *[]const u8 = @ptrCast(@alignCast(ctx.?));
+    const buf = buffer[0..len];
+    if (seed.len > len) {
+        std.mem.copyForwards(u8, buf, seed.*[0..len]);
+    } else {
+        std.mem.copyForwards(u8, buf, seed.*);
+    }
+    return 0;
+}
+
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
 
     const params = comptime clap.parseParamsComptime(
         \\-h, --help                  Display this help and exit.
+        \\-s, --seed <STR>            Seed to use when generating keys (only set if reproducibility is needed).
         \\-n, --common-name <STR>     Common name for certificate.
         \\-o, --organization <STR>    Organization for certificate.
         \\-c, --country <STR>         Country for certificate.
-        \\-s, --valid-seconds <NUM>   Number of seconds the certificate is valid for (defaults to 31536000, 1 year).
+        \\-v, --valid-seconds <NUM>   Number of seconds the certificate is valid for (defaults to 31536000, 1 year).
         \\-t, --time-now <NUM>        Number of seconds past the Unix epoch (defaults to current time, only set if reproducibility is needed).
         \\
     );
@@ -101,8 +113,8 @@ pub fn main() !void {
     C.mbedtls_ctr_drbg_init(&ctr_drbg);
     try mbedtls.wrap(C.mbedtls_ctr_drbg_seed(
         &ctr_drbg,
-        C.mbedtls_entropy_func,
-        &entropy,
+        if (res.args.seed != null) &fixed_seed else C.mbedtls_entropy_func,
+        if (res.args.seed) |seed| @ptrCast(@constCast(&seed)) else &entropy,
         "tboot-keygen",
         "tboot-keygen".len,
     ));
@@ -130,7 +142,6 @@ pub fn main() !void {
         defer pub_out.close();
 
         try pub_out.writeAll(std.mem.trim(u8, &key_buf, &.{0}));
-        try pub_out.writeAll(&.{0});
     }
 
     key_buf = std.mem.zeroes(@TypeOf(key_buf));
@@ -143,6 +154,12 @@ pub fn main() !void {
         defer priv_out.close();
 
         try priv_out.writeAll(std.mem.trim(u8, &key_buf, &.{0}));
+
+        // NOTE: mbedtls requires the PEM-encoded private key to have a
+        // null-byte terminator, or else we run into this issue:
+        // ```
+        // error: mbedtls error(15616): PK - Invalid key tag or value
+        // ```
         try priv_out.writeAll(&.{0});
     }
 
@@ -207,7 +224,6 @@ pub fn main() !void {
 
         const start: usize = cert_buf.len - len;
         try cert_der_out.writeAll(std.mem.trim(u8, cert_buf[start .. start + len], &.{0}));
-        try cert_der_out.writeAll(&.{0});
     }
 
     cert_buf = std.mem.zeroes(@TypeOf(cert_buf));
@@ -225,6 +241,6 @@ pub fn main() !void {
         const cert_pem_out = try std.fs.cwd().createFile("tboot-certificate.pem", .{ .mode = 0o444 });
         defer cert_pem_out.close();
 
-        try cert_pem_out.writeAll(&cert_buf);
+        try cert_pem_out.writeAll(std.mem.trim(u8, &cert_buf, &.{0}));
     }
 }
