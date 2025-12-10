@@ -183,6 +183,7 @@ pub fn build(b: *std.Build) !void {
             .root_source_file = b.path("src/tboot-bless-boot.zig"),
             .target = target,
             .optimize = optimize,
+            .strip = do_strip,
         });
         const tboot_bless_boot = b.addExecutable(.{
             .name = "tboot-bless-boot",

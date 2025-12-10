@@ -57,7 +57,7 @@ stdenvNoCC.mkDerivation {
 
   zigBuildFlags = [
     "--color off"
-    "-Doptimize=ReleaseSmall"
+    "--release=safe"
     "-Dtarget=${stdenvNoCC.hostPlatform.qemuArch}-${stdenvNoCC.hostPlatform.parsed.kernel.name}"
   ]
   ++ lib.optionals (firmwareDirectory != null) [
