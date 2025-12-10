@@ -1,7 +1,20 @@
 {
   testers,
+  buildPackages,
+  runCommand,
 }:
 
+let
+  tbootKeys =
+    runCommand "tboot-keys"
+      {
+        nativeBuildInputs = [ buildPackages.tinyboot ];
+      }
+      ''
+        tboot-keygen -n evilcorpkeys -o evilcorp -c US -s 000000 -t 0
+        mkdir -p $out && mv *der *.pem $out
+      '';
+in
 testers.runNixOSTest {
   name = "disk";
   defaults.imports = [ ../module.nix ];
@@ -13,17 +26,6 @@ testers.runNixOSTest {
       ...
     }:
 
-    let
-      tbootKeys =
-        pkgs.runCommand "tboot-keys"
-          {
-            nativeBuildInputs = [ pkgs.buildPackages.tinyboot ];
-          }
-          ''
-            tboot-keygen -n evilcorpkeys -o evilcorp -c US -s 000000 -t 0
-            mkdir -p $out && mv *der *.pem $out
-          '';
-    in
     {
       virtualisation.fileSystems."/boot" = {
         device = "/dev/vda1";
@@ -61,6 +63,10 @@ testers.runNixOSTest {
       import shutil
       import subprocess
       import tempfile
+
+      for file in ["tboot-private.pem", "tboot-public.pem", "tboot-certificate.pem"]:
+          with open(f"${tbootKeys}/{file}") as f:
+              print(f"using {file}:\n{f.read()}")
 
       tmp_disk_image = tempfile.NamedTemporaryFile()
       shutil.copyfile("${nodes.machine.system.build.diskImage}/nixos.img", tmp_disk_image.name)

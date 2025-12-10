@@ -154,13 +154,6 @@ pub fn main() !void {
         defer priv_out.close();
 
         try priv_out.writeAll(std.mem.trim(u8, &key_buf, &.{0}));
-
-        // NOTE: mbedtls requires the PEM-encoded private key to have a
-        // null-byte terminator, or else we run into this issue:
-        // ```
-        // error: mbedtls error(15616): PK - Invalid key tag or value
-        // ```
-        try priv_out.writeAll(&.{0});
     }
 
     // generate x509 cert

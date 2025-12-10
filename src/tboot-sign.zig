@@ -102,7 +102,16 @@ pub fn signFile(
 
     const private_key_file = try std.fs.cwd().openFile(private_key_filepath, .{});
     defer private_key_file.close();
-    const private_key_bytes = try private_key_file.readToEndAlloc(arena_alloc, std.math.maxInt(usize));
+
+    // NOTE: mbedtls requires the PEM-encoded private key to have a
+    // null-byte terminator, or else we run into this issue:
+    // ```
+    // error: mbedtls error(15616): PK - Invalid key tag or value
+    // ```
+    const private_key_stat = try private_key_file.stat();
+    var private_key_bytes = try arena_alloc.alloc(u8, private_key_stat.size + 1);
+    @memset(private_key_bytes, 0);
+    _ = try private_key_file.readAll(private_key_bytes[0..private_key_stat.size]);
 
     try mbedtls.wrap(C.mbedtls_pk_parse_key(
         &pk,
