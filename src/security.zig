@@ -29,7 +29,7 @@ const APPRAISE_POLICY = KEXEC_KERNEL_CHECK_APPRAISE ++ KEXEC_INITRAMFS_CHECK_APP
 
 const MEASURE_AND_APPRAISE_POLICY = MEASURE_POLICY ++ APPRAISE_POLICY;
 
-const IMA_POLICY_PATH = "/sys/kernel/security/ima/policy";
+const IMA_POLICY_PATH = "/sys/kernel/security/integrity/ima/policy";
 
 // Individual IMA policy lines below
 
