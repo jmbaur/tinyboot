@@ -25,6 +25,7 @@ linuxKernel.manualConfig {
         CONFIG_FW_CFG_SYSFS=y
         CONFIG_HVC_CONSOLE=y
         CONFIG_IKCONFIG=y
+        CONFIG_DYNAMIC_DEBUG=y
         CONFIG_PCI=y
         CONFIG_SCSI=y
         CONFIG_SCSI_VIRTIO=y
