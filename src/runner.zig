@@ -117,11 +117,13 @@ pub fn main() !void {
         "swtpm",
         "socket",
         "--terminate",
+        "--tpm2",
+        "--log",
+        try std.fmt.allocPrint(arena_alloc, "file={s}/swtpm.log,level=20", .{tempdir_path}),
         "--tpmstate",
         try std.fmt.allocPrint(arena_alloc, "dir={s}", .{tempdir_path}),
         "--ctrl",
         try std.fmt.allocPrint(arena_alloc, "type=unixio,path={s}/swtpm.sock", .{tempdir_path}),
-        "--tpm2",
     }, arena_alloc);
     try swtpm_child.spawn();
     defer _ = swtpm_child.kill() catch {};

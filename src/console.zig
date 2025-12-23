@@ -1113,7 +1113,7 @@ pub const Command = struct {
             // the first TPM will be at major number 10, minor number 224, and
             // since the minor numbers are incremented for each following
             // device, we have at least one TPM if this path exists.
-            print("TPM: ", .{});
+            print("\nTPM: ", .{});
             if (utils.absolutePathExists("/dev/char/10:224")) {
                 print("yes\n", .{});
                 var pcr_sha256_dir = try std.fs.cwd().openDir("/sys/class/tpm/tpm0/pcr-sha256", .{});
@@ -1131,6 +1131,16 @@ pub const Command = struct {
             print("\nKeys:\n", .{});
             utils.dumpFile(std.fs.cwd(), out, "/proc/keys") catch {
                 print("?\n", .{});
+            };
+
+            print("\nIMA policy:\n", .{});
+            utils.dumpFile(std.fs.cwd(), out, "/sys/kernel/security/integrity/ima/policy") catch {
+                print("n/a\n", .{});
+            };
+
+            print("\nIMA measurements:\n", .{});
+            utils.dumpFile(std.fs.cwd(), out, "/sys/kernel/security/integrity/ima/ascii_runtime_measurements") catch {
+                print("n/a\n", .{});
             };
 
             print("\nMTD:\n", .{});
