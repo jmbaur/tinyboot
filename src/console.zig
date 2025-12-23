@@ -1118,7 +1118,7 @@ pub const Command = struct {
                 print("yes\n", .{});
                 var pcr_sha256_dir = try std.fs.cwd().openDir("/sys/class/tpm/tpm0/pcr-sha256", .{});
                 defer pcr_sha256_dir.close();
-                for (0..25) |pcr| {
+                for (0..24) |pcr| {
                     print("\tPCR{d}: ", .{pcr});
                     utils.dumpFile(pcr_sha256_dir, out, &.{'0' + @as(u8, @intCast(pcr))}) catch {
                         print("n/a\n", .{});

@@ -87,6 +87,8 @@ testers.runNixOSTest {
       machine.succeed("test -e /boot/loader/entries/nixos-generation-1.conf")
       machine.fail("hello")
 
+      first_boot_pcrs = [machine.succeed(f"cat /sys/class/tpm/tpm0/pcr-sha256/{pcr}").strip() for pcr in range(0, 24)]
+
       machine.succeed("sed -i 's/nixos-generation-1/nixos-generation-1-specialisation-hello/' /boot/loader/loader.conf")
       machine.shutdown()
       machine.wait_for_shutdown()
@@ -95,5 +97,17 @@ testers.runNixOSTest {
       assert "active" == machine.succeed("systemctl is-active tboot-bless-boot.service").strip()
       machine.succeed("test -e /boot/loader/entries/nixos-generation-1-specialisation-hello.conf")
       print(machine.succeed("hello"))
+
+      second_boot_pcrs = [machine.succeed(f"cat /sys/class/tpm/tpm0/pcr-sha256/{pcr}").strip() for pcr in range(0, 24)]
+
+      # PCR7, PCR8, and PCR9 should be the same
+      for pcr in [7, 8, 9]:
+          if first_boot_pcrs[pcr] != second_boot_pcrs[pcr]:
+              raise AssertionError(f"PCR{pcr} should be equal")
+
+      # PCR12 should _not_ be the same
+      for pcr in [12]:
+          if first_boot_pcrs[pcr] == second_boot_pcrs[pcr]:
+              raise AssertionError(f"PCR{pcr} should not be equal")
     '';
 }
