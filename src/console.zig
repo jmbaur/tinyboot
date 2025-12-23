@@ -1221,7 +1221,12 @@ pub const Command = struct {
             writeAll("\n");
 
             for (entries, 0..) |entry, index| {
-                print("{d}\t{s}\n", .{ index, entry.linux });
+                print("{d}\n\tlinux={s}\n\tinitrd={?s}\n\tcmdline=\"{s}\"\n", .{
+                    index,
+                    entry.linux,
+                    entry.initrd,
+                    if (entry.cmdline) |cmdline| cmdline else "",
+                });
             }
 
             return null;
@@ -1256,8 +1261,8 @@ pub const Command = struct {
                 if (want_index == index) {
                     if (boot_loader.load(entry)) {
                         print(
-                            "selected entry: {s}\n",
-                            .{entry.linux},
+                            "selected entry:\n\tlinux={s}\n\tinitrd={?s}\n\tcmdline=\"{s}\"\n",
+                            .{ entry.linux, entry.initrd, if (entry.cmdline) |cmdline| cmdline else "" },
                         );
 
                         return .kexec;
@@ -1292,13 +1297,14 @@ pub const Command = struct {
 
                     for (entries) |entry| {
                         if (bl.load(entry)) {
-                            break;
+                            return .kexec;
                         } else |err| {
                             std.log.err("failed to probe {f}: {}", .{ bl.device, err });
                         }
                     }
                 }
             }
+
             return null;
         }
     };
