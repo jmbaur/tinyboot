@@ -7,18 +7,6 @@ const kexec_file_load_available = @import("./kexec/kexec.zig").kexec_file_load_a
 const linux_headers = @import("linux_headers");
 
 const MEASURE_POLICY =
-    PROC_SUPER_MAGIC ++
-    SYSFS_MAGIC ++
-    DEBUGFS_MAGIC ++
-    TMPFS_MAGIC ++
-    DEVPTS_SUPER_MAGIC ++
-    BINFMTFS_MAGIC ++
-    SECURITYFS_MAGIC ++
-    SELINUX_MAGIC ++
-    SMACK_MAGIC ++
-    CGROUP_SUPER_MAGIC ++
-    CGROUP2_SUPER_MAGIC ++
-    NSFS_MAGIC ++
     KEY_CHECK ++
     POLICY_CHECK ++
     KEXEC_KERNEL_CHECK ++
@@ -31,53 +19,15 @@ const MEASURE_AND_APPRAISE_POLICY = MEASURE_POLICY ++ APPRAISE_POLICY;
 
 const IMA_POLICY_PATH = "/sys/kernel/security/integrity/ima/policy";
 
-// Individual IMA policy lines below
-
-// PROC_SUPER_MAGIC = 0x9fa0
-const PROC_SUPER_MAGIC = withNewline("dont_measure fsmagic=0x9fa0");
-
-// SYSFS_MAGIC = 0x62656572
-const SYSFS_MAGIC = withNewline("dont_measure fsmagic=0x62656572");
-
-// DEBUGFS_MAGIC = 0x64626720
-const DEBUGFS_MAGIC = withNewline("dont_measure fsmagic=0x64626720");
-
-// TMPFS_MAGIC = 0x01021994
-const TMPFS_MAGIC = withNewline("dont_measure fsmagic=0x1021994");
-
-// DEVPTS_SUPER_MAGIC=0x1cd1
-const DEVPTS_SUPER_MAGIC = withNewline("dont_measure fsmagic=0x1cd1");
-
-// BINFMTFS_MAGIC=0x42494e4d
-const BINFMTFS_MAGIC = withNewline("dont_measure fsmagic=0x42494e4d");
-
-// SECURITYFS_MAGIC=0x73636673
-const SECURITYFS_MAGIC = withNewline("dont_measure fsmagic=0x73636673");
-
-// SELINUX_MAGIC=0xf97cff8c
-const SELINUX_MAGIC = withNewline("dont_measure fsmagic=0xf97cff8c");
-
-// SMACK_MAGIC=0x43415d53
-const SMACK_MAGIC = withNewline("dont_measure fsmagic=0x43415d53");
-
-// CGROUP_SUPER_MAGIC=0x27e0eb
-const CGROUP_SUPER_MAGIC = withNewline("dont_measure fsmagic=0x27e0eb");
-
-// CGROUP2_SUPER_MAGIC=0x63677270
-const CGROUP2_SUPER_MAGIC = withNewline("dont_measure fsmagic=0x63677270");
-
-// NSFS_MAGIC=0x6e736673
-const NSFS_MAGIC = withNewline("dont_measure fsmagic=0x6e736673");
-
 const KEY_CHECK = withNewline("measure func=KEY_CHECK pcr=7");
 
 const POLICY_CHECK = withNewline("measure func=POLICY_CHECK pcr=7");
 
-const KEXEC_KERNEL_CHECK = withNewline("measure func=KEXEC_KERNEL_CHECK pcr=8");
+const KEXEC_KERNEL_CHECK = withNewline("measure func=KEXEC_KERNEL_CHECK pcr=8 template=ima-modsig");
 
-const KEXEC_INITRAMFS_CHECK = withNewline("measure func=KEXEC_INITRAMFS_CHECK pcr=9");
+const KEXEC_INITRAMFS_CHECK = withNewline("measure func=KEXEC_INITRAMFS_CHECK pcr=9 template=ima-modsig");
 
-const KEXEC_CMDLINE = withNewline("measure func=KEXEC_CMDLINE pcr=12");
+const KEXEC_CMDLINE = withNewline("measure func=KEXEC_CMDLINE pcr=12 template=ima-buf");
 
 const KEXEC_KERNEL_CHECK_APPRAISE = withNewline("appraise func=KEXEC_KERNEL_CHECK appraise_type=imasig|modsig");
 
