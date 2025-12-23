@@ -22,8 +22,8 @@ pub fn enumFromStr(T: anytype, value: []const u8) !T {
     return error.NotFound;
 }
 
-pub fn dumpFile(writer: *std.Io.Writer, path: []const u8) !void {
-    const file = try std.fs.cwd().openFile(path, .{});
+pub fn dumpFile(dir: std.fs.Dir, writer: *std.Io.Writer, path: []const u8) !void {
+    const file = try dir.openFile(path, .{});
     defer file.close();
 
     // Use readerStreaming() on files in proc, since reader() uses stat()

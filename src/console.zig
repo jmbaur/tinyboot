@@ -1094,18 +1094,18 @@ pub const Command = struct {
             _ = args;
             _ = boot_loaders;
 
-            try utils.dumpFile(out, "/proc/version");
+            try utils.dumpFile(std.fs.cwd(), out, "/proc/version");
 
             print("\nInit:\n", .{});
-            try utils.dumpFile(out, "/proc/1/stat");
+            try utils.dumpFile(std.fs.cwd(), out, "/proc/1/stat");
 
             print("\nConsoles:\n", .{});
-            utils.dumpFile(out, "/proc/consoles") catch {
+            utils.dumpFile(std.fs.cwd(), out, "/proc/consoles") catch {
                 print("?\n", .{});
             };
 
             print("\nMemory:\n", .{});
-            utils.dumpFile(out, "/proc/meminfo") catch {
+            utils.dumpFile(std.fs.cwd(), out, "/proc/meminfo") catch {
                 print("?\n", .{});
             };
 
@@ -1113,20 +1113,33 @@ pub const Command = struct {
             // the first TPM will be at major number 10, minor number 224, and
             // since the minor numbers are incremented for each following
             // device, we have at least one TPM if this path exists.
-            print("\nTPM: {s}\n", .{if (utils.absolutePathExists("/dev/char/10:224")) "yes" else "no"});
+            print("TPM: ", .{});
+            if (utils.absolutePathExists("/dev/char/10:224")) {
+                print("yes\n", .{});
+                var pcr_sha256_dir = try std.fs.cwd().openDir("/sys/class/tpm/tpm0/pcr-sha256", .{});
+                defer pcr_sha256_dir.close();
+                for (0..25) |pcr| {
+                    print("\tPCR{d}: ", .{pcr});
+                    utils.dumpFile(pcr_sha256_dir, out, &.{'0' + @as(u8, @intCast(pcr))}) catch {
+                        print("n/a\n", .{});
+                    };
+                }
+            } else {
+                print("no\n", .{});
+            }
 
             print("\nKeys:\n", .{});
-            utils.dumpFile(out, "/proc/keys") catch {
+            utils.dumpFile(std.fs.cwd(), out, "/proc/keys") catch {
                 print("?\n", .{});
             };
 
             print("\nMTD:\n", .{});
-            utils.dumpFile(out, "/proc/mtd") catch {
+            utils.dumpFile(std.fs.cwd(), out, "/proc/mtd") catch {
                 print("?\n", .{});
             };
 
             print("\nPartitions:\n", .{});
-            utils.dumpFile(out, "/proc/partitions") catch {
+            utils.dumpFile(std.fs.cwd(), out, "/proc/partitions") catch {
                 print("?\n", .{});
             };
 
