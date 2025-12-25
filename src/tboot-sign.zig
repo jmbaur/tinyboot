@@ -108,10 +108,10 @@ pub fn signFile(
     // ```
     // error: mbedtls error(15616): PK - Invalid key tag or value
     // ```
-    const private_key_stat = try private_key_file.stat();
-    var private_key_bytes = try arena_alloc.alloc(u8, private_key_stat.size + 1);
+    const private_key_size: usize = @intCast((try private_key_file.stat()).size);
+    var private_key_bytes = try arena_alloc.alloc(u8, private_key_size + 1);
     @memset(private_key_bytes, 0);
-    _ = try private_key_file.readAll(private_key_bytes[0..private_key_stat.size]);
+    _ = try private_key_file.readAll(private_key_bytes[0..private_key_size]);
 
     try mbedtls.wrap(C.mbedtls_pk_parse_key(
         &pk,
