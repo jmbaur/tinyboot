@@ -28,7 +28,5 @@ in
   virtualisation.qemu.options = [
     "-kernel ${tinybootKernel}/${config.system.boot.loader.kernelFile}"
     "-initrd ${pkgs.tinyboot}/${pkgs.tinyboot.initrdFile}"
-  ]
-  # TODO(jared): make work with -cpu max
-  ++ lib.optionals isAarch64 [ "-cpu cortex-a53" ];
+  ];
 }
