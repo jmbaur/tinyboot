@@ -10,7 +10,6 @@
         genAttrs
         listToAttrs
         mapAttrs
-        optionalAttrs
         ;
     in
     {
@@ -23,7 +22,7 @@
         tinyboot = final.callPackage ./package.nix { };
       };
 
-      legacyPackages = genAttrs [ "aarch64-linux" "x86_64-linux" "aarch64-darwin" ] (
+      legacyPackages = genAttrs [ "aarch64-linux" "x86_64-linux" ] (
         system:
         import inputs.nixpkgs {
           inherit system;
@@ -39,14 +38,9 @@
             pkgs.swtpm
             pkgs.zig_0_15
           ];
-          # NOTE: Optionally populating $TINYBOOT_KERNEL so that darwin
-          # builders can do zig builds without pulling in the linux kernel
-          # (which does not build on darwin).
-          env = optionalAttrs pkgs.stdenv.buildPlatform.isLinux {
-            TINYBOOT_KERNEL =
-              with inputs.self.checks.${system}.disk.nodes.machine.system;
-              ''${build.tinybootKernel}/${boot.loader.kernelFile}'';
-          };
+          env.TINYBOOT_KERNEL =
+            with inputs.self.checks.${system}.disk.nodes.machine.system;
+            ''${build.tinybootKernel}/${boot.loader.kernelFile}'';
         };
       }) inputs.self.legacyPackages;
 
