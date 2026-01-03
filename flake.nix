@@ -1,8 +1,7 @@
 {
   description = "A kexec-based bootloader";
 
-  # TODO(jared): change back to nixos/nixpkgs when stuff is unbroken
-  inputs.nixpkgs.url = "github:jmbaur/nixpkgs/jmbaur-nixos-unstable";
+  inputs.nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
 
   outputs =
     inputs:
