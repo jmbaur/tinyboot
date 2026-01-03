@@ -1,16 +1,14 @@
 {
   description = "A kexec-based bootloader";
 
-  inputs.nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
+  # TODO(jared): change back to nixos/nixpkgs when stuff is unbroken
+  inputs.nixpkgs.url = "github:jmbaur/nixpkgs/jmbaur-nixos-unstable";
 
   outputs =
     inputs:
     let
-      inherit (inputs.nixpkgs.lib)
-        genAttrs
-        listToAttrs
-        mapAttrs
-        ;
+      inherit (builtins) listToAttrs mapAttrs;
+      inherit (inputs.nixpkgs.lib) genAttrs;
     in
     {
       nixosModules.default = {
