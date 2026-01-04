@@ -41,9 +41,11 @@ testers.runNixOSTest {
           chardev = machine.send_monitor_command("chardev-add pty,id=ymodem")
           machine.send_monitor_command("device_add virtconsole,chardev=ymodem")
           machine.wait_for_console_text("press ENTER to interrupt")
+          time.sleep(1)
           machine.send_console("\n")  # interrupt boot process
           time.sleep(1)
           machine.send_console("list\n")
+          time.sleep(1)
           machine.send_console("select 229:1\n")  # /dev/hvc1 has major:minor of 229:1
           time.sleep(1)
           machine.send_console("probe\n")
