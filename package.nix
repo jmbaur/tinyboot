@@ -39,43 +39,23 @@ stdenvNoCC.mkDerivation (
       ];
     };
 
+    nativeBuildInputs = [ zig_0_15 ];
+
+    __structuredAttrs = true;
+    doCheck = true;
+    dontPatchELF = true;
+    dontStrip = true;
     strictDeps = true;
 
-    depsBuildBuild = [ zig_0_15 ];
-
-    dontInstall = true;
-    doCheck = true;
-    dontStrip = true;
-
     zigBuildFlags = [
-      "--color off"
-      "--release=safe"
       "-Dtarget=${stdenvNoCC.hostPlatform.qemuArch}-${stdenvNoCC.hostPlatform.parsed.kernel.name}"
     ]
     ++ lib.optionals (firmwareDirectory != null) [
       "-Dfirmware-directory=${firmwareDirectory}"
     ];
 
-    configurePhase = ''
-      runHook preConfigure
-
-      export ZIG_GLOBAL_CACHE_DIR=$TEMPDIR
-
+    postHook = ''
       ln -s ${deps} $ZIG_GLOBAL_CACHE_DIR/p
-
-      runHook postConfigure
-    '';
-
-    buildPhase = ''
-      runHook preBuild
-      zig build install --prefix $out ''${zigBuildFlags[@]}
-      runHook postBuild
-    '';
-
-    checkPhase = ''
-      runHook preCheck
-      zig build test ''${zigBuildFlags[@]}
-      runHook postCheck
     '';
 
     passthru.initrdFile = "tboot-loader.cpio.zst";
