@@ -54,7 +54,7 @@ stdenvNoCC.mkDerivation (
       "-Dfirmware-directory=${firmwareDirectory}"
     ];
 
-    postHook = ''
+    postConfigure = ''
       ln -s ${deps} $ZIG_GLOBAL_CACHE_DIR/p
     '';
 

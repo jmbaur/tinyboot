@@ -37,8 +37,7 @@
           ];
           env.TINYBOOT_KERNEL =
             with inputs.self.checks.${system}.disk.nodes.machine.system;
-            ''${build.tinybootKernel}/${boot.loader.kernelFile}'';
-          shellHook = "unset ZIG_GLOBAL_CACHE_DIR";
+            "${build.tinybootKernel}/${boot.loader.kernelFile}";
         };
       }) inputs.self.legacyPackages;
 
