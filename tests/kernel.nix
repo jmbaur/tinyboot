@@ -3,16 +3,16 @@
   flex,
   lib,
   linuxKernel,
-  linux_6_18,
+  linux_6_19,
   stdenv,
 }:
 
 linuxKernel.manualConfig {
-  inherit (linux_6_18) src version;
+  inherit (linux_6_19) src version;
   configfile = stdenv.mkDerivation {
-    pname = linux_6_18.pname + "-config";
-    inherit (linux_6_18) version;
-    inherit (linux_6_18) src;
+    pname = linux_6_19.pname + "-config";
+    inherit (linux_6_19) version;
+    inherit (linux_6_19) src;
     dontConfigure = true;
     nativeBuildInputs = [
       flex
