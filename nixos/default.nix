@@ -51,6 +51,7 @@ in
     ];
     boot.kernelParams = [
       "kho=on"
+      "ima_hash=sha256"
       "liveupdate=on" # TODO(jared): is this needed on the second kernel?
     ];
     boot.kernelPatches = [
@@ -59,7 +60,6 @@ in
         patch = null;
         structuredExtraConfig = {
           IMA = kernel.yes;
-          IMA_DEFAULT_HASH_SHA256 = kernel.yes;
           LIVEUPDATE = kernel.yes;
         };
       }
