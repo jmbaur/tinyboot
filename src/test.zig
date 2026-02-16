@@ -14,6 +14,7 @@ test {
     _ = @import("./kexec/arm.zig");
     _ = @import("./kexec/kexec.zig");
     _ = @import("./kobject.zig");
+    _ = @import("./liveupdate.zig");
     _ = @import("./log.zig");
     _ = @import("./mbedtls.zig");
     _ = @import("./pkcs7.zig");

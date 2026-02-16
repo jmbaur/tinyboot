@@ -62,29 +62,29 @@ pub fn main() !void {
         return;
     }
 
-    var kernel_cmdline_file = try std.fs.cwd().openFile("/proc/cmdline", .{});
-    defer kernel_cmdline_file.close();
+    // var kernel_cmdline_file = try std.fs.cwd().openFile("/proc/cmdline", .{});
+    // defer kernel_cmdline_file.close();
+    //
+    // const kernel_cmdline = try kernel_cmdline_file.readToEndAlloc(allocator, 1024);
 
-    const kernel_cmdline = try kernel_cmdline_file.readToEndAlloc(allocator, 1024);
+    // if (std.mem.count(u8, kernel_cmdline, "tboot.bls-entry=") > 0) {
+    const basic_target_path = try std.fs.path.join(
+        allocator,
+        &.{ early_dir, "basic.target.wants" },
+    );
 
-    if (std.mem.count(u8, kernel_cmdline, "tboot.bls-entry=") > 0) {
-        const basic_target_path = try std.fs.path.join(
-            allocator,
-            &.{ early_dir, "basic.target.wants" },
-        );
+    std.fs.cwd().makeDir(basic_target_path) catch |err| switch (err) {
+        error.PathAlreadyExists => {},
+        else => return err,
+    };
 
-        std.fs.cwd().makeDir(basic_target_path) catch |err| switch (err) {
-            error.PathAlreadyExists => {},
-            else => return err,
-        };
+    var basic_target_dir = try std.fs.cwd().openDir(basic_target_path, .{});
+    defer basic_target_dir.close();
 
-        var basic_target_dir = try std.fs.cwd().openDir(basic_target_path, .{});
-        defer basic_target_dir.close();
-
-        try basic_target_dir.symLink(
-            "/etc/systemd/system/tboot-bless-boot.service",
-            "tboot-bless-boot.service",
-            .{},
-        );
-    }
+    try basic_target_dir.symLink(
+        "/etc/systemd/system/tboot-bless-boot.service",
+        "tboot-bless-boot.service",
+        .{},
+    );
+    // }
 }

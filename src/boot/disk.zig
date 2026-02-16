@@ -11,6 +11,7 @@ const Filesystem = @import("../disk/filesystem.zig");
 const Gpt = @import("../disk/gpt.zig");
 const Mbr = @import("../disk/mbr.zig");
 const TmpDir = @import("../tmpdir.zig");
+const LiveUpdate = @import("../liveupdate.zig");
 
 const DiskBootLoader = @This();
 
@@ -201,33 +202,15 @@ pub fn entryLoaded(self: *DiskBootLoader, ctx: *anyopaque) void {
 }
 
 fn persistEntryForNextKernel(bls_entry_file: *BlsEntryFile) !void {
-    var liveupdate = try std.fs.cwd().openFile("/dev/liveupdate", .{ .mode = .read_write });
-    defer liveupdate.close();
+    var liveupdate = try LiveUpdate.init(.preserve);
+    defer liveupdate.deinit();
 
-    var session = std.mem.zeroes(linux_headers.liveupdate_ioctl_create_session);
-    session.size = @sizeOf(@TypeOf(session));
-    std.mem.copyForwards(u8, &session.name, "tinyboot");
-    std.log.debug("LIVEUPDATE_IOCTL_CREATE_SESSION: {}", .{std.os.linux.ioctl(
-        liveupdate.handle,
-        linux_headers.LIVEUPDATE_IOCTL_CREATE_SESSION,
-        @intFromPtr(&session),
-    )});
-    defer posix.close(session.fd);
-
-    const memfd = std.os.linux.memfd_create("tinyboot-bls-entry", MFD.ALLOW_SEALING | MFD.CLOEXEC);
-    defer posix.close(@intCast(memfd));
+    const memfd = try std.posix.memfd_create("tinyboot-bls-entry", MFD.ALLOW_SEALING | MFD.CLOEXEC);
+    defer posix.close(memfd);
 
     _ = try posix.write(@intCast(memfd), bls_entry_file.name);
 
-    var preserve_fd = std.mem.zeroes(linux_headers.liveupdate_session_preserve_fd);
-    preserve_fd.size = @sizeOf(@TypeOf(preserve_fd));
-    preserve_fd.fd = @intCast(memfd);
-    preserve_fd.token = 0; // TODO(jared): choose something meaningful here?
-    std.log.debug("LIVEUPDATE_SESSION_PRESERVE_FD: {}", .{std.os.linux.ioctl(
-        session.fd,
-        linux_headers.LIVEUPDATE_SESSION_PRESERVE_FD,
-        @intFromPtr(&preserve_fd),
-    )});
+    try liveupdate.preserve(memfd, 0x42);
 }
 
 fn diskEntryLoaded(self: *@This(), ctx: *anyopaque) !void {

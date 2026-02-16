@@ -190,6 +190,7 @@ pub fn build(b: *std.Build) !void {
             .name = "tboot-bless-boot",
             .root_module = tboot_bless_boot_module,
         });
+        tboot_bless_boot.root_module.addImport("linux_headers", linux_headers_module);
         tboot_bless_boot.root_module.addImport("clap", clap);
         b.installArtifact(tboot_bless_boot);
 
