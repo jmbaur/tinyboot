@@ -961,13 +961,13 @@ fn searchForEntries(
             var final_cmdline: std.Io.Writer.Allocating = .init(allocator);
 
             if (entry.options) |opts| {
-                for (opts) |opt| {
+                for (opts, 1..) |opt, i| {
                     try final_cmdline.writer.writeAll(opt);
-                    try final_cmdline.writer.writeByte(' ');
+                    if (opts.len != i) {
+                        try final_cmdline.writer.writeByte(' ');
+                    }
                 }
             }
-
-            try final_cmdline.writer.print("tboot.bls-entry={s}", .{entry.id});
 
             break :b final_cmdline.written();
         };
