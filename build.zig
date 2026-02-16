@@ -105,7 +105,8 @@ pub fn build(b: *std.Build) !void {
         \\#include <sys/epoll.h>
         \\#include <sys/ioctl.h>
         \\#include <termios.h>
-    );
+        \\
+    ++ @embedFile("vendor/liveupdate.h"));
 
     const linux_headers = b.addTranslateC(.{
         .root_source_file = .{ .generated = .{ .file = &linux_h.generated_directory, .sub_path = "linux.h" } },

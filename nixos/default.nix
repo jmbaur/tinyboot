@@ -49,7 +49,10 @@ in
         message = "Must use Linux kernel 6.17 or newer for kexec handover";
       }
     ];
-    boot.kernelParams = [ "kho=on" ];
+    boot.kernelParams = [
+      "kho=on"
+      "liveupdate=on" # TODO(jared): is this needed on the second kernel?
+    ];
     boot.kernelPatches = [
       {
         name = "tinyboot-support";
@@ -57,7 +60,7 @@ in
         structuredExtraConfig = {
           IMA = kernel.yes;
           IMA_DEFAULT_HASH_SHA256 = kernel.yes;
-          KEXEC_HANDOVER = kernel.yes;
+          LIVEUPDATE = kernel.yes;
         };
       }
     ];
