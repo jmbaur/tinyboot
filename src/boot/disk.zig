@@ -1,6 +1,7 @@
 const std = @import("std");
 const posix = std.posix;
 const MS = std.os.linux.MS;
+const MFD = std.os.linux.MFD;
 
 const linux_headers = @import("linux_headers");
 
@@ -199,12 +200,46 @@ pub fn entryLoaded(self: *DiskBootLoader, ctx: *anyopaque) void {
     };
 }
 
+fn persistEntryForNextKernel(bls_entry_file: *BlsEntryFile) !void {
+    var liveupdate = try std.fs.cwd().openFile("/dev/liveupdate", .{ .mode = .read_write });
+    defer liveupdate.close();
+
+    var session = std.mem.zeroes(linux_headers.liveupdate_ioctl_create_session);
+    session.size = @sizeOf(@TypeOf(session));
+    std.mem.copyForwards(u8, &session.name, "tinyboot");
+    std.log.debug("LIVEUPDATE_IOCTL_CREATE_SESSION: {}", .{std.os.linux.ioctl(
+        liveupdate.handle,
+        linux_headers.LIVEUPDATE_IOCTL_CREATE_SESSION,
+        @intFromPtr(&session),
+    )});
+    defer posix.close(session.fd);
+
+    const memfd = std.os.linux.memfd_create("tinyboot-bls-entry", MFD.ALLOW_SEALING | MFD.CLOEXEC);
+    defer posix.close(@intCast(memfd));
+
+    _ = try posix.write(@intCast(memfd), bls_entry_file.name);
+
+    var preserve_fd = std.mem.zeroes(linux_headers.liveupdate_session_preserve_fd);
+    preserve_fd.size = @sizeOf(@TypeOf(preserve_fd));
+    preserve_fd.fd = @intCast(memfd);
+    preserve_fd.token = 0; // TODO(jared): choose something meaningful here?
+    std.log.debug("LIVEUPDATE_SESSION_PRESERVE_FD: {}", .{std.os.linux.ioctl(
+        session.fd,
+        linux_headers.LIVEUPDATE_SESSION_PRESERVE_FD,
+        @intFromPtr(&preserve_fd),
+    )});
+}
+
 fn diskEntryLoaded(self: *@This(), ctx: *anyopaque) !void {
     var bls_entry_file: *BlsEntryFile = @ptrCast(@alignCast(ctx));
 
     var tmpdir = self.tmpdir orelse return;
 
     const allocator = self.arena.allocator();
+
+    persistEntryForNextKernel(bls_entry_file) catch |err| {
+        std.log.err("failed to persist entry for next kernel: {}", .{err});
+    };
 
     const original_name = try bls_entry_file.toFilename(allocator);
     defer allocator.free(original_name);
