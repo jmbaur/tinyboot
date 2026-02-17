@@ -79,6 +79,7 @@ pub fn init(op_mode: OpMode) !LiveUpdate {
 
 pub fn deinit(self: *LiveUpdate) void {
     var session_finish = std.mem.zeroes(liveupdate_session_finish);
+    session_finish.size = @sizeOf(@TypeOf(session_finish));
     if (self.op_mode == .retrieve) {
         _ = ioctl(
             self.session_fd,
