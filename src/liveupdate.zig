@@ -63,6 +63,7 @@ pub fn init(op_mode: OpMode) !LiveUpdate {
                 @intFromPtr(&retrieve_session),
             ))) {
                 .SUCCESS => {},
+                .NOENT => return error.SessionNotFound,
                 else => |err| return std.posix.unexpectedErrno(err),
             }
 
@@ -78,16 +79,20 @@ pub fn init(op_mode: OpMode) !LiveUpdate {
 }
 
 pub fn deinit(self: *LiveUpdate) void {
-    var session_finish = std.mem.zeroes(liveupdate_session_finish);
-    session_finish.size = @sizeOf(@TypeOf(session_finish));
     if (self.op_mode == .retrieve) {
+        var session_finish = std.mem.zeroes(liveupdate_session_finish);
+        session_finish.size = @sizeOf(@TypeOf(session_finish));
         _ = ioctl(
             self.session_fd,
             LIVEUPDATE_SESSION_FINISH,
             @intFromPtr(&session_finish),
         );
+        std.posix.close(self.session_fd);
     }
-    std.posix.close(self.session_fd);
+
+    // We do not close the session file descriptor if we are not retrieving,
+    // since then the state will not persist across kernels.
+
     self.liveupdate.close();
 }
 

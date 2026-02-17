@@ -50,9 +50,9 @@ in
       }
     ];
     boot.kernelParams = [
-      "kho=on"
       "ima_hash=sha256"
-      "liveupdate=on" # TODO(jared): is this needed on the second kernel?
+      "kho=on"
+      "liveupdate=on"
     ];
     boot.kernelPatches = [
       {

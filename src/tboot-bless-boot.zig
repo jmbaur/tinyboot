@@ -192,7 +192,7 @@ pub fn main() !void {
     var buf: [1024]u8 = undefined;
     const read = try std.posix.read(memfd, &buf);
     const tboot_bls_entry = buf[0..read];
-    std.log.debug("{s}", .{tboot_bls_entry});
+    std.log.info("tboot_bls_entry='{s}' {any}", .{ tboot_bls_entry, tboot_bls_entry });
 
     try findEntry(
         allocator,
