@@ -36,6 +36,7 @@ stdenvNoCC.mkDerivation (
         ./build.zig.zon
         ./deps
         ./src
+        ./vendor
       ];
     };
 
