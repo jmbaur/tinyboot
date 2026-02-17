@@ -186,13 +186,14 @@ pub fn main() !void {
     var liveupdate = try LiveUpdate.init(.retrieve);
     defer liveupdate.deinit();
 
-    const memfd = try liveupdate.retrieve(0x42);
+    const memfd = try liveupdate.retrieve(DiskBootLoader.entry_token);
     defer std.posix.close(memfd);
+
+    try std.posix.lseek_SET(memfd, 0);
 
     var buf: [1024]u8 = undefined;
     const read = try std.posix.read(memfd, &buf);
     const tboot_bls_entry = buf[0..read];
-    std.log.info("tboot_bls_entry='{s}' {any}", .{ tboot_bls_entry, tboot_bls_entry });
 
     try findEntry(
         allocator,

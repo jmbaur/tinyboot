@@ -201,16 +201,25 @@ pub fn entryLoaded(self: *DiskBootLoader, ctx: *anyopaque) void {
     };
 }
 
+pub const entry_name = "tboot-bls-entry";
+pub const entry_token = 0x42;
+
 fn persistEntryForNextKernel(bls_entry_file: *BlsEntryFile) !void {
     var liveupdate = try LiveUpdate.init(.preserve);
     defer liveupdate.deinit();
 
-    const memfd = try std.posix.memfd_create("tinyboot-bls-entry", MFD.ALLOW_SEALING | MFD.CLOEXEC);
+    const memfd = try std.posix.memfd_create(entry_name, MFD.ALLOW_SEALING | MFD.CLOEXEC);
     defer posix.close(memfd);
 
     _ = try posix.write(@intCast(memfd), bls_entry_file.name);
 
-    try liveupdate.preserve(memfd, 0x42);
+    try liveupdate.preserve(memfd, entry_token);
+
+    // Best effort to reset the seek positition, since the next kernel will
+    // _most likely_ want to start reading from the start.
+    posix.lseek_SET(memfd, 0) catch |err| {
+        std.log.warn("failed to reset the seek position of {s}: {}", .{ entry_name, err });
+    };
 }
 
 fn diskEntryLoaded(self: *@This(), ctx: *anyopaque) !void {
