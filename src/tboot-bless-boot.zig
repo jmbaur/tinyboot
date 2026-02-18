@@ -186,7 +186,7 @@ pub fn main() !void {
     var liveupdate = try LiveUpdate.init(.retrieve);
     defer liveupdate.deinit();
 
-    const memfd = try liveupdate.retrieve(DiskBootLoader.entry_token);
+    const memfd = try liveupdate.retrieve(DiskBootLoader.luo_entry_token);
     defer std.posix.close(memfd);
 
     try std.posix.lseek_SET(memfd, 0);

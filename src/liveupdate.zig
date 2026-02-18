@@ -17,7 +17,7 @@ const LIVEUPDATE_SESSION_RETRIEVE_FD = linux_headers.LIVEUPDATE_SESSION_RETRIEVE
 const LiveUpdate = @This();
 
 const session_name = "tinyboot";
-const liveupdate_chardev = "/dev/liveupdate";
+pub const liveupdate_chardev = "/dev/liveupdate";
 
 // We can be doing one of two things: preserving or retrieving.
 // Preserving is usually meant for the first kernel, while retrieving

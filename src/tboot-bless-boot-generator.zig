@@ -1,6 +1,7 @@
 const builtin = @import("builtin");
 const std = @import("std");
 const clap = @import("clap");
+const LiveUpdate = @import("./liveupdate.zig");
 
 pub const std_options = std.Options{ .log_level = if (builtin.mode == .Debug) .debug else .info };
 
@@ -62,12 +63,10 @@ pub fn main() !void {
         return;
     }
 
-    // var kernel_cmdline_file = try std.fs.cwd().openFile("/proc/cmdline", .{});
-    // defer kernel_cmdline_file.close();
-    //
-    // const kernel_cmdline = try kernel_cmdline_file.readToEndAlloc(allocator, 1024);
+    if (std.fs.cwd().access(LiveUpdate.liveupdate_chardev, .{})) {} else |_| {
+        return;
+    }
 
-    // if (std.mem.count(u8, kernel_cmdline, "tboot.bls-entry=") > 0) {
     const basic_target_path = try std.fs.path.join(
         allocator,
         &.{ early_dir, "basic.target.wants" },
@@ -86,5 +85,4 @@ pub fn main() !void {
         "tboot-bless-boot.service",
         .{},
     );
-    // }
 }
