@@ -122,7 +122,7 @@ pub fn build(b: *std.Build) !void {
         .root_source_file = b.path("src/tboot-sign.zig"),
         .target = target,
         .optimize = optimize,
-        .strip = do_strip,
+        .strip = false,
     });
     const tboot_sign = b.addExecutable(.{
         .name = "tboot-sign",
@@ -137,7 +137,7 @@ pub fn build(b: *std.Build) !void {
         .root_source_file = b.path("src/tboot-keygen.zig"),
         .target = target,
         .optimize = optimize,
-        .strip = do_strip,
+        .strip = false,
     });
     const tboot_keygen = b.addExecutable(.{
         .name = "tboot-keygen",
@@ -152,7 +152,7 @@ pub fn build(b: *std.Build) !void {
         .root_source_file = b.path("src/vpd.zig"),
         .target = target,
         .optimize = optimize,
-        .strip = do_strip,
+        .strip = false,
     });
     const tboot_vpd = b.addExecutable(.{
         .name = "tboot-vpd",
@@ -170,7 +170,7 @@ pub fn build(b: *std.Build) !void {
             .root_source_file = b.path("src/ymodem.zig"),
             .target = target,
             .optimize = optimize,
-            .strip = do_strip,
+            .strip = false,
         });
         const tboot_ymodem = b.addExecutable(.{
             .name = "tboot-ymodem",
@@ -184,12 +184,13 @@ pub fn build(b: *std.Build) !void {
             .root_source_file = b.path("src/tboot-bless-boot.zig"),
             .target = target,
             .optimize = optimize,
-            .strip = do_strip,
+            .strip = false,
         });
         const tboot_bless_boot = b.addExecutable(.{
             .name = "tboot-bless-boot",
             .root_module = tboot_bless_boot_module,
         });
+        tboot_bless_boot.root_module.addImport("linux_headers", linux_headers_module);
         tboot_bless_boot.root_module.addImport("clap", clap);
         b.installArtifact(tboot_bless_boot);
 
@@ -197,7 +198,7 @@ pub fn build(b: *std.Build) !void {
             .root_source_file = b.path("src/tboot-bless-boot-generator.zig"),
             .target = target,
             .optimize = optimize,
-            .strip = do_strip,
+            .strip = false,
         });
         const tboot_bless_boot_generator = b.addExecutable(.{
             .name = "tboot-bless-boot-generator",
@@ -210,7 +211,7 @@ pub fn build(b: *std.Build) !void {
             .root_source_file = b.path("src/tboot-nixos-install.zig"),
             .target = target,
             .optimize = optimize,
-            .strip = do_strip,
+            .strip = false,
         });
         const tboot_nixos_install = b.addExecutable(.{
             .name = "tboot-nixos-install",
