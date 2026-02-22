@@ -6,13 +6,14 @@ const tboot_builtin = @import("tboot_builtin");
 
 const Autoboot = @import("./autoboot.zig");
 const BootLoader = @import("./boot/bootloader.zig");
-const DiskBootLoader = @import("./boot/disk.zig");
-const YmodemBootLoader = @import("./boot/ymodem.zig");
 const Console = @import("./console.zig");
+const DeviceWatcher = @import("./watch.zig");
+const DiskBootLoader = @import("./boot/disk.zig");
+const LiveUpdate = @import("./liveupdate.zig");
 const Log = @import("./log.zig");
+const YmodemBootLoader = @import("./boot/ymodem.zig");
 const security = @import("./security.zig");
 const system = @import("./system.zig");
-const DeviceWatcher = @import("./watch.zig");
 
 const SIGRTMIN = 32;
 
@@ -26,16 +27,14 @@ const TbootLoader = @This();
 var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
 var boot_loaders = std.array_list.Managed(*BootLoader).init(arena.allocator());
 
-// Indicates if we are PID1. This allows for running tboot-loader as a non-PID1
-// program.
-is_pid1: bool = true,
-
 /// Master epoll file descriptor for driving the event loop.
 epoll: posix.fd_t,
 
 /// DeviceWatcher instance used to handle events of devices being added or
 /// removed from the system.
 device_watcher: DeviceWatcher,
+
+liveupdate: LiveUpdate,
 
 /// Console instance used to handle user input.
 console: Console,
@@ -53,36 +52,34 @@ timer: posix.fd_t,
 /// General state of the program
 state: enum { init, autobooting, user_input } = .init,
 
-fn init(is_pid1: bool) !TbootLoader {
-    var self = TbootLoader{
-        .is_pid1 = is_pid1,
-        .epoll = try posix.epoll_create1(std.os.linux.EPOLL.CLOEXEC),
-        .timer = try posix.timerfd_create(posix.timerfd_clockid_t.MONOTONIC, .{}),
-        .device_watcher = try DeviceWatcher.init(is_pid1),
-        .console = try Console.init(),
-    };
+fn init() !TbootLoader {
+    const epoll = try posix.epoll_create1(std.os.linux.EPOLL.CLOEXEC);
+    const timer = try posix.timerfd_create(posix.timerfd_clockid_t.MONOTONIC, .{});
+    const device_watcher = try DeviceWatcher.init();
+    const console = try Console.init();
+    const liveupdate = try LiveUpdate.init(.preserve);
 
     var timer_event = epoll_event{
-        .data = .{ .fd = self.timer },
+        .data = .{ .fd = timer },
         .events = std.os.linux.EPOLL.IN,
     };
 
     try posix.epoll_ctl(
-        self.epoll,
+        epoll,
         std.os.linux.EPOLL.CTL_ADD,
-        self.timer,
+        timer,
         &timer_event,
     );
 
     var device_watcher_event = epoll_event{
-        .data = .{ .fd = self.device_watcher.event },
+        .data = .{ .fd = device_watcher.event },
         .events = std.os.linux.EPOLL.IN,
     };
 
     try posix.epoll_ctl(
-        self.epoll,
+        epoll,
         std.os.linux.EPOLL.CTL_ADD,
-        self.device_watcher.event,
+        device_watcher.event,
         &device_watcher_event,
     );
 
@@ -92,27 +89,31 @@ fn init(is_pid1: bool) !TbootLoader {
     };
 
     try posix.epoll_ctl(
-        self.epoll,
+        epoll,
         std.os.linux.EPOLL.CTL_ADD,
         posix.STDIN_FILENO,
         &console_event,
     );
 
     var terminal_resize_signal = epoll_event{
-        .data = .{ .fd = self.console.resize_signal },
+        .data = .{ .fd = console.resize_signal },
         .events = std.os.linux.EPOLL.IN,
     };
 
     try posix.epoll_ctl(
-        self.epoll,
+        epoll,
         std.os.linux.EPOLL.CTL_ADD,
-        self.console.resize_signal,
+        console.resize_signal,
         &terminal_resize_signal,
     );
 
-    try self.newDeviceArmTimer();
-
-    return self;
+    return .{
+        .epoll = epoll,
+        .timer = timer,
+        .device_watcher = device_watcher,
+        .console = console,
+        .liveupdate = liveupdate,
+    };
 }
 
 // Since the timer is used entirely for autobooting purposes, if we ever disarm
@@ -124,9 +125,7 @@ fn userInputModeTransition(self: *TbootLoader) !void {
 
     // Going into user input mode also means that we need to turn off the
     // console so that it doesn't visually clobber what the user is trying to type.
-    if (self.is_pid1) {
-        try system.setConsole(.off);
-    }
+    try system.setConsole(.off);
 }
 
 fn handleConsoleResize(self: *TbootLoader) void {
@@ -141,7 +140,7 @@ fn handleConsoleInput(self: *TbootLoader) !?posix.RebootCommand {
         self.console.prompt();
     }
 
-    const outcome = try self.console.handleStdin(boot_loaders.items) orelse return null;
+    const outcome = try self.console.handleStdin(boot_loaders.items, &self.liveupdate) orelse return null;
 
     switch (outcome) {
         .reboot => return posix.RebootCommand.RESTART,
@@ -150,16 +149,15 @@ fn handleConsoleInput(self: *TbootLoader) !?posix.RebootCommand {
     }
 }
 
-// For every new device we get, this will trigger an iteration through our
-// event loop to make an attempt at autobooting the boot loader attached to the
-// device (assuming a boot attempt has not already been made for this device).
-fn newDeviceArmTimer(self: *TbootLoader) !void {
-    try posix.timerfd_settime(self.timer, .{}, &.{
-        // oneshot
-        .it_interval = .{ .sec = 0, .nsec = 0 },
-        // consider settled after 2 seconds without any new events
-        .it_value = .{ .sec = 2, .nsec = 0 },
-    }, null);
+const settled_timespec: std.posix.system.itimerspec = .{
+    // oneshot
+    .it_interval = .{ .sec = 0, .nsec = 0 },
+    // consider settled after 2 seconds without any new events
+    .it_value = .{ .sec = 2, .nsec = 0 },
+};
+
+fn armTimer(self: *TbootLoader) !void {
+    try posix.timerfd_settime(self.timer, .{}, &settled_timespec, null);
 }
 
 const ALL_BOOTLOADERS = .{ DiskBootLoader, YmodemBootLoader };
@@ -231,7 +229,7 @@ fn handleDevice(self: *TbootLoader) !void {
     // Don't arm the timer if we aren't in the `init` state since we don't want
     // to trigger any autoboot functionality otherwise.
     if (self.state == .init) {
-        try self.newDeviceArmTimer();
+        try self.armTimer();
     }
 }
 
@@ -244,7 +242,7 @@ fn handleTimer(self: *TbootLoader) ?posix.RebootCommand {
 
     std.debug.assert(self.state == .autobooting);
 
-    if (self.autoboot.run(&boot_loaders, self.timer)) |maybe_event| {
+    if (self.autoboot.run(&boot_loaders, self.timer, &self.liveupdate)) |maybe_event| {
         if (maybe_event) |outcome| {
             switch (outcome) {
                 .reboot => return posix.RebootCommand.RESTART,
@@ -262,6 +260,7 @@ fn handleTimer(self: *TbootLoader) ?posix.RebootCommand {
 
 fn deinit(self: *TbootLoader) void {
     self.console.deinit();
+    self.liveupdate.deinit();
 
     posix.close(self.timer);
     posix.close(self.epoll);
@@ -312,8 +311,6 @@ pub fn main() !void {
         std.process.exit(1);
     }
 
-    const is_pid1 = std.os.linux.getpid() == 1;
-
     defer {
         for (boot_loaders.items) |boot_loader| {
             boot_loader.deinit();
@@ -322,15 +319,13 @@ pub fn main() !void {
         arena.deinit();
     }
 
-    if (is_pid1) {
-        // Prevent CTRL-C from doing anything
-        var mask = posix.sigemptyset();
-        posix.sigaddset(&mask, posix.SIG.INT);
-        posix.sigprocmask(posix.SIG.BLOCK, &mask, null);
+    // Prevent CTRL-C from doing anything
+    var mask = posix.sigemptyset();
+    posix.sigaddset(&mask, posix.SIG.INT);
+    posix.sigprocmask(posix.SIG.BLOCK, &mask, null);
 
-        // Ensure basic filesystems are available (/sys, /proc, /dev, etc.).
-        try system.mountPseudoFilesystems();
-    }
+    // Ensure basic filesystems are available (/sys, /proc, /dev, etc.).
+    try system.mountPseudoFilesystems();
 
     const done = try posix.eventfd(0, std.os.linux.EFD.SEMAPHORE);
     defer posix.close(done);
@@ -343,7 +338,7 @@ pub fn main() !void {
     var num_threads: u64 = 0;
 
     {
-        var tboot_loader = try TbootLoader.init(is_pid1);
+        var tboot_loader = try TbootLoader.init();
         defer tboot_loader.deinit();
 
         // We should be able to log right after we've initialized the device
@@ -351,6 +346,7 @@ pub fn main() !void {
         // continue logging until the very end).
         try Log.init();
 
+        try tboot_loader.armTimer();
         var device_watch_thread = try std.Thread.spawn(
             .{},
             DeviceWatcher.watch,
@@ -370,37 +366,19 @@ pub fn main() !void {
 
         std.log.info("tinyboot {s} (zig {s})", .{ tboot_builtin.version, builtin.zig_version_string });
 
-        // TODO(jared): should we do this even if we aren't PID 1?
-        if (is_pid1) {
-            try security.initializeSecurity(arena.allocator());
-        }
+        try security.initializeSecurity(arena.allocator());
 
         const reboot_cmd = try tboot_loader.run();
 
         std.log.debug("performing reboot type {s}\n", .{@tagName(reboot_cmd)});
 
-        if (is_pid1) {
-            try posix.reboot(reboot_cmd);
-        } else if (reboot_cmd == .KEXEC) {
-            // NOTE: This assumes that PID1 is systemd. According to
-            // systemd(1), SIGRTMIN+6 indicates that systemd should do a clean
-            // shutdown and reboot(KEXEC) at the end (essentially the same as
-            // `systemctl kexec`).
-            try std.posix.kill(1, SIGRTMIN + 6);
-        } else {
-            std.debug.print(
-                "tboot-loader is not PID1, refusing to run reboot type {s}\n",
-                .{@tagName(reboot_cmd)},
-            );
-        }
+        try posix.reboot(reboot_cmd);
     }
 
     Log.deinit();
 
-    if (is_pid1) {
-        // Sleep forever without hammering the CPU, waiting for the kernel to
-        // reboot.
-        var futex = std.atomic.Value(u32).init(0);
-        while (true) std.Thread.Futex.wait(&futex, 0);
-    }
+    // Sleep forever without hammering the CPU, waiting for the kernel to
+    // reboot.
+    var futex = std.atomic.Value(u32).init(0);
+    while (true) std.Thread.Futex.wait(&futex, 0);
 }

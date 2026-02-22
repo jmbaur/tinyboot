@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const Device = @import("../device.zig");
+const LiveUpdate = @import("../liveupdate.zig");
 const kexec = @import("../kexec/kexec.zig").kexec;
 
 const BootLoader = @This();
@@ -47,7 +48,7 @@ vtable: *const struct {
     name: *const fn () []const u8,
     probe: *const fn (*anyopaque, *std.array_list.Managed(Entry), Device) anyerror!void,
     timeout: *const fn (*anyopaque) u8,
-    entryLoaded: *const fn (*anyopaque, Entry) void,
+    entryLoaded: *const fn (*anyopaque, Entry, *LiveUpdate) void,
     deinit: *const fn (*anyopaque, std.mem.Allocator) void,
 },
 
@@ -82,10 +83,10 @@ pub fn init(
             try self.probe(entries, d);
         }
 
-        pub fn entryLoaded(ctx: *anyopaque, entry: Entry) void {
+        pub fn entryLoaded(ctx: *anyopaque, entry: Entry, liveupdate: *LiveUpdate) void {
             const self: *T = @ptrCast(@alignCast(ctx));
 
-            self.entryLoaded(entry.context);
+            self.entryLoaded(entry.context, liveupdate);
         }
 
         pub fn timeout(ctx: *anyopaque) u8 {
@@ -139,10 +140,10 @@ pub fn probe(self: *BootLoader) ![]const Entry {
     return self.entries.items;
 }
 
-pub fn load(self: *BootLoader, entry: Entry) !void {
+pub fn load(self: *BootLoader, entry: Entry, liveupdate: *LiveUpdate) !void {
     self.boot_attempted = true;
 
     try kexec(self.allocator, entry.linux, entry.initrd, entry.cmdline);
 
-    self.vtable.entryLoaded(self.inner, entry);
+    self.vtable.entryLoaded(self.inner, entry, liveupdate);
 }

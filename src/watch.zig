@@ -32,8 +32,6 @@ const KERN_RCVBUF = 128 * 1024 * 1024;
 
 arena: std.heap.ArenaAllocator = std.heap.ArenaAllocator.init(std.heap.page_allocator),
 
-is_pid1: bool,
-
 block_dir: std.fs.Dir,
 char_dir: std.fs.Dir,
 
@@ -51,9 +49,8 @@ event: posix.fd_t,
 mutex: std.Thread.Mutex = .{},
 queue: std.DoublyLinkedList = .{},
 
-pub fn init(is_pid1: bool) !DeviceWatcher {
+pub fn init() !DeviceWatcher {
     var self = DeviceWatcher{
-        .is_pid1 = is_pid1,
         .event = try posix.eventfd(0, 0),
         .block_dir = try std.fs.cwd().makeOpenPath("/dev/block", .{}),
         .char_dir = try std.fs.cwd().makeOpenPath("/dev/char", .{}),
@@ -250,17 +247,15 @@ pub fn scanAndCreateExistingDevicesForSubsystem(
 }
 
 fn addDevice(self: *DeviceWatcher, event: Event) !void {
-    if (self.is_pid1) {
-        switch (event.device.type) {
-            .node => |node| {
-                const major, const minor = node;
-                try self.mknod(switch (event.device.subsystem) {
-                    .block => .block,
-                    else => .char,
-                }, major, minor);
-            },
-            else => {},
-        }
+    switch (event.device.type) {
+        .node => |node| {
+            const major, const minor = node;
+            try self.mknod(switch (event.device.subsystem) {
+                .block => .block,
+                else => .char,
+            }, major, minor);
+        },
+        else => {},
     }
 
     {
@@ -277,17 +272,15 @@ fn addDevice(self: *DeviceWatcher, event: Event) !void {
 }
 
 fn removeDevice(self: *DeviceWatcher, event: Event) !void {
-    if (self.is_pid1) {
-        switch (event.device.type) {
-            .node => |node| {
-                const major, const minor = node;
-                try self.removeNode(switch (event.device.subsystem) {
-                    .block => .block,
-                    else => .char,
-                }, major, minor);
-            },
-            else => {},
-        }
+    switch (event.device.type) {
+        .node => |node| {
+            const major, const minor = node;
+            try self.removeNode(switch (event.device.subsystem) {
+                .block => .block,
+                else => .char,
+            }, major, minor);
+        },
+        else => {},
     }
 
     {
@@ -303,7 +296,6 @@ fn removeDevice(self: *DeviceWatcher, event: Event) !void {
     }
 }
 
-/// Assumes we are PID1.
 fn removeNode(self: *DeviceWatcher, node_type: NodeType, major: u32, minor: u32) !void {
     var buf: [10]u8 = undefined;
     const device = try std.fmt.bufPrint(&buf, "{}:{}", .{ major, minor });

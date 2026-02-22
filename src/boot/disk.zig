@@ -1,6 +1,7 @@
 const std = @import("std");
 const posix = std.posix;
 const MS = std.os.linux.MS;
+const MFD = std.os.linux.MFD;
 
 const linux_headers = @import("linux_headers");
 
@@ -10,6 +11,7 @@ const Filesystem = @import("../disk/filesystem.zig");
 const Gpt = @import("../disk/gpt.zig");
 const Mbr = @import("../disk/mbr.zig");
 const TmpDir = @import("../tmpdir.zig");
+const LiveUpdate = @import("../liveupdate.zig");
 
 const DiskBootLoader = @This();
 
@@ -190,8 +192,8 @@ pub fn probe(
     try self.searchForEntries(disk_device, entries);
 }
 
-pub fn entryLoaded(self: *DiskBootLoader, ctx: *anyopaque) void {
-    self.diskEntryLoaded(ctx) catch |err| {
+pub fn entryLoaded(self: *DiskBootLoader, ctx: *anyopaque, liveupdate: *LiveUpdate) void {
+    self.diskEntryLoaded(ctx, liveupdate) catch |err| {
         std.log.err(
             "failed to finalize BLS boot counter for chosen entry: {}",
             .{err},
@@ -199,12 +201,36 @@ pub fn entryLoaded(self: *DiskBootLoader, ctx: *anyopaque) void {
     };
 }
 
-fn diskEntryLoaded(self: *@This(), ctx: *anyopaque) !void {
+pub const luo_entry_token = 0x42;
+
+// TODO: It might be nicer if we have a standard way of serializing information
+// for the next kernel into one single memfd object, allowing for all this work
+// to be done in one place right before reboot() is called.
+fn persistEntryForNextKernel(bls_entry_file: *BlsEntryFile, liveupdate: *LiveUpdate) !void {
+    const memfd = try std.posix.memfd_create("tboot-bls-entry", MFD.ALLOW_SEALING | MFD.CLOEXEC);
+    defer posix.close(memfd);
+
+    _ = try posix.write(@intCast(memfd), bls_entry_file.name);
+
+    try liveupdate.preserve(memfd, luo_entry_token);
+
+    // Best effort to reset the seek positition, since the next kernel will
+    // _most likely_ want to start reading from the start.
+    posix.lseek_SET(memfd, 0) catch |err| {
+        std.log.warn("failed to reset the seek position of tboot-bls-entry: {}", .{err});
+    };
+}
+
+fn diskEntryLoaded(self: *@This(), ctx: *anyopaque, liveupdate: *LiveUpdate) !void {
     var bls_entry_file: *BlsEntryFile = @ptrCast(@alignCast(ctx));
 
     var tmpdir = self.tmpdir orelse return;
 
     const allocator = self.arena.allocator();
+
+    persistEntryForNextKernel(bls_entry_file, liveupdate) catch |err| {
+        std.log.err("failed to persist entry for next kernel: {}", .{err});
+    };
 
     const original_name = try bls_entry_file.toFilename(allocator);
     defer allocator.free(original_name);
@@ -943,13 +969,13 @@ fn searchForEntries(
             var final_cmdline: std.Io.Writer.Allocating = .init(allocator);
 
             if (entry.options) |opts| {
-                for (opts) |opt| {
+                for (opts, 1..) |opt, i| {
                     try final_cmdline.writer.writeAll(opt);
-                    try final_cmdline.writer.writeByte(' ');
+                    if (opts.len != i) {
+                        try final_cmdline.writer.writeByte(' ');
+                    }
                 }
             }
-
-            try final_cmdline.writer.print("tboot.bls-entry={s}", .{entry.id});
 
             break :b final_cmdline.written();
         };

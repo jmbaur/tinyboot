@@ -3,6 +3,7 @@ const posix = std.posix;
 
 const BootLoader = @import("./boot/bootloader.zig");
 const Console = @import("./console.zig");
+const LiveUpdate = @import("./liveupdate.zig");
 
 const Autoboot = @This();
 
@@ -16,6 +17,7 @@ pub fn run(
     self: *Autoboot,
     boot_loaders: *std.array_list.Managed(*BootLoader),
     timerfd: posix.fd_t,
+    liveupdate: *LiveUpdate,
 ) !?Console.Event {
     if (self.boot_loader) |boot_loader| {
         // After we attempt to boot with this boot loader, we unset it from the
@@ -31,7 +33,7 @@ pub fn run(
         const entries = try boot_loader.probe();
 
         for (entries) |entry| {
-            boot_loader.load(entry) catch |err| {
+            boot_loader.load(entry, liveupdate) catch |err| {
                 std.log.err(
                     "failed to load entry {s}: {}",
                     .{ entry.linux, err },
@@ -71,7 +73,7 @@ pub fn run(
         const timeout = try self.boot_loader.?.timeout();
 
         if (timeout == 0) {
-            return self.run(boot_loaders, timerfd);
+            return self.run(boot_loaders, timerfd, liveupdate);
         } else {
             try posix.timerfd_settime(timerfd, .{}, &.{
                 // oneshot

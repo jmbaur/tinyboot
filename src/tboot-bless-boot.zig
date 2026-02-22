@@ -5,6 +5,7 @@ const clap = @import("clap");
 pub const std_options = std.Options{ .log_level = if (builtin.mode == .Debug) .debug else .info };
 
 const DiskBootLoader = @import("./boot/disk.zig");
+const LiveUpdate = @import("./liveupdate.zig");
 
 const BlsEntryFile = DiskBootLoader.BlsEntryFile;
 
@@ -182,29 +183,17 @@ pub fn main() !void {
     const esp_mnt = res.args.@"esp-mnt" orelse std.fs.path.sep_str ++ "boot";
     const action = if (res.positionals[0]) |action| try Action.fromStr(action) else Action.status;
 
-    const kernel_cmdline_file = try std.fs.cwd().openFile("/proc/cmdline", .{});
-    defer kernel_cmdline_file.close();
+    var liveupdate = try LiveUpdate.init(.retrieve);
+    defer liveupdate.deinit();
 
-    const kernel_cmdline = try kernel_cmdline_file.readToEndAlloc(allocator, 1024);
+    const memfd = try liveupdate.retrieve(DiskBootLoader.luo_entry_token);
+    defer std.posix.close(memfd);
 
-    var split = std.mem.splitScalar(u8, kernel_cmdline, ' ');
-    const tboot_bls_entry = b: {
-        while (split.next()) |kernel_param| {
-            if (std.mem.startsWith(u8, kernel_param, "tboot.bls-entry=")) {
-                var param_split = std.mem.splitScalar(u8, kernel_param, '=');
-                _ = param_split.next().?;
+    try std.posix.lseek_SET(memfd, 0);
 
-                // /proc/cmdline contains newline at the end of the file
-                break :b std.mem.trimRight(
-                    u8,
-                    param_split.next() orelse return Error.MissingBlsEntry,
-                    "\n",
-                );
-            }
-        }
-
-        return Error.MissingBlsEntry;
-    };
+    var buf: [1024]u8 = undefined;
+    const read = try std.posix.read(memfd, &buf);
+    const tboot_bls_entry = buf[0..read];
 
     try findEntry(
         allocator,

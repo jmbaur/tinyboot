@@ -3,10 +3,11 @@ const posix = std.posix;
 
 const BootLoader = @import("./bootloader.zig");
 const Device = @import("../device.zig");
+const LiveUpdate = @import("../liveupdate.zig");
 const TmpDir = @import("../tmpdir.zig");
 const system = @import("../system.zig");
-const ymodem = @import("../ymodem.zig");
 const utils = @import("../utils.zig");
+const ymodem = @import("../ymodem.zig");
 
 const linux_headers = @import("linux_headers");
 
@@ -163,9 +164,10 @@ pub fn probe(self: *YmodemBootLoader, entries: *std.array_list.Managed(BootLoade
     });
 }
 
-pub fn entryLoaded(self: *YmodemBootLoader, ctx: *anyopaque) void {
+pub fn entryLoaded(self: *YmodemBootLoader, ctx: *anyopaque, liveupdate: *LiveUpdate) void {
     _ = self;
     _ = ctx;
+    _ = liveupdate;
 }
 
 pub fn deinit(self: *YmodemBootLoader) void {

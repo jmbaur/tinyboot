@@ -5,6 +5,7 @@ const builtin = @import("builtin");
 
 const BootLoader = @import("./boot/bootloader.zig");
 const Fdt = @import("./fdt.zig");
+const LiveUpdate = @import("./liveupdate.zig");
 const system = @import("./system.zig");
 const utils = @import("./utils.zig");
 
@@ -697,7 +698,7 @@ pub fn handleResize(self: *Console) void {
     self.prompt();
 }
 
-pub fn handleStdin(self: *Console, boot_loaders: []*BootLoader) !?Event {
+pub fn handleStdin(self: *Console, boot_loaders: []*BootLoader, liveupdate: *LiveUpdate) !?Event {
     const maybe_input = try self.shell.handleInput(self.context);
 
     if (maybe_input) |user_input| {
@@ -710,7 +711,7 @@ pub fn handleStdin(self: *Console, boot_loaders: []*BootLoader) !?Event {
         var args = try ArgsIterator.init(self.arena.allocator(), user_input);
         defer args.deinit();
 
-        if (self.runCommand(&args, boot_loaders)) |maybe_event| {
+        if (self.runCommand(&args, boot_loaders, liveupdate)) |maybe_event| {
             if (maybe_event) |event| {
                 return event;
             }
@@ -743,10 +744,11 @@ fn runCommand(
     self: *Console,
     args: *ArgsIterator,
     boot_loaders: []*BootLoader,
+    liveupdate: *LiveUpdate,
 ) !?Event {
     if (args.next()) |cmd| {
         if (std.mem.eql(u8, cmd, "help")) {
-            return Command.help.run(self, args, boot_loaders);
+            return Command.help.run(self, args, boot_loaders, liveupdate);
         }
 
         if (self.context) |ctx| {
@@ -756,6 +758,7 @@ fn runCommand(
                         self,
                         args,
                         ctx,
+                        liveupdate,
                     );
                 }
             }
@@ -766,6 +769,7 @@ fn runCommand(
                         self,
                         args,
                         boot_loaders,
+                        liveupdate,
                     );
                 }
             }
@@ -836,7 +840,7 @@ pub const Command = struct {
             print("unknown command \"{s}\"\n", .{cmd});
         }
 
-        fn run(console: *Console, args: *ArgsIterator, _: []*BootLoader) !?Event {
+        fn run(console: *Console, args: *ArgsIterator, _: []*BootLoader, _: *LiveUpdate) !?Event {
             if (args.next()) |cmd| {
                 if (console.context == null) {
                     helpOne(NoContext, cmd);
@@ -864,7 +868,7 @@ pub const Command = struct {
             \\poweroff
         ;
 
-        fn run(_: *Console, _: *ArgsIterator, _: []*BootLoader) !?Event {
+        fn run(_: *Console, _: *ArgsIterator, _: []*BootLoader, _: *LiveUpdate) !?Event {
             return .poweroff;
         }
     };
@@ -878,7 +882,7 @@ pub const Command = struct {
             \\reboot
         ;
 
-        fn run(_: *Console, _: *ArgsIterator, _: []*BootLoader) !?Event {
+        fn run(_: *Console, _: *ArgsIterator, _: []*BootLoader, _: *LiveUpdate) !?Event {
             return .reboot;
         }
     };
@@ -896,7 +900,7 @@ pub const Command = struct {
             \\logs 7
         ;
 
-        fn run(console: *Console, args: *ArgsIterator, _: []*BootLoader) !?Event {
+        fn run(console: *Console, args: *ArgsIterator, _: []*BootLoader, _: *LiveUpdate) !?Event {
             var filter = if (args.next()) |filter_str|
                 try std.fmt.parseInt(usize, filter_str, 10)
             else
@@ -925,7 +929,7 @@ pub const Command = struct {
             \\fdt
         ;
 
-        fn run(console: *Console, _: *ArgsIterator, _: []*BootLoader) !?Event {
+        fn run(console: *Console, _: *ArgsIterator, _: []*BootLoader, _: *LiveUpdate) !?Event {
             const sys_firmware_fdt = std.fs.cwd().openFile("/sys/firmware/fdt", .{}) catch {
                 writeAll("FDT not found\n");
                 return null;
@@ -986,7 +990,7 @@ pub const Command = struct {
             \\history
         ;
 
-        fn run(console: *Console, _: *ArgsIterator, _: []*BootLoader) !?Event {
+        fn run(console: *Console, _: *ArgsIterator, _: []*BootLoader, _: *LiveUpdate) !?Event {
             writeAll("\n");
             const len = console.shell.history.items.len;
             for (0..len) |i| {
@@ -1010,7 +1014,7 @@ pub const Command = struct {
             \\clear
         ;
 
-        fn run(_: *Console, _: *ArgsIterator, _: []*BootLoader) !?Event {
+        fn run(_: *Console, _: *ArgsIterator, _: []*BootLoader, _: *LiveUpdate) !?Event {
             clearScreen();
 
             return null;
@@ -1034,7 +1038,7 @@ pub const Command = struct {
             \\select 8:1        Selects the boot loader attached to device 8:1
         ;
 
-        fn run(console: *Console, args: *ArgsIterator, boot_loaders: []*BootLoader) !?Event {
+        fn run(console: *Console, args: *ArgsIterator, boot_loaders: []*BootLoader, _: *LiveUpdate) !?Event {
             const select_arg = args.next() orelse return error.InvalidArgument;
 
             var split = std.mem.splitScalar(u8, select_arg, ':');
@@ -1089,7 +1093,7 @@ pub const Command = struct {
             \\info
         ;
 
-        fn run(console: *Console, args: *ArgsIterator, boot_loaders: []*BootLoader) !?Event {
+        fn run(console: *Console, args: *ArgsIterator, boot_loaders: []*BootLoader, _: *LiveUpdate) !?Event {
             _ = console;
             _ = args;
             _ = boot_loaders;
@@ -1168,7 +1172,7 @@ pub const Command = struct {
             \\list
         ;
 
-        fn run(_: *Console, _: *ArgsIterator, boot_loaders: []*BootLoader) !?Event {
+        fn run(_: *Console, _: *ArgsIterator, boot_loaders: []*BootLoader, _: *LiveUpdate) !?Event {
             writeAll("\n");
 
             for (boot_loaders, 0..) |bl, index| {
@@ -1196,7 +1200,7 @@ pub const Command = struct {
             \\exit
         ;
 
-        fn run(console: *Console, _: *ArgsIterator, _: *BootLoader) !?Event {
+        fn run(console: *Console, _: *ArgsIterator, _: *BootLoader, _: *LiveUpdate) !?Event {
             defer console.context = null;
 
             return null;
@@ -1212,7 +1216,7 @@ pub const Command = struct {
             \\probe
         ;
 
-        fn run(_: *Console, _: *ArgsIterator, boot_loader: *BootLoader) !?Event {
+        fn run(_: *Console, _: *ArgsIterator, boot_loader: *BootLoader, _: *LiveUpdate) !?Event {
             const entries = boot_loader.probe() catch |err| {
                 print("failed to probe: {}\n", .{err});
                 return null;
@@ -1245,7 +1249,7 @@ pub const Command = struct {
             \\boot 7
         ;
 
-        fn run(_: *Console, args: *ArgsIterator, boot_loader: *BootLoader) !?Event {
+        fn run(_: *Console, args: *ArgsIterator, boot_loader: *BootLoader, liveupdate: *LiveUpdate) !?Event {
             const want_index = try std.fmt.parseInt(
                 usize,
                 args.next() orelse "0",
@@ -1259,7 +1263,7 @@ pub const Command = struct {
 
             for (entries, 0..) |entry, index| {
                 if (want_index == index) {
-                    if (boot_loader.load(entry)) {
+                    if (boot_loader.load(entry, liveupdate)) {
                         print(
                             "selected entry:\n\tlinux={s}\n\tinitrd={?s}\n\tcmdline=\"{s}\"\n",
                             .{ entry.linux, entry.initrd, if (entry.cmdline) |cmdline| cmdline else "" },
@@ -1287,7 +1291,7 @@ pub const Command = struct {
             \\autoboot
         ;
 
-        fn run(_: *Console, _: *ArgsIterator, boot_loaders: []*BootLoader) !?Event {
+        fn run(_: *Console, _: *ArgsIterator, boot_loaders: []*BootLoader, liveupdate: *LiveUpdate) !?Event {
             for (boot_loaders) |bl| {
                 if (bl.autoboot) {
                     const entries = bl.probe() catch |err| {
@@ -1296,7 +1300,7 @@ pub const Command = struct {
                     };
 
                     for (entries) |entry| {
-                        if (bl.load(entry)) {
+                        if (bl.load(entry, liveupdate)) {
                             return .kexec;
                         } else |err| {
                             std.log.err("failed to probe {f}: {}", .{ bl.device, err });
