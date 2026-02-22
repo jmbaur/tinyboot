@@ -1,19 +1,16 @@
 {
   config,
-  lib,
   pkgs,
   ...
 }:
 
 let
-  inherit (pkgs.stdenv.hostPlatform) isAarch64;
-
   tinybootKernel = pkgs.callPackage ./kernel.nix { };
 in
 {
   imports = [ ../nixos ];
 
-  boot.kernelPackages = pkgs.linuxPackages_6_18;
+  boot.kernelPackages = pkgs.linuxPackages_6_19;
 
   system.switch.enable = true;
 

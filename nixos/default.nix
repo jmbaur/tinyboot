@@ -45,13 +45,14 @@ in
         message = "Bootloader install program depends on bootspec";
       }
       {
-        assertion = versionAtLeast config.boot.kernelPackages.kernel.version "6.17";
-        message = "Must use Linux kernel 6.17 or newer for kexec handover";
+        assertion = versionAtLeast config.boot.kernelPackages.kernel.version "6.19";
+        message = "Must use Linux kernel 6.19 or newer for liveupdate";
       }
     ];
     boot.kernelParams = [
+      "ima_hash=sha256"
       "kho=on"
-      "liveupdate=on" # TODO(jared): is this needed on the second kernel?
+      "liveupdate=on"
     ];
     boot.kernelPatches = [
       {
@@ -59,7 +60,6 @@ in
         patch = null;
         structuredExtraConfig = {
           IMA = kernel.yes;
-          IMA_DEFAULT_HASH_SHA256 = kernel.yes;
           LIVEUPDATE = kernel.yes;
         };
       }
