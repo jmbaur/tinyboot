@@ -10,7 +10,6 @@ let
   inherit (lib)
     escapeShellArgs
     getExe'
-    kernel
     mkEnableOption
     mkForce
     mkIf
@@ -53,16 +52,6 @@ in
       "ima_hash=sha256"
       "kho=on"
       "liveupdate=on"
-    ];
-    boot.kernelPatches = [
-      {
-        name = "tinyboot-support";
-        patch = null;
-        structuredExtraConfig = {
-          IMA = kernel.yes;
-          LIVEUPDATE = kernel.yes;
-        };
-      }
     ];
     boot.loader.supportsInitrdSecrets = mkForce false;
     boot.loader.efi.canTouchEfiVariables = mkForce false;
