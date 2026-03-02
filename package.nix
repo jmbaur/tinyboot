@@ -2,6 +2,7 @@
   firmwareDirectory ? null,
 
   lib,
+  nukeReferences,
   stdenvNoCC,
   zig_0_15,
 }:
@@ -40,12 +41,16 @@ stdenvNoCC.mkDerivation (
       ];
     };
 
-    nativeBuildInputs = [ zig_0_15 ];
+    nativeBuildInputs = [
+      nukeReferences
+      zig_0_15
+    ];
+
+    # Prevent zig (or anything else) from being in the runtime closure
+    allowedReferences = [ ];
 
     __structuredAttrs = true;
     doCheck = true;
-    dontPatchELF = true;
-    dontStrip = true;
     strictDeps = true;
 
     zigBuildFlags = [
@@ -57,6 +62,12 @@ stdenvNoCC.mkDerivation (
 
     postConfigure = ''
       ln -s ${deps} $ZIG_GLOBAL_CACHE_DIR/p
+    '';
+
+    postFixup = ''
+      find $out/bin -type f | while read i; do
+        nuke-refs -e $out $i
+      done
     '';
 
     passthru.initrdFile = "tboot-loader.cpio.zst";
