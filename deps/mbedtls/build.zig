@@ -98,6 +98,7 @@ pub fn build(b: *std.Build) !void {
             "library/psa_crypto_mac.c",
             "library/psa_crypto_pake.c",
             "library/psa_crypto_rsa.c",
+            "library/psa_crypto_random.c",
             "library/psa_crypto_se.c",
             "library/psa_crypto_slot_management.c",
             "library/psa_crypto_storage.c",

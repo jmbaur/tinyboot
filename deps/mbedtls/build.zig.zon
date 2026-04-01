@@ -1,11 +1,11 @@
 .{
     .name = .mbedtls,
-    .version = "3.6.4",
+    .version = "3.6.6",
     .paths = .{"build.zig"},
     .dependencies = .{
         .mbedtls = .{
-            .url = "https://github.com/MBED-TLS/mbedtls/archive/v3.6.4.tar.gz",
-            .hash = "N-V-__8AADE9jALWhPS2ykOLbf8gUmr9r-SBwyzzpccbtBAv",
+            .url = "https://github.com/MBED-TLS/mbedtls/archive/v3.6.6.tar.gz",
+            .hash = "N-V-__8AAI1FmQLj92go7nR7_J6kwr-7uYyuitngGqydvWkd",
         },
     },
 }
