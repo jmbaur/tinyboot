@@ -7,3 +7,4 @@
 /.direnv
 result*
 zig-out
+zig-pkg
