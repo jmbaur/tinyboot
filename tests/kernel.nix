@@ -3,15 +3,15 @@
   flex,
   lib,
   linuxKernel,
-  linux_7_0,
+  linux_7_1,
   stdenv,
 }:
 
 linuxKernel.manualConfig {
-  inherit (linux_7_0) src version;
+  inherit (linux_7_1) src version;
   configfile = stdenv.mkDerivation {
-    pname = linux_7_0.pname + "-config";
-    inherit (linux_7_0) src version;
+    pname = linux_7_1.pname + "-config";
+    inherit (linux_7_1) src version;
     dontConfigure = true;
     nativeBuildInputs = [
       flex
