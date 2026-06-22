@@ -1,6 +1,7 @@
 const std = @import("std");
 const base64 = std.base64.standard;
 const posix = std.posix;
+const linux = std.os.linux;
 
 const kexec_file_load_available = @import("./kexec/kexec.zig").kexec_file_load_available;
 
@@ -33,13 +34,15 @@ const KEXEC_KERNEL_CHECK_APPRAISE = withNewline("appraise func=KEXEC_KERNEL_CHEC
 
 const KEXEC_INITRAMFS_CHECK_APPRAISE = withNewline("appraise func=KEXEC_INITRAMFS_CHECK appraise_type=imasig|modsig");
 
-fn installImaPolicy(policy: []const u8) !void {
-    var policy_file = try std.fs.cwd().openFile(IMA_POLICY_PATH, .{ .mode = .write_only });
-    defer policy_file.close();
+fn installImaPolicy(io: std.Io, policy: []const u8) !void {
+    var policy_file = try std.Io.Dir.cwd().openFile(io, IMA_POLICY_PATH, .{ .mode = .write_only });
+    defer policy_file.close(io);
 
     std.log.debug("writing IMA policy", .{});
 
-    try policy_file.writeAll(policy);
+    var buf: [1024]u8 = undefined;
+    var writer = policy_file.writer(io, &buf);
+    try writer.interface.writeAll(policy);
 }
 
 const MAX_KEY_SIZE = 8192;
@@ -48,17 +51,19 @@ const MAX_KEY_SIZE = 8192;
 // https://github.com/torvalds/linux/blob/master/drivers/firmware/google/vpd.c#L193
 const VPD_KEY = "/sys/firmware/vpd/ro/pubkey";
 
-fn loadVpdKey(allocator: std.mem.Allocator) ![]const u8 {
-    const vpd_key = std.fs.cwd().openFile(
+fn loadVpdKey(io: std.Io, allocator: std.mem.Allocator) ![]const u8 {
+    const vpd_key = std.Io.Dir.cwd().openFile(
+        io,
         VPD_KEY,
         .{},
     ) catch |err| switch (err) {
         error.FileNotFound => return error.MissingKey,
         else => return err,
     };
-    defer vpd_key.close();
+    defer vpd_key.close(io);
 
-    const contents = try vpd_key.readToEndAlloc(allocator, MAX_KEY_SIZE);
+    var reader = vpd_key.reader(io, &.{});
+    const contents = try reader.interface.allocRemaining(allocator, .limited(MAX_KEY_SIZE));
     defer allocator.free(contents);
     const out_size = try base64.Decoder.calcSizeForSlice(contents);
     var out_buf = try allocator.alloc(u8, out_size);
@@ -70,26 +75,28 @@ fn loadVpdKey(allocator: std.mem.Allocator) ![]const u8 {
 // https://qemu-project.gitlab.io/qemu/specs/fw_cfg.html
 const QEMU_FW_CFG_KEY = "/sys/firmware/qemu_fw_cfg/by_name/opt/org.tboot/pubkey/raw";
 
-fn loadQemuFwCfgKey(allocator: std.mem.Allocator) ![]const u8 {
-    const fw_cfg_key = std.fs.cwd().openFile(
+fn loadQemuFwCfgKey(io: std.Io, allocator: std.mem.Allocator) ![]const u8 {
+    const fw_cfg_key = std.Io.Dir.cwd().openFile(
+        io,
         QEMU_FW_CFG_KEY,
         .{},
     ) catch |err| switch (err) {
         error.FileNotFound => return error.MissingKey,
         else => return err,
     };
-    defer fw_cfg_key.close();
+    defer fw_cfg_key.close(io);
 
-    return try fw_cfg_key.readToEndAlloc(allocator, MAX_KEY_SIZE);
+    var reader = fw_cfg_key.reader(io, &.{});
+    return try reader.interface.allocRemaining(allocator, .limited(MAX_KEY_SIZE));
 }
 
 // https://github.com/torvalds/linux/blob/3b517966c5616ac011081153482a5ba0e91b17ff/security/integrity/digsig.c#L193
-fn loadVerificationKey(allocator: std.mem.Allocator) !void {
+fn loadVerificationKey(io: std.Io, allocator: std.mem.Allocator) !void {
     const keyring_id = try addKeyring(IMA_KEYRING_NAME, KeySerial.User);
     std.log.info("added ima keyring (id=0x{x})", .{keyring_id});
 
-    inline for (.{ loadVpdKey, loadQemuFwCfgKey }) |load_key_fn| {
-        if (load_key_fn(allocator)) |pubkey| {
+    inline for (.{ loadVpdKey, loadQemuFwCfgKey }) |loadKeyFn| {
+        if (loadKeyFn(io, allocator)) |pubkey| {
             defer allocator.free(pubkey);
 
             const key_id = try addKey(keyring_id, pubkey);
@@ -111,18 +118,18 @@ fn loadVerificationKey(allocator: std.mem.Allocator) !void {
 // with IMA since we basically get it for free; measurements are held in memory
 // and persisted across kexecs, and the measurements are extended to the
 // system's TPM if one is available.
-pub fn initializeSecurity(allocator: std.mem.Allocator) !void {
+pub fn initializeSecurity(io: std.Io, allocator: std.mem.Allocator) !void {
     if (!kexec_file_load_available) {
         std.log.warn("platform does not have kexec_file_load(), skipping security setup", .{});
         return;
     }
 
-    if (loadVerificationKey(allocator)) {
-        try installImaPolicy(MEASURE_AND_APPRAISE_POLICY);
+    if (loadVerificationKey(io, allocator)) {
+        try installImaPolicy(io, MEASURE_AND_APPRAISE_POLICY);
         std.log.info("boot measurement and verification is enabled", .{});
     } else |err| {
         std.log.warn("failed to load verification key, cannot perform boot verification: {}", .{err});
-        try installImaPolicy(MEASURE_POLICY);
+        try installImaPolicy(io, MEASURE_POLICY);
         std.log.info("boot measurement is enabled", .{});
     }
 }
@@ -155,7 +162,7 @@ fn addKeyring(name: [*:0]const u8, key_serial: KeySerial) !usize {
 
     const key_content: ?[*:0]const u8 = null;
 
-    const rc = std.os.linux.syscall5(
+    const rc = linux.syscall5(
         .add_key,
         @intFromPtr(key_type),
         @intFromPtr(name),
@@ -164,7 +171,7 @@ fn addKeyring(name: [*:0]const u8, key_serial: KeySerial) !usize {
         @as(u32, @bitCast(keyring)),
     );
 
-    switch (std.os.linux.E.init(rc)) {
+    switch (linux.errno(rc)) {
         .SUCCESS => {
             return rc;
         },
@@ -180,7 +187,7 @@ fn addKey(keyring_id: usize, key_content: []const u8) !usize {
     const key_desc: ?[*:0]const u8 = null;
 
     // see https://github.com/torvalds/linux/blob/59f3fd30af355dc893e6df9ccb43ace0b9033faa/security/keys/keyctl.c#L74
-    const rc = std.os.linux.syscall5(
+    const rc = linux.syscall5(
         .add_key,
         @intFromPtr(key_type),
         @intFromPtr(key_desc),
@@ -189,7 +196,7 @@ fn addKey(keyring_id: usize, key_content: []const u8) !usize {
         keyring_id,
     );
 
-    switch (std.os.linux.E.init(rc)) {
+    switch (linux.errno(rc)) {
         .SUCCESS => {
             return rc;
         },

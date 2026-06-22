@@ -50,21 +50,22 @@ const common_name_oid = asn1.Oid.fromDotComptime("2.5.4.3");
 const organization_name_oid = asn1.Oid.fromDotComptime("2.5.4.10");
 
 pub fn signFile(
+    io: std.Io,
     arena_alloc: std.mem.Allocator,
     in_filepath: []const u8,
     out_filepath: []const u8,
     private_key_filepath: []const u8,
     certificate_filepath: []const u8,
 ) !void {
-    var scratch_buf = [_]u8{0} ** 4096;
+    var scratch_buf: [4096]u8 = undefined;
 
-    const input_file = try std.fs.cwd().openFile(in_filepath, .{});
-    defer input_file.close();
+    const input_file = try std.Io.Dir.cwd().openFile(io, in_filepath, .{});
+    defer input_file.close(io);
 
-    errdefer std.fs.cwd().deleteFile(out_filepath) catch {};
+    errdefer std.Io.Dir.cwd().deleteFile(io, out_filepath) catch {};
 
-    const output_file = try std.fs.cwd().createFile(out_filepath, .{});
-    defer output_file.close();
+    const output_file = try std.Io.Dir.cwd().createFile(io, out_filepath, .{});
+    defer output_file.close(io);
 
     var entropy: C.mbedtls_entropy_context = undefined;
     C.mbedtls_entropy_init(&entropy);
@@ -86,9 +87,10 @@ pub fn signFile(
         "tinyboot".len,
     ));
 
-    const certificate_file = try std.fs.cwd().openFile(certificate_filepath, .{});
-    defer certificate_file.close();
-    const certificate_bytes = try certificate_file.readToEndAlloc(arena_alloc, std.math.maxInt(usize));
+    const certificate_file = try std.Io.Dir.cwd().openFile(io, certificate_filepath, .{});
+    defer certificate_file.close(io);
+    var certificate_file_reader = certificate_file.reader(io, &.{});
+    const certificate_bytes = try certificate_file_reader.interface.allocRemaining(arena_alloc, .unlimited);
 
     var x509: C.mbedtls_x509_crt = undefined;
     C.mbedtls_x509_crt_init(&x509);
@@ -100,18 +102,19 @@ pub fn signFile(
     const country_name = getAttribute(&x509, .countryName) orelse return error.MissingCountryName;
     const serial_number = x509.serial.p[0..x509.serial.len];
 
-    const private_key_file = try std.fs.cwd().openFile(private_key_filepath, .{});
-    defer private_key_file.close();
+    const private_key_file = try std.Io.Dir.cwd().openFile(io, private_key_filepath, .{});
+    defer private_key_file.close(io);
 
     // NOTE: mbedtls requires the PEM-encoded private key to have a
     // null-byte terminator, or else we run into this issue:
     // ```
     // error: mbedtls error(15616): PK - Invalid key tag or value
     // ```
-    const private_key_size: usize = @intCast((try private_key_file.stat()).size);
+    const private_key_size: usize = @intCast((try private_key_file.stat(io)).size);
     var private_key_bytes = try arena_alloc.alloc(u8, private_key_size + 1);
     @memset(private_key_bytes, 0);
-    _ = try private_key_file.readAll(private_key_bytes[0..private_key_size]);
+    var private_key_file_reader = private_key_file.reader(io, &.{});
+    _ = try private_key_file_reader.interface.readSliceShort(private_key_bytes[0..private_key_size]);
 
     try mbedtls.wrap(C.mbedtls_pk_parse_key(
         &pk,
@@ -137,7 +140,8 @@ pub fn signFile(
     var hash = [_]u8{0} ** sha2.Sha256.digest_length;
     var hasher = sha2.Sha256.init(.{});
     while (true) {
-        const bytes_read = try input_file.read(&scratch_buf);
+        var input_file_reader = input_file.reader(io, &.{});
+        const bytes_read = try input_file_reader.interface.readSliceShort(&scratch_buf);
         if (bytes_read == 0) {
             break;
         }
@@ -248,10 +252,7 @@ fn getAttribute(x509: *C.mbedtls_x509_crt, attribute: std.crypto.Certificate.Att
     return null;
 }
 
-pub fn main() !void {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-
+pub fn main(init: std.process.Init) !void {
     const params = comptime clap.parseParamsComptime(
         \\-h, --help              Display this help and exit.
         \\--private-key <FILE>    Private key to sign with.
@@ -266,18 +267,18 @@ pub fn main() !void {
     };
 
     var diag = clap.Diagnostic{};
-    var res = clap.parse(clap.Help, &params, &parsers, .{
+    var res = clap.parse(clap.Help, &params, &parsers, init.minimal.args, .{
         .diagnostic = &diag,
-        .allocator = arena.allocator(),
+        .allocator = init.arena.allocator(),
     }) catch |err| {
-        try diag.reportToFile(.stderr(), err);
-        try clap.usageToFile(.stderr(), clap.Help, &params);
+        try diag.reportToFile(init.io, .stderr(), err);
+        try clap.usageToFile(init.io, .stderr(), clap.Help, &params);
         return;
     };
     defer res.deinit();
 
     if (res.args.help != 0) {
-        return clap.helpToFile(.stderr(), clap.Help, &params, .{});
+        return clap.helpToFile(init.io, .stderr(), clap.Help, &params, .{});
     }
 
     if (res.positionals[0] == null or
@@ -285,8 +286,8 @@ pub fn main() !void {
         res.args.@"private-key" == null or
         res.args.certificate == null)
     {
-        try diag.reportToFile(.stderr(), error.InvalidArgument);
-        try clap.usageToFile(.stderr(), clap.Help, &params);
+        try diag.reportToFile(init.io, .stderr(), error.InvalidArgument);
+        try clap.usageToFile(init.io, .stderr(), clap.Help, &params);
         return;
     }
 
@@ -296,7 +297,8 @@ pub fn main() !void {
     const certificate_filepath = res.args.certificate.?;
 
     return signFile(
-        arena.allocator(),
+        init.io,
+        init.arena.allocator(),
         in_file,
         out_file,
         private_key_filepath,

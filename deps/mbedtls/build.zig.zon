@@ -1,5 +1,6 @@
 .{
     .name = .mbedtls,
+    .fingerprint = 0x841b00c20264d254,
     .version = "3.6.6",
     .paths = .{"build.zig"},
     .dependencies = .{

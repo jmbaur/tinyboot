@@ -667,7 +667,7 @@ const PartitionRecord = extern struct {
         var name_utf16le_bytes: [byte_count]u16 = @bitCast(self.partition_name);
         var name_utf8_bytes: [byte_count]u8 = undefined;
         const end = try std.unicode.utf16LeToUtf8(&name_utf8_bytes, &name_utf16le_bytes);
-        return try allocator.dupe(u8, std.mem.trimRight(u8, name_utf8_bytes[0..end], &.{0}));
+        return try allocator.dupe(u8, std.mem.trimEnd(u8, name_utf8_bytes[0..end], &.{0}));
     }
 
     pub fn partType(self: *const @This()) ?PartitionType {
@@ -770,7 +770,7 @@ pub fn deinit(self: *Gpt) void {
 
 /// By the time this is called, we are at LBA1 + @sizeOf(Header)
 fn findPartitions(allocator: std.mem.Allocator, reader: *Io.Reader, header: Header, sector_size: u16) ![]PartitionRecord {
-    var p = std.ArrayList(PartitionRecord){};
+    var p: std.ArrayList(PartitionRecord) = .empty;
     errdefer p.deinit(allocator);
 
     var current_position = sector_size + @sizeOf(Header);

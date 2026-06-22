@@ -63,17 +63,6 @@ pub fn addEntry(
 
     const filepath_len = path.len + 1; // null terminator
 
-    // Zero by default for reproducibility, plus it's probably best to not
-    // meaningfully use this field. The new ascii cpio format suffers from the
-    // year 2038 problem with only being able to store 32 bits of time
-    // information.
-    var mtime_buf = [_]u8{0} ** (@sizeOf(u32) * 8);
-    var fba = std.heap.FixedBufferAllocator.init(&mtime_buf);
-    const mtime = b: {
-        const mtime_string = std.process.getEnvVarOwned(fba.allocator(), "SOURCE_DATE_EPOCH") catch break :b 0;
-        break :b try std.fmt.parseInt(u32, mtime_string, 10);
-    };
-
     // write entry to archive
     {
         const header = CpioHeader{
@@ -87,7 +76,7 @@ pub fn addEntry(
             .devminor = 0,
             .rdevmajor = 0,
             .rdevminor = 0,
-            .mtime = mtime,
+            .mtime = 0,
             .namesize = @intCast(filepath_len),
         };
 
@@ -139,16 +128,18 @@ pub fn addEntry(
     self.ino += 1;
 }
 
-pub fn addFile(self: *@This(), path: []const u8, file: std.fs.File, perms: u32) !void {
-    const stat = try file.stat();
-    if (stat.size > std.math.maxInt(u32)) {
-        return Error.FileTooLarge;
-    }
-
+pub fn addFile(
+    self: *@This(),
+    io: std.Io,
+    path: []const u8,
+    file: std.Io.File,
+    size: u32,
+    permissions: std.Io.File.Permissions,
+) !void {
     var buffer: [1024]u8 = undefined;
-    var reader = file.reader(&buffer);
+    var reader = file.reader(io, &buffer);
 
-    try self.addEntry(&reader.interface, @intCast(stat.size), path, .File, perms);
+    try self.addEntry(&reader.interface, size, path, .File, @intFromEnum(permissions));
 }
 
 pub fn addDirectory(self: *@This(), path: []const u8, perms: u32) !void {
@@ -181,27 +172,36 @@ pub fn finalize(self: *@This()) !void {
 }
 
 fn handleFile(
+    io: std.Io,
     arena: *std.heap.ArenaAllocator,
-    kind: std.fs.File.Kind,
+    kind: std.Io.File.Kind,
     filename: []const u8,
     current_directory: []const u8,
     starting_directory: []const u8,
     archive: *CpioArchive,
-    directory: *std.fs.Dir,
+    directory: *std.Io.Dir,
 ) anyerror!void {
     var fullpath_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const full_entry_path = try directory.realpath(filename, &fullpath_buf);
-    const entry_path = try std.fs.path.relative(arena.allocator(), starting_directory, full_entry_path);
+    const full_entry_path_len = try directory.realPathFile(io, filename, &fullpath_buf);
+    const entry_path = try std.fs.path.relative(
+        arena.allocator(),
+        ".",
+        null,
+        starting_directory,
+        fullpath_buf[0..full_entry_path_len],
+    );
 
     switch (kind) {
         .directory => {
             var sub_directory = try directory.openDir(
+                io,
                 filename,
                 .{ .iterate = true },
             );
-            defer sub_directory.close();
+            defer sub_directory.close(io);
 
             try walkDirectory(
+                io,
                 arena,
                 starting_directory,
                 archive,
@@ -209,12 +209,22 @@ fn handleFile(
             );
         },
         .file => {
-            var file = try directory.openFile(filename, .{});
-            defer file.close();
+            var file = try directory.openFile(io, filename, .{});
+            defer file.close(io);
 
-            const stat = try file.stat();
+            const stat = try file.stat(io);
 
-            try archive.addFile(entry_path, file, @intCast(stat.mode));
+            if (stat.size > std.math.maxInt(u32)) {
+                return Error.FileTooLarge;
+            }
+
+            try archive.addFile(
+                io,
+                entry_path,
+                file,
+                @intCast(stat.size),
+                stat.permissions,
+            );
         },
         .sym_link => {
             const resolved_path = try std.fs.path.resolve(
@@ -230,9 +240,10 @@ fn handleFile(
 
                 try archive.addSymlink(symlink_path, entry_path);
             } else {
-                const stat = try std.fs.cwd().statFile(resolved_path);
+                const stat = try std.Io.Dir.cwd().statFile(io, resolved_path, .{});
 
                 try handleFile(
+                    io,
                     arena,
                     stat.kind,
                     resolved_path,
@@ -245,23 +256,30 @@ fn handleFile(
         },
         else => std.log.warn(
             "Do not know how to add file {s} of kind {} to CPIO archive",
-            .{ full_entry_path, kind },
+            .{ fullpath_buf[0..full_entry_path_len], kind },
         ),
     }
 }
 
 pub fn walkDirectory(
+    io: std.Io,
     arena: *std.heap.ArenaAllocator,
     starting_directory: []const u8,
     archive: *CpioArchive,
-    directory: *std.fs.Dir,
+    directory: *std.Io.Dir,
 ) anyerror!void {
     var iter = directory.iterate();
 
     // Before iterating through the directory, first add the directory itself.
     var fullpath_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const full_directory_path = try directory.realpath(".", &fullpath_buf);
-    const directory_path = try std.fs.path.relative(arena.allocator(), starting_directory, full_directory_path);
+    const fullpath_len = try directory.realPathFile(io, ".", &fullpath_buf);
+    const directory_path = try std.fs.path.relative(
+        arena.allocator(),
+        ".",
+        null,
+        starting_directory,
+        fullpath_buf[0..fullpath_len],
+    );
 
     // We don't need to add the root directory, as it will already exist.
     if (!std.mem.eql(u8, directory_path, "")) {
@@ -270,8 +288,9 @@ pub fn walkDirectory(
         try archive.addDirectory(directory_path, 0o755);
     }
 
-    while (try iter.next()) |dir_entry| {
+    while (try iter.next(io)) |dir_entry| {
         try handleFile(
+            io,
             arena,
             dir_entry.kind,
             dir_entry.name,

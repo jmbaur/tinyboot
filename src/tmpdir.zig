@@ -5,30 +5,31 @@ const sub_path_len = std.fs.base64_encoder.calcSize(random_bytes_count);
 
 pub const TmpDir = @This();
 
-dir: std.fs.Dir,
-parent_dir: std.fs.Dir,
+dir: std.Io.Dir,
+parent_dir: std.Io.Dir,
 sub_path: [sub_path_len]u8,
 
-pub fn cleanup(self: *TmpDir) void {
-    self.dir.close();
-    self.parent_dir.deleteTree(&self.sub_path) catch {};
-    self.parent_dir.close();
-    self.* = undefined;
-}
-
-pub fn create(opts: std.fs.Dir.OpenOptions) !TmpDir {
+pub fn create(io: std.Io, dir: std.Io.Dir, sub_path: []const u8, opts: std.Io.Dir.CreateDirPathOpenOptions) !TmpDir {
     var random_bytes: [TmpDir.random_bytes_count]u8 = undefined;
-    std.crypto.random.bytes(&random_bytes);
-    var sub_path: [sub_path_len]u8 = undefined;
-    _ = std.fs.base64_encoder.encode(&sub_path, &random_bytes);
+    std.Io.random(io, &random_bytes);
+    var child_sub_path: [sub_path_len]u8 = undefined;
+    _ = std.fs.base64_encoder.encode(&child_sub_path, &random_bytes);
 
-    const parent_dir = try std.fs.cwd().makeOpenPath("/run", .{});
+    const parent_dir = try dir.createDirPathOpen(io, sub_path, .{});
+    errdefer parent_dir.close(io);
 
-    const dir = try parent_dir.makeOpenPath(&sub_path, opts);
+    const child_dir = try parent_dir.createDirPathOpen(io, &child_sub_path, opts);
 
     return .{
-        .dir = dir,
+        .dir = child_dir,
         .parent_dir = parent_dir,
-        .sub_path = sub_path,
+        .sub_path = child_sub_path,
     };
+}
+
+pub fn cleanup(self: *TmpDir, io: std.Io) void {
+    self.dir.close(io);
+    self.parent_dir.deleteTree(io, &self.sub_path) catch {};
+    self.parent_dir.close(io);
+    self.* = undefined;
 }

@@ -32,7 +32,7 @@ fn serialDeviceIsConnected(fd: posix.fd_t) bool {
     return serial & linux_headers.TIOCM_DTR == linux_headers.TIOCM_DTR;
 }
 
-pub fn match(device: *const Device) ?u8 {
+pub fn match(io: std.Io, device: *const Device) ?u8 {
     if (device.subsystem != .tty) {
         return null;
     }
@@ -58,14 +58,15 @@ pub fn match(device: *const Device) ?u8 {
 
     var serial_path_buf: [std.fs.max_path_bytes]u8 = undefined;
     const serial_path = device.nodePath(&serial_path_buf) catch return null;
-    var serial = std.fs.cwd().openFile(
+    var serial = std.Io.Dir.cwd().openFile(
+        io,
         serial_path,
         .{ .mode = .read_write },
     ) catch |err| {
         std.log.err("failed to open {f}: {}", .{ device, err });
         return null;
     };
-    defer serial.close();
+    defer serial.close(io);
 
     // Prioritize serial devices that are already connected.
     if (!serialDeviceIsConnected(serial.handle)) {
@@ -89,14 +90,14 @@ pub fn timeout(self: *YmodemBootLoader) u8 {
     return 0;
 }
 
-pub fn probe(self: *YmodemBootLoader, entries: *std.array_list.Managed(BootLoader.Entry), device: Device) !void {
+pub fn probe(self: *YmodemBootLoader, io: std.Io, entries: *std.array_list.Managed(BootLoader.Entry), device: Device) !void {
     const allocator = self.arena.allocator();
 
     var serial_path_buf: [std.fs.max_path_bytes]u8 = undefined;
     const serial_path = try device.nodePath(&serial_path_buf);
 
-    var serial = try std.fs.cwd().openFile(serial_path, .{ .mode = .read_write });
-    defer serial.close();
+    var serial = try std.Io.Dir.cwd().openFile(io, serial_path, .{ .mode = .read_write });
+    defer serial.close(io);
 
     var tty = system.Tty.init(serial);
     defer {
@@ -104,12 +105,12 @@ pub fn probe(self: *YmodemBootLoader, entries: *std.array_list.Managed(BootLoade
 
         // If the TTY is being used for user input, this will allow for the
         // next message printed to the TTY to be legible.
-        tty.file.writeAll(&.{'\n'}) catch {};
+        tty.file.writeStreamingAll(io, "\n") catch {};
     }
 
     try tty.setMode(.file_transfer);
 
-    self.tmpdir = try TmpDir.create(.{});
+    self.tmpdir = try TmpDir.create(io, std.Io.Dir.cwd(), "/run", .{});
 
     var tmpdir = self.tmpdir.?;
 
@@ -119,10 +120,11 @@ pub fn probe(self: *YmodemBootLoader, entries: *std.array_list.Managed(BootLoade
         system.setConsole(.off) catch {};
         defer system.setConsole(.on) catch {};
 
-        try ymodem.recv(&tty, tmpdir.dir);
+        try ymodem.recv(io, &tty, tmpdir.dir);
     }
 
     const linux = try utils.realpathAllocMany(
+        io,
         tmpdir.dir,
         allocator,
         &.{ "linux", "kernel" },
@@ -130,6 +132,7 @@ pub fn probe(self: *YmodemBootLoader, entries: *std.array_list.Managed(BootLoade
 
     const initrd: ?[]const u8 = b: {
         break :b utils.realpathAllocMany(
+            io,
             tmpdir.dir,
             allocator,
             &.{ "initrd", "initramfs" },
@@ -141,6 +144,7 @@ pub fn probe(self: *YmodemBootLoader, entries: *std.array_list.Managed(BootLoade
 
     const cmdline: ?[]const u8 = b: {
         const fullpath = utils.realpathAllocMany(
+            io,
             tmpdir.dir,
             allocator,
             &.{ "kernel-params", "params", "options" },
@@ -149,10 +153,11 @@ pub fn probe(self: *YmodemBootLoader, entries: *std.array_list.Managed(BootLoade
             else => return err,
         };
 
-        const cmdline_file = try tmpdir.dir.openFile(fullpath, .{});
-        defer cmdline_file.close();
+        const cmdline_file = try tmpdir.dir.openFile(io, fullpath, .{});
+        defer cmdline_file.close(io);
 
-        const cmdline_bytes = try cmdline_file.readToEndAlloc(allocator, linux_headers.COMMAND_LINE_SIZE);
+        var reader = cmdline_file.reader(io, &.{});
+        const cmdline_bytes = try reader.interface.allocRemaining(allocator, .limited(linux_headers.COMMAND_LINE_SIZE));
         break :b std.mem.trim(u8, cmdline_bytes, &std.ascii.whitespace);
     };
 
@@ -164,17 +169,18 @@ pub fn probe(self: *YmodemBootLoader, entries: *std.array_list.Managed(BootLoade
     });
 }
 
-pub fn entryLoaded(self: *YmodemBootLoader, ctx: *anyopaque, liveupdate: *LiveUpdate) void {
+pub fn entryLoaded(self: *YmodemBootLoader, ctx: *anyopaque, io: std.Io, liveupdate: *LiveUpdate) void {
     _ = self;
     _ = ctx;
+    _ = io;
     _ = liveupdate;
 }
 
-pub fn deinit(self: *YmodemBootLoader) void {
+pub fn deinit(self: *YmodemBootLoader, io: std.Io) void {
     self.arena.deinit();
 
     if (self.tmpdir) |*tmpdir| {
-        tmpdir.cleanup();
+        tmpdir.cleanup(io);
         self.tmpdir = null;
     }
 }

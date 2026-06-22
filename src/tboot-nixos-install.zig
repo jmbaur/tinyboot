@@ -16,26 +16,29 @@ const BootJson = @import("./bootspec.zig").BootJson;
 const BlsEntryFile = DiskBootLoader.BlsEntryFile;
 
 fn ensureFilesystemState(
-    esp: *std.fs.Dir,
+    io: std.Io,
+    esp: std.Io.Dir,
     args: *const Args,
 ) !void {
     std.log.debug("ensuring filesystem state", .{});
 
     // Make directories even if we are in dry run mode, as we need to be able
     // to open these directories for iterating over.
-    try esp.makePath("loader/nixos");
-    try esp.makePath("loader/entries");
+    try esp.createDirPath(io, "loader/nixos");
+    try esp.createDirPath(io, "loader/entries");
 
-    if (!utils.pathExists(esp, "loader/entries.srel")) {
+    if (!utils.pathExists(io, esp, "loader/entries.srel")) {
         const srel_filepath = "loader/entries.srel";
         if (!args.dry_run) {
             var entries_srel_file = try esp.createFile(
+                io,
                 srel_filepath,
                 .{},
             );
-            defer entries_srel_file.close();
+            defer entries_srel_file.close(io);
+            var writer = entries_srel_file.writer(io, &.{});
 
-            try entries_srel_file.writeAll("type1\n");
+            try writer.interface.writeAll("type1\n");
         }
         std.log.info("installed {s}", .{srel_filepath});
     }
@@ -44,13 +47,14 @@ fn ensureFilesystemState(
 }
 
 fn installGeneration(
+    io: std.Io,
     arena_alloc: std.mem.Allocator,
     nixos_known_files: *StringSet,
     entries_known_files: *StringSet,
     spec: *const BootSpecV1,
-    nixos_dir: *std.fs.Dir,
-    entries_dir: *std.fs.Dir,
-    esp: *std.fs.Dir,
+    nixos_dir: std.Io.Dir,
+    entries_dir: std.Io.Dir,
+    esp: std.Io.Dir,
     generation: u32,
     args: *const Args,
 ) !void {
@@ -74,10 +78,11 @@ fn installGeneration(
         &.{ args.efi_sys_mount_point, linux_target },
     );
 
-    if (!utils.pathExists(esp, linux_target)) {
+    if (!utils.pathExists(io, esp, linux_target)) {
         if (!args.dry_run) {
             if (args.sign) |sign| {
                 try signFile(
+                    io,
                     arena_alloc,
                     spec.kernel,
                     full_linux_path,
@@ -87,9 +92,10 @@ fn installGeneration(
 
                 std.log.info("signed {s}", .{linux_target});
             } else {
-                try std.fs.cwd().copyFile(
+                try std.Io.Dir.cwd().copyFile(
+                    io,
                     spec.kernel,
-                    nixos_dir.*,
+                    nixos_dir,
                     linux_target_filename,
                     .{},
                 );
@@ -123,7 +129,7 @@ fn installGeneration(
                 initrd_target,
             });
 
-            if (!utils.pathExists(esp, initrd_target)) {
+            if (!utils.pathExists(io, esp, initrd_target)) {
                 if (!args.dry_run) {
                     if (args.sign) |sign| {
                         try signFile(
@@ -136,9 +142,10 @@ fn installGeneration(
 
                         std.log.info("signed {s}", .{initrd_target});
                     } else {
-                        try std.fs.cwd().copyFile(
+                        try std.Io.Dir.cwd().copyFile(
+                            io,
                             initrd,
-                            nixos_dir.*,
+                            nixos_dir,
                             initrd_target_filename,
                             .{},
                         );
@@ -207,8 +214,8 @@ fn installGeneration(
     }
 
     if (!args.dry_run) {
-        var entry_file = try entries_dir.createFile(entry_filename_with_counters, .{});
-        defer entry_file.close();
+        var entry_file = try entries_dir.createFile(io, entry_filename_with_counters, .{});
+        defer entry_file.close(io);
 
         var entry_buffer: [512]u8 = undefined;
         var entry_writer = entry_file.writer(&entry_buffer);
@@ -228,19 +235,20 @@ fn installGeneration(
 }
 
 fn cleanupDir(
+    io: std.Io,
     known_files: *StringSet,
-    dir: *std.fs.Dir,
+    dir: std.Io.Dir,
     args: *const Args,
 ) !void {
     var it = dir.iterate();
-    while (try it.next()) |entry| {
+    while (try it.next(io)) |entry| {
         if (entry.kind != .file) {
             continue;
         }
 
         if (known_files.get(entry.name) == null) {
             if (!args.dry_run) {
-                try dir.deleteFile(entry.name);
+                try dir.deleteFile(io, entry.name);
             }
 
             std.log.info("cleaned up {s}", .{entry.name});
@@ -264,11 +272,8 @@ const Args = struct {
     dry_run: bool = false,
 };
 
-pub fn main() !void {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-
-    const arena_alloc = arena.allocator();
+pub fn main(init: std.process.Init) !void {
+    const arena_alloc = init.arena.allocator();
 
     const params = comptime clap.parseParamsComptime(
         \\-h, --help              Display this help and exit.
@@ -289,18 +294,18 @@ pub fn main() !void {
     };
 
     var diag = clap.Diagnostic{};
-    var res = clap.parse(clap.Help, &params, &parsers, .{
+    var res = clap.parse(clap.Help, &params, &parsers, init.minimal.args, .{
         .diagnostic = &diag,
         .allocator = arena_alloc,
     }) catch |err| {
-        try diag.reportToFile(.stderr(), err);
-        try clap.usageToFile(.stderr(), clap.Help, &params);
+        try diag.reportToFile(init.io, .stderr(), err);
+        try clap.usageToFile(init.io, .stderr(), clap.Help, &params);
         return;
     };
     defer res.deinit();
 
     if (res.args.help != 0) {
-        return clap.helpToFile(.stderr(), clap.Help, &params, .{});
+        return clap.helpToFile(init.io, .stderr(), clap.Help, &params, .{});
     }
 
     if (res.positionals[0] == null or
@@ -309,15 +314,16 @@ pub fn main() !void {
         ((res.args.@"private-key" == null) !=
             (res.args.certificate == null)))
     {
-        try diag.reportToFile(.stderr(), error.InvalidArgument);
-        try clap.usageToFile(.stderr(), clap.Help, &params);
+        try diag.reportToFile(init.io, .stderr(), error.InvalidArgument);
+        try clap.usageToFile(init.io, .stderr(), clap.Help, &params);
         return;
     }
 
     var args = Args{
-        .default_nixos_system_closure = try std.fs.cwd().realpathAlloc(
-            arena_alloc,
+        .default_nixos_system_closure = try std.Io.Dir.cwd().realPathFileAlloc(
+            init.io,
             res.positionals[0].?,
+            arena_alloc,
         ),
     };
 
@@ -350,30 +356,31 @@ pub fn main() !void {
         std.log.warn("in dry run mode, no filesystem changes will occur", .{});
     }
 
-    var esp = try std.fs.cwd().openDir(args.efi_sys_mount_point, .{
+    var esp = try std.Io.Dir.cwd().openDir(init.io, args.efi_sys_mount_point, .{
         .iterate = true,
     });
-    defer esp.close();
+    defer esp.close(init.io);
 
-    try ensureFilesystemState(&esp, &args);
+    try ensureFilesystemState(init.io, esp, &args);
 
-    var nixos_dir = try esp.openDir("loader/nixos", .{ .iterate = true });
-    defer nixos_dir.close();
+    var nixos_dir = try esp.openDir(init.io, "loader/nixos", .{ .iterate = true });
+    defer nixos_dir.close(init.io);
 
-    var entries_dir = try esp.openDir("loader/entries", .{ .iterate = true });
-    defer entries_dir.close();
+    var entries_dir = try esp.openDir(init.io, "loader/entries", .{ .iterate = true });
+    defer entries_dir.close(init.io);
 
-    var nixos_profiles_dir = try std.fs.cwd().openDir(
+    var nixos_profiles_dir = try std.Io.Dir.cwd().openDir(
+        init.io,
         "/nix/var/nix/profiles",
         .{ .iterate = true },
     );
-    defer nixos_profiles_dir.close();
+    defer nixos_profiles_dir.close(init.io);
 
     var nixos_known_files = StringSet.init(arena_alloc);
     var entries_known_files = StringSet.init(arena_alloc);
 
     var it = nixos_profiles_dir.iterate();
-    while (try it.next()) |entry| {
+    while (try it.next(init.io)) |entry| {
         if (entry.kind != .sym_link) {
             continue;
         }
@@ -397,10 +404,11 @@ pub fn main() !void {
             "boot.json",
         });
 
-        var boot_json_file = try nixos_profiles_dir.openFile(boot_json_path, .{});
-        defer boot_json_file.close();
+        var boot_json_file = try nixos_profiles_dir.openFile(init.io, boot_json_path, .{});
+        defer boot_json_file.close(init.io);
 
-        const boot_json_contents = try boot_json_file.readToEndAlloc(arena_alloc, 8192);
+        var boot_json_file_reader = boot_json_file.reader(init.io, &.{});
+        const boot_json_contents = try boot_json_file_reader.interface.allocRemaining(arena_alloc, .unlimited);
 
         const boot_json = BootJson.parse(arena_alloc, boot_json_contents) catch |err| {
             std.log.err("failed to parse bootspec boot.json: {}", .{err});
@@ -408,13 +416,14 @@ pub fn main() !void {
         };
 
         try installGeneration(
+            init.io,
             arena_alloc,
             &nixos_known_files,
             &entries_known_files,
             &boot_json.spec,
-            &nixos_dir,
-            &entries_dir,
-            &esp,
+            nixos_dir,
+            entries_dir,
+            esp,
             generation,
             &args,
         );
@@ -422,13 +431,14 @@ pub fn main() !void {
         if (boot_json.specialisations) |specialisations| {
             for (specialisations) |s| {
                 try installGeneration(
+                    init.io,
                     arena_alloc,
                     &nixos_known_files,
                     &entries_known_files,
                     &s,
-                    &nixos_dir,
-                    &entries_dir,
-                    &esp,
+                    nixos_dir,
+                    entries_dir,
+                    esp,
                     generation,
                     &args,
                 );
@@ -454,6 +464,6 @@ pub fn main() !void {
         }
     }
 
-    try cleanupDir(&nixos_known_files, &nixos_dir, &args);
-    try cleanupDir(&entries_known_files, &entries_dir, &args);
+    try cleanupDir(init.io, &nixos_known_files, nixos_dir, &args);
+    try cleanupDir(init.io, &entries_known_files, entries_dir, &args);
 }

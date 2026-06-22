@@ -47,14 +47,16 @@ const GoogleVpdInfo = extern struct {
 
 const VpdList = std.ArrayList(struct { []const u8, []const u8 });
 
-fn writeVpd(vpd_list: VpdList, file: std.fs.File) !void {
-    const stat = try file.stat();
+fn writeVpd(io: std.Io, vpd_list: VpdList, file: std.Io.File) !void {
+    const stat = try file.stat(io);
     const file_size: usize = @intCast(stat.size);
 
-    try file.seekTo(GOOGLE_VPD_2_0_OFFSET + @sizeOf(GoogleVpdInfo));
+    var buf: [512]u8 = undefined;
+    var file_reader = file.reader(io, &buf);
+    try file_reader.seekTo(GOOGLE_VPD_2_0_OFFSET + @sizeOf(GoogleVpdInfo));
 
     var buffer: [1024]u8 = undefined;
-    var file_writer = file.writer(&buffer);
+    var file_writer = file.writer(io, &buffer);
     var writer = &file_writer.interface;
 
     for (vpd_list.items) |vpd_item| {
@@ -74,10 +76,10 @@ fn writeVpd(vpd_list: VpdList, file: std.fs.File) !void {
 
     try writer.writeByte(VPD_TYPE_TERMINATOR);
 
-    const pos: usize = @intCast(try file.getPos());
+    const pos: usize = @intCast(file_reader.logicalPos());
     try writer.splatByteAll(0xff, file_size - pos);
 
-    try file.seekTo(GOOGLE_VPD_2_0_OFFSET);
+    try file_reader.seekTo(GOOGLE_VPD_2_0_OFFSET);
     const vpd_info: GoogleVpdInfo = .{
         .header = .{ .magic = INFO_MAGIC },
         .size = std.mem.nativeToLittle(
@@ -141,15 +143,15 @@ test "calculate vpd value length" {
     }, vpdValueLength(65793, &buf));
 }
 
-fn collectVpd(allocator: std.mem.Allocator, file: std.fs.File) !VpdList {
-    var vpd_list = VpdList{};
+fn collectVpd(io: std.Io, allocator: std.mem.Allocator, file: std.Io.File) !VpdList {
+    var vpd_list: VpdList = .empty;
     errdefer vpd_list.deinit(allocator);
 
-    try file.seekTo(GOOGLE_VPD_2_0_OFFSET);
-
     var buffer: [1024]u8 = undefined;
-    var file_reader = file.reader(&buffer);
+    var file_reader = file.reader(io, &buffer);
     var reader = &file_reader.interface;
+
+    try file_reader.seekTo(GOOGLE_VPD_2_0_OFFSET);
 
     const total_size = b: {
         var vpd_info_buf: [@sizeOf(GoogleVpdInfo)]u8 = undefined;
@@ -216,10 +218,7 @@ fn readLength(reader: *std.Io.Reader) !usize {
     return std.mem.littleToNative(@TypeOf(total), total);
 }
 
-pub fn main() !void {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-
+pub fn main(init: std.process.Init) !void {
     const params = comptime clap.parseParamsComptime(
         \\-h, --help                     Display this help and exit.
         \\-f, --file <FILE>              File to operate on.
@@ -244,23 +243,23 @@ pub fn main() !void {
     };
 
     var diag = clap.Diagnostic{};
-    var res = clap.parse(clap.Help, &params, &parsers, .{
+    var res = clap.parse(clap.Help, &params, &parsers, init.minimal.args, .{
         .diagnostic = &diag,
-        .allocator = arena.allocator(),
+        .allocator = init.arena.allocator(),
     }) catch |err| {
-        try diag.reportToFile(.stderr(), err);
-        try clap.usageToFile(.stderr(), clap.Help, &params);
+        try diag.reportToFile(init.io, .stderr(), err);
+        try clap.usageToFile(init.io, .stderr(), clap.Help, &params);
         return;
     };
     defer res.deinit();
 
     if (res.args.help != 0) {
-        return clap.helpToFile(.stderr(), clap.Help, &params, .{});
+        return clap.helpToFile(init.io, .stderr(), clap.Help, &params, .{});
     }
 
     if (res.positionals[0] == null or res.args.file == null) {
-        try diag.reportToFile(.stderr(), error.InvalidArgument);
-        try clap.usageToFile(.stderr(), clap.Help, &params);
+        try diag.reportToFile(init.io, .stderr(), error.InvalidArgument);
+        try clap.usageToFile(init.io, .stderr(), clap.Help, &params);
         return;
     }
 
@@ -268,24 +267,24 @@ pub fn main() !void {
     switch (action) {
         .get, .set, .delete => {
             if (res.args.key == null or (action == .set and res.args.value == null and res.args.@"value-from-file" == null)) {
-                try diag.reportToFile(.stderr(), error.InvalidArgument);
-                try clap.usageToFile(.stderr(), clap.Help, &params);
+                try diag.reportToFile(init.io, .stderr(), error.InvalidArgument);
+                try clap.usageToFile(init.io, .stderr(), clap.Help, &params);
                 return;
             }
         },
         else => {},
     }
 
-    var file = try std.fs.cwd().openFile(res.args.file.?, .{
+    var file = try std.Io.Dir.cwd().openFile(init.io, res.args.file.?, .{
         .mode = switch (action) {
             .list, .get => .read_only,
             .set, .delete => .read_write,
         },
     });
-    defer file.close();
+    defer file.close(init.io);
 
-    var vpd_list = try collectVpd(arena.allocator(), file);
-    defer vpd_list.deinit(arena.allocator());
+    var vpd_list = try collectVpd(init.io, init.arena.allocator(), file);
+    defer vpd_list.deinit(init.arena.allocator());
 
     switch (action) {
         .list => {
@@ -305,11 +304,16 @@ pub fn main() !void {
             }
         },
         .set => {
-            const value = if (res.args.value) |value| try arena.allocator().dupe(u8, value) else b: {
+            const value = if (res.args.value) |value| try init.arena.allocator().dupe(u8, value) else b: {
                 const value_file = res.args.@"value-from-file".?;
-                const file_contents = try std.fs.cwd().readFileAlloc(arena.allocator(), value_file, 8192);
+                const file_contents = try std.Io.Dir.cwd().readFileAlloc(
+                    init.io,
+                    value_file,
+                    init.arena.allocator(),
+                    .limited(8192),
+                );
                 const encoded_size = base64.Encoder.calcSize(file_contents.len);
-                var dest = try arena.allocator().alloc(u8, encoded_size);
+                var dest = try init.arena.allocator().alloc(u8, encoded_size);
                 break :b base64.Encoder.encode(dest[0..], file_contents);
             };
 
@@ -328,10 +332,10 @@ pub fn main() !void {
                 }
 
                 // Otherwise, we add a new key/value
-                try vpd_list.append(arena.allocator(), .{ res.args.key.?, value });
+                try vpd_list.append(init.arena.allocator(), .{ res.args.key.?, value });
             }
 
-            try writeVpd(vpd_list, file);
+            try writeVpd(init.io, vpd_list, file);
         },
         .delete => {
             const found = b: {
@@ -348,7 +352,7 @@ pub fn main() !void {
             };
 
             if (found) {
-                try writeVpd(vpd_list, file);
+                try writeVpd(init.io, vpd_list, file);
             } else {
                 std.debug.print("key '{s}' not found\n", .{res.args.key.?});
             }

@@ -46,10 +46,10 @@ inner: *anyopaque,
 /// Operations that can be ran on the underlying bootloader.
 vtable: *const struct {
     name: *const fn () []const u8,
-    probe: *const fn (*anyopaque, *std.array_list.Managed(Entry), Device) anyerror!void,
+    probe: *const fn (*anyopaque, std.Io, *std.array_list.Managed(Entry), Device) anyerror!void,
     timeout: *const fn (*anyopaque) u8,
-    entryLoaded: *const fn (*anyopaque, Entry, *LiveUpdate) void,
-    deinit: *const fn (*anyopaque, std.mem.Allocator) void,
+    entryLoaded: *const fn (*anyopaque, Entry, std.Io, *LiveUpdate) void,
+    deinit: *const fn (*anyopaque, std.Io, std.mem.Allocator) void,
 },
 
 pub fn init(
@@ -66,27 +66,28 @@ pub fn init(
     inner.* = T.init();
 
     const wrapper = struct {
-        pub fn deinit(ctx: *anyopaque, a: std.mem.Allocator) void {
+        pub fn deinit(ctx: *anyopaque, io: std.Io, a: std.mem.Allocator) void {
             const self: *T = @ptrCast(@alignCast(ctx));
             defer a.destroy(self);
 
-            self.deinit();
+            self.deinit(io);
         }
 
         pub fn probe(
             ctx: *anyopaque,
+            io: std.Io,
             entries: *std.array_list.Managed(Entry),
             d: Device,
         ) !void {
             const self: *T = @ptrCast(@alignCast(ctx));
 
-            try self.probe(entries, d);
+            try self.probe(io, entries, d);
         }
 
-        pub fn entryLoaded(ctx: *anyopaque, entry: Entry, liveupdate: *LiveUpdate) void {
+        pub fn entryLoaded(ctx: *anyopaque, entry: Entry, io: std.Io, liveupdate: *LiveUpdate) void {
             const self: *T = @ptrCast(@alignCast(ctx));
 
-            self.entryLoaded(entry.context, liveupdate);
+            self.entryLoaded(entry.context, io, liveupdate);
         }
 
         pub fn timeout(ctx: *anyopaque) u8 {
@@ -113,26 +114,26 @@ pub fn init(
     };
 }
 
-pub fn deinit(self: *BootLoader) void {
+pub fn deinit(self: *BootLoader, io: std.Io) void {
     defer self.entries.deinit();
 
-    self.vtable.deinit(self.inner, self.allocator);
+    self.vtable.deinit(self.inner, io, self.allocator);
 }
 
 pub fn name(self: *BootLoader) []const u8 {
     return self.vtable.name();
 }
 
-pub fn timeout(self: *BootLoader) !u8 {
-    _ = try self.probe();
+pub fn timeout(self: *BootLoader, io: std.Io) !u8 {
+    _ = try self.probe(io);
 
     return self.vtable.timeout(self.inner);
 }
 
-pub fn probe(self: *BootLoader) ![]const Entry {
+pub fn probe(self: *BootLoader, io: std.Io) ![]const Entry {
     if (!self.probed) {
         std.log.debug("bootloader not yet probed on {f}", .{self.device});
-        try self.vtable.probe(self.inner, &self.entries, self.device);
+        try self.vtable.probe(self.inner, io, &self.entries, self.device);
         self.probed = true;
         std.log.debug("bootloader probed on {f}", .{self.device});
     }
@@ -140,10 +141,10 @@ pub fn probe(self: *BootLoader) ![]const Entry {
     return self.entries.items;
 }
 
-pub fn load(self: *BootLoader, entry: Entry, liveupdate: *LiveUpdate) !void {
+pub fn load(self: *BootLoader, io: std.Io, entry: Entry, liveupdate: *LiveUpdate) !void {
     self.boot_attempted = true;
 
-    try kexec(self.allocator, entry.linux, entry.initrd, entry.cmdline);
+    try kexec(io, self.allocator, entry.linux, entry.initrd, entry.cmdline);
 
-    self.vtable.entryLoaded(self.inner, entry, liveupdate);
+    self.vtable.entryLoaded(self.inner, entry, io, liveupdate);
 }

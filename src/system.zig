@@ -1,7 +1,7 @@
 const std = @import("std");
 const posix = std.posix;
 const linux = std.os.linux;
-const MS = std.os.linux.MS;
+const MS = linux.MS;
 
 const linux_headers = @import("linux_headers");
 
@@ -14,26 +14,26 @@ fn mountPseudoFs(
 ) !void {
     const rc = linux.mount(fstype, path, fstype, flags, 0);
 
-    switch (linux.E.init(rc)) {
+    switch (linux.errno(rc)) {
         .SUCCESS => {},
         else => |err| return posix.unexpectedErrno(err),
     }
 }
 
 /// Mounts basic psuedo-filesystems (/dev, /proc, /sys, etc.).
-pub fn mountPseudoFilesystems() !void {
-    try std.fs.cwd().makePath("/proc");
+pub fn mountPseudoFilesystems(io: std.Io) !void {
+    try std.Io.Dir.cwd().createDirPath(io, "/proc");
     try mountPseudoFs("/proc", "proc", MS.NOSUID | MS.NODEV | MS.NOEXEC);
 
-    try std.fs.cwd().makePath("/sys");
+    try std.Io.Dir.cwd().createDirPath(io, "/sys");
     try mountPseudoFs("/sys", "sysfs", MS.NOSUID | MS.NODEV | MS.NOEXEC | MS.RELATIME);
     try mountPseudoFs("/sys/kernel/security", "securityfs", MS.NOSUID | MS.NODEV | MS.NOEXEC | MS.RELATIME);
     try mountPseudoFs("/sys/kernel/debug", "debugfs", MS.NOSUID | MS.NODEV | MS.NOEXEC | MS.RELATIME);
 
-    try std.fs.cwd().makePath("/dev");
+    try std.Io.Dir.cwd().createDirPath(io, "/dev");
     try mountPseudoFs("/dev", "devtmpfs", MS.SILENT | MS.NOSUID | MS.NOEXEC);
 
-    try std.fs.cwd().makePath("/run");
+    try std.Io.Dir.cwd().createDirPath(io, "/run");
     try mountPseudoFs("/run", "tmpfs", MS.NOSUID | MS.NODEV);
 }
 
@@ -79,7 +79,7 @@ fn cfmakeraw(t: *posix.termios) void {
 }
 
 pub const Tty = struct {
-    file: std.fs.File,
+    file: std.Io.File,
     original: ?State = null,
     mode: ?Mode = null,
 
@@ -91,7 +91,7 @@ pub const Tty = struct {
         file_transfer,
     };
 
-    pub fn init(file: std.fs.File) @This() {
+    pub fn init(file: std.Io.File) @This() {
         return .{ .file = file };
     }
 
@@ -213,11 +213,11 @@ pub fn printKernelLogs(
     filter: u3,
     writer: *std.Io.Writer,
 ) !void {
-    const bytes_available = std.os.linux.syscall3(.syslog, SYSLOG_ACTION_UNREAD, 0, 0);
+    const bytes_available = linux.syscall3(.syslog, SYSLOG_ACTION_UNREAD, 0, 0);
     const buf = try allocator.alloc(u8, bytes_available);
     defer allocator.free(buf);
 
-    switch (linux.E.init(std.os.linux.syscall3(
+    switch (linux.errno(linux.syscall3(
         .syslog,
         SYSLOG_ACTION_READ_ALL,
         @intFromPtr(buf.ptr),
@@ -247,7 +247,7 @@ pub fn printKernelLogs(
 }
 
 pub fn setConsole(toggle: enum { on, off }) !void {
-    switch (std.os.linux.E.init(std.os.linux.syscall3(
+    switch (linux.errno(linux.syscall3(
         .syslog,
         switch (toggle) {
             .on => SYSLOG_ACTION_CONSOLE_ON,

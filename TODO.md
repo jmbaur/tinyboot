@@ -5,3 +5,4 @@
 - use non-volatile storage for configuration of boot order, etc.
 - use CONFIG_MFD_CROS_EC_DEV & CONFIG_CROS_EC_VBC in linux
 - fuzz testing (outside of normal build and test procedure)
+- std.os.linux syscall error handling

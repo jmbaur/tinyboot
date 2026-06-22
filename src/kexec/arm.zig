@@ -56,6 +56,7 @@ fn mmapFile(file: std.fs.File) ![]align(std.heap.page_size_min) u8 {
 // invoking the next kernel with the correct r2 register value
 // (https://github.com/torvalds/linux/blob/0e1329d4045ca3606f9c06a8c47f62e758a09105/arch/arm/kernel/machine_kexec.c#L51).
 pub fn kexecLoad(
+    io: std.Io,
     allocator: std.mem.Allocator,
     linux: std.fs.File,
     initrd: ?std.fs.File,
@@ -153,8 +154,8 @@ pub fn kexecLoad(
 
     const extra_size = 0x8000; // TEXT_OFFSET
 
-    const proc_iomem = try std.fs.cwd().openFile("/proc/iomem", .{});
-    defer proc_iomem.close();
+    const proc_iomem = try std.Io.Dir.cwd().openFile(io, "/proc/iomem", .{});
+    defer proc_iomem.close(io);
     var buffer: [1024]u8 = undefined;
     var proc_iomem_reader = proc_iomem.reader(&buffer);
     const memory_ranges = try getMemoryRanges(allocator, &proc_iomem_reader.interface);
@@ -179,8 +180,8 @@ pub fn kexecLoad(
     std.log.debug("kernel: address=0x{x} size=0x{x}", .{ kernel_base, uncompressed_kernel_size });
 
     // TODO(jared): we need to be able to inject the kernel parameters into /chosen/bootargs
-    const sys_firmware_fdt = try std.fs.cwd().openFile("/sys/firmware/fdt", .{});
-    defer sys_firmware_fdt.close();
+    const sys_firmware_fdt = try std.Io.Dir.cwd().openFile(io, "/sys/firmware/fdt", .{});
+    defer sys_firmware_fdt.close(io);
 
     var fdt_buffer: [1024]u8 = undefined;
     var fdt_reader = sys_firmware_fdt.reader(&fdt_buffer);
@@ -218,8 +219,8 @@ pub fn kexecLoad(
             try fdt.upsertU32Property("/chosen/linux,initrd-end", initrd_end);
 
             // Insert KASLR seed if a hardware RNG is available
-            if (std.fs.cwd().openFile("/dev/char/10:183", .{})) |hwrng| {
-                defer hwrng.close();
+            if (std.Io.Dir.cwd().openFile(io, "/dev/char/10:183", .{})) |hwrng| {
+                defer hwrng.close(io);
 
                 var hwrng_buf: [@sizeOf(u64)]u8 = undefined;
                 var hwrng_reader = hwrng.reader(&hwrng_buf);
@@ -396,7 +397,7 @@ test "locate hole" {
 
 // parses memory ranges from a /proc/iomem stream
 fn getMemoryRanges(allocator: std.mem.Allocator, reader: *std.Io.Reader) ![]MemoryRange {
-    var memory_ranges = std.ArrayList(MemoryRange){};
+    var memory_ranges: std.ArrayList(MemoryRange) = .empty;
     errdefer memory_ranges.deinit(allocator);
 
     var buf = [_]u8{0} ** 255; // unlikely to encounter a line this large

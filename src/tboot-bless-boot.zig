@@ -1,6 +1,7 @@
 const builtin = @import("builtin");
 const std = @import("std");
 const clap = @import("clap");
+const linux = std.os.linux;
 
 pub const std_options = std.Options{ .log_level = if (builtin.mode == .Debug) .debug else .info };
 
@@ -33,8 +34,9 @@ const Action = enum {
 };
 
 fn markAsGood(
+    io: std.Io,
     allocator: std.mem.Allocator,
-    parent_dir: std.fs.Dir,
+    parent_dir: std.Io.Dir,
     original_entry_filename: []const u8,
     bls_entry_file: BlsEntryFile,
 ) !void {
@@ -47,13 +49,14 @@ fn markAsGood(
             .{bls_entry_file.name},
         );
 
-        try parent_dir.rename(original_entry_filename, new_filename);
+        try parent_dir.rename(original_entry_filename, std.Io.Dir.cwd(), new_filename, io);
     }
 }
 
 fn markAsBad(
+    io: std.Io,
     allocator: std.mem.Allocator,
-    parent_dir: std.fs.Dir,
+    parent_dir: std.Io.Dir,
     original_entry_filename: []const u8,
     bls_entry_file: BlsEntryFile,
 ) !void {
@@ -73,16 +76,17 @@ fn markAsBad(
         }
     };
 
-    try parent_dir.rename(original_entry_filename, new_filename);
+    try parent_dir.rename(original_entry_filename, std.Io.Dir.cwd(), new_filename, io);
 }
 
 fn printStatus(
+    io: std.Io,
     original_entry_filename: []const u8,
     bls_entry_file: BlsEntryFile,
 ) !void {
-    var stdout_file = std.fs.File.stdout();
-    var buf = [_]u8{0} ** 1024;
-    var stdout_writer = stdout_file.writer(&buf);
+    var buf: [1024]u8 = undefined;
+    var stdout_file = std.Io.File.stdout();
+    var stdout_writer = stdout_file.writer(io, &buf);
     var writer = &stdout_writer.interface;
     defer writer.flush() catch {};
 
@@ -106,6 +110,7 @@ fn printStatus(
 }
 
 fn findEntry(
+    io: std.Io,
     allocator: std.mem.Allocator,
     esp_mnt: []const u8,
     entry_name: []const u8,
@@ -116,14 +121,15 @@ fn findEntry(
         &.{ esp_mnt, "loader", "entries" },
     );
 
-    var entries_dir = try std.fs.cwd().openDir(
+    var entries_dir = try std.Io.Dir.cwd().openDir(
+        io,
         entries_path,
         .{ .iterate = true },
     );
-    defer entries_dir.close();
+    defer entries_dir.close(io);
 
     var iter = entries_dir.iterate();
-    while (try iter.next()) |dir_entry| {
+    while (try iter.next(io)) |dir_entry| {
         if (dir_entry.kind != .file) {
             continue;
         }
@@ -138,9 +144,9 @@ fn findEntry(
 
         if (std.mem.eql(u8, bls_entry.name, entry_name)) {
             return switch (action) {
-                .good => try markAsGood(allocator, entries_dir, dir_entry.name, bls_entry),
-                .bad => try markAsBad(allocator, entries_dir, dir_entry.name, bls_entry),
-                .status => try printStatus(dir_entry.name, bls_entry),
+                .good => try markAsGood(io, allocator, entries_dir, dir_entry.name, bls_entry),
+                .bad => try markAsBad(io, allocator, entries_dir, dir_entry.name, bls_entry),
+                .status => try printStatus(io, dir_entry.name, bls_entry),
             };
         }
     }
@@ -148,10 +154,8 @@ fn findEntry(
     return Error.MissingBlsEntry;
 }
 
-pub fn main() !void {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.arena.allocator();
 
     const params = comptime clap.parseParamsComptime(
         \\-h, --help              Display this help and exit.
@@ -166,36 +170,38 @@ pub fn main() !void {
     };
 
     var diag = clap.Diagnostic{};
-    var res = clap.parse(clap.Help, &params, &parsers, .{
+    var res = clap.parse(clap.Help, &params, &parsers, init.minimal.args, .{
         .diagnostic = &diag,
-        .allocator = arena.allocator(),
+        .allocator = init.arena.allocator(),
     }) catch |err| {
-        try diag.reportToFile(.stderr(), err);
-        try clap.usageToFile(.stderr(), clap.Help, &params);
+        try diag.reportToFile(init.io, .stderr(), err);
+        try clap.usageToFile(init.io, .stderr(), clap.Help, &params);
         return;
     };
     defer res.deinit();
 
     if (res.args.help != 0) {
-        return clap.helpToFile(.stderr(), clap.Help, &params, .{});
+        return clap.helpToFile(init.io, .stderr(), clap.Help, &params, .{});
     }
 
     const esp_mnt = res.args.@"esp-mnt" orelse std.fs.path.sep_str ++ "boot";
     const action = if (res.positionals[0]) |action| try Action.fromStr(action) else Action.status;
 
-    var liveupdate = try LiveUpdate.init(.retrieve);
-    defer liveupdate.deinit();
+    var liveupdate = try LiveUpdate.init(init.io, .retrieve);
+    defer liveupdate.deinit(init.io);
 
     const memfd = try liveupdate.retrieve(DiskBootLoader.luo_entry_token);
-    defer std.posix.close(memfd);
+    defer _ = linux.close(memfd);
 
-    try std.posix.lseek_SET(memfd, 0);
+    // TODO(jared): error handling
+    _ = linux.lseek(memfd, 0, linux.SEEK.SET);
 
     var buf: [1024]u8 = undefined;
     const read = try std.posix.read(memfd, &buf);
     const tboot_bls_entry = buf[0..read];
 
     try findEntry(
+        init.io,
         allocator,
         esp_mnt,
         tboot_bls_entry,

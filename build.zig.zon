@@ -6,8 +6,8 @@
     .paths = .{ "build.zig", "build.zig.zon", "src", "vendor" },
     .dependencies = .{
         .clap = .{
-            .url = "https://github.com/jmbaur/zig-clap/archive/76f87a072e1be64834829ccba625aef0f0bd4fdd.tar.gz",
-            .hash = "clap-0.11.0-oBajB-3nAQAWHQx0oqlPOm4KLcvO4xEEvxg31WMlFh_Q",
+            .url = "https://github.com/hejsil/zig-clap/archive/refs/tags/0.12.0.tar.gz",
+            .hash = "clap-0.12.0-oBajB7foAQDqlSwaSG5g0yq7xGbQARUsBk5T64gAOqP5",
         },
         .mbedtls = .{ .path = "./deps/mbedtls/" },
         .zstd = .{ .path = "./deps/zstd/" },

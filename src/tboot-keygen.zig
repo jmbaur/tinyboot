@@ -55,10 +55,7 @@ fn fixed_seed(ctx: ?*anyopaque, buffer: [*c]u8, len: usize) callconv(.c) c_int {
     return 0;
 }
 
-pub fn main() !void {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-
+pub fn main(init: std.process.Init) !void {
     const params = comptime clap.parseParamsComptime(
         \\-h, --help                  Display this help and exit.
         \\-s, --seed <STR>            Seed to use when generating keys (only set if reproducibility is needed).
@@ -76,32 +73,32 @@ pub fn main() !void {
     };
 
     var diag = clap.Diagnostic{};
-    var res = clap.parse(clap.Help, &params, &parsers, .{
+    var res = clap.parse(clap.Help, &params, &parsers, init.minimal.args, .{
         .diagnostic = &diag,
-        .allocator = arena.allocator(),
+        .allocator = init.arena.allocator(),
     }) catch |err| {
-        try diag.reportToFile(.stderr(), err);
-        try clap.usageToFile(.stderr(), clap.Help, &params);
+        try diag.reportToFile(init.io, .stderr(), err);
+        try clap.usageToFile(init.io, .stderr(), clap.Help, &params);
         return;
     };
     defer res.deinit();
 
     if (res.args.help != 0) {
-        return clap.helpToFile(.stderr(), clap.Help, &params, .{});
+        return clap.helpToFile(init.io, .stderr(), clap.Help, &params, .{});
     }
 
     const time_now: u64 = res.args.@"time-now" orelse @intCast(C.time(null));
     const valid_seconds: u64 = res.args.@"valid-seconds" orelse 60 * 60 * 24 * 365;
     const common_name: []const u8 = res.args.@"common-name" orelse {
-        try clap.usageToFile(.stderr(), clap.Help, &params);
+        try clap.usageToFile(init.io, .stderr(), clap.Help, &params);
         return;
     };
     const organization: []const u8 = res.args.organization orelse {
-        try clap.usageToFile(.stderr(), clap.Help, &params);
+        try clap.usageToFile(init.io, .stderr(), clap.Help, &params);
         return;
     };
     const country: []const u8 = res.args.country orelse {
-        try clap.usageToFile(.stderr(), clap.Help, &params);
+        try clap.usageToFile(init.io, .stderr(), clap.Help, &params);
         return;
     };
 
@@ -138,10 +135,12 @@ pub fn main() !void {
     {
         try mbedtls.wrap(C.mbedtls_pk_write_pubkey_pem(&key, &key_buf, key_buf.len));
 
-        const pub_out = try std.fs.cwd().createFile("tboot-public.pem", .{ .mode = 0o444 });
-        defer pub_out.close();
+        const pub_out = try std.Io.Dir.cwd().createFile(init.io, "tboot-public.pem", .{ .permissions = .fromMode(0o444) });
+        defer pub_out.close(init.io);
 
-        try pub_out.writeAll(std.mem.trim(u8, &key_buf, &.{0}));
+        var writer = pub_out.writer(init.io, &.{});
+        try writer.interface.writeAll(std.mem.trim(u8, &key_buf, &.{0}));
+        try writer.interface.flush();
     }
 
     key_buf = std.mem.zeroes(@TypeOf(key_buf));
@@ -150,10 +149,16 @@ pub fn main() !void {
     {
         try mbedtls.wrap(C.mbedtls_pk_write_key_pem(&key, &key_buf, key_buf.len));
 
-        const priv_out = try std.fs.cwd().createFile("tboot-private.pem", .{ .mode = 0o444 });
-        defer priv_out.close();
+        const priv_out = try std.Io.Dir.cwd().createFile(
+            init.io,
+            "tboot-private.pem",
+            .{ .permissions = .fromMode(0o444) },
+        );
+        defer priv_out.close(init.io);
 
-        try priv_out.writeAll(std.mem.trim(u8, &key_buf, &.{0}));
+        var writer = priv_out.writer(init.io, &.{});
+        try writer.interface.writeAll(std.mem.trim(u8, &key_buf, &.{0}));
+        try writer.interface.flush();
     }
 
     // generate x509 cert
@@ -170,9 +175,9 @@ pub fn main() !void {
     C.mbedtls_x509write_crt_set_subject_key(&crt, &key);
     C.mbedtls_x509write_crt_set_issuer_key(&crt, &key);
 
-    const name = try std.fmt.allocPrint(arena.allocator(), "CN={s},O={s},C={s}", .{ common_name, organization, country });
-    try mbedtls.wrap(C.mbedtls_x509write_crt_set_subject_name(&crt, try arena.allocator().dupeZ(u8, name)));
-    try mbedtls.wrap(C.mbedtls_x509write_crt_set_issuer_name(&crt, try arena.allocator().dupeZ(u8, name)));
+    const name = try std.fmt.allocPrint(init.arena.allocator(), "CN={s},O={s},C={s}", .{ common_name, organization, country });
+    try mbedtls.wrap(C.mbedtls_x509write_crt_set_subject_name(&crt, try init.arena.allocator().dupeZ(u8, name)));
+    try mbedtls.wrap(C.mbedtls_x509write_crt_set_issuer_name(&crt, try init.arena.allocator().dupeZ(u8, name)));
 
     C.mbedtls_x509write_crt_set_md_alg(&crt, C.MBEDTLS_MD_SHA256);
 
@@ -186,8 +191,8 @@ pub fn main() !void {
     var after_buf = [_]u8{0} ** 15;
 
     // mbedtls expects the 'Z' to not be present
-    const not_before_time = try arena.allocator().dupeZ(u8, (try generalizedTime(.{ .secs = not_before_seconds }, &before_buf))[0..14]);
-    const not_after_time = try arena.allocator().dupeZ(u8, (try generalizedTime(.{ .secs = not_after_seconds }, &after_buf))[0..14]);
+    const not_before_time = try init.arena.allocator().dupeZ(u8, (try generalizedTime(.{ .secs = not_before_seconds }, &before_buf))[0..14]);
+    const not_after_time = try init.arena.allocator().dupeZ(u8, (try generalizedTime(.{ .secs = not_after_seconds }, &after_buf))[0..14]);
 
     try mbedtls.wrap(C.mbedtls_x509write_crt_set_validity(
         &crt,
@@ -212,11 +217,13 @@ pub fn main() !void {
             &ctr_drbg,
         )));
 
-        const cert_der_out = try std.fs.cwd().createFile("tboot-certificate.der", .{ .mode = 0o444 });
-        defer cert_der_out.close();
+        const cert_der_out = try std.Io.Dir.cwd().createFile(init.io, "tboot-certificate.der", .{ .permissions = .fromMode(0o444) });
+        defer cert_der_out.close(init.io);
 
         const start: usize = cert_buf.len - len;
-        try cert_der_out.writeAll(std.mem.trim(u8, cert_buf[start .. start + len], &.{0}));
+        var writer = cert_der_out.writer(init.io, &.{});
+        try writer.interface.writeAll(std.mem.trim(u8, cert_buf[start .. start + len], &.{0}));
+        try writer.interface.flush();
     }
 
     cert_buf = std.mem.zeroes(@TypeOf(cert_buf));
@@ -231,9 +238,11 @@ pub fn main() !void {
             &ctr_drbg,
         ));
 
-        const cert_pem_out = try std.fs.cwd().createFile("tboot-certificate.pem", .{ .mode = 0o444 });
-        defer cert_pem_out.close();
+        const cert_pem_out = try std.Io.Dir.cwd().createFile(init.io, "tboot-certificate.pem", .{ .permissions = .fromMode(0o444) });
+        defer cert_pem_out.close(init.io);
 
-        try cert_pem_out.writeAll(std.mem.trim(u8, &cert_buf, &.{0}));
+        var writer = cert_pem_out.writer(init.io, &.{});
+        try writer.interface.writeAll(std.mem.trim(u8, &cert_buf, &.{0}));
+        try writer.interface.flush();
     }
 }

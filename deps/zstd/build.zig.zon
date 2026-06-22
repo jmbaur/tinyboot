@@ -1,5 +1,6 @@
 .{
     .name = .zstd,
+    .fingerprint = 0x72fd505e7fa015d5,
     .version = "1.5.7",
     .paths = .{"build.zig"},
     .dependencies = .{

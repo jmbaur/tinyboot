@@ -15,6 +15,7 @@ pub fn init() Autoboot {
 
 pub fn run(
     self: *Autoboot,
+    io: std.Io,
     boot_loaders: *std.array_list.Managed(*BootLoader),
     timerfd: posix.fd_t,
     liveupdate: *LiveUpdate,
@@ -30,10 +31,10 @@ pub fn run(
 
         std.log.info("autobooting {f}", .{boot_loader.device});
 
-        const entries = try boot_loader.probe();
+        const entries = try boot_loader.probe(io);
 
         for (entries) |entry| {
-            boot_loader.load(entry, liveupdate) catch |err| {
+            boot_loader.load(io, entry, liveupdate) catch |err| {
                 std.log.err(
                     "failed to load entry {s}: {}",
                     .{ entry.linux, err },
@@ -70,12 +71,12 @@ pub fn run(
         self.boot_loader = head;
 
         std.debug.assert(self.boot_loader != null);
-        const timeout = try self.boot_loader.?.timeout();
+        const timeout = try self.boot_loader.?.timeout(io);
 
         if (timeout == 0) {
-            return self.run(boot_loaders, timerfd, liveupdate);
+            return self.run(io, boot_loaders, timerfd, liveupdate);
         } else {
-            try posix.timerfd_settime(timerfd, .{}, &.{
+            _ = std.os.linux.timerfd_settime(timerfd, .{}, &.{
                 // oneshot
                 .it_interval = .{ .sec = 0, .nsec = 0 },
                 // wait for `timeout` seconds before continuing to boot

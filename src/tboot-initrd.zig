@@ -21,13 +21,15 @@ const BoolArgument = enum {
 };
 
 fn compress(
+    io: std.Io,
     arena: *std.heap.ArenaAllocator,
     output: []const u8,
-    archive_file: std.fs.File,
+    archive_file: std.Io.File,
 ) !void {
-    try archive_file.seekTo(0);
+    var file_reader = archive_file.reader(io, &.{});
+    try file_reader.seekTo(0);
 
-    const archive_file_buf = try archive_file.readToEndAlloc(arena.allocator(), std.math.maxInt(usize));
+    const archive_file_buf = try file_reader.interface.allocRemaining(arena.allocator(), .unlimited);
     const compressed = try zstd.compress(arena.allocator(), archive_file_buf);
     defer compressed.deinit();
 
@@ -37,18 +39,17 @@ fn compress(
         .{output},
     );
 
-    var compressed_file = try std.fs.cwd().createFile(compressed_output, .{ .mode = 0o444 });
-    defer compressed_file.close();
+    var compressed_file = try std.Io.Dir.cwd().createFile(io, compressed_output, .{ .permissions = .fromMode(0o444) });
+    defer compressed_file.close(io);
 
-    try compressed_file.writeAll(compressed.content());
+    var buf: [1024]u8 = undefined;
+    var writer = compressed_file.writer(io, &buf);
+    try writer.interface.writeAll(compressed.content());
 
-    try std.fs.cwd().rename(compressed_output, output);
+    try std.Io.Dir.cwd().rename(compressed_output, std.Io.Dir.cwd(), output, io);
 }
 
-pub fn main() !void {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-
+pub fn main(init: std.process.Init) !void {
     const params = comptime clap.parseParamsComptime(
         \\-h, --help                    Display this help and exit.
         \\-c, --compress <BOOL>         Specify whether archive should be compressed.
@@ -65,58 +66,71 @@ pub fn main() !void {
     };
 
     var diag = clap.Diagnostic{};
-    var res = clap.parse(clap.Help, &params, &parsers, .{
+    var res = clap.parse(clap.Help, &params, &parsers, init.minimal.args, .{
         .diagnostic = &diag,
-        .allocator = arena.allocator(),
+        .allocator = init.arena.allocator(),
     }) catch |err| {
-        try diag.reportToFile(.stderr(), err);
-        try clap.usageToFile(.stderr(), clap.Help, &params);
+        try diag.reportToFile(init.io, .stderr(), err);
+        try clap.usageToFile(init.io, .stderr(), clap.Help, &params);
         return;
     };
     defer res.deinit();
 
     if (res.args.help != 0) {
-        return clap.helpToFile(.stderr(), clap.Help, &params, .{});
+        return clap.helpToFile(init.io, .stderr(), clap.Help, &params, .{});
     }
 
     if (res.args.init == null or res.args.output == null) {
-        try diag.reportToFile(.stderr(), error.InvalidArgument);
-        try clap.usageToFile(.stderr(), clap.Help, &params);
+        try diag.reportToFile(init.io, .stderr(), error.InvalidArgument);
+        try clap.usageToFile(init.io, .stderr(), clap.Help, &params);
         return;
     }
 
     const do_compress: bool = if (res.args.compress) |do_compress| do_compress.to_bool() else true;
-    const init: []const u8 = res.args.init.?;
+    const init_: []const u8 = res.args.init.?;
     const directories: []const []const u8 = res.args.directory;
     const output: []const u8 = res.args.output.?;
 
-    var archive_file = try std.fs.cwd().createFile(
+    var archive_file = try std.Io.Dir.cwd().createFile(
+        init.io,
         output,
-        .{ .read = true, .mode = 0o444 },
+        .{ .read = true, .permissions = .fromMode(0o444) },
     );
-    defer archive_file.close();
+    defer archive_file.close(init.io);
 
     var writer_buffer: [1024]u8 = undefined;
-    var archive_file_writer = archive_file.writer(&writer_buffer);
+    var archive_file_writer = archive_file.writer(init.io, &writer_buffer);
     var archive = try CpioArchive.init(&archive_file_writer.interface);
 
-    var init_file = try std.fs.cwd().openFile(init, .{});
-    defer init_file.close();
+    var init_file = try std.Io.Dir.cwd().openFile(init.io, init_, .{});
+    defer init_file.close(init.io);
 
-    try archive.addFile("init", init_file, 0o755);
+    const init_file_stat = try init_file.stat(init.io);
+    if (init_file_stat.size > std.math.maxInt(u32)) {
+        return error.FileTooLarge;
+    }
+
+    try archive.addFile(
+        init.io,
+        "init",
+        init_file,
+        @intCast(init_file_stat.size),
+        .fromMode(0o755),
+    );
 
     for (directories) |directory_path| {
-        var dir = try std.fs.cwd().openDir(
+        var dir = try std.Io.Dir.cwd().openDir(
+            init.io,
             directory_path,
             .{ .iterate = true },
         );
-        defer dir.close();
-        try CpioArchive.walkDirectory(&arena, directory_path, &archive, &dir);
+        defer dir.close(init.io);
+        try CpioArchive.walkDirectory(init.io, init.arena, directory_path, &archive, &dir);
     }
 
     try archive.finalize();
 
     if (do_compress) {
-        try compress(&arena, output, archive_file);
+        try compress(init.io, init.arena, output, archive_file);
     }
 }

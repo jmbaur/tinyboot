@@ -1,15 +1,15 @@
 const std = @import("std");
 
-pub fn pathExists(d: *const std.fs.Dir, p: []const u8) bool {
-    d.access(p, .{}) catch {
+pub fn pathExists(io: std.Io, d: std.Io.Dir, p: []const u8) bool {
+    d.access(io, p, .{}) catch {
         return false;
     };
 
     return true;
 }
 
-pub fn absolutePathExists(p: []const u8) bool {
-    return pathExists(&std.fs.cwd(), p);
+pub fn absolutePathExists(io: std.Io, p: []const u8) bool {
+    return pathExists(io, std.Io.Dir.cwd(), p);
 }
 
 pub fn enumFromStr(T: anytype, value: []const u8) !T {
@@ -22,9 +22,9 @@ pub fn enumFromStr(T: anytype, value: []const u8) !T {
     return error.NotFound;
 }
 
-pub fn dumpFile(dir: std.fs.Dir, writer: *std.Io.Writer, path: []const u8) !void {
-    const file = try dir.openFile(path, .{});
-    defer file.close();
+pub fn dumpFile(io: std.Io, dir: std.Io.Dir, writer: *std.Io.Writer, path: []const u8) !void {
+    const file = try dir.openFile(io, path, .{});
+    defer file.close(io);
 
     // Use readerStreaming() on files in proc, since reader() uses stat()
     // information to determine how much we can stream, which is not useful for
@@ -34,7 +34,7 @@ pub fn dumpFile(dir: std.fs.Dir, writer: *std.Io.Writer, path: []const u8) !void
         u8,
         path,
         std.fs.path.sep_str ++ "proc",
-    )) file.readerStreaming(&buffer) else file.reader(&buffer);
+    )) file.readerStreaming(io, &buffer) else file.reader(io, &buffer);
     while (file_reader.interface.stream(writer, .unlimited)) |_| {} else |err| switch (err) {
         error.EndOfStream => {},
         else => return err,
@@ -42,12 +42,13 @@ pub fn dumpFile(dir: std.fs.Dir, writer: *std.Io.Writer, path: []const u8) !void
 }
 
 pub fn realpathAllocMany(
-    dir: std.fs.Dir,
+    io: std.Io,
+    dir: std.Io.Dir,
     allocator: std.mem.Allocator,
     path_options: []const []const u8,
 ) ![]u8 {
     for (path_options) |path| {
-        const fullpath = dir.realpathAlloc(allocator, path) catch |err| switch (err) {
+        const fullpath = dir.realPathFileAlloc(io, path, allocator) catch |err| switch (err) {
             error.FileNotFound => continue,
             else => return err,
         };

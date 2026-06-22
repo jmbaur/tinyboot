@@ -17,13 +17,13 @@ fn tbootInitrd(
         .target = target,
         .optimize = optimize,
         .strip = strip,
+        .link_libc = true,
     });
     const tboot_initrd = b.addExecutable(.{
         .name = "tboot-initrd",
         .root_module = tboot_initrd_module,
     });
-    tboot_initrd.linkLibC();
-    tboot_initrd.linkLibrary(zstd);
+    tboot_initrd.root_module.linkLibrary(zstd);
     tboot_initrd.root_module.addImport("clap", clap);
     return tboot_initrd;
 }
@@ -35,9 +35,6 @@ pub fn build(b: *std.Build) !void {
         "version",
         try std.fmt.allocPrint(b.allocator, "{f}", .{version}),
     );
-
-    var env = try std.process.getEnvMap(b.allocator);
-    defer env.deinit();
 
     const target = b.standardTargetOptions(.{ .default_target = .{ .cpu_model = .baseline } });
 
@@ -86,7 +83,7 @@ pub fn build(b: *std.Build) !void {
 
     const runner_keydir = b.option([]const u8, "keydir", "Directory of keys to use when spawning VM runner (as output by tboot-keygen)");
 
-    const runner_kernel = b.option([]const u8, "kernel", "Kernel to use when spawning VM runner") orelse env.get("TINYBOOT_KERNEL");
+    const runner_kernel = b.option([]const u8, "kernel", "Kernel to use when spawning VM runner") orelse b.graph.environ_map.get("TINYBOOT_KERNEL");
 
     const clap_dependency = b.dependency("clap", .{});
     const clap = clap_dependency.module("clap");
@@ -131,7 +128,7 @@ pub fn build(b: *std.Build) !void {
     tboot_sign.root_module.link_libc = true;
     tboot_sign.root_module.linkLibrary(mbedtls);
     tboot_sign.root_module.addImport("clap", clap);
-    b.installArtifact(tboot_sign);
+    // b.installArtifact(tboot_sign);
 
     const tboot_keygen_module = b.createModule(.{
         .root_source_file = b.path("src/tboot-keygen.zig"),
@@ -220,7 +217,7 @@ pub fn build(b: *std.Build) !void {
         tboot_nixos_install.root_module.link_libc = true;
         tboot_nixos_install.root_module.linkLibrary(mbedtls);
         tboot_nixos_install.root_module.addImport("clap", clap);
-        b.installArtifact(tboot_nixos_install);
+        // b.installArtifact(tboot_nixos_install);
     }
 
     const tboot_loader_module = b.createModule(.{
@@ -302,7 +299,7 @@ pub fn build(b: *std.Build) !void {
     runner_tool.addArg(@tagName(target.result.cpu.arch));
     runner_tool.addArg(if (runner_keydir) |keydir| keydir else "");
     runner_tool.addFileArg(initrd_file.source);
-    runner_tool.addArg(if (runner_kernel) |kernel| try std.fs.cwd().realpathAlloc(b.allocator, kernel) else "");
+    runner_tool.addArg(if (runner_kernel) |kernel| try std.Io.Dir.cwd().realPathFileAlloc(b.graph.io, kernel, b.allocator) else "");
 
     // Extra arguments passed through to qemu. We add our own '--' since
     // zig-clap will accept variadic extra arguments only after the

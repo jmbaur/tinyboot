@@ -2,13 +2,11 @@ const std = @import("std");
 const builtin = @import("builtin");
 const clap = @import("clap");
 
+const tmpdir = @import("tmpdir.zig");
 const utils = @import("./utils.zig");
 
-pub fn main() !void {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-
-    const arena_alloc = arena.allocator();
+pub fn main(init: std.process.Init) !void {
+    const arena_alloc = init.arena.allocator();
 
     const params = comptime clap.parseParamsComptime(
         \\-h, --help              Display this help and exit.
@@ -30,18 +28,18 @@ pub fn main() !void {
     };
 
     var diag = clap.Diagnostic{};
-    var res = clap.parse(clap.Help, &params, &parsers, .{
+    var res = clap.parse(clap.Help, &params, &parsers, init.minimal.args, .{
         .diagnostic = &diag,
-        .allocator = arena.allocator(),
+        .allocator = init.arena.allocator(),
     }) catch |err| {
-        try diag.reportToFile(.stderr(), err);
-        try clap.usageToFile(.stderr(), clap.Help, &params);
+        try diag.reportToFile(init.io, .stderr(), err);
+        try clap.usageToFile(init.io, .stderr(), clap.Help, &params);
         return;
     };
     defer res.deinit();
 
     if (res.args.help != 0) {
-        return clap.helpToFile(.stderr(), clap.Help, &params, .{});
+        return clap.helpToFile(init.io, .stderr(), clap.Help, &params, .{});
     }
 
     const arch = res.positionals[0].?;
@@ -50,15 +48,15 @@ pub fn main() !void {
     const kernel = res.positionals[3].?;
     const extra_qemu_args = res.positionals[4];
 
-    var tempdir = std.testing.tmpDir(.{});
-    defer tempdir.cleanup();
+    var tempdir = try tmpdir.create(init.io, std.Io.Dir.cwd(), "/tmp", .{});
+    defer tempdir.cleanup(init.io);
 
     if (std.mem.eql(u8, kernel, "")) {
         std.log.err("Cannot execute runner without kernel", .{});
         return error.InvalidArgument;
     }
 
-    var qemu_args = std.ArrayList([]const u8){};
+    var qemu_args: std.ArrayList([]const u8) = .empty;
 
     try qemu_args.append(arena_alloc, switch (arch) {
         .aarch64 => "qemu-system-aarch64",
@@ -67,7 +65,7 @@ pub fn main() !void {
         else => return error.UnknownArchitecture,
     });
 
-    if (builtin.target.os.tag == .linux and utils.absolutePathExists("/dev/kvm") and builtin.target.cpu.arch == arch) {
+    if (builtin.target.os.tag == .linux and utils.absolutePathExists(init.io, "/dev/kvm") and builtin.target.cpu.arch == arch) {
         try qemu_args.append(arena_alloc, "-enable-kvm");
     }
 
@@ -97,7 +95,7 @@ pub fn main() !void {
         });
     }
 
-    const tempdir_path = try tempdir.dir.realpathAlloc(arena_alloc, ".");
+    const tempdir_path = try tempdir.dir.realPathFileAlloc(init.io, ".", arena_alloc);
     try qemu_args.appendSlice(arena_alloc, &.{
         "-chardev", try std.fmt.allocPrint(arena_alloc, "socket,id=chrtpm,path={s}/swtpm.sock", .{tempdir_path}),
         "-tpmdev",  "emulator,id=tpm0,chardev=chrtpm",
@@ -113,19 +111,20 @@ pub fn main() !void {
         try qemu_args.append(arena_alloc, arg);
     }
 
-    var swtpm_child = std.process.Child.init(&.{
-        "swtpm",       "socket",
-        "--terminate", "--tpm2",
-        "--flags",     "not-need-init",
-        "--log",       try std.fmt.allocPrint(arena_alloc, "file={s}/swtpm.log,level=6", .{tempdir_path}),
-        "--tpmstate",  try std.fmt.allocPrint(arena_alloc, "dir={s}", .{tempdir_path}),
-        "--ctrl",      try std.fmt.allocPrint(arena_alloc, "type=unixio,path={s}/swtpm.sock", .{tempdir_path}),
-    }, arena_alloc);
-    try swtpm_child.spawn();
-    defer _ = swtpm_child.kill() catch {};
+    var swtpm_child = try init.io.vtable.processSpawn(init.io.userdata, .{
+        .argv = &.{
+            "swtpm",       "socket",
+            "--terminate", "--tpm2",
+            "--flags",     "not-need-init",
+            "--log",       try std.fmt.allocPrint(arena_alloc, "file={s}/swtpm.log,level=6", .{tempdir_path}),
+            "--tpmstate",  try std.fmt.allocPrint(arena_alloc, "dir={s}", .{tempdir_path}),
+            "--ctrl",      try std.fmt.allocPrint(arena_alloc, "type=unixio,path={s}/swtpm.sock", .{tempdir_path}),
+        },
+    });
+    defer swtpm_child.kill(init.io);
 
-    var qemu_child = std.process.Child.init(try qemu_args.toOwnedSlice(
-        arena_alloc,
-    ), arena_alloc);
-    _ = try qemu_child.spawnAndWait();
+    var qemu_child = try init.io.vtable.processSpawn(init.io.userdata, .{
+        .argv = try qemu_args.toOwnedSlice(arena_alloc),
+    });
+    _ = try qemu_child.wait(init.io);
 }

@@ -1,7 +1,8 @@
+const builtin = @import("builtin");
 const std = @import("std");
 const posix = std.posix;
+const linux = std.os.linux;
 const process = std.process;
-const builtin = @import("builtin");
 
 const BootLoader = @import("./boot/bootloader.zig");
 const Fdt = @import("./fdt.zig");
@@ -31,7 +32,7 @@ const soh = std.ascii.control_code.soh;
 const stx = std.ascii.control_code.stx;
 const vt = std.ascii.control_code.vt;
 
-const ArgsIterator = process.ArgIteratorGeneral(.{});
+const ArgsIterator = process.Args.IteratorGeneral(.{});
 
 pub const Event = enum {
     /// Reboot initiated from console.
@@ -48,18 +49,17 @@ const Console = @This();
 
 const NON_WORD_CHARS = std.ascii.whitespace ++ [_]u8{ '.', ';', ',' };
 
-var in_buf = [_]u8{0};
-var out_buf = [_]u8{0} ** 1024;
-
-const stdout: std.fs.File = .stdout();
-var out_writer = stdout.writer(&out_buf);
-var out = &out_writer.interface;
+const stdout: std.Io.File = .stdout();
+const stdin: std.Io.File = .stdin();
 
 const Shell = struct {
     arena: std.heap.ArenaAllocator = std.heap.ArenaAllocator.init(std.heap.page_allocator),
     input_cursor: usize = 0,
     input_end: usize = 0,
-    stdin: std.fs.File.Reader = std.fs.File.stdin().reader(&in_buf),
+    in_buf: [1]u8,
+    in: std.Io.File.Reader,
+    out_buf: [1024]u8,
+    out: std.Io.File.Writer,
     input_buffer: [std.math.maxInt(u9)]u8 = undefined,
     history: History = .{},
 
@@ -69,13 +69,76 @@ const Shell = struct {
         self.history.deinit(self.arena.allocator());
     }
 
-    pub fn prompt(self: *@This(), context: ?*BootLoader) void {
-        _ = self;
+    fn flush(self: *Shell) void {
+        self.out.interface.flush() catch {};
+    }
 
-        if (context) |ctx| {
-            writeAll(ctx.name());
+    /// Flushes occur transparently. Do not use if control over when flushes occur
+    /// is needed.
+    fn print(self: *Shell, comptime fmt: []const u8, args: anytype) void {
+        self.out.interface.print(fmt, args) catch {};
+    }
+
+    fn writeAll(self: *Shell, bytes: []const u8) void {
+        self.out.interface.writeAll(bytes) catch {};
+    }
+
+    fn writeAllAndFlush(self: *Shell, bytes: []const u8) void {
+        self.writeAll(bytes);
+        self.flush();
+    }
+
+    /// Assumes cursor is already located at `start`.
+    fn eraseInputAndUpdateCursor(self: *Shell, input: []u8, start: usize, end: *usize, n: usize) void {
+        std.mem.copyForwards(
+            u8,
+            input[start..end.* -| n],
+            input[start +| n..end.*],
+        );
+        end.* -|= n;
+        self.cursorLeft(start);
+        self.writeAll(input[0..end.*]);
+        self.eraseToEndOfLine();
+        self.cursorLeft(end.* -| start);
+    }
+
+    /// Caller required to flush
+    fn cursorLeft(self: *Shell, n: usize) void {
+        if (n > 0) {
+            self.print(.{esc} ++ "[{d:0>5}D", .{n});
         }
-        writeAllAndFlush("> ");
+    }
+
+    /// Caller required to flush
+    fn cursorRight(self: *Shell, n: usize) void {
+        if (n > 0) {
+            self.print(.{esc} ++ "[{d}C", .{n});
+        }
+    }
+
+    /// Caller required to flush
+    fn eraseToEndOfLine(self: *Shell) void {
+        self.writeAll(.{esc} ++ "[0K");
+    }
+
+    /// Caller required to flush
+    fn eraseToCursor(self: *Shell) void {
+        self.writeAll(.{esc} ++ "[1K");
+    }
+
+    /// Empties the display and moves the cursor to absolute position 0, 0.
+    fn clearScreen(self: *Shell) void {
+        // empties the display
+        self.writeAll(.{esc} ++ "[2J");
+        // moves the cursor to 0, 0
+        self.writeAll(.{esc} ++ "[0;0H");
+    }
+
+    pub fn prompt(self: *@This(), context: ?*BootLoader) void {
+        if (context) |ctx| {
+            self.writeAll(ctx.name());
+        }
+        self.writeAllAndFlush("> ");
     }
 
     fn historyPrev(self: *@This()) bool {
@@ -86,9 +149,9 @@ const Shell = struct {
             self.input_end = prev.len;
             self.input_cursor = prev.len;
 
-            cursorLeft(old_end);
-            writeAll(self.input_buffer[0..self.input_end]);
-            eraseToEndOfLine();
+            self.cursorLeft(old_end);
+            self.writeAll(self.input_buffer[0..self.input_end]);
+            self.eraseToEndOfLine();
 
             return true;
         }
@@ -104,20 +167,20 @@ const Shell = struct {
             self.input_end = next.len;
             self.input_cursor = next.len;
 
-            cursorLeft(old_end);
-            writeAll(self.input_buffer[0..self.input_end]);
-            eraseToEndOfLine();
+            self.cursorLeft(old_end);
+            self.writeAll(self.input_buffer[0..self.input_end]);
+            self.eraseToEndOfLine();
 
             return true;
         } else {
             // We are back out of scrolling through history, start from
             // a clean slate.
-            cursorLeft(self.input_end);
+            self.cursorLeft(self.input_end);
 
             self.input_end = 0;
             self.input_cursor = 0;
 
-            eraseToEndOfLine();
+            self.eraseToEndOfLine();
 
             return true;
         }
@@ -127,7 +190,7 @@ const Shell = struct {
 
     fn moveLeft(self: *@This()) bool {
         if (self.input_cursor > 0) {
-            cursorLeft(1);
+            self.cursorLeft(1);
             self.input_cursor -|= 1;
             return true;
         }
@@ -137,7 +200,7 @@ const Shell = struct {
 
     fn moveRight(self: *@This()) bool {
         if (self.input_cursor < self.input_end) {
-            cursorRight(1);
+            self.cursorRight(1);
             self.input_cursor +|= 1;
             return true;
         }
@@ -150,19 +213,19 @@ const Shell = struct {
 
         var done = false;
 
-        const char = try self.stdin.interface.takeByte();
+        const char = try self.in.interface.takeByte();
 
         const needs_flush = switch (char) {
             // C-k
             vt => b: {
-                eraseToEndOfLine();
+                self.eraseToEndOfLine();
                 self.input_end = self.input_cursor;
                 break :b true;
             },
             // C-a
             soh => b: {
                 if (self.input_cursor > 0) {
-                    cursorLeft(self.input_cursor);
+                    self.cursorLeft(self.input_cursor);
                     self.input_cursor = 0;
                     break :b true;
                 }
@@ -173,7 +236,7 @@ const Shell = struct {
             stx => self.moveLeft(),
             // C-c
             etx => b: {
-                writeAll("\n");
+                self.writeAll("\n");
                 self.input_cursor = 0;
                 self.input_end = 0;
                 done = true;
@@ -182,7 +245,7 @@ const Shell = struct {
             // C-d
             eot => b: {
                 if (self.input_cursor < self.input_end) {
-                    eraseInputAndUpdateCursor(&self.input_buffer, self.input_cursor, &self.input_end, 1);
+                    self.eraseInputAndUpdateCursor(&self.input_buffer, self.input_cursor, &self.input_end, 1);
                     break :b true;
                 }
 
@@ -191,7 +254,7 @@ const Shell = struct {
             // C-e
             enq => b: {
                 if (self.input_cursor < self.input_end) {
-                    cursorRight(self.input_end -| self.input_cursor);
+                    self.cursorRight(self.input_end -| self.input_cursor);
                     self.input_cursor = self.input_end;
                     break :b true;
                 }
@@ -212,10 +275,10 @@ const Shell = struct {
                     );
                     self.input_cursor -|= 1;
                     self.input_end -|= 1;
-                    cursorLeft(1);
-                    writeAll(self.input_buffer[self.input_cursor..self.input_end]);
-                    eraseToEndOfLine();
-                    cursorLeft(self.input_end -| self.input_cursor);
+                    self.cursorLeft(1);
+                    self.writeAll(self.input_buffer[self.input_cursor..self.input_end]);
+                    self.eraseToEndOfLine();
+                    self.cursorLeft(self.input_end -| self.input_cursor);
                     break :b true;
                 }
 
@@ -225,15 +288,15 @@ const Shell = struct {
             ht => false,
             // C-l
             ff => b: {
-                clearScreen();
+                self.clearScreen();
                 self.prompt(context);
-                writeAll(self.input_buffer[0..self.input_end]);
-                cursorLeft(self.input_end -| self.input_cursor);
+                self.writeAll(self.input_buffer[0..self.input_end]);
+                self.cursorLeft(self.input_end -| self.input_cursor);
                 break :b true;
             },
             // \r, \n; \n is also known as C-j
             cr, lf => b: {
-                writeAll("\n");
+                self.writeAll("\n");
                 done = true;
                 break :b true;
             },
@@ -251,9 +314,9 @@ const Shell = struct {
                         &self.input_buffer[self.input_cursor -| 1],
                         &self.input_buffer[self.input_cursor],
                     );
-                    cursorLeft(1);
+                    self.cursorLeft(1);
                     self.input_cursor +|= 1;
-                    writeAll(self.input_buffer[self.input_cursor -| 2..self.input_cursor]);
+                    self.writeAll(self.input_buffer[self.input_cursor -| 2..self.input_cursor]);
                     break :b true;
                 }
 
@@ -262,12 +325,12 @@ const Shell = struct {
             // C-u
             nak => b: {
                 if (self.input_cursor > 0) {
-                    cursorLeft(self.input_cursor);
-                    writeAll(self.input_buffer[self.input_cursor..self.input_end]);
-                    eraseToEndOfLine();
+                    self.cursorLeft(self.input_cursor);
+                    self.writeAll(self.input_buffer[self.input_cursor..self.input_end]);
+                    self.eraseToEndOfLine();
                     self.input_end = self.input_end -| self.input_cursor;
                     self.input_cursor = 0;
-                    cursorLeft(self.input_end);
+                    self.cursorLeft(self.input_end);
                     break :b true;
                 }
 
@@ -303,8 +366,8 @@ const Shell = struct {
                         self.input_cursor +|= @intCast(first_word);
                     }
 
-                    cursorLeft(old_cursor - self.input_cursor);
-                    eraseInputAndUpdateCursor(
+                    self.cursorLeft(old_cursor - self.input_cursor);
+                    self.eraseInputAndUpdateCursor(
                         &self.input_buffer,
                         self.input_cursor,
                         &self.input_end,
@@ -319,7 +382,7 @@ const Shell = struct {
             // Space...~
             0x20...0x7e => b: {
                 if (builtin.mode == .Debug and char == '?') {
-                    print("\n{}\n", .{self});
+                    self.print("\n{}\n", .{self});
                     break :b true;
                 } else if
 
@@ -332,9 +395,9 @@ const Shell = struct {
                     );
                     self.input_buffer[self.input_cursor] = char;
                     self.input_end +|= 1;
-                    writeAll(self.input_buffer[self.input_cursor..self.input_end]);
+                    self.writeAll(self.input_buffer[self.input_cursor..self.input_end]);
                     self.input_cursor +|= 1;
-                    cursorLeft(self.input_end -| self.input_cursor);
+                    self.cursorLeft(self.input_end -| self.input_cursor);
                     break :b true;
                 }
 
@@ -342,9 +405,9 @@ const Shell = struct {
             },
             // Escape sequence
             esc => b: {
-                switch (try self.stdin.interface.takeByte()) {
+                switch (try self.in.interface.takeByte()) {
                     0x5b => {
-                        switch (try self.stdin.interface.takeByte()) {
+                        switch (try self.in.interface.takeByte()) {
                             // Up arrow
                             0x41 => break :b self.historyPrev(),
                             // Down arrow
@@ -386,7 +449,7 @@ const Shell = struct {
                                 self.input_cursor +|= @intCast(first_word);
                             }
 
-                            cursorLeft(old_cursor -| self.input_cursor);
+                            self.cursorLeft(old_cursor -| self.input_cursor);
 
                             break :b true;
                         }
@@ -424,7 +487,7 @@ const Shell = struct {
                             else
                                 first_word + first_non_word;
 
-                            eraseInputAndUpdateCursor(
+                            self.eraseInputAndUpdateCursor(
                                 &self.input_buffer,
                                 self.input_cursor,
                                 &self.input_end,
@@ -455,7 +518,7 @@ const Shell = struct {
 
                             self.input_cursor +|= @intCast(first_word);
 
-                            cursorRight(self.input_cursor -| old_cursor);
+                            self.cursorRight(self.input_cursor -| old_cursor);
 
                             break :b true;
                         }
@@ -472,7 +535,7 @@ const Shell = struct {
         };
 
         if (needs_flush) {
-            flush();
+            self.flush();
         }
 
         if (done) {
@@ -592,15 +655,24 @@ test "shell history" {
 arena: std.heap.ArenaAllocator = std.heap.ArenaAllocator.init(std.heap.page_allocator),
 context: ?*BootLoader = null,
 resize_signal: posix.fd_t,
-shell: Shell = .{},
+shell: Shell,
 tty: system.Tty,
 
-pub fn init() !Console {
+pub fn init(io: std.Io) !Console {
     // Turn off local echo, making the ENTER key the only thing that shows a
     // sign of user input.
-    var tty = system.Tty.init(std.fs.File.stdin());
+    var tty = system.Tty.init(std.Io.File.stdin());
     try tty.setMode(.no_echo);
-    writeAllAndFlush("\npress ENTER to interrupt\n\n");
+
+    var in_buf: [1]u8 = undefined;
+    var out_buf: [1024]u8 = undefined;
+    var shell: Shell = .{
+        .in_buf = in_buf,
+        .in = stdin.reader(io, &in_buf),
+        .out_buf = out_buf,
+        .out = stdout.writer(io, &out_buf),
+    };
+    shell.writeAllAndFlush("\npress ENTER to interrupt\n\n");
 
     var mask = posix.sigemptyset();
     posix.sigaddset(&mask, posix.SIG.WINCH);
@@ -609,6 +681,7 @@ pub fn init() !Console {
     const resize_signal = try posix.signalfd(-1, &mask, 0);
 
     return .{
+        .shell = shell,
         .resize_signal = resize_signal,
         .tty = tty,
     };
@@ -618,71 +691,6 @@ pub fn prompt(self: *Console) void {
     self.shell.prompt(self.context);
 }
 
-fn flush() void {
-    out.flush() catch {};
-}
-
-/// Flushes occur transparently. Do not use if control over when flushes occur
-/// is needed.
-fn print(comptime fmt: []const u8, args: anytype) void {
-    out.print(fmt, args) catch {};
-}
-
-fn writeAll(bytes: []const u8) void {
-    out.writeAll(bytes) catch {};
-}
-
-fn writeAllAndFlush(bytes: []const u8) void {
-    writeAll(bytes);
-    flush();
-}
-
-/// Assumes cursor is already located at `start`.
-fn eraseInputAndUpdateCursor(input: []u8, start: usize, end: *usize, n: usize) void {
-    std.mem.copyForwards(
-        u8,
-        input[start..end.* -| n],
-        input[start +| n..end.*],
-    );
-    end.* -|= n;
-    cursorLeft(start);
-    writeAll(input[0..end.*]);
-    eraseToEndOfLine();
-    cursorLeft(end.* -| start);
-}
-
-/// Caller required to flush
-fn cursorLeft(n: usize) void {
-    if (n > 0) {
-        out.print(.{esc} ++ "[{d:0>5}D", .{n}) catch {};
-    }
-}
-
-/// Caller required to flush
-fn cursorRight(n: usize) void {
-    if (n > 0) {
-        out.print(.{esc} ++ "[{d}C", .{n}) catch {};
-    }
-}
-
-/// Caller required to flush
-fn eraseToEndOfLine() void {
-    out.writeAll(.{esc} ++ "[0K") catch {};
-}
-
-/// Caller required to flush
-fn eraseToCursor() void {
-    out.writeAll(.{esc} ++ "[1K") catch {};
-}
-
-/// Empties the display and moves the cursor to absolute position 0, 0.
-fn clearScreen() void {
-    // empties the display
-    out.writeAll(.{esc} ++ "[2J") catch {};
-    // moves the cursor to 0, 0
-    out.writeAll(.{esc} ++ "[0;0H") catch {};
-}
-
 pub fn deinit(self: *Console) void {
     defer self.arena.deinit();
 
@@ -690,15 +698,15 @@ pub fn deinit(self: *Console) void {
 
     self.tty.deinit();
 
-    posix.close(self.resize_signal);
+    _ = linux.close(self.resize_signal);
 }
 
 pub fn handleResize(self: *Console) void {
-    writeAll("\n");
+    self.shell.writeAll("\n");
     self.prompt();
 }
 
-pub fn handleStdin(self: *Console, boot_loaders: []*BootLoader, liveupdate: *LiveUpdate) !?Event {
+pub fn handleStdin(self: *Console, io: std.Io, boot_loaders: []*BootLoader, liveupdate: *LiveUpdate) !?Event {
     const maybe_input = try self.shell.handleInput(self.context);
 
     if (maybe_input) |user_input| {
@@ -711,12 +719,12 @@ pub fn handleStdin(self: *Console, boot_loaders: []*BootLoader, liveupdate: *Liv
         var args = try ArgsIterator.init(self.arena.allocator(), user_input);
         defer args.deinit();
 
-        if (self.runCommand(&args, boot_loaders, liveupdate)) |maybe_event| {
+        if (self.runCommand(io, &args, boot_loaders, liveupdate)) |maybe_event| {
             if (maybe_event) |event| {
                 return event;
             }
         } else |err| {
-            print("\nerror running command: {}\n", .{err});
+            self.shell.print("\nerror running command: {}\n", .{err});
         }
 
         self.prompt();
@@ -742,13 +750,14 @@ pub fn format(
 
 fn runCommand(
     self: *Console,
+    io: std.Io,
     args: *ArgsIterator,
     boot_loaders: []*BootLoader,
     liveupdate: *LiveUpdate,
 ) !?Event {
     if (args.next()) |cmd| {
         if (std.mem.eql(u8, cmd, "help")) {
-            return Command.help.run(self, args, boot_loaders, liveupdate);
+            return Command.help.run(self, io, args, boot_loaders, liveupdate);
         }
 
         if (self.context) |ctx| {
@@ -756,6 +765,7 @@ fn runCommand(
                 if (std.mem.eql(u8, field.name, cmd)) {
                     return @field(Command, field.name).run(
                         self,
+                        io,
                         args,
                         ctx,
                         liveupdate,
@@ -767,6 +777,7 @@ fn runCommand(
                 if (std.mem.eql(u8, field.name, cmd)) {
                     return @field(Command, field.name).run(
                         self,
+                        io,
                         args,
                         boot_loaders,
                         liveupdate,
@@ -775,7 +786,7 @@ fn runCommand(
             }
         }
 
-        print("\nunknown command \"{s}\"\n", .{cmd});
+        self.shell.print("\nunknown command \"{s}\"\n", .{cmd});
     }
 
     return null;
@@ -811,47 +822,47 @@ pub const Command = struct {
         ;
 
         /// Prints a help message for all commands.
-        fn helpAll(t: anytype) void {
-            print("\n", .{});
+        fn helpAll(shell: *Shell, t: anytype) void {
+            shell.print("\n", .{});
 
             inline for (std.meta.fields(t)) |field| {
                 const cmd_short_help = comptime @field(Command, field.name).short_help;
                 const space = 20 - comptime field.name.len;
-                print("{s}{s}{s}\n", .{ field.name, " " ** space, cmd_short_help });
+                shell.print("{s}{s}{s}\n", .{ field.name, " " ** space, cmd_short_help });
             }
         }
 
         /// Prints a help message for a single command.
-        fn helpOne(t: anytype, cmd: []const u8) void {
+        fn helpOne(shell: *Shell, t: anytype, cmd: []const u8) void {
             if (std.mem.eql(u8, cmd, "help")) {
                 const cmd_long_help = comptime @field(Command, "help").long_help;
-                print("\n{s}\n", .{cmd_long_help});
+                shell.print("\n{s}\n", .{cmd_long_help});
                 return;
             }
 
             inline for (std.meta.fields(t)) |field| {
                 if (std.mem.eql(u8, field.name, cmd)) {
                     const cmd_long_help = comptime @field(Command, field.name).long_help;
-                    print("\n{s}\n", .{cmd_long_help});
+                    shell.print("\n{s}\n", .{cmd_long_help});
                     return;
                 }
             }
 
-            print("unknown command \"{s}\"\n", .{cmd});
+            shell.print("unknown command \"{s}\"\n", .{cmd});
         }
 
-        fn run(console: *Console, args: *ArgsIterator, _: []*BootLoader, _: *LiveUpdate) !?Event {
+        fn run(console: *Console, _: std.Io, args: *ArgsIterator, _: []*BootLoader, _: *LiveUpdate) !?Event {
             if (args.next()) |cmd| {
                 if (console.context == null) {
-                    helpOne(NoContext, cmd);
+                    helpOne(&console.shell, NoContext, cmd);
                 } else {
-                    helpOne(Context, cmd);
+                    helpOne(&console.shell, Context, cmd);
                 }
             } else {
                 if (console.context == null) {
-                    helpAll(NoContext);
+                    helpAll(&console.shell, NoContext);
                 } else {
-                    helpAll(Context);
+                    helpAll(&console.shell, Context);
                 }
             }
 
@@ -868,7 +879,7 @@ pub const Command = struct {
             \\poweroff
         ;
 
-        fn run(_: *Console, _: *ArgsIterator, _: []*BootLoader, _: *LiveUpdate) !?Event {
+        fn run(_: *Console, _: std.Io, _: *ArgsIterator, _: []*BootLoader, _: *LiveUpdate) !?Event {
             return .poweroff;
         }
     };
@@ -882,7 +893,7 @@ pub const Command = struct {
             \\reboot
         ;
 
-        fn run(_: *Console, _: *ArgsIterator, _: []*BootLoader, _: *LiveUpdate) !?Event {
+        fn run(_: *Console, _: std.Io, _: *ArgsIterator, _: []*BootLoader, _: *LiveUpdate) !?Event {
             return .reboot;
         }
     };
@@ -900,7 +911,7 @@ pub const Command = struct {
             \\logs 7
         ;
 
-        fn run(console: *Console, args: *ArgsIterator, _: []*BootLoader, _: *LiveUpdate) !?Event {
+        fn run(console: *Console, _: std.Io, args: *ArgsIterator, _: []*BootLoader, _: *LiveUpdate) !?Event {
             var filter = if (args.next()) |filter_str|
                 try std.fmt.parseInt(usize, filter_str, 10)
             else
@@ -913,7 +924,7 @@ pub const Command = struct {
             try system.printKernelLogs(
                 console.arena.allocator(),
                 @intCast(filter),
-                out,
+                &console.shell.out.interface,
             );
 
             return null;
@@ -929,16 +940,15 @@ pub const Command = struct {
             \\fdt
         ;
 
-        fn run(console: *Console, _: *ArgsIterator, _: []*BootLoader, _: *LiveUpdate) !?Event {
-            const sys_firmware_fdt = std.fs.cwd().openFile("/sys/firmware/fdt", .{}) catch {
-                writeAll("FDT not found\n");
+        fn run(console: *Console, io: std.Io, _: *ArgsIterator, _: []*BootLoader, _: *LiveUpdate) !?Event {
+            const sys_firmware_fdt = std.Io.Dir.cwd().openFile(io, "/sys/firmware/fdt", .{}) catch {
+                console.shell.writeAll("FDT not found\n");
                 return null;
             };
-
-            defer sys_firmware_fdt.close();
+            defer sys_firmware_fdt.close(io);
 
             var buffer: [1024]u8 = undefined;
-            var reader = sys_firmware_fdt.reader(&buffer);
+            var reader = sys_firmware_fdt.reader(io, &buffer);
             var fdt_ = try Fdt.init(&reader.interface, console.arena.allocator());
             defer fdt_.deinit();
 
@@ -953,10 +963,10 @@ pub const Command = struct {
                     .BeginNode => |node_name| {
                         if (node_name.len != 0) {
                             if (depth == 0) {
-                                try out.writeByte('\n');
+                                try console.shell.out.interface.writeByte('\n');
                             }
-                            try out.splatByteAll('\t', depth);
-                            try out.print("{s}:\n", .{node_name});
+                            try console.shell.out.interface.splatByteAll('\t', depth);
+                            try console.shell.out.interface.print("{s}:\n", .{node_name});
 
                             depth += 1;
                         }
@@ -967,10 +977,10 @@ pub const Command = struct {
                     .End => break,
                     .Prop => |prop| {
                         const prop_name = try fdt_.getString(prop.inner.name_offset);
-                        try out.splatByteAll('\t', depth);
-                        try out.print("{s}=", .{prop_name});
-                        try Fdt.printValue(out, prop.value);
-                        try out.print("\n", .{});
+                        try console.shell.out.interface.splatByteAll('\t', depth);
+                        try console.shell.out.interface.print("{s}=", .{prop_name});
+                        try Fdt.printValue(&console.shell.out.interface, prop.value);
+                        try console.shell.out.interface.print("\n", .{});
                     },
                 }
 
@@ -990,14 +1000,14 @@ pub const Command = struct {
             \\history
         ;
 
-        fn run(console: *Console, _: *ArgsIterator, _: []*BootLoader, _: *LiveUpdate) !?Event {
-            writeAll("\n");
+        fn run(console: *Console, _: std.Io, _: *ArgsIterator, _: []*BootLoader, _: *LiveUpdate) !?Event {
+            console.shell.writeAll("\n");
             const len = console.shell.history.items.len;
             for (0..len) |i| {
                 const index = len - 1 - i;
                 const item = console.shell.history.items[index];
                 if (item) |item_| {
-                    print("{d:0>2} {s}\n", .{ index, item_ });
+                    console.shell.print("{d:0>2} {s}\n", .{ index, item_ });
                 }
             }
 
@@ -1014,8 +1024,8 @@ pub const Command = struct {
             \\clear
         ;
 
-        fn run(_: *Console, _: *ArgsIterator, _: []*BootLoader, _: *LiveUpdate) !?Event {
-            clearScreen();
+        fn run(console: *Console, _: std.Io, _: *ArgsIterator, _: []*BootLoader, _: *LiveUpdate) !?Event {
+            console.shell.clearScreen();
 
             return null;
         }
@@ -1038,7 +1048,7 @@ pub const Command = struct {
             \\select 8:1        Selects the boot loader attached to device 8:1
         ;
 
-        fn run(console: *Console, args: *ArgsIterator, boot_loaders: []*BootLoader, _: *LiveUpdate) !?Event {
+        fn run(console: *Console, _: std.Io, args: *ArgsIterator, boot_loaders: []*BootLoader, _: *LiveUpdate) !?Event {
             const select_arg = args.next() orelse return error.InvalidArgument;
 
             var split = std.mem.splitScalar(u8, select_arg, ':');
@@ -1055,7 +1065,7 @@ pub const Command = struct {
                             const have_major, const have_minor = node;
                             if (have_major == major and have_minor == minor) {
                                 console.context = boot_loader;
-                                print(
+                                console.shell.print(
                                     "selected boot loader: {s} ({f})\n",
                                     .{ boot_loader.name(), boot_loader.device },
                                 );
@@ -1071,7 +1081,7 @@ pub const Command = struct {
                 for (boot_loaders, 0..) |boot_loader, index| {
                     if (want_index == index) {
                         console.context = boot_loader;
-                        print(
+                        console.shell.print(
                             "selected boot loader: {s} ({f})\n",
                             .{ boot_loader.name(), boot_loader.device },
                         );
@@ -1093,71 +1103,70 @@ pub const Command = struct {
             \\info
         ;
 
-        fn run(console: *Console, args: *ArgsIterator, boot_loaders: []*BootLoader, _: *LiveUpdate) !?Event {
-            _ = console;
+        fn run(console: *Console, io: std.Io, args: *ArgsIterator, boot_loaders: []*BootLoader, _: *LiveUpdate) !?Event {
             _ = args;
             _ = boot_loaders;
 
-            try utils.dumpFile(std.fs.cwd(), out, "/proc/version");
+            try utils.dumpFile(io, std.Io.Dir.cwd(), &console.shell.out.interface, "/proc/version");
 
-            print("\nInit:\n", .{});
-            try utils.dumpFile(std.fs.cwd(), out, "/proc/1/stat");
+            console.shell.print("\nInit:\n", .{});
+            try utils.dumpFile(io, std.Io.Dir.cwd(), &console.shell.out.interface, "/proc/1/stat");
 
-            print("\nConsoles:\n", .{});
-            utils.dumpFile(std.fs.cwd(), out, "/proc/consoles") catch {
-                print("?\n", .{});
+            console.shell.print("\nConsoles:\n", .{});
+            utils.dumpFile(io, std.Io.Dir.cwd(), &console.shell.out.interface, "/proc/consoles") catch {
+                console.shell.print("?\n", .{});
             };
 
-            print("\nMemory:\n", .{});
-            utils.dumpFile(std.fs.cwd(), out, "/proc/meminfo") catch {
-                print("?\n", .{});
+            console.shell.print("\nMemory:\n", .{});
+            utils.dumpFile(io, std.Io.Dir.cwd(), &console.shell.out.interface, "/proc/meminfo") catch {
+                console.shell.print("?\n", .{});
             };
 
             // According to https://github.com/torvalds/linux/blob/aef17cb3d3c43854002956f24c24ec8e1a0e3546/Documentation/admin-guide/devices.txt,
             // the first TPM will be at major number 10, minor number 224, and
             // since the minor numbers are incremented for each following
             // device, we have at least one TPM if this path exists.
-            print("\nTPM: ", .{});
-            if (utils.absolutePathExists("/dev/char/10:224")) {
-                print("yes\n", .{});
-                var pcr_sha256_dir = try std.fs.cwd().openDir("/sys/class/tpm/tpm0/pcr-sha256", .{});
-                defer pcr_sha256_dir.close();
+            console.shell.print("\nTPM: ", .{});
+            if (utils.absolutePathExists(io, "/dev/char/10:224")) {
+                console.shell.print("yes\n", .{});
+                var pcr_sha256_dir = try std.Io.Dir.cwd().openDir(io, "/sys/class/tpm/tpm0/pcr-sha256", .{});
+                defer pcr_sha256_dir.close(io);
                 for (0..24) |pcr| {
-                    print("\tPCR{d}: ", .{pcr});
-                    utils.dumpFile(pcr_sha256_dir, out, &.{'0' + @as(u8, @intCast(pcr))}) catch {
-                        print("n/a\n", .{});
+                    console.shell.print("\tPCR{d}: ", .{pcr});
+                    utils.dumpFile(io, pcr_sha256_dir, &console.shell.out.interface, &.{'0' + @as(u8, @intCast(pcr))}) catch {
+                        console.shell.print("n/a\n", .{});
                     };
                 }
             } else {
-                print("no\n", .{});
+                console.shell.print("no\n", .{});
             }
 
-            print("\nKeys:\n", .{});
-            utils.dumpFile(std.fs.cwd(), out, "/proc/keys") catch {
-                print("?\n", .{});
+            console.shell.print("\nKeys:\n", .{});
+            utils.dumpFile(io, std.Io.Dir.cwd(), &console.shell.out.interface, "/proc/keys") catch {
+                console.shell.print("?\n", .{});
             };
 
-            print("\nIMA policy:\n", .{});
-            utils.dumpFile(std.fs.cwd(), out, "/sys/kernel/security/integrity/ima/policy") catch {
-                print("n/a\n", .{});
+            console.shell.print("\nIMA policy:\n", .{});
+            utils.dumpFile(io, std.Io.Dir.cwd(), &console.shell.out.interface, "/sys/kernel/security/integrity/ima/policy") catch {
+                console.shell.print("n/a\n", .{});
             };
 
-            print("\nIMA measurements:\n", .{});
-            utils.dumpFile(std.fs.cwd(), out, "/sys/kernel/security/integrity/ima/ascii_runtime_measurements") catch {
-                print("n/a\n", .{});
+            console.shell.print("\nIMA measurements:\n", .{});
+            utils.dumpFile(io, std.Io.Dir.cwd(), &console.shell.out.interface, "/sys/kernel/security/integrity/ima/ascii_runtime_measurements") catch {
+                console.shell.print("n/a\n", .{});
             };
 
-            print("\nMTD:\n", .{});
-            utils.dumpFile(std.fs.cwd(), out, "/proc/mtd") catch {
-                print("?\n", .{});
+            console.shell.print("\nMTD:\n", .{});
+            utils.dumpFile(io, std.Io.Dir.cwd(), &console.shell.out.interface, "/proc/mtd") catch {
+                console.shell.print("?\n", .{});
             };
 
-            print("\nPartitions:\n", .{});
-            utils.dumpFile(std.fs.cwd(), out, "/proc/partitions") catch {
-                print("?\n", .{});
+            console.shell.print("\nPartitions:\n", .{});
+            utils.dumpFile(io, std.Io.Dir.cwd(), &console.shell.out.interface, "/proc/partitions") catch {
+                console.shell.print("?\n", .{});
             };
 
-            try out.flush();
+            console.shell.flush();
 
             return null;
         }
@@ -1172,11 +1181,11 @@ pub const Command = struct {
             \\list
         ;
 
-        fn run(_: *Console, _: *ArgsIterator, boot_loaders: []*BootLoader, _: *LiveUpdate) !?Event {
-            writeAll("\n");
+        fn run(console: *Console, _: std.Io, _: *ArgsIterator, boot_loaders: []*BootLoader, _: *LiveUpdate) !?Event {
+            console.shell.writeAll("\n");
 
             for (boot_loaders, 0..) |bl, index| {
-                print(
+                console.shell.print(
                     "{d}\t{s}\t{f}{s}\n",
                     .{
                         index,
@@ -1200,7 +1209,7 @@ pub const Command = struct {
             \\exit
         ;
 
-        fn run(console: *Console, _: *ArgsIterator, _: *BootLoader, _: *LiveUpdate) !?Event {
+        fn run(console: *Console, _: std.Io, _: *ArgsIterator, _: *BootLoader, _: *LiveUpdate) !?Event {
             defer console.context = null;
 
             return null;
@@ -1216,16 +1225,16 @@ pub const Command = struct {
             \\probe
         ;
 
-        fn run(_: *Console, _: *ArgsIterator, boot_loader: *BootLoader, _: *LiveUpdate) !?Event {
-            const entries = boot_loader.probe() catch |err| {
-                print("failed to probe: {}\n", .{err});
+        fn run(console: *Console, io: std.Io, _: *ArgsIterator, boot_loader: *BootLoader, _: *LiveUpdate) !?Event {
+            const entries = boot_loader.probe(io) catch |err| {
+                console.shell.print("failed to probe: {}\n", .{err});
                 return null;
             };
 
-            writeAll("\n");
+            console.shell.writeAll("\n");
 
             for (entries, 0..) |entry, index| {
-                print("{d}\n\tlinux={s}\n\tinitrd={?s}\n\tcmdline=\"{s}\"\n", .{
+                console.shell.print("{d}\n\tlinux={s}\n\tinitrd={?s}\n\tcmdline=\"{s}\"\n", .{
                     index,
                     entry.linux,
                     entry.initrd,
@@ -1249,29 +1258,29 @@ pub const Command = struct {
             \\boot 7
         ;
 
-        fn run(_: *Console, args: *ArgsIterator, boot_loader: *BootLoader, liveupdate: *LiveUpdate) !?Event {
+        fn run(console: *Console, io: std.Io, args: *ArgsIterator, boot_loader: *BootLoader, liveupdate: *LiveUpdate) !?Event {
             const want_index = try std.fmt.parseInt(
                 usize,
                 args.next() orelse "0",
                 10,
             );
 
-            const entries = boot_loader.probe() catch |err| {
-                print("failed to probe: {}\n", .{err});
+            const entries = boot_loader.probe(io) catch |err| {
+                console.shell.print("failed to probe: {}\n", .{err});
                 return null;
             };
 
             for (entries, 0..) |entry, index| {
                 if (want_index == index) {
-                    if (boot_loader.load(entry, liveupdate)) {
-                        print(
+                    if (boot_loader.load(io, entry, liveupdate)) {
+                        console.shell.print(
                             "selected entry:\n\tlinux={s}\n\tinitrd={?s}\n\tcmdline=\"{s}\"\n",
                             .{ entry.linux, entry.initrd, if (entry.cmdline) |cmdline| cmdline else "" },
                         );
 
                         return .kexec;
                     } else |err| {
-                        print("failed to load entry: {}\n", .{err});
+                        console.shell.print("failed to load entry: {}\n", .{err});
                         return null;
                     }
                 }
@@ -1291,16 +1300,16 @@ pub const Command = struct {
             \\autoboot
         ;
 
-        fn run(_: *Console, _: *ArgsIterator, boot_loaders: []*BootLoader, liveupdate: *LiveUpdate) !?Event {
+        fn run(_: *Console, io: std.Io, _: *ArgsIterator, boot_loaders: []*BootLoader, liveupdate: *LiveUpdate) !?Event {
             for (boot_loaders) |bl| {
                 if (bl.autoboot) {
-                    const entries = bl.probe() catch |err| {
+                    const entries = bl.probe(io) catch |err| {
                         std.log.err("failed to probe {f}: {}", .{ bl.device, err });
                         continue;
                     };
 
                     for (entries) |entry| {
-                        if (bl.load(entry, liveupdate)) {
+                        if (bl.load(io, entry, liveupdate)) {
                             return .kexec;
                         } else |err| {
                             std.log.err("failed to probe {f}: {}", .{ bl.device, err });

@@ -33,23 +33,23 @@ pub const KexecSegment = struct {
 };
 
 /// Wait for up to 10 seconds for kernel to report for kexec to be loaded.
-fn waitForKexecKernelLoaded() !void {
-    var f = try std.fs.cwd().openFile(KEXEC_LOADED, .{});
-    defer f.close();
+fn waitForKexecKernelLoaded(io: std.Io) !void {
+    var f = try std.Io.Dir.cwd().openFile(io, KEXEC_LOADED, .{});
+    defer f.close(io);
 
     var buffer: [1]u8 = undefined;
-    var reader = f.reader(&buffer);
+    var reader = f.reader(io, &buffer);
 
     var time_slept: usize = 0;
     while (time_slept < 10 * std.time.ns_per_s) : (time_slept += std.time.ns_per_s) {
         std.log.debug("waiting for kexec load to finish", .{});
-        try f.seekTo(0);
+        try reader.seekTo(0);
 
         if (try reader.interface.takeByte() == '1') {
             return;
         }
 
-        std.Thread.sleep(std.time.ns_per_s);
+        try std.Io.sleep(io, .fromSeconds(1), .boot);
     }
 
     return error.Timeout;
@@ -63,36 +63,40 @@ const kexecLoad = switch (builtin.cpu.arch) {
 const kho_finalize_filepath = "/sys/kernel/debug/kho/out/finalize";
 const kho_active_filepath = "/sys/kernel/debug/kho/out/finalize";
 
-fn enableKHO() !void {
-    var kho = std.fs.cwd().openFile(kho_finalize_filepath, .{ .mode = .write_only }) catch |err| switch (err) {
+fn enableKHO(io: std.Io) !void {
+    var kho = std.Io.Dir.cwd().openFile(io, kho_finalize_filepath, .{ .mode = .write_only }) catch |err| switch (err) {
         error.FileNotFound => {
             std.log.warn("kexec handover not enabled, tinyboot state will not persist to next kernel", .{});
             return;
         },
         else => return err,
     };
-    defer kho.close();
+    defer kho.close(io);
 
-    try kho.writeAll("1\n");
+    var writer = kho.writer(io, &.{});
+    try writer.interface.writeAll("1\n");
+    try writer.flush();
 }
 
-fn disableKHO() !void {
-    var kho = std.fs.cwd().openFile(kho_active_filepath, .{ .mode = .write_only }) catch |err| switch (err) {
+fn disableKHO(io: std.Io) !void {
+    var kho = std.Io.Dir.cwd().openFile(io, kho_active_filepath, .{ .mode = .write_only }) catch |err| switch (err) {
         error.FileNotFound => {
             std.log.warn("kexec handover not enabled, skipping kho disable", .{});
             return;
         },
         else => return err,
     };
-    defer kho.close();
+    defer kho.close(io);
 
-    try kho.writeAll("0\n");
+    var writer = kho.writer(io, &.{});
+    try writer.interface.writeAll("0\n");
+    try writer.flush();
 }
 
 fn kexecFileLoad(
     allocator: std.mem.Allocator,
-    linux: std.fs.File,
-    initrd: ?std.fs.File,
+    linux: std.Io.File,
+    initrd: ?std.Io.File,
     cmdline: ?[]const u8,
 ) !void {
     var flags: usize = if (builtin.mode == .Debug) linux_headers.KEXEC_FILE_DEBUG else 0;
@@ -119,7 +123,7 @@ fn kexecFileLoad(
         flags,
     );
 
-    switch (std.os.linux.E.init(rc)) {
+    switch (std.os.linux.errno(rc)) {
         .SUCCESS => {},
         // IMA appraisal failed
         .ACCES => return error.PermissionDenied,
@@ -165,6 +169,7 @@ pub fn kexecUnload() !void {
 }
 
 pub fn kexec(
+    io: std.Io,
     allocator: std.mem.Allocator,
     linux_filepath: []const u8,
     initrd_filepath: ?[]const u8,
@@ -177,38 +182,38 @@ pub fn kexec(
 
     // Use a constant path for the kernel and initrd so that the IMA events
     // don't have differing random temporary paths each boot.
-    std.fs.cwd().makeDir("/tinyboot") catch |err| switch (err) {
+    std.Io.Dir.cwd().createDirPath(io, "/tinyboot") catch |err| switch (err) {
         error.PathAlreadyExists => {},
         else => return err,
     };
 
-    var boot_dir = try std.fs.cwd().openDir("/tinyboot", .{});
+    var boot_dir = try std.Io.Dir.cwd().openDir(io, "/tinyboot", .{});
     defer {
-        boot_dir.close();
-        std.fs.cwd().deleteTree("/tinyboot") catch {};
+        boot_dir.close(io);
+        std.Io.Dir.cwd().deleteTree(io, "/tinyboot") catch {};
     }
 
-    const kernel_file = try std.fs.cwd().openFile(linux_filepath, .{});
-    defer kernel_file.close();
+    const kernel_file = try std.Io.Dir.cwd().openFile(io, linux_filepath, .{});
+    defer kernel_file.close(io);
 
     if (initrd_filepath) |initrd| {
-        try std.fs.cwd().copyFile(initrd, std.fs.cwd(), "/tinyboot/initrd", .{});
+        try std.Io.Dir.cwd().copyFile(initrd, std.Io.Dir.cwd(), "/tinyboot/initrd", io, .{});
     }
 
-    var linux: ?std.fs.File = null;
+    var linux: ?std.Io.File = null;
     defer {
         if (linux) |l| {
-            l.close();
+            l.close(io);
         }
     }
 
-    if (detectCompression(kernel_file)) |compression| {
-        linux = try std.fs.cwd().createFile("/tinyboot/kernel", .{});
+    if (detectCompression(io, kernel_file)) |compression| {
+        linux = try std.Io.Dir.cwd().createFile(io, "/tinyboot/kernel", .{});
 
         var reader_buffer: [1024]u8 = undefined;
         var writer_buffer: [1024]u8 = undefined;
-        var reader = kernel_file.reader(&reader_buffer);
-        var writer = linux.?.writer(&writer_buffer);
+        var reader = kernel_file.reader(io, &reader_buffer);
+        var writer = linux.?.writer(io, &writer_buffer);
         switch (compression) {
             .gzip => {
                 var decomp_buffer: [1024]u8 = undefined;
@@ -224,30 +229,30 @@ pub fn kexec(
             },
         }
     } else {
-        try std.fs.cwd().copyFile(linux_filepath, std.fs.cwd(), "/tinyboot/kernel", .{});
-        linux = try std.fs.cwd().openFile("/tinyboot/kernel", .{});
+        try std.Io.Dir.cwd().copyFile(linux_filepath, std.Io.Dir.cwd(), "/tinyboot/kernel", io, .{});
+        linux = try std.Io.Dir.cwd().openFile(io, "/tinyboot/kernel", .{});
     }
 
-    const initrd: ?std.fs.File = if (initrd_filepath != null)
-        try std.fs.cwd().openFile("/tinyboot/initrd", .{})
+    const initrd: ?std.Io.File = if (initrd_filepath != null)
+        try std.Io.Dir.cwd().openFile(io, "/tinyboot/initrd", .{})
     else
         null;
 
     defer {
         if (initrd) |initrd_| {
-            initrd_.close();
+            initrd_.close(io);
         }
     }
 
     if (kexec_file_load_available) {
-        try enableKHO();
-        errdefer disableKHO() catch {};
+        try enableKHO(io);
+        errdefer disableKHO(io) catch {};
         try kexecFileLoad(allocator, linux.?, initrd, cmdline);
     } else {
-        try kexecLoad(allocator, linux.?, initrd, cmdline);
+        try kexecLoad(io, allocator, linux.?, initrd, cmdline);
     }
 
-    try waitForKexecKernelLoaded();
+    try waitForKexecKernelLoaded(io);
 
     std.log.info("kexec loaded", .{});
 }
@@ -255,13 +260,14 @@ pub fn kexec(
 const gzip_magic = [_]u8{ 0x1f, 0x8b };
 const Compression = enum { gzip };
 
-fn detectCompression(file: std.fs.File) ?Compression {
-    defer file.seekTo(0) catch {};
+fn detectCompression(io: std.Io, file: std.Io.File) ?Compression {
+    var file_reader = file.reader(io, &.{});
+    defer file_reader.seekTo(0) catch {};
 
-    file.seekTo(0) catch return null;
+    file_reader.seekTo(0) catch return null;
 
     var magic: [2]u8 = undefined;
-    const bytes_read = file.readAll(&magic) catch return null;
+    const bytes_read = file_reader.interface.readSliceShort(&magic) catch return null;
     if (bytes_read != magic.len) {
         return null;
     }
