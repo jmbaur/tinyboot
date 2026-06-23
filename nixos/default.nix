@@ -40,10 +40,6 @@ in
   config = mkIf cfg.enable {
     assertions = [
       {
-        assertion = config.boot.bootspec.enable;
-        message = "Bootloader install program depends on bootspec";
-      }
-      {
         assertion = versionAtLeast config.boot.kernelPackages.kernel.version "6.19";
         message = "Must use Linux kernel 6.19 or newer for liveupdate";
       }
