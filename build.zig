@@ -9,9 +9,32 @@ fn tbootInitrd(
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
     strip: bool,
-    zstd: *std.Build.Step.Compile,
-    clap: *std.Build.Module,
 ) *std.Build.Step.Compile {
+    const zstd_dependency = b.dependency("zstd", .{ .target = target, .optimize = optimize });
+    const zstd = zstd_dependency.artifact("zstd");
+
+    const clap_dependency = b.dependency("clap", .{ .target = target, .optimize = optimize });
+    const clap = clap_dependency.module("clap");
+
+    const zstd_h = b.addWriteFile(
+        "zstd.h",
+        \\#include <zstd.h>
+        ,
+    );
+    const zstd_translate_c = b.addTranslateC(.{
+        .root_source_file = .{ .generated = .{ .index = zstd_h.generated_directory, .sub_path = "zstd.h" } },
+        .target = target,
+        .optimize = optimize,
+    });
+    const zstd_module = b.createModule(.{
+        .root_source_file = b.path("src/zstd.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    zstd_module.linkLibrary(zstd);
+    zstd_module.addImport("zstd_c", zstd_translate_c.createModule());
+
     const tboot_initrd_module = b.createModule(.{
         .root_source_file = b.path("src/tboot-initrd.zig"),
         .target = target,
@@ -23,8 +46,9 @@ fn tbootInitrd(
         .name = "tboot-initrd",
         .root_module = tboot_initrd_module,
     });
-    tboot_initrd.root_module.linkLibrary(zstd);
+    tboot_initrd.root_module.addImport("zstd", zstd_module);
     tboot_initrd.root_module.addImport("clap", clap);
+
     return tboot_initrd;
 }
 
@@ -89,10 +113,6 @@ pub fn build(b: *std.Build) !void {
     const clap = clap_dependency.module("clap");
     const mbedtls_dependency = b.dependency("mbedtls", .{ .target = target, .optimize = optimize });
     const mbedtls = mbedtls_dependency.artifact("mbedtls");
-    const zstd_dependency = b.dependency("zstd", .{ .target = target, .optimize = optimize });
-    const zstd = zstd_dependency.artifact("zstd");
-    const build_zstd_dependency = b.dependency("zstd", .{ .target = b.graph.host, .optimize = .Debug });
-    const build_zstd = build_zstd_dependency.artifact("zstd");
 
     const linux_h = b.addWriteFile("linux.h",
         \\#include <asm-generic/setup.h>
@@ -106,14 +126,36 @@ pub fn build(b: *std.Build) !void {
     ++ @embedFile("vendor/liveupdate.h"));
 
     const linux_headers = b.addTranslateC(.{
-        .root_source_file = .{ .generated = .{ .file = &linux_h.generated_directory, .sub_path = "linux.h" } },
+        .root_source_file = .{ .generated = .{ .index = linux_h.generated_directory, .sub_path = "linux.h" } },
         .target = linux_target,
         .optimize = .ReleaseSafe, // This doesn't seem to do anything when translating pure headers
     });
 
     const linux_headers_module = linux_headers.addModule("linux_headers");
 
-    b.installArtifact(tbootInitrd(b, target, optimize, do_strip, zstd, clap));
+    const mbedtls_h = b.addWriteFile("mbedtls.h",
+        \\#include <mbedtls/ctr_debug.h>
+        \\#include <mbedtls/entropy.h>
+        \\#include <mbedtls/error.h>
+        \\#include <mbedtls/pk.h>
+        \\#include <mbedtls/rsa.h>
+        \\#include <mbedtls/x509_crt.h>
+        \\#include <time.h>
+    );
+    const mbedtls_translate_c = b.addTranslateC(.{
+        .root_source_file = .{ .generated = .{ .index = mbedtls_h.generated_directory, .sub_path = "mbedtls.h" } },
+        .target = target,
+        .optimize = optimize,
+    });
+    const mbedtls_module = b.createModule(.{
+        .root_source_file = b.path("src/mbedtls.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    mbedtls_module.linkLibrary(mbedtls);
+    mbedtls_module.addImport("mbedtls_c", mbedtls_translate_c.createModule());
+
+    b.installArtifact(tbootInitrd(b, target, optimize, do_strip));
 
     const tboot_sign_module = b.createModule(.{
         .root_source_file = b.path("src/tboot-sign.zig"),
@@ -126,9 +168,9 @@ pub fn build(b: *std.Build) !void {
         .root_module = tboot_sign_module,
     });
     tboot_sign.root_module.link_libc = true;
-    tboot_sign.root_module.linkLibrary(mbedtls);
     tboot_sign.root_module.addImport("clap", clap);
-    // b.installArtifact(tboot_sign);
+    tboot_sign.root_module.addImport("mbedtls", mbedtls_module);
+    b.installArtifact(tboot_sign);
 
     const tboot_keygen_module = b.createModule(.{
         .root_source_file = b.path("src/tboot-keygen.zig"),
@@ -143,6 +185,7 @@ pub fn build(b: *std.Build) !void {
     tboot_keygen.root_module.link_libc = true;
     tboot_keygen.root_module.linkLibrary(mbedtls);
     tboot_keygen.root_module.addImport("clap", clap);
+    tboot_keygen.root_module.addImport("mbedtls", mbedtls_module);
     b.installArtifact(tboot_keygen);
 
     const tboot_vpd_module = b.createModule(.{
@@ -215,9 +258,9 @@ pub fn build(b: *std.Build) !void {
             .root_module = tboot_nixos_install_module,
         });
         tboot_nixos_install.root_module.link_libc = true;
-        tboot_nixos_install.root_module.linkLibrary(mbedtls);
+        tboot_nixos_install.root_module.addImport("mbedtls", mbedtls_module);
         tboot_nixos_install.root_module.addImport("clap", clap);
-        // b.installArtifact(tboot_nixos_install);
+        b.installArtifact(tboot_nixos_install);
     }
 
     const tboot_loader_module = b.createModule(.{
@@ -234,7 +277,7 @@ pub fn build(b: *std.Build) !void {
     tboot_loader.root_module.addImport("linux_headers", linux_headers_module);
 
     // Use tboot-initrd built for the build host.
-    var run_tboot_initrd = b.addRunArtifact(tbootInitrd(b, b.graph.host, .Debug, false, build_zstd, clap));
+    var run_tboot_initrd = b.addRunArtifact(tbootInitrd(b, b.graph.host, .Debug, false));
 
     // TODO(jared): Would be nicer to have generic
     // --file=tboot_loader:/init CLI interface, but don't know how to
@@ -304,10 +347,8 @@ pub fn build(b: *std.Build) !void {
     // Extra arguments passed through to qemu. We add our own '--' since
     // zig-clap will accept variadic extra arguments only after the
     // '--', which `zig build ...` already excepts.
-    if (b.args) |args| {
-        runner_tool.addArg("--");
-        runner_tool.addArgs(args);
-    }
+    runner_tool.addArg("--");
+    runner_tool.addPassthruArgs();
 
     const run_step = b.step("run", "Run in qemu");
     run_step.dependOn(&runner_tool.step);

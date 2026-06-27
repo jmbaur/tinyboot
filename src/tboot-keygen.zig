@@ -1,15 +1,7 @@
 const std = @import("std");
 const clap = @import("clap");
-
+const mbedtls_c = @import("mbedtls");
 const mbedtls = @import("./mbedtls.zig");
-
-const C = @cImport({
-    @cInclude("mbedtls/ctr_drbg.h");
-    @cInclude("mbedtls/pk.h");
-    @cInclude("mbedtls/x509_crt.h");
-    @cInclude("mbedtls/x509_csr.h");
-    @cInclude("time.h");
-});
 
 /// Returns the generalized time (https://datatracker.ietf.org/doc/html/rfc5280#section-4.1.2.5.2) of an
 /// instant, requires the input buffer's length to be >= 15.
@@ -87,7 +79,7 @@ pub fn main(init: std.process.Init) !void {
         return clap.helpToFile(init.io, .stderr(), clap.Help, &params, .{});
     }
 
-    const time_now: u64 = res.args.@"time-now" orelse @intCast(C.time(null));
+    const time_now: u64 = res.args.@"time-now" orelse @intCast(mbedtls_c.time(null));
     const valid_seconds: u64 = res.args.@"valid-seconds" orelse 60 * 60 * 24 * 365;
     const common_name: []const u8 = res.args.@"common-name" orelse {
         try clap.usageToFile(init.io, .stderr(), clap.Help, &params);
@@ -102,29 +94,29 @@ pub fn main(init: std.process.Init) !void {
         return;
     };
 
-    var entropy: C.mbedtls_entropy_context = undefined;
-    C.mbedtls_entropy_init(&entropy);
-    defer C.mbedtls_entropy_free(&entropy);
+    var entropy: mbedtls_c.mbedtls_entropy_context = undefined;
+    mbedtls_c.mbedtls_entropy_init(&entropy);
+    defer mbedtls_c.mbedtls_entropy_free(&entropy);
 
-    var ctr_drbg: C.mbedtls_ctr_drbg_context = undefined;
-    C.mbedtls_ctr_drbg_init(&ctr_drbg);
-    try mbedtls.wrap(C.mbedtls_ctr_drbg_seed(
+    var ctr_drbg: mbedtls_c.mbedtls_ctr_drbg_context = undefined;
+    mbedtls_c.mbedtls_ctr_drbg_init(&ctr_drbg);
+    try mbedtls.wrap(mbedtls_c.mbedtls_ctr_drbg_seed(
         &ctr_drbg,
-        if (res.args.seed != null) &fixed_seed else C.mbedtls_entropy_func,
+        if (res.args.seed != null) &fixed_seed else mbedtls_c.mbedtls_entropy_func,
         if (res.args.seed) |seed| @ptrCast(@constCast(&seed)) else &entropy,
         "tboot-keygen",
         "tboot-keygen".len,
     ));
-    defer C.mbedtls_ctr_drbg_free(&ctr_drbg);
+    defer mbedtls_c.mbedtls_ctr_drbg_free(&ctr_drbg);
 
     // generate RSA key
-    var key: C.mbedtls_pk_context = undefined;
-    C.mbedtls_pk_init(&key);
-    defer C.mbedtls_pk_free(&key);
+    var key: mbedtls_c.mbedtls_pk_context = undefined;
+    mbedtls_c.mbedtls_pk_init(&key);
+    defer mbedtls_c.mbedtls_pk_free(&key);
 
-    try mbedtls.wrap(C.mbedtls_pk_setup(&key, C.mbedtls_pk_info_from_type(C.MBEDTLS_PK_RSA)));
+    try mbedtls.wrap(mbedtls_c.mbedtls_pk_setup(&key, mbedtls_c.mbedtls_pk_info_from_type(mbedtls_c.MBEDTLS_PK_RSA)));
 
-    try mbedtls.wrap(C.mbedtls_rsa_gen_key(C.mbedtls_pk_rsa(key), C.mbedtls_ctr_drbg_random, &ctr_drbg, 4096, 65537));
+    try mbedtls.wrap(mbedtls_c.mbedtls_rsa_gen_key(mbedtls_c.mbedtls_pk_rsa(key), mbedtls_c.mbedtls_ctr_drbg_random, &ctr_drbg, 4096, 65537));
 
     var key_buf = [_]u8{0} ** 16000;
 
@@ -133,7 +125,7 @@ pub fn main(init: std.process.Init) !void {
 
     // write out public key
     {
-        try mbedtls.wrap(C.mbedtls_pk_write_pubkey_pem(&key, &key_buf, key_buf.len));
+        try mbedtls.wrap(mbedtls_c.mbedtls_pk_write_pubkey_pem(&key, &key_buf, key_buf.len));
 
         const pub_out = try std.Io.Dir.cwd().createFile(init.io, "tboot-public.pem", .{ .permissions = .fromMode(0o444) });
         defer pub_out.close(init.io);
@@ -147,7 +139,7 @@ pub fn main(init: std.process.Init) !void {
 
     // write out private key
     {
-        try mbedtls.wrap(C.mbedtls_pk_write_key_pem(&key, &key_buf, key_buf.len));
+        try mbedtls.wrap(mbedtls_c.mbedtls_pk_write_key_pem(&key, &key_buf, key_buf.len));
 
         const priv_out = try std.Io.Dir.cwd().createFile(
             init.io,
@@ -162,27 +154,27 @@ pub fn main(init: std.process.Init) !void {
     }
 
     // generate x509 cert
-    var issuer_crt: C.mbedtls_x509_crt = undefined;
-    C.mbedtls_x509_crt_init(&issuer_crt);
+    var issuer_crt: mbedtls_c.mbedtls_x509_crt = undefined;
+    mbedtls_c.mbedtls_x509_crt_init(&issuer_crt);
 
-    var crt: C.mbedtls_x509write_cert = undefined;
-    C.mbedtls_x509write_crt_init(&crt);
+    var crt: mbedtls_c.mbedtls_x509write_cert = undefined;
+    mbedtls_c.mbedtls_x509write_crt_init(&crt);
 
-    var csr: C.mbedtls_x509_csr = undefined;
-    C.mbedtls_x509_csr_init(&csr);
+    var csr: mbedtls_c.mbedtls_x509_csr = undefined;
+    mbedtls_c.mbedtls_x509_csr_init(&csr);
 
     // self-signed
-    C.mbedtls_x509write_crt_set_subject_key(&crt, &key);
-    C.mbedtls_x509write_crt_set_issuer_key(&crt, &key);
+    mbedtls_c.mbedtls_x509write_crt_set_subject_key(&crt, &key);
+    mbedtls_c.mbedtls_x509write_crt_set_issuer_key(&crt, &key);
 
     const name = try std.fmt.allocPrint(init.arena.allocator(), "CN={s},O={s},C={s}", .{ common_name, organization, country });
-    try mbedtls.wrap(C.mbedtls_x509write_crt_set_subject_name(&crt, try init.arena.allocator().dupeZ(u8, name)));
-    try mbedtls.wrap(C.mbedtls_x509write_crt_set_issuer_name(&crt, try init.arena.allocator().dupeZ(u8, name)));
+    try mbedtls.wrap(mbedtls_c.mbedtls_x509write_crt_set_subject_name(&crt, try init.arena.allocator().dupeZ(u8, name)));
+    try mbedtls.wrap(mbedtls_c.mbedtls_x509write_crt_set_issuer_name(&crt, try init.arena.allocator().dupeZ(u8, name)));
 
-    C.mbedtls_x509write_crt_set_md_alg(&crt, C.MBEDTLS_MD_SHA256);
+    mbedtls_c.mbedtls_x509write_crt_set_md_alg(&crt, mbedtls_c.MBEDTLS_MD_SHA256);
 
     var serial = "1";
-    try mbedtls.wrap(C.mbedtls_x509write_crt_set_serial_raw(&crt, @ptrCast(&serial), 1));
+    try mbedtls.wrap(mbedtls_c.mbedtls_x509write_crt_set_serial_raw(&crt, @ptrCast(&serial), 1));
 
     const not_before_seconds = time_now;
     const not_after_seconds = not_before_seconds + valid_seconds;
@@ -194,26 +186,26 @@ pub fn main(init: std.process.Init) !void {
     const not_before_time = try init.arena.allocator().dupeZ(u8, (try generalizedTime(.{ .secs = not_before_seconds }, &before_buf))[0..14]);
     const not_after_time = try init.arena.allocator().dupeZ(u8, (try generalizedTime(.{ .secs = not_after_seconds }, &after_buf))[0..14]);
 
-    try mbedtls.wrap(C.mbedtls_x509write_crt_set_validity(
+    try mbedtls.wrap(mbedtls_c.mbedtls_x509write_crt_set_validity(
         &crt,
         @ptrCast(not_before_time),
         @ptrCast(not_after_time),
     ));
 
-    try mbedtls.wrap(C.mbedtls_x509write_crt_set_basic_constraints(&crt, 1, -1));
+    try mbedtls.wrap(mbedtls_c.mbedtls_x509write_crt_set_basic_constraints(&crt, 1, -1));
 
-    try mbedtls.wrap(C.mbedtls_x509write_crt_set_subject_key_identifier(&crt));
-    try mbedtls.wrap(C.mbedtls_x509write_crt_set_authority_key_identifier(&crt));
+    try mbedtls.wrap(mbedtls_c.mbedtls_x509write_crt_set_subject_key_identifier(&crt));
+    try mbedtls.wrap(mbedtls_c.mbedtls_x509write_crt_set_authority_key_identifier(&crt));
 
     var cert_buf = [_]u8{0} ** 4096;
 
     // write out certificate in DER format
     {
-        const len: usize = @intCast(try mbedtls.wrapMulti(C.mbedtls_x509write_crt_der(
+        const len: usize = @intCast(try mbedtls.wrapMulti(mbedtls_c.mbedtls_x509write_crt_der(
             &crt,
             &cert_buf,
             cert_buf.len,
-            C.mbedtls_ctr_drbg_random,
+            mbedtls_c.mbedtls_ctr_drbg_random,
             &ctr_drbg,
         )));
 
@@ -230,11 +222,11 @@ pub fn main(init: std.process.Init) !void {
 
     // write out certificate in PEM format
     {
-        try mbedtls.wrap(C.mbedtls_x509write_crt_pem(
+        try mbedtls.wrap(mbedtls_c.mbedtls_x509write_crt_pem(
             &crt,
             &cert_buf,
             cert_buf.len,
-            C.mbedtls_ctr_drbg_random,
+            mbedtls_c.mbedtls_ctr_drbg_random,
             &ctr_drbg,
         ));
 

@@ -9,7 +9,7 @@ pub const std_options = std.Options{
 };
 
 const DiskBootLoader = @import("./boot/disk.zig");
-const signFile = @import("./tboot-sign.zig").signFile;
+const signFile = @import("mbedtls").signFile;
 const BootSpecV1 = @import("./bootspec.zig").BootSpecV1;
 const BootJson = @import("./bootspec.zig").BootJson;
 

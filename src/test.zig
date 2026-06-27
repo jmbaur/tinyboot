@@ -17,7 +17,7 @@ test {
     _ = @import("./liveupdate.zig");
     _ = @import("./log.zig");
     _ = @import("./mbedtls.zig");
-    // _ = @import("./pkcs7.zig");
+    _ = @import("./pkcs7.zig");
     _ = @import("./runner.zig");
     _ = @import("./security.zig");
     _ = @import("./system.zig");
@@ -27,8 +27,8 @@ test {
     _ = @import("./tboot-initrd.zig");
     _ = @import("./tboot-keygen.zig");
     _ = @import("./tboot-loader.zig");
-    // _ = @import("./tboot-nixos-install.zig");
-    // _ = @import("./tboot-sign.zig");
+    _ = @import("./tboot-nixos-install.zig");
+    _ = @import("./tboot-sign.zig");
     _ = @import("./tmpdir.zig");
     _ = @import("./utils.zig");
     _ = @import("./vpd.zig");

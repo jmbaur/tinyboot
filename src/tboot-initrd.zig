@@ -1,8 +1,8 @@
 const builtin = @import("builtin");
 const std = @import("std");
 const clap = @import("clap");
+const zstd = @import("zstd");
 const CpioArchive = @import("./cpio.zig");
-const zstd = @import("./zstd.zig");
 
 pub const std_options = std.Options{ .log_level = if (builtin.mode == .Debug) .debug else .info };
 
