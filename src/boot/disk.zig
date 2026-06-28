@@ -280,12 +280,12 @@ fn mount(self: *DiskBootLoader, io: std.Io, fstype: Filesystem.Type, path: []con
 
     var where_buf: [std.fs.max_path_bytes]u8 = undefined;
     const tmp_where = try tmpdir.dir.realPathFile(io, mountpath, &where_buf);
-    const where = try self.arena.allocator().dupeZ(u8, where_buf[0..tmp_where]);
+    const where = try self.arena.allocator().dupeSentinel(u8, where_buf[0..tmp_where], 0);
     defer self.arena.allocator().free(where);
 
     var what_buf: [std.fs.max_path_bytes]u8 = undefined;
     const tmp_what = try std.Io.Dir.cwd().realPathFile(io, path, &what_buf);
-    const what = try self.arena.allocator().dupeZ(u8, what_buf[0..tmp_what]);
+    const what = try self.arena.allocator().dupeSentinel(u8, what_buf[0..tmp_what], 0);
     defer self.arena.allocator().free(what);
 
     switch (linux.errno(linux.mount(
@@ -336,8 +336,8 @@ fn compareVersion(left: []const u8, right: []const u8) std.math.Order {
     var right_char: u8 = right_reader.takeByte() catch 0;
 
     // 128 bytes oughta be enough??
-    var left_buf = [_]u8{0} ** 128;
-    var right_buf = [_]u8{0} ** 128;
+    var left_buf: [128]u8 = @splat(0);
+    var right_buf: [128]u8 = @splat(0);
 
     var left_writer: std.Io.Writer = .fixed(&left_buf);
     var right_writer: std.Io.Writer = .fixed(&right_buf);

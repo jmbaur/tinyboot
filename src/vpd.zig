@@ -65,7 +65,7 @@ fn writeVpd(io: std.Io, vpd_list: VpdList, file: std.Io.File) !void {
         std.log.debug("writing {s}({})={s}({})", .{ key, key.len, value, value.len });
 
         try writer.writeByte(VPD_TYPE_STRING);
-        var vpd_len_buf = [_]u8{0} ** 64;
+        var vpd_len_buf: [64]u8 = @splat(0);
         const key_len_bytes = vpdValueLength(key.len, &vpd_len_buf);
         try writer.writeAll(key_len_bytes);
         try writer.writeAll(key);
@@ -124,7 +124,7 @@ fn vpdValueLength(size: usize, buf: []u8) []u8 {
 }
 
 test "calculate vpd value length" {
-    var buf = [_]u8{0} ** 64;
+    var buf: [64]u8 = @splat(0);
 
     try std.testing.expectEqualSlices(u8, &.{0b0000001}, vpdValueLength(1, &buf));
 

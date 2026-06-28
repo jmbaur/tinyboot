@@ -736,12 +736,12 @@ pub fn init(allocator: std.mem.Allocator, reader: *Io.Reader) !Gpt {
             return Error.UnknownPartitionEntrySize;
         }
 
-        var hdr_bytes_to_hash = [_]u8{0} ** @sizeOf(Header);
+        var hdr_bytes_to_hash: [@sizeOf(Header)]u8 = @splat(0);
         @memcpy(&hdr_bytes_to_hash, hdr_bytes);
 
         // The CRC calculation is done with the crc32 field set to zero.
         const header_crc32_offset = @offsetOf(Header, "header_crc32");
-        @memcpy(hdr_bytes_to_hash[header_crc32_offset .. header_crc32_offset + @sizeOf(u32)], &[_]u8{0} ** @sizeOf(u32));
+        @memcpy(hdr_bytes_to_hash[header_crc32_offset .. header_crc32_offset + @sizeOf(u32)], &@as([@sizeOf(u32)]u8, @splat(0)));
 
         // The CRC calculation is done without the unused bytes.
         const calculated_header_crc = std.hash.crc.Crc32.hash(
@@ -917,7 +917,7 @@ test "gpt parsing" {
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    } ++ [_]u8{0x0} ** (1024 * 16);
+    } ++ @as([1024 * 16]u8, @splat(0));
 
     var buffer: [@sizeOf(Header)]u8 = undefined;
     var reader: Io.Reader = .fixed(&partition_table);

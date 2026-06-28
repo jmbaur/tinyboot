@@ -168,8 +168,8 @@ pub fn main(init: std.process.Init) !void {
     mbedtls_c.mbedtls_x509write_crt_set_issuer_key(&crt, &key);
 
     const name = try std.fmt.allocPrint(init.arena.allocator(), "CN={s},O={s},C={s}", .{ common_name, organization, country });
-    try mbedtls.wrap(mbedtls_c.mbedtls_x509write_crt_set_subject_name(&crt, try init.arena.allocator().dupeZ(u8, name)));
-    try mbedtls.wrap(mbedtls_c.mbedtls_x509write_crt_set_issuer_name(&crt, try init.arena.allocator().dupeZ(u8, name)));
+    try mbedtls.wrap(mbedtls_c.mbedtls_x509write_crt_set_subject_name(&crt, try init.arena.allocator().dupeSentinel(u8, name, 0)));
+    try mbedtls.wrap(mbedtls_c.mbedtls_x509write_crt_set_issuer_name(&crt, try init.arena.allocator().dupeSentinel(u8, name, 0)));
 
     mbedtls_c.mbedtls_x509write_crt_set_md_alg(&crt, mbedtls_c.MBEDTLS_MD_SHA256);
 
@@ -183,8 +183,8 @@ pub fn main(init: std.process.Init) !void {
     var after_buf = [_]u8{0} ** 15;
 
     // mbedtls expects the 'Z' to not be present
-    const not_before_time = try init.arena.allocator().dupeZ(u8, (try generalizedTime(.{ .secs = not_before_seconds }, &before_buf))[0..14]);
-    const not_after_time = try init.arena.allocator().dupeZ(u8, (try generalizedTime(.{ .secs = not_after_seconds }, &after_buf))[0..14]);
+    const not_before_time = try init.arena.allocator().dupeSentinel(u8, (try generalizedTime(.{ .secs = not_before_seconds }, &before_buf))[0..14], 0);
+    const not_after_time = try init.arena.allocator().dupeSentinel(u8, (try generalizedTime(.{ .secs = not_after_seconds }, &after_buf))[0..14], 0);
 
     try mbedtls.wrap(mbedtls_c.mbedtls_x509write_crt_set_validity(
         &crt,

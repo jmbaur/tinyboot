@@ -116,7 +116,7 @@ pub fn watch(self: *DeviceWatcher, io: std.Io, done: posix.fd_t) !void {
     );
 
     while (true) {
-        var events = [_]linux.epoll_event{undefined} ** (2 << 4);
+        var events: [2 << 4]linux.epoll_event = @splat(undefined);
 
         const n_events = linux.epoll_wait(self.epoll, &events, events.len, -1);
 
@@ -177,7 +177,7 @@ pub fn deinit(self: *DeviceWatcher, io: std.Io) void {
 
 fn mknod(self: *DeviceWatcher, node_type: NodeType, major: u32, minor: u32) !void {
     var buf: [10]u8 = undefined;
-    const device = try std.fmt.bufPrintZ(&buf, "{}:{}", .{ major, minor });
+    const device = try std.fmt.bufPrintSentinel(&buf, "{}:{}", .{ major, minor }, 0);
 
     const rc = std.os.linux.mknodat(
         switch (node_type) {
@@ -205,19 +205,22 @@ const UEVENT_FILE_SIZE = 4096;
 /// Scan sysfs and create all nodes of interest that currently exist on the
 /// system.
 pub fn scanAndCreateExistingDevices(self: *DeviceWatcher, io: std.Io) !void {
-    inline for (std.meta.fields(Device.Subsystem)) |field| {
-        try self.scanAndCreateExistingDevicesForSubsystem(io, field.name);
+    var class_dir = try std.Io.Dir.cwd().openDir(io, "/sys/class", .{});
+    defer class_dir.close(io);
+    inline for (comptime std.meta.fieldNames(Device.Subsystem)) |field| {
+        try self.scanAndCreateExistingDevicesForSubsystem(io, class_dir, field);
     }
 }
 
 pub fn scanAndCreateExistingDevicesForSubsystem(
     self: *DeviceWatcher,
     io: std.Io,
+    class_dir: std.Io.Dir,
     comptime subsystem: []const u8,
 ) !void {
-    var subsystem_dir = std.Io.Dir.cwd().openDir(
+    var subsystem_dir = class_dir.openDir(
         io,
-        "/sys/class/" ++ subsystem,
+        subsystem,
         .{ .iterate = true },
     ) catch return; // don't hard fail if the subsystem does not exist
     defer subsystem_dir.close(io);

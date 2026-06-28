@@ -400,7 +400,7 @@ fn getMemoryRanges(allocator: std.mem.Allocator, reader: *std.Io.Reader) ![]Memo
     var memory_ranges: std.ArrayList(MemoryRange) = .empty;
     errdefer memory_ranges.deinit(allocator);
 
-    var buf = [_]u8{0} ** 255; // unlikely to encounter a line this large
+    var buf: [255]u8 = @splat(0); // unlikely to encounter a line this large
 
     while (true) {
         var buf_writer: std.Io.Writer = .fixed(&buf);

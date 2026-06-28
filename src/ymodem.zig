@@ -79,7 +79,7 @@ pub fn send(
         var chunk: Chunk128 = .{
             .block = 0,
             .start = SOH,
-            .payload = [_]u8{0x0} ** 128,
+            .payload = @splat(0),
         };
 
         try finalizeAndWriteChunk(Chunk128, &chunk, reader, writer);
@@ -100,7 +100,7 @@ pub fn send(
     defer file_node.end();
 
     {
-        var payload = [_]u8{PAD} ** 128;
+        var payload: [128]u8 = @splat(PAD);
         _ = try std.fmt.bufPrint(
             &payload,
             "{s}{c}{d}{c}",
@@ -121,7 +121,7 @@ pub fn send(
 
     var chunk = Chunk1K{ .start = STX };
 
-    var chunk_buf = [_]u8{0} ** 1024;
+    var chunk_buf: [1024]u8 = @splat(0);
 
     while (true) {
         const bytes_read = try reader.readSliceShort(&chunk_buf);

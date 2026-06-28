@@ -13,9 +13,9 @@ pub fn absolutePathExists(io: std.Io, p: []const u8) bool {
 }
 
 pub fn enumFromStr(T: anytype, value: []const u8) !T {
-    inline for (std.meta.fields(T)) |field| {
-        if (std.mem.eql(u8, field.name, value)) {
-            return @field(T, field.name);
+    inline for (comptime std.meta.fieldNames(T)) |field| {
+        if (std.mem.eql(u8, field, value)) {
+            return @field(T, field);
         }
     }
 

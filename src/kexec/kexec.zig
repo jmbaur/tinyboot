@@ -105,9 +105,9 @@ fn kexecFileLoad(
         flags |= linux_headers.KEXEC_FILE_NO_INITRAMFS;
     }
 
-    // dupeZ() returns a null-terminated slice, however the null-terminator
+    // dupeSentinel() returns a null-terminated slice, however the null-terminator
     // is not included in the length of the slice, so we must add 1.
-    const cmdline_z = try allocator.dupeZ(u8, cmdline orelse "");
+    const cmdline_z = try allocator.dupeSentinel(u8, cmdline orelse "", 0);
     defer allocator.free(cmdline_z);
     const cmdline_len = cmdline_z.len + 1;
 

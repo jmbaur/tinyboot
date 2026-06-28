@@ -269,7 +269,7 @@ fn deinit(self: *TbootLoader, io: std.Io) void {
 
 fn run(self: *TbootLoader, io: std.Io) !posix.RebootCommand {
     while (true) {
-        var events = [_]linux.epoll_event{undefined} ** (2 << 4);
+        var events: [2 << 4]linux.epoll_event = @splat(undefined);
 
         const n_events = linux.epoll_wait(self.epoll, &events, events.len, -1);
 

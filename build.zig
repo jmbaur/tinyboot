@@ -17,12 +17,12 @@ fn tbootInitrd(
     const clap = clap_dependency.module("clap");
 
     const zstd_h = b.addWriteFile(
-        "zstd.h",
+        "zstd-wrapper.h",
         \\#include <zstd.h>
         ,
     );
     const zstd_translate_c = b.addTranslateC(.{
-        .root_source_file = .{ .generated = .{ .index = zstd_h.generated_directory, .sub_path = "zstd.h" } },
+        .root_source_file = .{ .generated = .{ .index = zstd_h.generated_directory, .sub_path = "zstd-wrapper.h" } },
         .target = target,
         .optimize = optimize,
     });
@@ -146,6 +146,7 @@ pub fn build(b: *std.Build) !void {
         .root_source_file = .{ .generated = .{ .index = mbedtls_h.generated_directory, .sub_path = "mbedtls.h" } },
         .target = target,
         .optimize = optimize,
+        .link_libc = true,
     });
     const mbedtls_module = b.createModule(.{
         .root_source_file = b.path("src/mbedtls.zig"),

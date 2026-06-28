@@ -561,7 +561,7 @@ const Shell = struct {
 
         index: ?usize = null,
 
-        items: [size]?[]const u8 = [_]?[]const u8{null} ** size,
+        items: [size]?[]const u8 = @splat(null),
 
         pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
             for (self.items) |item| {
@@ -761,9 +761,9 @@ fn runCommand(
         }
 
         if (self.context) |ctx| {
-            inline for (std.meta.fields(Command.Context)) |field| {
-                if (std.mem.eql(u8, field.name, cmd)) {
-                    return @field(Command, field.name).run(
+            inline for (comptime std.meta.fieldNames(Command.Context)) |field| {
+                if (std.mem.eql(u8, field, cmd)) {
+                    return @field(Command, field).run(
                         self,
                         io,
                         args,
@@ -773,9 +773,9 @@ fn runCommand(
                 }
             }
         } else {
-            inline for (std.meta.fields(Command.NoContext)) |field| {
-                if (std.mem.eql(u8, field.name, cmd)) {
-                    return @field(Command, field.name).run(
+            inline for (comptime std.meta.fieldNames(Command.NoContext)) |field| {
+                if (std.mem.eql(u8, field, cmd)) {
+                    return @field(Command, field).run(
                         self,
                         io,
                         args,
@@ -825,10 +825,10 @@ pub const Command = struct {
         fn helpAll(shell: *Shell, t: anytype) void {
             shell.print("\n", .{});
 
-            inline for (std.meta.fields(t)) |field| {
-                const cmd_short_help = comptime @field(Command, field.name).short_help;
-                const space = 20 - comptime field.name.len;
-                shell.print("{s}{s}{s}\n", .{ field.name, " " ** space, cmd_short_help });
+            inline for (comptime std.meta.fieldNames(t)) |field| {
+                const cmd_short_help = comptime @field(Command, field).short_help;
+                const space = 20 - comptime field.len;
+                shell.print("{s}{s}{s}\n", .{ field, @as([space]u8, @splat(' ')), cmd_short_help });
             }
         }
 
@@ -840,9 +840,9 @@ pub const Command = struct {
                 return;
             }
 
-            inline for (std.meta.fields(t)) |field| {
-                if (std.mem.eql(u8, field.name, cmd)) {
-                    const cmd_long_help = comptime @field(Command, field.name).long_help;
+            inline for (comptime std.meta.fieldNames(t)) |field| {
+                if (std.mem.eql(u8, field, cmd)) {
+                    const cmd_long_help = comptime @field(Command, field).long_help;
                     shell.print("\n{s}\n", .{cmd_long_help});
                     return;
                 }
