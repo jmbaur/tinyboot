@@ -903,6 +903,7 @@ test "fdt write" {
     defer std.testing.allocator.free(buf);
     var writer: std.Io.Writer = .fixed(buf);
     try fdt.save(&writer);
+    try writer.flush();
 
     // ensure the unique strings we removed don't appear
     try std.testing.expectEqual(null, std.mem.indexOf(u8, buf, "bool"));

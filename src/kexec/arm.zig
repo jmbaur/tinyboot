@@ -1,6 +1,7 @@
 const builtin = @import("builtin");
 const std = @import("std");
 const posix = std.posix;
+const linux = std.os.linux;
 
 const linux_headers = @import("linux_headers");
 
@@ -39,17 +40,17 @@ const ZimageTag = extern struct {
     },
 };
 
-fn mmapFile(file: std.fs.File) ![]align(std.heap.page_size_min) u8 {
-    const stat = try file.stat();
+fn mmapFile(io: std.Io, file: std.Io.File) ![]align(std.heap.page_size_min) []u8 {
+    const stat = try file.stat(io);
 
-    return try posix.mmap(
+    return @ptrFromInt(linux.mmap(
         null,
         @intCast(stat.size),
-        posix.PROT.READ,
+        .{ .READ = true },
         .{ .TYPE = .PRIVATE },
         file.handle,
         0,
-    );
+    ));
 }
 
 // No need to pass a purgatory program since the current kernel handles
@@ -58,23 +59,23 @@ fn mmapFile(file: std.fs.File) ![]align(std.heap.page_size_min) u8 {
 pub fn kexecLoad(
     io: std.Io,
     allocator: std.mem.Allocator,
-    linux: std.fs.File,
-    initrd: ?std.fs.File,
+    kernel: std.Io.File,
+    initrd: ?std.Io.File,
     cmdline: ?[]const u8,
 ) !void {
     const page_size = std.heap.pageSize();
 
-    var segments = std.ArrayList(KexecSegment){};
+    var segments: std.ArrayList(KexecSegment) = .empty;
     defer segments.deinit(allocator);
 
-    const linux_stat = try linux.stat();
+    const linux_stat = try kernel.stat(io);
 
     // Kernel too small
     if (linux_stat.size < @sizeOf(ZimageHeader)) {
         return error.InvalidKernel;
     }
 
-    const kernel_buf = try mmapFile(linux);
+    const kernel_buf = try mmapFile(io, kernel);
     defer posix.munmap(kernel_buf);
 
     const hdr: *ZimageHeader = @ptrCast(@alignCast(kernel_buf));
@@ -261,7 +262,7 @@ pub fn kexecLoad(
 
     try addSegment(allocator, &segments, page_size, kernel_buf, kernel_buf_size, kernel_base, kernel_mem_size);
 
-    const rc = std.os.linux.syscall4(
+    const rc = linux.syscall4(
         .kexec_load,
         kernel_base,
         segments.items.len,
@@ -269,7 +270,7 @@ pub fn kexecLoad(
         linux_headers.KEXEC_ARCH_DEFAULT,
     );
 
-    return switch (std.os.linux.E.init(rc)) {
+    return switch (linux.errno(rc)) {
         .SUCCESS => {},
         else => |err| posix.unexpectedErrno(err),
     };

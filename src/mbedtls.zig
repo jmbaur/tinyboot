@@ -268,6 +268,7 @@ pub fn signFile(
 
     try output_file_writer.interface.writeAll(std.mem.asBytes(&sig_info));
     try output_file_writer.interface.writeAll(MODULE_SIG_STRING);
+    try output_file_writer.interface.flush();
 }
 
 fn fixed_seed(ctx: ?*anyopaque, buffer: [*c]u8, len: usize) callconv(.c) c_int {
@@ -364,9 +365,7 @@ pub fn generateKeyAndCert(
         const pub_out = try outdir.createFile(io, "tboot-public.pem", .{ .permissions = .fromMode(0o444) });
         defer pub_out.close(io);
 
-        var writer = pub_out.writer(io, &.{});
-        try writer.interface.writeAll(std.mem.trim(u8, &key_buf, &.{0}));
-        try writer.interface.flush();
+        try pub_out.writeStreamingAll(io, std.mem.trim(u8, &key_buf, &.{0}));
     }
 
     key_buf = std.mem.zeroes(@TypeOf(key_buf));
@@ -382,9 +381,7 @@ pub fn generateKeyAndCert(
         );
         defer priv_out.close(io);
 
-        var writer = priv_out.writer(io, &.{});
-        try writer.interface.writeAll(std.mem.trim(u8, &key_buf, &.{0}));
-        try writer.interface.flush();
+        try priv_out.writeStreamingAll(io, std.mem.trim(u8, &key_buf, &.{0}));
     }
 
     // generate x509 cert
@@ -447,9 +444,7 @@ pub fn generateKeyAndCert(
         defer cert_der_out.close(io);
 
         const start: usize = cert_buf.len - len;
-        var writer = cert_der_out.writer(io, &.{});
-        try writer.interface.writeAll(std.mem.trim(u8, cert_buf[start .. start + len], &.{0}));
-        try writer.interface.flush();
+        try cert_der_out.writeStreamingAll(io, std.mem.trim(u8, cert_buf[start .. start + len], &.{0}));
     }
 
     cert_buf = std.mem.zeroes(@TypeOf(cert_buf));
@@ -467,8 +462,6 @@ pub fn generateKeyAndCert(
         const cert_pem_out = try outdir.createFile(io, "tboot-certificate.pem", .{ .permissions = .fromMode(0o444) });
         defer cert_pem_out.close(io);
 
-        var writer = cert_pem_out.writer(io, &.{});
-        try writer.interface.writeAll(std.mem.trim(u8, &cert_buf, &.{0}));
-        try writer.interface.flush();
+        try cert_pem_out.writeStreamingAll(io, std.mem.trim(u8, &cert_buf, &.{0}));
     }
 }

@@ -36,9 +36,7 @@ fn ensureFilesystemState(
                 .{},
             );
             defer entries_srel_file.close(io);
-            var writer = entries_srel_file.writer(io, &.{});
-
-            try writer.interface.writeAll("type1\n");
+            try entries_srel_file.writeStreamingAll(io, "type1\n");
         }
         std.log.info("installed {s}", .{srel_filepath});
     }
@@ -458,8 +456,7 @@ pub fn main(init: std.process.Init) !void {
                 var loader_conf_file = try esp.createFile(init.io, loader_conf_path, .{});
                 defer loader_conf_file.close(init.io);
 
-                var loader_conf_writer = loader_conf_file.writer(init.io, &.{});
-                try loader_conf_writer.interface.writeAll(loader_conf_contents);
+                try loader_conf_file.writeStreamingAll(init.io, loader_conf_contents);
             }
 
             std.log.info("installed {s}", .{loader_conf_path});

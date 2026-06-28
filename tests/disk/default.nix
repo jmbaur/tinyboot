@@ -103,11 +103,11 @@ testers.runNixOSTest {
       # PCR7, PCR8, and PCR9 should be the same
       for pcr in [7, 8, 9]:
           if first_boot_pcrs[pcr] != second_boot_pcrs[pcr]:
-              raise AssertionError(f"PCR{pcr} should be equal")
+              raise AssertionError(f"PCR{pcr} should be equal, got {first_boot_pcrs[pcr]} and {second_boot_pcrs[pcr]}")
 
       # PCR12 should _not_ be the same
       for pcr in [12]:
           if first_boot_pcrs[pcr] == second_boot_pcrs[pcr]:
-              raise AssertionError(f"PCR{pcr} should not be equal")
+              raise AssertionError(f"PCR{pcr} should not be equal, got {first_boot_pcrs[pcr]}")
     '';
 }

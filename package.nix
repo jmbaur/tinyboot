@@ -1,6 +1,7 @@
 {
   firmwareDirectory ? null,
 
+  breakpointHook,
   lib,
   nukeReferences,
   stdenvNoCC,
@@ -44,6 +45,7 @@ stdenvNoCC.mkDerivation (
     nativeBuildInputs = [
       nukeReferences
       zig
+      breakpointHook
     ];
 
     # Prevent zig (or anything else) from being in the runtime closure
@@ -52,29 +54,34 @@ stdenvNoCC.mkDerivation (
     __structuredAttrs = true;
     doCheck = true;
     strictDeps = true;
+    dontInstall = true;
 
     zigBuildFlags = [
+      "--color off"
+      "--release=safe"
       "-Dtarget=${stdenvNoCC.hostPlatform.qemuArch}-${stdenvNoCC.hostPlatform.parsed.kernel.name}"
     ]
     ++ lib.optionals (firmwareDirectory != null) [
       "-Dfirmware-directory=${firmwareDirectory}"
     ];
 
+    configurePhase = ''
+      runHook preConfigure
+      export ZIG_GLOBAL_CACHE_DIR=$TMPDIR
+      ln -s ${deps} $ZIG_GLOBAL_CACHE_DIR/p
+      runHook postConfigure
+    '';
+
     buildPhase = ''
       runHook preBuild
-      zig build --color off -Doptimize=ReleaseSafe ''${zigBuildFlags[@]}
+      zig build install --prefix $out ''${zigBuildFlags[@]}
       runHook postBuild
     '';
 
-    installPhase = ''
-      runHook preInstall
-      zig build install --color off --prefix $out -Doptimize=ReleaseSafe ''${zigBuildFlags[@]}
-      runHook postInstall
-    '';
-
-    postConfigure = ''
-      export ZIG_GLOBAL_CACHE_DIR=$TMPDIR
-      ln -s ${deps} $ZIG_GLOBAL_CACHE_DIR/p
+    checkPhase = ''
+      runHook preCheck
+      zig build test ''${zigBuildFlags[@]}
+      runHook postCheck
     '';
 
     postFixup = ''

@@ -19,7 +19,7 @@
 
       overlays.default = final: _prev: {
         tinyboot = final.callPackage ./package.nix {
-          zig = inputs.zig-overlay.packages.${final.stdenv.buildPlatform.system}.master;
+          zig = inputs.zig-overlay.packages.${final.stdenv.buildPlatform.system}.master-2026-06-22;
         };
       };
 
@@ -34,7 +34,7 @@
       devShells = mapAttrs (system: pkgs: {
         default = pkgs.mkShell {
           packages = [
-            inputs.zig-overlay.packages.${system}.master
+            inputs.zig-overlay.packages.${system}.master-2026-06-22
             pkgs.lldb
             pkgs.qemu
             pkgs.swtpm

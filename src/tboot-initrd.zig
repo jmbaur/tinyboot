@@ -42,9 +42,7 @@ fn compress(
     var compressed_file = try std.Io.Dir.cwd().createFile(io, compressed_output, .{ .permissions = .fromMode(0o444) });
     defer compressed_file.close(io);
 
-    var buf: [1024]u8 = undefined;
-    var writer = compressed_file.writer(io, &buf);
-    try writer.interface.writeAll(compressed.content());
+    try compressed_file.writeStreamingAll(io, compressed.content());
 
     try std.Io.Dir.cwd().rename(compressed_output, std.Io.Dir.cwd(), output, io);
 }

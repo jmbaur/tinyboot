@@ -73,9 +73,7 @@ fn enableKHO(io: std.Io) !void {
     };
     defer kho.close(io);
 
-    var writer = kho.writer(io, &.{});
-    try writer.interface.writeAll("1\n");
-    try writer.flush();
+    try kho.writeStreamingAll(io, "1\n");
 }
 
 fn disableKHO(io: std.Io) !void {
@@ -88,9 +86,7 @@ fn disableKHO(io: std.Io) !void {
     };
     defer kho.close(io);
 
-    var writer = kho.writer(io, &.{});
-    try writer.interface.writeAll("0\n");
-    try writer.flush();
+    try kho.writeStreamingAll(io, "0\n");
 }
 
 fn kexecFileLoad(

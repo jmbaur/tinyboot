@@ -56,6 +56,13 @@ fn tbootInitrd(
 }
 
 pub fn build(b: *std.Build) !void {
+    // TODO(jared): Dynamic linker for sandboxed nix builds and zig 0.17.x do not play well with one another.
+    var build_target_ = b.graph.host;
+    if (build_target_.result.isGnuLibC()) {
+        build_target_.query.abi = .musl;
+    }
+    const build_target = b.resolveTargetQuery(build_target_.query);
+
     const tboot_builtin = b.addOptions();
     tboot_builtin.addOption(
         []const u8,
@@ -286,7 +293,7 @@ pub fn build(b: *std.Build) !void {
     tboot_loader.root_module.addImport("linux_headers", linux_headers_module);
 
     // Use tboot-initrd built for the build host.
-    var run_tboot_initrd = b.addRunArtifact(tbootInitrd(b, b.graph.host, .Debug, false));
+    var run_tboot_initrd = b.addRunArtifact(tbootInitrd(b, build_target, .Debug, false));
 
     // TODO(jared): Would be nicer to have generic
     // --file=tboot_loader:/init CLI interface, but don't know how to
@@ -338,7 +345,7 @@ pub fn build(b: *std.Build) !void {
     }
 
     const tboot_runner_module = b.createModule(.{
-        .target = b.graph.host,
+        .target = build_target,
         .root_source_file = b.path("src/runner.zig"),
     });
     const tboot_runner = b.addExecutable(.{

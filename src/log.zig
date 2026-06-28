@@ -27,8 +27,7 @@ pub fn init(io: std.Io) !void {
         .{ .mode = .write_only },
     )) |printk_devkmsg| {
         defer printk_devkmsg.close(io);
-        var writer = printk_devkmsg.writer(io, &.{});
-        writer.interface.writeAll("on\n") catch {};
+        printk_devkmsg.writeStreamingAll(io, "on\n") catch {};
     } else |_| {}
 
     kmsg = try std.Io.Dir.cwd().openFile(io, KMSG, .{ .mode = .write_only });

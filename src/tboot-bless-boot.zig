@@ -49,7 +49,7 @@ fn markAsGood(
             .{bls_entry_file.name},
         );
 
-        try parent_dir.rename(original_entry_filename, std.Io.Dir.cwd(), new_filename, io);
+        try parent_dir.rename(original_entry_filename, parent_dir, new_filename, io);
     }
 }
 
@@ -76,7 +76,7 @@ fn markAsBad(
         }
     };
 
-    try parent_dir.rename(original_entry_filename, std.Io.Dir.cwd(), new_filename, io);
+    try parent_dir.rename(original_entry_filename, parent_dir, new_filename, io);
 }
 
 fn printStatus(

@@ -16,8 +16,6 @@ const MEASURE_POLICY =
 
 const APPRAISE_POLICY = KEXEC_KERNEL_CHECK_APPRAISE ++ KEXEC_INITRAMFS_CHECK_APPRAISE;
 
-const MEASURE_AND_APPRAISE_POLICY = MEASURE_POLICY ++ APPRAISE_POLICY;
-
 const IMA_POLICY_PATH = "/sys/kernel/security/integrity/ima/policy";
 
 const KEY_CHECK = withNewline("measure func=KEY_CHECK pcr=7");
@@ -40,9 +38,7 @@ fn installImaPolicy(io: std.Io, policy: []const u8) !void {
 
     std.log.debug("writing IMA policy", .{});
 
-    var buf: [1024]u8 = undefined;
-    var writer = policy_file.writer(io, &buf);
-    try writer.interface.writeAll(policy);
+    try policy_file.writeStreamingAll(io, policy);
 }
 
 const MAX_KEY_SIZE = 8192;
@@ -125,7 +121,7 @@ pub fn initializeSecurity(io: std.Io, allocator: std.mem.Allocator) !void {
     }
 
     if (loadVerificationKey(io, allocator)) {
-        try installImaPolicy(io, MEASURE_AND_APPRAISE_POLICY);
+        try installImaPolicy(io, MEASURE_POLICY ++ APPRAISE_POLICY);
         std.log.info("boot measurement and verification is enabled", .{});
     } else |err| {
         std.log.warn("failed to load verification key, cannot perform boot verification: {}", .{err});

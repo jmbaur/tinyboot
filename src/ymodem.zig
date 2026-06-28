@@ -182,6 +182,7 @@ pub fn recv(io: std.Io, tty: *system.Tty, dir: std.Io.Dir) !void {
     var bytes_written: usize = 0;
 
     var out_file: ?std.Io.File = null;
+    var out_file_writer: ?std.Io.File.Writer = null;
     defer {
         if (out_file) |file| {
             file.close(io);
@@ -301,15 +302,15 @@ pub fn recv(io: std.Io, tty: *system.Tty, dir: std.Io.Dir) !void {
                         filesize = try std.fmt.parseInt(usize, filesize_str, 10);
 
                         out_file = try dir.createFile(io, std.fs.path.basename(filename), .{});
+                        out_file_writer = out_file.?.writer(io, &save_buffer);
 
                         std.log.info("fetching {Bi:.02} to '{s}'", .{ filesize, filename });
                     },
                     .data => {
                         std.debug.assert(filesize >= bytes_written);
                         const bytes_to_write = @min(filesize - bytes_written, chunk.payload.len);
-                        var file = out_file orelse return error.MissingFile;
-                        var file_writer = file.writer(io, &save_buffer);
-                        try file_writer.interface.writeAll(chunk.payload[0..bytes_to_write]);
+                        var file_writer = &(out_file_writer orelse return error.MissingFile).interface;
+                        try file_writer.writeAll(chunk.payload[0..bytes_to_write]);
                         bytes_written += bytes_to_write;
                         try ack(writer);
                     },
@@ -344,16 +345,22 @@ pub fn recv(io: std.Io, tty: *system.Tty, dir: std.Io.Dir) !void {
 
                 std.debug.assert(filesize >= bytes_written);
                 const bytes_to_write = @min(filesize - bytes_written, chunk.payload.len);
-                var file = out_file orelse return error.MissingFile;
-                var file_writer = file.writer(io, &save_buffer);
-                try file_writer.interface.writeAll(chunk.payload[0..bytes_to_write]);
+                var file_writer = &(out_file_writer orelse return error.MissingFile).interface;
+                try file_writer.writeAll(chunk.payload[0..bytes_to_write]);
                 bytes_written += bytes_to_write;
                 try ack(writer);
             },
             EOF => {
+                if (state != .data) {
+                    return error.InvalidState;
+                }
+
                 if (bytes_written != filesize) {
                     return error.InvalidFilesize;
                 }
+
+                var file_writer = &(out_file_writer orelse return error.MissingFile).interface;
+                try file_writer.flush();
 
                 try ack(writer);
 
