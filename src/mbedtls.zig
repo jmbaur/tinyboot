@@ -98,24 +98,27 @@ pub fn signFile(
     const input_file = try std.Io.Dir.cwd().openFile(io, in_filepath, .{});
     defer input_file.close(io);
 
+    var input_file_reader = input_file.reader(io, &.{});
+
     errdefer std.Io.Dir.cwd().deleteFile(io, out_filepath) catch {};
 
     const output_file = try std.Io.Dir.cwd().createFile(io, out_filepath, .{});
     defer output_file.close(io);
+    var output_file_writer = output_file.writer(io, &.{});
 
     var entropy: mbedtls_c.mbedtls_entropy_context = undefined;
     mbedtls_c.mbedtls_entropy_init(&entropy);
     defer mbedtls_c.mbedtls_entropy_free(&entropy);
 
-    var ctr_drbg: mbedtls_c.mbedtlstr_drbg_context = undefined;
-    mbedtls_c.mbedtlstr_drbg_init(&ctr_drbg);
-    defer mbedtls_c.mbedtlstr_drbg_free(&ctr_drbg);
+    var ctr_drbg: mbedtls_c.mbedtls_ctr_drbg_context = undefined;
+    mbedtls_c.mbedtls_ctr_drbg_init(&ctr_drbg);
+    defer mbedtls_c.mbedtls_ctr_drbg_free(&ctr_drbg);
 
     var pk: mbedtls_c.mbedtls_pk_context = undefined;
     mbedtls_c.mbedtls_pk_init(&pk);
     defer mbedtls_c.mbedtls_pk_free(&pk);
 
-    try mbedtls_c.wrap(mbedtls_c.mbedtlstr_drbg_seed(
+    try wrap(mbedtls_c.mbedtls_ctr_drbg_seed(
         &ctr_drbg,
         mbedtls_c.mbedtls_entropy_func,
         &entropy,
@@ -130,7 +133,7 @@ pub fn signFile(
 
     var x509: mbedtls_c.mbedtls_x509_crt = undefined;
     mbedtls_c.mbedtls_x509_crt_init(&x509);
-    try mbedtls_c.wrap(mbedtls_c.mbedtls_x509_crt_parse(&x509, @ptrCast(certificate_bytes), certificate_bytes.len));
+    try wrap(mbedtls_c.mbedtls_x509_crt_parse(&x509, @ptrCast(certificate_bytes), certificate_bytes.len));
     defer mbedtls_c.mbedtls_x509_crt_free(&x509);
 
     const common_name = getAttribute(&x509, .commonName) orelse return error.MissingCommonName;
@@ -152,13 +155,13 @@ pub fn signFile(
     var private_key_file_reader = private_key_file.reader(io, &.{});
     _ = try private_key_file_reader.interface.readSliceShort(private_key_bytes[0..private_key_size]);
 
-    try mbedtls_c.wrap(mbedtls_c.mbedtls_pk_parse_key(
+    try wrap(mbedtls_c.mbedtls_pk_parse_key(
         &pk,
         @ptrCast(private_key_bytes),
         private_key_bytes.len,
         null,
         0,
-        mbedtls_c.mbedtlstr_drbg_random,
+        mbedtls_c.mbedtls_ctr_drbg_random,
         &ctr_drbg,
     ));
 
@@ -167,16 +170,15 @@ pub fn signFile(
         return error.InvalidPrivateKey;
     }
 
-    try mbedtls_c.wrap(mbedtls_c.mbedtls_rsa_set_padding(
+    try wrap(mbedtls_c.mbedtls_rsa_set_padding(
         mbedtls_c.mbedtls_pk_rsa(pk),
         mbedtls_c.MBEDTLS_RSA_PKCS_V15,
         mbedtls_c.MBEDTLS_MD_SHA256,
     ));
 
-    var hash = [_]u8{0} ** sha2.Sha256.digest_length;
+    var hash: [sha2.Sha256.digest_length]u8 = @splat(0);
     var hasher = sha2.Sha256.init(.{});
     while (true) {
-        var input_file_reader = input_file.reader(io, &.{});
         const bytes_read = try input_file_reader.interface.readSliceShort(&scratch_buf);
         if (bytes_read == 0) {
             break;
@@ -189,8 +191,8 @@ pub fn signFile(
     scratch_buf = std.mem.zeroes(@TypeOf(scratch_buf));
 
     var signature_len: usize = 0;
-    var signature_buf = [_]u8{0} ** mbedtls_c.MBEDTLS_MPI_MAX_SIZE;
-    try mbedtls_c.wrap(mbedtls_c.mbedtls_pk_sign(
+    var signature_buf: [mbedtls_c.MBEDTLS_MPI_MAX_SIZE]u8 = @splat(0);
+    try wrap(mbedtls_c.mbedtls_pk_sign(
         &pk,
         mbedtls_c.MBEDTLS_MD_SHA256,
         &hash,
@@ -198,7 +200,7 @@ pub fn signFile(
         &signature_buf,
         signature_buf.len,
         &signature_len,
-        mbedtls_c.mbedtlstr_drbg_random,
+        mbedtls_c.mbedtls_ctr_drbg_random,
         &ctr_drbg,
     ));
 
@@ -242,28 +244,231 @@ pub fn signFile(
 
     const pkcs7_encoded = encoder.buffer.data;
 
-    try input_file.seekTo(0);
+    try input_file_reader.seekTo(0);
     while (true) {
-        const bytes_read = try input_file.read(&scratch_buf);
+        const bytes_read = try input_file_reader.interface.readSliceShort(&scratch_buf);
         if (bytes_read == 0) {
             break;
         }
 
-        try output_file.writeAll(scratch_buf[0..bytes_read]);
+        try output_file_writer.interface.writeAll(scratch_buf[0..bytes_read]);
     }
 
-    try output_file.writeAll(pkcs7_encoded);
+    try output_file_writer.interface.writeAll(pkcs7_encoded);
 
     const sig_info = ModuleSignature{
         .sig_len = std.mem.nativeToBig(u32, @intCast(pkcs7_encoded.len)),
         .id_type = @intFromEnum(PkeyIdType.PkeyIdPkcs7),
         .algo = 0,
         .hash = 0,
-        .__pad = [_]u8{0} ** 3,
+        .__pad = @splat(0),
         .signer_len = 0,
         .key_id_len = 0,
     };
 
-    try output_file.writeAll(std.mem.asBytes(&sig_info));
-    try output_file.writeAll(MODULE_SIG_STRING);
+    try output_file_writer.interface.writeAll(std.mem.asBytes(&sig_info));
+    try output_file_writer.interface.writeAll(MODULE_SIG_STRING);
+}
+
+fn fixed_seed(ctx: ?*anyopaque, buffer: [*c]u8, len: usize) callconv(.c) c_int {
+    const seed: *[]const u8 = @ptrCast(@alignCast(ctx.?));
+    const buf = buffer[0..len];
+    if (seed.len > len) {
+        std.mem.copyForwards(u8, buf, seed.*[0..len]);
+    } else {
+        std.mem.copyForwards(u8, buf, seed.*);
+    }
+    return 0;
+}
+
+/// Returns the generalized time (https://datatracker.ietf.org/doc/html/rfc5280#section-4.1.2.5.2) of an
+/// instant, requires the input buffer's length to be >= 15.
+fn generalizedTime(epoch_seconds: std.time.epoch.EpochSeconds, buf: []u8) ![]u8 {
+    const epoch_day = epoch_seconds.getEpochDay();
+    const day_seconds = epoch_seconds.getDaySeconds();
+    const year_day = epoch_day.calculateYearDay();
+    const month_day = year_day.calculateMonthDay();
+
+    // YYYYMMDDHHMMSSZ
+    return std.fmt.bufPrint(buf, "{:0>4}{:0>2}{:0>2}{:0>2}{:0>2}{:0>2}Z", .{
+        year_day.year,
+        month_day.month.numeric(),
+        month_day.day_index + 1,
+        day_seconds.getHoursIntoDay(),
+        day_seconds.getMinutesIntoHour(),
+        day_seconds.getSecondsIntoMinute(),
+    });
+}
+
+test generalizedTime {
+    var buf: ["YYYYMMDDHHMMSSZ".len]u8 = @splat(0);
+
+    try std.testing.expectEqualStrings(
+        "19700101000000Z",
+        try generalizedTime(.{ .secs = 0 }, &buf),
+    );
+
+    try std.testing.expectEqualStrings(
+        "20250513050449Z",
+        try generalizedTime(.{ .secs = 1747112689 }, &buf),
+    );
+}
+
+pub fn generateKeyAndCert(
+    io: std.Io,
+    arena_alloc: std.mem.Allocator,
+    outdir: std.Io.Dir,
+    time_now_: ?u64,
+    valid_seconds_: ?u64,
+    common_name: []const u8,
+    organization: []const u8,
+    country: []const u8,
+    seed: ?[]const u8,
+) !void {
+    const time_now: u64 = time_now_ orelse @intCast(mbedtls_c.time(null));
+    const valid_seconds: u64 = valid_seconds_ orelse 60 * 60 * 24 * 365;
+
+    var entropy: mbedtls_c.mbedtls_entropy_context = undefined;
+    mbedtls_c.mbedtls_entropy_init(&entropy);
+    defer mbedtls_c.mbedtls_entropy_free(&entropy);
+
+    var ctr_drbg: mbedtls_c.mbedtls_ctr_drbg_context = undefined;
+    mbedtls_c.mbedtls_ctr_drbg_init(&ctr_drbg);
+    try wrap(mbedtls_c.mbedtls_ctr_drbg_seed(
+        &ctr_drbg,
+        if (seed != null) &fixed_seed else mbedtls_c.mbedtls_entropy_func,
+        if (seed) |seed_| @ptrCast(@constCast(&seed_)) else &entropy,
+        "tboot-keygen",
+        "tboot-keygen".len,
+    ));
+    defer mbedtls_c.mbedtls_ctr_drbg_free(&ctr_drbg);
+
+    // generate RSA key
+    var key: mbedtls_c.mbedtls_pk_context = undefined;
+    mbedtls_c.mbedtls_pk_init(&key);
+    defer mbedtls_c.mbedtls_pk_free(&key);
+
+    try wrap(mbedtls_c.mbedtls_pk_setup(&key, mbedtls_c.mbedtls_pk_info_from_type(mbedtls_c.MBEDTLS_PK_RSA)));
+
+    try wrap(mbedtls_c.mbedtls_rsa_gen_key(mbedtls_c.mbedtls_pk_rsa(key), mbedtls_c.mbedtls_ctr_drbg_random, &ctr_drbg, 4096, 65537));
+
+    var key_buf: [16000]u8 = @splat(0);
+
+    // NOTE: When we write out PEM files, ensure there is a trailing null byte
+    // so that MBEDTLS detects these as PEM files, see https://github.com/Mbed-TLS/mbedtls/blob/6fb5120fde4ab889bea402f5ab230c720b0a3b9a/library/pkparse.c#L994.
+
+    // write out public key
+    {
+        try wrap(mbedtls_c.mbedtls_pk_write_pubkey_pem(&key, &key_buf, key_buf.len));
+
+        const pub_out = try outdir.createFile(io, "tboot-public.pem", .{ .permissions = .fromMode(0o444) });
+        defer pub_out.close(io);
+
+        var writer = pub_out.writer(io, &.{});
+        try writer.interface.writeAll(std.mem.trim(u8, &key_buf, &.{0}));
+        try writer.interface.flush();
+    }
+
+    key_buf = std.mem.zeroes(@TypeOf(key_buf));
+
+    // write out private key
+    {
+        try wrap(mbedtls_c.mbedtls_pk_write_key_pem(&key, &key_buf, key_buf.len));
+
+        const priv_out = try outdir.createFile(
+            io,
+            "tboot-private.pem",
+            .{ .permissions = .fromMode(0o444) },
+        );
+        defer priv_out.close(io);
+
+        var writer = priv_out.writer(io, &.{});
+        try writer.interface.writeAll(std.mem.trim(u8, &key_buf, &.{0}));
+        try writer.interface.flush();
+    }
+
+    // generate x509 cert
+    var issuer_crt: mbedtls_c.mbedtls_x509_crt = undefined;
+    mbedtls_c.mbedtls_x509_crt_init(&issuer_crt);
+
+    var crt: mbedtls_c.mbedtls_x509write_cert = undefined;
+    mbedtls_c.mbedtls_x509write_crt_init(&crt);
+
+    var csr: mbedtls_c.mbedtls_x509_csr = undefined;
+    mbedtls_c.mbedtls_x509_csr_init(&csr);
+
+    // self-signed
+    mbedtls_c.mbedtls_x509write_crt_set_subject_key(&crt, &key);
+    mbedtls_c.mbedtls_x509write_crt_set_issuer_key(&crt, &key);
+
+    const name = try std.fmt.allocPrint(arena_alloc, "CN={s},O={s},C={s}", .{ common_name, organization, country });
+    try wrap(mbedtls_c.mbedtls_x509write_crt_set_subject_name(&crt, try arena_alloc.dupeSentinel(u8, name, 0)));
+    try wrap(mbedtls_c.mbedtls_x509write_crt_set_issuer_name(&crt, try arena_alloc.dupeSentinel(u8, name, 0)));
+
+    mbedtls_c.mbedtls_x509write_crt_set_md_alg(&crt, mbedtls_c.MBEDTLS_MD_SHA256);
+
+    var serial = "1";
+    try wrap(mbedtls_c.mbedtls_x509write_crt_set_serial_raw(&crt, @ptrCast(&serial), 1));
+
+    const not_before_seconds = time_now;
+    const not_after_seconds = not_before_seconds + valid_seconds;
+
+    var before_buf: [15]u8 = @splat(0);
+    var after_buf: [15]u8 = @splat(0);
+
+    // mbedtls expects the 'Z' to not be present
+    const not_before_time = try arena_alloc.dupeSentinel(u8, (try generalizedTime(.{ .secs = not_before_seconds }, &before_buf))[0..14], 0);
+    const not_after_time = try arena_alloc.dupeSentinel(u8, (try generalizedTime(.{ .secs = not_after_seconds }, &after_buf))[0..14], 0);
+
+    try wrap(mbedtls_c.mbedtls_x509write_crt_set_validity(
+        &crt,
+        @ptrCast(not_before_time),
+        @ptrCast(not_after_time),
+    ));
+
+    try wrap(mbedtls_c.mbedtls_x509write_crt_set_basic_constraints(&crt, 1, -1));
+
+    try wrap(mbedtls_c.mbedtls_x509write_crt_set_subject_key_identifier(&crt));
+    try wrap(mbedtls_c.mbedtls_x509write_crt_set_authority_key_identifier(&crt));
+
+    var cert_buf: [4096]u8 = @splat(0);
+
+    // write out certificate in DER format
+    {
+        const len: usize = @intCast(try wrapMulti(mbedtls_c.mbedtls_x509write_crt_der(
+            &crt,
+            &cert_buf,
+            cert_buf.len,
+            mbedtls_c.mbedtls_ctr_drbg_random,
+            &ctr_drbg,
+        )));
+
+        const cert_der_out = try outdir.createFile(io, "tboot-certificate.der", .{ .permissions = .fromMode(0o444) });
+        defer cert_der_out.close(io);
+
+        const start: usize = cert_buf.len - len;
+        var writer = cert_der_out.writer(io, &.{});
+        try writer.interface.writeAll(std.mem.trim(u8, cert_buf[start .. start + len], &.{0}));
+        try writer.interface.flush();
+    }
+
+    cert_buf = std.mem.zeroes(@TypeOf(cert_buf));
+
+    // write out certificate in PEM format
+    {
+        try wrap(mbedtls_c.mbedtls_x509write_crt_pem(
+            &crt,
+            &cert_buf,
+            cert_buf.len,
+            mbedtls_c.mbedtls_ctr_drbg_random,
+            &ctr_drbg,
+        ));
+
+        const cert_pem_out = try outdir.createFile(io, "tboot-certificate.pem", .{ .permissions = .fromMode(0o444) });
+        defer cert_pem_out.close(io);
+
+        var writer = cert_pem_out.writer(io, &.{});
+        try writer.interface.writeAll(std.mem.trim(u8, &cert_buf, &.{0}));
+        try writer.interface.flush();
+    }
 }

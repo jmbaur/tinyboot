@@ -23,7 +23,7 @@ stdenvNoCC.mkDerivation (
       '';
       outputHashAlgo = null;
       outputHashMode = "recursive";
-      outputHash = lib.fakeHash; # "sha256-rJsJvvjA55A0FB+2bGlLuXU4NxKuL3TaqyAPK7wAVhE=";
+      outputHash = "sha256-+i28+Eq7Abl3txiL2Up5EAT3fS9WIDImKNsVoXEjGmI=";
     };
   in
   {
@@ -60,7 +60,20 @@ stdenvNoCC.mkDerivation (
       "-Dfirmware-directory=${firmwareDirectory}"
     ];
 
+    buildPhase = ''
+      runHook preBuild
+      zig build --color off -Doptimize=ReleaseSafe ''${zigBuildFlags[@]}
+      runHook postBuild
+    '';
+
+    installPhase = ''
+      runHook preInstall
+      zig build install --color off --prefix $out -Doptimize=ReleaseSafe ''${zigBuildFlags[@]}
+      runHook postInstall
+    '';
+
     postConfigure = ''
+      export ZIG_GLOBAL_CACHE_DIR=$TMPDIR
       ln -s ${deps} $ZIG_GLOBAL_CACHE_DIR/p
     '';
 

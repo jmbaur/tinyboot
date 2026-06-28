@@ -670,9 +670,13 @@ const PartitionRecord = extern struct {
         return try allocator.dupe(u8, std.mem.trimEnd(u8, name_utf8_bytes[0..end], &.{0}));
     }
 
+    // TODO(jared): don't do this
     pub fn partType(self: *const @This()) ?PartitionType {
-        const guid: std.os.uefi.Guid = @bitCast(self.partition_type);
-        return PartitionType.fromGuid(guid);
+        _ = self;
+        return .EfiSystem;
+        // return null;
+        // const guid: std.os.uefi.Guid = @bitCast(self.partition_type);
+        // return PartitionType.fromGuid(guid);
     }
 };
 

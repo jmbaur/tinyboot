@@ -16,24 +16,27 @@ fn tbootInitrd(
     const clap_dependency = b.dependency("clap", .{ .target = target, .optimize = optimize });
     const clap = clap_dependency.module("clap");
 
-    const zstd_h = b.addWriteFile(
-        "zstd-wrapper.h",
+    const write_files = b.addWriteFiles();
+    const zstd_h = write_files.add("zstd.h",
         \\#include <zstd.h>
-        ,
     );
     const zstd_translate_c = b.addTranslateC(.{
-        .root_source_file = .{ .generated = .{ .index = zstd_h.generated_directory, .sub_path = "zstd-wrapper.h" } },
+        .root_source_file = zstd_h,
         .target = target,
         .optimize = optimize,
+        .link_libc = true,
     });
+    zstd_translate_c.addIncludePath(zstd.getEmittedIncludeTree());
+    const zstd_c_module = zstd_translate_c.createModule();
+    zstd_c_module.linkLibrary(zstd);
+
     const zstd_module = b.createModule(.{
         .root_source_file = b.path("src/zstd.zig"),
         .target = target,
         .optimize = optimize,
         .link_libc = true,
     });
-    zstd_module.linkLibrary(zstd);
-    zstd_module.addImport("zstd_c", zstd_translate_c.createModule());
+    zstd_module.addImport("zstd_c", zstd_c_module);
 
     const tboot_initrd_module = b.createModule(.{
         .root_source_file = b.path("src/tboot-initrd.zig"),
@@ -133,28 +136,33 @@ pub fn build(b: *std.Build) !void {
 
     const linux_headers_module = linux_headers.addModule("linux_headers");
 
-    const mbedtls_h = b.addWriteFile("mbedtls.h",
-        \\#include <mbedtls/ctr_debug.h>
+    const write_files = b.addWriteFiles();
+    const mbedtls_h = write_files.add("mbedtls.h",
+        \\#include <mbedtls/ctr_drbg.h>
         \\#include <mbedtls/entropy.h>
         \\#include <mbedtls/error.h>
         \\#include <mbedtls/pk.h>
         \\#include <mbedtls/rsa.h>
         \\#include <mbedtls/x509_crt.h>
+        \\#include <mbedtls/x509_csr.h>
         \\#include <time.h>
     );
     const mbedtls_translate_c = b.addTranslateC(.{
-        .root_source_file = .{ .generated = .{ .index = mbedtls_h.generated_directory, .sub_path = "mbedtls.h" } },
+        .root_source_file = mbedtls_h,
         .target = target,
         .optimize = optimize,
         .link_libc = true,
     });
+    mbedtls_translate_c.addIncludePath(mbedtls.getEmittedIncludeTree());
+    const mbedtls_c_module = mbedtls_translate_c.createModule();
+    mbedtls_c_module.linkLibrary(mbedtls);
+
     const mbedtls_module = b.createModule(.{
         .root_source_file = b.path("src/mbedtls.zig"),
         .target = target,
         .optimize = optimize,
     });
-    mbedtls_module.linkLibrary(mbedtls);
-    mbedtls_module.addImport("mbedtls_c", mbedtls_translate_c.createModule());
+    mbedtls_module.addImport("mbedtls_c", mbedtls_c_module);
 
     b.installArtifact(tbootInitrd(b, target, optimize, do_strip));
 

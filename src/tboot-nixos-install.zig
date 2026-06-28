@@ -93,10 +93,10 @@ fn installGeneration(
                 std.log.info("signed {s}", .{linux_target});
             } else {
                 try std.Io.Dir.cwd().copyFile(
-                    io,
                     spec.kernel,
                     nixos_dir,
                     linux_target_filename,
+                    io,
                     .{},
                 );
             }
@@ -133,6 +133,7 @@ fn installGeneration(
                 if (!args.dry_run) {
                     if (args.sign) |sign| {
                         try signFile(
+                            io,
                             arena_alloc,
                             initrd,
                             full_initrd_path,
@@ -143,10 +144,10 @@ fn installGeneration(
                         std.log.info("signed {s}", .{initrd_target});
                     } else {
                         try std.Io.Dir.cwd().copyFile(
-                            io,
                             initrd,
                             nixos_dir,
                             initrd_target_filename,
+                            io,
                             .{},
                         );
                     }
@@ -199,7 +200,7 @@ fn installGeneration(
 
     var it = entries_dir.iterate();
 
-    while (try it.next()) |dir_entry| {
+    while (try it.next(io)) |dir_entry| {
         if (dir_entry.kind != .file) {
             continue;
         }
@@ -218,7 +219,7 @@ fn installGeneration(
         defer entry_file.close(io);
 
         var entry_buffer: [512]u8 = undefined;
-        var entry_writer = entry_file.writer(&entry_buffer);
+        var entry_writer = entry_file.writer(io, &entry_buffer);
         try entry_writer.interface.print("title {s}{s}\n", .{ spec.label, sub_name });
         try entry_writer.interface.print("version {s}\n", .{spec.label});
         try entry_writer.interface.print("linux {s}\n", .{linux_target});
@@ -454,10 +455,11 @@ pub fn main(init: std.process.Init) !void {
             , .{ args.timeout, generation });
 
             if (!args.dry_run) {
-                var loader_conf_file = try esp.createFile(loader_conf_path, .{});
-                defer loader_conf_file.close();
+                var loader_conf_file = try esp.createFile(init.io, loader_conf_path, .{});
+                defer loader_conf_file.close(init.io);
 
-                try loader_conf_file.writeAll(loader_conf_contents);
+                var loader_conf_writer = loader_conf_file.writer(init.io, &.{});
+                try loader_conf_writer.interface.writeAll(loader_conf_contents);
             }
 
             std.log.info("installed {s}", .{loader_conf_path});

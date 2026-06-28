@@ -125,7 +125,7 @@ test "vfat filesystem detection" {
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x55, 0xaa,
     };
 
-    var null_source: std.Io.Reader = .fixed(@as([512]u8, @splat(0)));
+    var null_source: std.Io.Reader = .fixed(&@as([512]u8, @splat(0)));
     var fat32_source: std.Io.Reader = .fixed(FAT32_FILESYSTEM);
     var fat16_source: std.Io.Reader = .fixed(FAT16_FILESYSTEM);
     var fat12_source: std.Io.Reader = .fixed(FAT12_FILESYSTEM);

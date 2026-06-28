@@ -2,7 +2,7 @@
     .name = .tinyboot,
     .fingerprint = 0xf283d479be749c48,
     .version = "0.1.0",
-    .minimum_zig_version = "0.15.2",
+    .minimum_zig_version = "0.17.0",
     .paths = .{ "build.zig", "build.zig.zon", "src", "vendor" },
     .dependencies = .{
         .clap = .{

@@ -19,7 +19,7 @@
 
       overlays.default = final: _prev: {
         tinyboot = final.callPackage ./package.nix {
-          zig = inputs.zig-overlay.packages.${final.stdenv.buildPlatform.name}.master;
+          zig = inputs.zig-overlay.packages.${final.stdenv.buildPlatform.system}.master;
         };
       };
 

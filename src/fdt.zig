@@ -243,7 +243,7 @@ fn findProperty(
     self: *@This(),
     node: ?*Node.Inner,
     path: []const u8,
-) !std.meta.Tuple(&.{ bool, *Node.Inner }) {
+) !@Tuple(&.{ bool, *Node.Inner }) {
     var split = std.mem.splitScalar(u8, path, '/');
 
     return self._findProperty(node orelse return error.PropertyNotFound, &split);
@@ -282,7 +282,7 @@ fn _findProperty(
     self: *@This(),
     root: *Node.Inner,
     path: *std.mem.SplitIterator(u8, .scalar),
-) !std.meta.Tuple(&.{ bool, *Node.Inner }) {
+) !@Tuple(&.{ bool, *Node.Inner }) {
     var node = root;
 
     while (true) {
@@ -448,7 +448,7 @@ pub fn getU64Property(self: *@This(), path: []const u8) !u64 {
     return (@as(u64, std.mem.readInt(u32, &left, .big)) << 32) | @as(u64, std.mem.readInt(u32, &right, .big));
 }
 
-fn addString(self: *@This(), value: []const u8) !std.meta.Tuple(&.{ bool, u32 }) {
+fn addString(self: *@This(), value: []const u8) !@Tuple(&.{ bool, u32 }) {
     if (std.mem.indexOf(u8, self.dt_strings.written(), value)) |offset| {
         return .{ true, @intCast(offset) };
     }
