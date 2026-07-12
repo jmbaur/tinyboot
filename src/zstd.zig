@@ -1,8 +1,5 @@
 const std = @import("std");
-
-const C = @cImport({
-    @cInclude("zstd.h");
-});
+const zstd = @import("zstd_c");
 
 pub const Compressed = struct {
     allocator: std.mem.Allocator,
@@ -19,11 +16,11 @@ pub const Compressed = struct {
 };
 
 pub fn compress(allocator: std.mem.Allocator, buf: []const u8) !Compressed {
-    const compressed_size = C.ZSTD_compressBound(buf.len);
+    const compressed_size = zstd.ZSTD_compressBound(buf.len);
     const compressed_buf = try allocator.alloc(u8, compressed_size);
     errdefer allocator.free(compressed_buf);
 
-    const rc = C.ZSTD_compress(
+    const rc = zstd.ZSTD_compress(
         @ptrCast(compressed_buf),
         compressed_size,
         @ptrCast(buf),
@@ -31,8 +28,8 @@ pub fn compress(allocator: std.mem.Allocator, buf: []const u8) !Compressed {
         1,
     );
 
-    if (C.ZSTD_isError(rc) == 1) {
-        std.log.err("failed to compress: {s}", .{C.ZSTD_getErrorName(rc)});
+    if (zstd.ZSTD_isError(rc) == 1) {
+        std.log.err("failed to compress: {s}", .{zstd.ZSTD_getErrorName(rc)});
         return error.CompressFail;
     }
 

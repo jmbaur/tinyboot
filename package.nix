@@ -1,10 +1,11 @@
 {
   firmwareDirectory ? null,
 
+  breakpointHook,
   lib,
   nukeReferences,
   stdenvNoCC,
-  zig_0_15,
+  zig,
 }:
 
 stdenvNoCC.mkDerivation (
@@ -13,7 +14,7 @@ stdenvNoCC.mkDerivation (
     deps = stdenvNoCC.mkDerivation {
       pname = finalAttrs.pname + "-deps";
       inherit (finalAttrs) src version;
-      depsBuildBuild = [ zig_0_15 ];
+      depsBuildBuild = [ zig ];
       buildCommand = ''
         export ZIG_GLOBAL_CACHE_DIR=$(mktemp -d)
         runHook unpackPhase
@@ -23,7 +24,7 @@ stdenvNoCC.mkDerivation (
       '';
       outputHashAlgo = null;
       outputHashMode = "recursive";
-      outputHash = "sha256-oXN06yiNNfbi+FMh+PwxPVzAOT0M31Acu9Xgeyib7aY=";
+      outputHash = "sha256-+i28+Eq7Abl3txiL2Up5EAT3fS9WIDImKNsVoXEjGmI=";
     };
   in
   {
@@ -43,7 +44,8 @@ stdenvNoCC.mkDerivation (
 
     nativeBuildInputs = [
       nukeReferences
-      zig_0_15
+      zig
+      breakpointHook
     ];
 
     # Prevent zig (or anything else) from being in the runtime closure
@@ -52,20 +54,38 @@ stdenvNoCC.mkDerivation (
     __structuredAttrs = true;
     doCheck = true;
     strictDeps = true;
+    dontInstall = true;
 
     zigBuildFlags = [
+      "--color off"
+      "--release=safe"
       "-Dtarget=${stdenvNoCC.hostPlatform.qemuArch}-${stdenvNoCC.hostPlatform.parsed.kernel.name}"
     ]
     ++ lib.optionals (firmwareDirectory != null) [
       "-Dfirmware-directory=${firmwareDirectory}"
     ];
 
-    postConfigure = ''
+    configurePhase = ''
+      runHook preConfigure
+      export ZIG_GLOBAL_CACHE_DIR=$TMPDIR
       ln -s ${deps} $ZIG_GLOBAL_CACHE_DIR/p
+      runHook postConfigure
+    '';
+
+    buildPhase = ''
+      runHook preBuild
+      zig build install --prefix $out ''${zigBuildFlags[@]}
+      runHook postBuild
+    '';
+
+    checkPhase = ''
+      runHook preCheck
+      zig build test ''${zigBuildFlags[@]}
+      runHook postCheck
     '';
 
     postFixup = ''
-      find $out/bin -type f | while read i; do
+      find $out -type f | while read i; do
         nuke-refs -e $out $i
       done
     '';

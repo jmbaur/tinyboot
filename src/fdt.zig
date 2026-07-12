@@ -172,7 +172,7 @@ fn parseDtStruct(
 
         switch (try nextToken(reader)) {
             .BeginNode => {
-                var node_name_buf = [_]u8{0} ** node_prop_name_max_chars;
+                var node_name_buf: [node_prop_name_max_chars]u8 = @splat(0);
                 var node_name_writer: std.Io.Writer = .fixed(&node_name_buf);
                 const node_name_length = try reader.streamDelimiter(&node_name_writer, 0);
                 std.debug.assert(0 == try reader.takeByte()); // skip null byte
@@ -243,7 +243,7 @@ fn findProperty(
     self: *@This(),
     node: ?*Node.Inner,
     path: []const u8,
-) !std.meta.Tuple(&.{ bool, *Node.Inner }) {
+) !@Tuple(&.{ bool, *Node.Inner }) {
     var split = std.mem.splitScalar(u8, path, '/');
 
     return self._findProperty(node orelse return error.PropertyNotFound, &split);
@@ -282,7 +282,7 @@ fn _findProperty(
     self: *@This(),
     root: *Node.Inner,
     path: *std.mem.SplitIterator(u8, .scalar),
-) !std.meta.Tuple(&.{ bool, *Node.Inner }) {
+) !@Tuple(&.{ bool, *Node.Inner }) {
     var node = root;
 
     while (true) {
@@ -404,7 +404,7 @@ pub fn getU32Property(self: *@This(), path: []const u8) !u32 {
 
     const node_data: *Node = @fieldParentPtr("inner", node);
 
-    var value = [_]u8{0} ** @sizeOf(u32);
+    var value: [@sizeOf(u32)]u8 = @splat(0);
 
     std.debug.assert(node_data.token == .Prop);
     @memcpy(&value, b: switch (node_data.token) {
@@ -440,15 +440,15 @@ pub fn getU64Property(self: *@This(), path: []const u8) !u64 {
         else => unreachable,
     };
 
-    var left = [_]u8{0} ** @sizeOf(u32);
-    var right = [_]u8{0} ** @sizeOf(u32);
+    var left: [@sizeOf(u32)]u8 = @splat(0);
+    var right: [@sizeOf(u32)]u8 = @splat(0);
     @memcpy(&left, value[0..4]);
     @memcpy(&right, value[4..]);
 
     return (@as(u64, std.mem.readInt(u32, &left, .big)) << 32) | @as(u64, std.mem.readInt(u32, &right, .big));
 }
 
-fn addString(self: *@This(), value: []const u8) !std.meta.Tuple(&.{ bool, u32 }) {
+fn addString(self: *@This(), value: []const u8) !@Tuple(&.{ bool, u32 }) {
     if (std.mem.indexOf(u8, self.dt_strings.written(), value)) |offset| {
         return .{ true, @intCast(offset) };
     }
@@ -476,7 +476,7 @@ pub fn upsertStringProperty(self: *@This(), path: []const u8, value: []const u8)
 }
 
 pub fn upsertU32Property(self: *@This(), path: []const u8, value: u32) !void {
-    var value_bytes = [_]u8{0} ** @sizeOf(u32);
+    var value_bytes: [@sizeOf(u32)]u8 = @splat(0);
     std.mem.writeInt(u32, &value_bytes, value, .big);
 
     const dest = try self.allocator.alloc(u8, @sizeOf(u32));
@@ -488,10 +488,10 @@ pub fn upsertU32Property(self: *@This(), path: []const u8, value: u32) !void {
 }
 
 pub fn upsertU64Property(self: *@This(), path: []const u8, value: u64) !void {
-    var left = [_]u8{0} ** @sizeOf(u32);
+    var left: [@sizeOf(u32)]u8 = @splat(0);
     std.mem.writeInt(u32, &left, @intCast(value >> 32), .big);
 
-    var right = [_]u8{0} ** @sizeOf(u32);
+    var right: [@sizeOf(u32)]u8 = @splat(0);
     std.mem.writeInt(u32, &right, @intCast(value & std.math.maxInt(u32)), .big);
 
     const dest = try self.allocator.alloc(u8, @sizeOf(u64));
@@ -903,6 +903,7 @@ test "fdt write" {
     defer std.testing.allocator.free(buf);
     var writer: std.Io.Writer = .fixed(buf);
     try fdt.save(&writer);
+    try writer.flush();
 
     // ensure the unique strings we removed don't appear
     try std.testing.expectEqual(null, std.mem.indexOf(u8, buf, "bool"));

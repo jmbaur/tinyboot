@@ -42,7 +42,7 @@ pub const BootSpecV1 = struct {
         if (val) |value| {
             switch (value) {
                 .array => |array| {
-                    var new_list = std.ArrayList([]const u8){};
+                    var new_list: std.ArrayList([]const u8) = .empty;
                     defer new_list.deinit(allocator);
 
                     for (array.items) |inner_val| {
@@ -134,7 +134,7 @@ pub const BootJson = struct {
         const specialisations: ?[]BootSpecV1 = s: {
             if (toplevel_object.get("org.nixos.specialisation.v1")) |special| switch (special) {
                 .object => |obj| {
-                    var special_list = std.ArrayList(BootSpecV1){};
+                    var special_list: std.ArrayList(BootSpecV1) = .empty;
                     defer special_list.deinit(allocator);
 
                     var it = obj.iterator();

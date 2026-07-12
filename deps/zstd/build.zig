@@ -12,19 +12,18 @@ pub fn build(b: *std.Build) !void {
             .root_source_file = null,
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
         }),
     });
 
     lib.installHeadersDirectory(upstream.path("lib"), "", .{});
-
-    lib.linkLibC();
 
     switch (optimize) {
         .Debug, .ReleaseSafe => lib.bundle_compiler_rt = true,
         else => lib.root_module.strip = true,
     }
 
-    lib.addCSourceFiles(.{
+    lib.root_module.addCSourceFiles(.{
         .root = upstream.path(""),
         .files = &.{
             "lib/common/debug.c",

@@ -50,19 +50,21 @@ fn finalizeAndWriteChunk(comptime chunk_type: type, chunk: *chunk_type, reader: 
 }
 
 pub fn send(
+    io: std.Io,
     parent_node: *Progress.Node,
     tty: *system.Tty,
     opts: ?struct {
         name: []const u8,
-        file: std.fs.File,
+        file: std.Io.File,
     },
 ) !void {
+    var file_buffer: [1024]u8 = undefined;
     var reader_buffer: [1024]u8 = undefined;
     var writer_buffer: [1024]u8 = undefined;
-    var file_reader = tty.file.reader(&reader_buffer);
-    var file_writer = tty.file.writer(&writer_buffer);
-    var reader = &file_reader.interface;
-    var writer = &file_writer.interface;
+    var tty_reader = tty.file.readerStreaming(io, &reader_buffer);
+    var tty_writer = tty.file.writerStreaming(io, &writer_buffer);
+    var reader = &tty_reader.interface;
+    var writer = &tty_writer.interface;
 
     std.log.debug("waiting for receiver ping", .{});
 
@@ -78,7 +80,7 @@ pub fn send(
         var chunk: Chunk128 = .{
             .block = 0,
             .start = SOH,
-            .payload = [_]u8{0x0} ** 128,
+            .payload = @splat(0),
         };
 
         try finalizeAndWriteChunk(Chunk128, &chunk, reader, writer);
@@ -90,16 +92,17 @@ pub fn send(
     const file = opts.?.file;
     const name = opts.?.name;
 
-    try file.seekTo(0);
+    var file_reader = file.reader(io, &file_buffer);
+    try file_reader.seekTo(0);
 
-    const stat = try file.stat();
+    const stat = try file.stat(io);
     const size: usize = @intCast(stat.size);
 
     var file_node = parent_node.start(name, size / 1024);
     defer file_node.end();
 
     {
-        var payload = [_]u8{PAD} ** 128;
+        var payload: [128]u8 = @splat(PAD);
         _ = try std.fmt.bufPrint(
             &payload,
             "{s}{c}{d}{c}",
@@ -120,10 +123,10 @@ pub fn send(
 
     var chunk = Chunk1K{ .start = STX };
 
-    var chunk_buf = [_]u8{0} ** 1024;
+    var chunk_buf: [1024]u8 = @splat(0);
 
     while (true) {
-        const bytes_read = try file.readAll(&chunk_buf);
+        const bytes_read = try file_reader.interface.readSliceShort(&chunk_buf);
         @memset(chunk_buf[bytes_read..], PAD);
         @memcpy(&chunk.payload, &chunk_buf);
 
@@ -166,23 +169,25 @@ fn crcPasses(comptime chunk_type: type, chunk: *const chunk_type) bool {
     return crc_got == chunk.crc;
 }
 
-pub fn recv(tty: *system.Tty, dir: std.fs.Dir) !void {
+pub fn recv(io: std.Io, tty: *system.Tty, dir: std.Io.Dir) !void {
+    var save_buffer: [1024]u8 = undefined;
     var reader_buffer: [1024]u8 = undefined;
     var writer_buffer: [1024]u8 = undefined;
-    var file_reader = tty.file.reader(&reader_buffer);
-    var file_writer = tty.file.writer(&writer_buffer);
-    var reader = &file_reader.interface;
-    var writer = &file_writer.interface;
+    var tty_reader = tty.file.readerStreaming(io, &reader_buffer);
+    var tty_writer = tty.file.writerStreaming(io, &writer_buffer);
+    var reader = &tty_reader.interface;
+    var writer = &tty_writer.interface;
 
     var state: RecvState = .filename;
 
     var filesize: usize = 0;
     var bytes_written: usize = 0;
 
-    var out_file: ?std.fs.File = null;
+    var out_file: ?std.Io.File = null;
+    var out_file_writer: ?std.Io.File.Writer = null;
     defer {
         if (out_file) |file| {
-            file.close();
+            file.close(io);
         }
     }
 
@@ -298,15 +303,16 @@ pub fn recv(tty: *system.Tty, dir: std.fs.Dir) !void {
 
                         filesize = try std.fmt.parseInt(usize, filesize_str, 10);
 
-                        out_file = try dir.createFile(std.fs.path.basename(filename), .{});
+                        out_file = try dir.createFile(io, std.fs.path.basename(filename), .{});
+                        out_file_writer = out_file.?.writer(io, &save_buffer);
 
                         std.log.info("fetching {Bi:.02} to '{s}'", .{ filesize, filename });
                     },
                     .data => {
                         std.debug.assert(filesize >= bytes_written);
                         const bytes_to_write = @min(filesize - bytes_written, chunk.payload.len);
-                        var file = out_file orelse return error.MissingFile;
-                        try file.writeAll(chunk.payload[0..bytes_to_write]);
+                        var file_writer = &(out_file_writer orelse return error.MissingFile).interface;
+                        try file_writer.writeAll(chunk.payload[0..bytes_to_write]);
                         bytes_written += bytes_to_write;
                         try ack(writer);
                     },
@@ -341,19 +347,26 @@ pub fn recv(tty: *system.Tty, dir: std.fs.Dir) !void {
 
                 std.debug.assert(filesize >= bytes_written);
                 const bytes_to_write = @min(filesize - bytes_written, chunk.payload.len);
-                var file = out_file orelse return error.MissingFile;
-                try file.writeAll(chunk.payload[0..bytes_to_write]);
+                var file_writer = &(out_file_writer orelse return error.MissingFile).interface;
+                try file_writer.writeAll(chunk.payload[0..bytes_to_write]);
                 bytes_written += bytes_to_write;
                 try ack(writer);
             },
             EOF => {
+                if (state != .data) {
+                    return error.InvalidState;
+                }
+
                 if (bytes_written != filesize) {
                     return error.InvalidFilesize;
                 }
 
+                var file_writer = &(out_file_writer orelse return error.MissingFile).interface;
+                try file_writer.flush();
+
                 try ack(writer);
 
-                return recv(tty, dir);
+                return recv(io, tty, dir);
             },
             else => {
                 std.log.err("unknown header start: 0x{x}", .{start});
@@ -375,10 +388,7 @@ inline fn nak(writer: *std.Io.Writer) !void {
     try writer.flush();
 }
 
-pub fn main() !void {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-
+pub fn main(init: std.process.Init) !void {
     const params = comptime clap.parseParamsComptime(
         \\-h, --help                 Display this help and exit.
         \\-t, --tty       <FILE>     TTY to send/receive on.
@@ -399,72 +409,74 @@ pub fn main() !void {
     };
 
     var diag = clap.Diagnostic{};
-    var res = clap.parse(clap.Help, &params, &parsers, .{
+    var res = clap.parse(clap.Help, &params, &parsers, init.minimal.args, .{
         .diagnostic = &diag,
-        .allocator = arena.allocator(),
+        .allocator = init.arena.allocator(),
     }) catch |err| {
-        try diag.reportToFile(.stderr(), err);
-        try clap.usageToFile(.stderr(), clap.Help, &params);
+        try diag.reportToFile(init.io, .stderr(), err);
+        try clap.usageToFile(init.io, .stderr(), clap.Help, &params);
         return;
     };
     defer res.deinit();
 
     if (res.args.help != 0) {
-        return clap.helpToFile(.stderr(), clap.Help, &params, .{});
+        return clap.helpToFile(init.io, .stderr(), clap.Help, &params, .{});
     }
 
     if (res.positionals[0] == null or res.args.directory == null or res.args.tty == null) {
-        try diag.reportToFile(.stderr(), error.InvalidArgument);
-        try clap.usageToFile(.stderr(), clap.Help, &params);
+        try diag.reportToFile(init.io, .stderr(), error.InvalidArgument);
+        try clap.usageToFile(init.io, .stderr(), clap.Help, &params);
         return;
     }
 
-    var tty_file = try std.fs.cwd().openFile(
+    var tty_file = try std.Io.Dir.cwd().openFile(
+        init.io,
         res.args.tty.?,
         .{ .mode = .read_write, .lock = .none },
     );
-    defer tty_file.close();
+    defer tty_file.close(init.io);
 
     var tty: system.Tty = .init(tty_file);
     defer tty.deinit();
 
     try tty.setMode(.file_transfer);
 
-    var dir = try std.fs.cwd().openDir(
+    var dir = try std.Io.Dir.cwd().openDir(
+        init.io,
         res.args.directory.?,
         .{ .iterate = true },
     );
-    defer dir.close();
+    defer dir.close(init.io);
 
     const action = res.positionals[0].?;
 
     switch (action) {
         .send => {
-            var progress = Progress.start(.{ .root_name = "ymodem" });
+            var progress = Progress.start(init.io, .{ .root_name = "ymodem" });
             defer progress.end();
 
             var iter = dir.iterate();
 
-            while (try iter.next()) |entry| {
+            while (try iter.next(init.io)) |entry| {
                 if (entry.kind != .file and entry.kind != .sym_link) {
                     continue;
                 }
 
-                const file = try dir.openFile(entry.name, .{});
-                defer file.close();
+                const file = try dir.openFile(init.io, entry.name, .{});
+                defer file.close(init.io);
 
                 std.log.debug("sending file '{s}'", .{entry.name});
 
-                try send(&progress, &tty, .{
+                try send(init.io, &progress, &tty, .{
                     .name = entry.name,
                     .file = file,
                 });
             }
 
-            try send(&progress, &tty, null);
+            try send(init.io, &progress, &tty, null);
         },
         .recv => {
-            try recv(&tty, dir);
+            try recv(init.io, &tty, dir);
         },
     }
 }

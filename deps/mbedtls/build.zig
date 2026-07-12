@@ -12,20 +12,19 @@ pub fn build(b: *std.Build) !void {
             .root_source_file = null,
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
         }),
     });
 
     lib.installHeadersDirectory(upstream.path("include"), "", .{});
 
-    lib.linkLibC();
-
     if (lib.rootModuleTarget().isMinGW()) {
-        lib.linkSystemLibrary("ws2_32"); // inet_pton and friends
-        lib.linkSystemLibrary("bcrypt"); // BCryptGenRandom
+        lib.root_module.linkSystemLibrary("ws2_32", .{}); // inet_pton and friends
+        lib.root_module.linkSystemLibrary("bcrypt", .{}); // BCryptGenRandom
     }
 
-    lib.addIncludePath(upstream.path("include"));
-    lib.addCSourceFiles(.{
+    lib.root_module.addIncludePath(upstream.path("include"));
+    lib.root_module.addCSourceFiles(.{
         .root = upstream.path(""),
         .files = &.{
             "library/aes.c",

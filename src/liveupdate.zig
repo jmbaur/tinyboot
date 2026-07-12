@@ -1,7 +1,7 @@
 const std = @import("std");
 const linux_headers = @import("linux_headers");
-const ioctl = std.os.linux.ioctl;
-const E = std.os.linux.E;
+const linux = std.os.linux;
+const ioctl = linux.ioctl;
 
 const liveupdate_ioctl_create_session = linux_headers.liveupdate_ioctl_create_session;
 const liveupdate_ioctl_retrieve_session = linux_headers.liveupdate_ioctl_retrieve_session;
@@ -28,12 +28,12 @@ pub const OpMode = enum {
 };
 
 op_mode: OpMode,
-liveupdate: std.fs.File,
+liveupdate: std.Io.File,
 session_fd: std.posix.fd_t,
 
-pub fn init(op_mode: OpMode) !LiveUpdate {
-    var liveupdate = try std.fs.cwd().openFile(liveupdate_chardev, .{ .mode = .read_write });
-    errdefer liveupdate.close();
+pub fn init(io: std.Io, op_mode: OpMode) !LiveUpdate {
+    var liveupdate = try std.Io.Dir.cwd().openFile(io, liveupdate_chardev, .{ .mode = .read_write });
+    errdefer liveupdate.close(io);
 
     const session_fd = b: switch (op_mode) {
         .preserve => {
@@ -41,7 +41,7 @@ pub fn init(op_mode: OpMode) !LiveUpdate {
             session.size = @sizeOf(@TypeOf(session));
             std.mem.copyForwards(u8, &session.name, session_name);
 
-            switch (E.init(ioctl(
+            switch (linux.errno(ioctl(
                 liveupdate.handle,
                 LIVEUPDATE_IOCTL_CREATE_SESSION,
                 @intFromPtr(&session),
@@ -59,7 +59,7 @@ pub fn init(op_mode: OpMode) !LiveUpdate {
             retrieve_session.size = @sizeOf(@TypeOf(retrieve_session));
             std.mem.copyForwards(u8, &retrieve_session.name, session_name);
 
-            switch (E.init(ioctl(
+            switch (linux.errno(ioctl(
                 liveupdate.handle,
                 LIVEUPDATE_IOCTL_RETRIEVE_SESSION,
                 @intFromPtr(&retrieve_session),
@@ -97,7 +97,7 @@ pub fn closeSession(self: *LiveUpdate) void {
     std.posix.close(self.session_fd);
 }
 
-pub fn deinit(self: *LiveUpdate) void {
+pub fn deinit(self: *LiveUpdate, io: std.Io) void {
     if (self.op_mode == .retrieve) {
         var session_finish = std.mem.zeroes(liveupdate_session_finish);
         session_finish.size = @sizeOf(@TypeOf(session_finish));
@@ -106,13 +106,12 @@ pub fn deinit(self: *LiveUpdate) void {
             LIVEUPDATE_SESSION_FINISH,
             @intFromPtr(&session_finish),
         );
-        std.posix.close(self.session_fd);
+        _ = linux.close(self.session_fd);
     }
 
     // We do not close the session file descriptor if we are not retrieving,
     // since then the state will not persist across kernels.
-
-    self.liveupdate.close();
+    self.liveupdate.close(io);
 
     self.* = undefined;
 }
@@ -122,7 +121,7 @@ pub fn preserve(self: *LiveUpdate, fd: std.posix.fd_t, token: usize) !void {
     preserve_fd.size = @sizeOf(@TypeOf(preserve_fd));
     preserve_fd.fd = fd;
     preserve_fd.token = token;
-    switch (E.init(std.os.linux.ioctl(
+    switch (linux.errno(std.os.linux.ioctl(
         self.session_fd,
         LIVEUPDATE_SESSION_PRESERVE_FD,
         @intFromPtr(&preserve_fd),
@@ -141,7 +140,7 @@ pub fn retrieve(self: *LiveUpdate, token: usize) !std.posix.fd_t {
     var retrieve_fd = std.mem.zeroes(liveupdate_session_retrieve_fd);
     retrieve_fd.size = @sizeOf(@TypeOf(retrieve_fd));
     retrieve_fd.token = token;
-    switch (E.init(ioctl(
+    switch (linux.errno(ioctl(
         self.session_fd,
         LIVEUPDATE_SESSION_RETRIEVE_FD,
         @intFromPtr(&retrieve_fd),
