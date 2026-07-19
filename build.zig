@@ -88,15 +88,15 @@ pub fn build(b: *std.Build) !void {
 
     const optimize = b.standardOptimizeOption(.{});
 
-    const do_strip = optimize != std.builtin.OptimizeMode.Debug;
+    const do_strip = optimize != .debug;
 
     // For certain outputs of this project, we always use release small (if we
     // are in release mode). Smallest size is our goal in order to minimize
     // footprint on flash.
-    const optimize_prefer_small = if (optimize == std.builtin.OptimizeMode.Debug)
-        std.builtin.OptimizeMode.Debug
+    const optimize_prefer_small: std.builtin.OptimizeMode = if (optimize == .debug)
+        .debug
     else
-        std.builtin.OptimizeMode.ReleaseSmall;
+        .small;
 
     const with_loader_efi_stub = b.option(
         bool,
@@ -293,7 +293,7 @@ pub fn build(b: *std.Build) !void {
     tboot_loader.root_module.addImport("linux_headers", linux_headers_module);
 
     // Use tboot-initrd built for the build host.
-    var run_tboot_initrd = b.addRunArtifact(tbootInitrd(b, build_target, .Debug, false));
+    var run_tboot_initrd = b.addRunArtifact(tbootInitrd(b, build_target, .debug, false));
 
     // TODO(jared): Would be nicer to have generic
     // --file=tboot_loader:/init CLI interface, but don't know how to

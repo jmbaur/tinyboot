@@ -1,5 +1,6 @@
 const std = @import("std");
 const mem = std.mem;
+const Crc32 = std.hash.crc.@"CRC-32/ISO-HDLC";
 const Io = std.Io;
 
 /// expects a guid string formatted like so: 00000000-0000-0000-0000-000000000000
@@ -744,7 +745,7 @@ pub fn init(allocator: std.mem.Allocator, reader: *Io.Reader) !Gpt {
         @memcpy(hdr_bytes_to_hash[header_crc32_offset .. header_crc32_offset + @sizeOf(u32)], &@as([@sizeOf(u32)]u8, @splat(0)));
 
         // The CRC calculation is done without the unused bytes.
-        const calculated_header_crc = std.hash.crc.Crc32.hash(
+        const calculated_header_crc = Crc32.hash(
             hdr_bytes_to_hash[0..@offsetOf(Header, "unused_reserved")],
         );
 
@@ -777,7 +778,7 @@ fn findPartitions(allocator: std.mem.Allocator, reader: *Io.Reader, header: Head
     const partition_entries_position = header.starting_partition_entry_lba * sector_size;
     const partition_entries_end = (header.num_partition_entries * @sizeOf(PartitionRecord)) + partition_entries_position;
     _ = try reader.discard(.limited(@as(usize, @intCast(partition_entries_position)) - current_position));
-    var crc = std.hash.crc.Crc32.init();
+    var crc = Crc32.init();
 
     var no_more_partitions = false;
 

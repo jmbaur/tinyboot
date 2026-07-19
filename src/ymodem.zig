@@ -2,7 +2,7 @@
 // See https://en.wikipedia.org/wiki/YMODEM#1k and http://wiki.synchro.net/ref:ymodem#figure_4ymodem_batch_transmission_session-1k_blocks
 
 const std = @import("std");
-const Crc16Xmodem = std.hash.crc.Crc16Xmodem;
+const Crc16Xmodem = std.hash.crc.@"CRC-16/XMODEM";
 const Progress = std.Progress;
 
 const system = @import("./system.zig");

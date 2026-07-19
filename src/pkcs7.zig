@@ -1,7 +1,7 @@
 const std = @import("std");
 const asn1 = std.crypto.codecs.asn1;
 
-const sequence_of_tag = asn1.Tag.universal(.sequence_of, true);
+const set_tag = asn1.Tag.universal(.set, true);
 const sequence_tag = asn1.Tag.universal(.sequence, true);
 const integer_tag = asn1.Tag.universal(.integer, false);
 const printable_string_tag = asn1.Tag.universal(.string_printable, false);
@@ -59,7 +59,7 @@ const ContentType = enum {
 const Content = union(ContentType) {
     const SignedData = struct {
         const DigestAlgorithms = struct {
-            pub const asn1_tag = sequence_of_tag;
+            pub const asn1_tag = set_tag;
 
             inner: DigestAlgorithmIdentifier,
         };
@@ -115,7 +115,7 @@ const Content = union(ContentType) {
                                     const start = encoder.buffer.data.len;
                                     try encoder.any(name);
                                     try encoder.length(encoder.buffer.data.len - start);
-                                    try encoder.tag(sequence_of_tag);
+                                    try encoder.tag(set_tag);
                                 }
                             }
                         };
@@ -162,7 +162,7 @@ const Content = union(ContentType) {
                 }
 
                 try encoder.length(encoder.buffer.data.len - start);
-                try encoder.tag(sequence_of_tag);
+                try encoder.tag(set_tag);
             }
         };
 

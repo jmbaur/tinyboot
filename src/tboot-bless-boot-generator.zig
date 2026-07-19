@@ -3,7 +3,7 @@ const std = @import("std");
 const clap = @import("clap");
 const LiveUpdate = @import("./liveupdate.zig");
 
-pub const std_options = std.Options{ .log_level = if (builtin.mode == .Debug) .debug else .info };
+pub const std_options = std.Options{ .log_level = if (builtin.mode == .debug) .debug else .info };
 
 pub fn main(init: std.process.Init) !void {
     const allocator = init.arena.allocator();

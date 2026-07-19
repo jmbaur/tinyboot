@@ -381,7 +381,7 @@ const Shell = struct {
             },
             // Space...~
             0x20...0x7e => b: {
-                if (builtin.mode == .Debug and char == '?') {
+                if (builtin.mode == .debug and char == '?') {
                     self.print("\n{}\n", .{self});
                     break :b true;
                 } else if

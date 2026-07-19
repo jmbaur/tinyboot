@@ -95,7 +95,7 @@ fn kexecFileLoad(
     initrd: ?std.Io.File,
     cmdline: ?[]const u8,
 ) !void {
-    var flags: usize = if (builtin.mode == .Debug) linux_headers.KEXEC_FILE_DEBUG else 0;
+    var flags: usize = if (builtin.mode == .debug) linux_headers.KEXEC_FILE_DEBUG else 0;
 
     if (initrd == null) {
         flags |= linux_headers.KEXEC_FILE_NO_INITRAMFS;

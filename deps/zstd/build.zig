@@ -19,7 +19,7 @@ pub fn build(b: *std.Build) !void {
     lib.installHeadersDirectory(upstream.path("lib"), "", .{});
 
     switch (optimize) {
-        .Debug, .ReleaseSafe => lib.bundle_compiler_rt = true,
+        .debug, .safe => lib.bundle_compiler_rt = true,
         else => lib.root_module.strip = true,
     }
 
