@@ -20,7 +20,6 @@ pub fn main(init: std.process.Init) !void {
 
     const parsers = comptime .{
         .ARCH = clap.parsers.enumeration(std.Target.Cpu.Arch),
-        .TEMPDIR = clap.parsers.string,
         .KEYDIR = clap.parsers.string,
         .INITRD = clap.parsers.string,
         .KERNEL = clap.parsers.string,
