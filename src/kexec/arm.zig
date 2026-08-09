@@ -213,11 +213,8 @@ pub fn kexecLoad(
 
             std.log.info("initrd: address=0x{x} size=0x{x}", .{ initrd_base, initrd_buf.?.len });
 
-            const initrd_start = std.mem.nativeToBig(u32, initrd_base);
-            const initrd_end = std.mem.nativeToBig(u32, initrd_base + initrd_buf.?.len);
-
-            try fdt.upsertU32Property("/chosen/linux,initrd-start", initrd_start);
-            try fdt.upsertU32Property("/chosen/linux,initrd-end", initrd_end);
+            try fdt.upsertU32Property("/chosen/linux,initrd-start", initrd_base);
+            try fdt.upsertU32Property("/chosen/linux,initrd-end", initrd_base + initrd_buf.?.len);
 
             // Insert KASLR seed if a hardware RNG is available
             if (std.Io.Dir.cwd().openFile(io, "/dev/char/10:183", .{})) |hwrng| {
