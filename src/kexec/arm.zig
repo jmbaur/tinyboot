@@ -40,17 +40,17 @@ const ZimageTag = extern struct {
     },
 };
 
-fn mmapFile(io: std.Io, file: std.Io.File) ![]align(std.heap.page_size_min) []u8 {
+fn mmapFile(io: std.Io, file: std.Io.File) ![]align(std.heap.page_size_min) u8 {
     const stat = try file.stat(io);
 
-    return @ptrFromInt(linux.mmap(
+    return posix.mmap(
         null,
         @intCast(stat.size),
         .{ .READ = true },
         .{ .TYPE = .PRIVATE },
         file.handle,
         0,
-    ));
+    );
 }
 
 // No need to pass a purgatory program since the current kernel handles
@@ -158,7 +158,7 @@ pub fn kexecLoad(
     const proc_iomem = try std.Io.Dir.cwd().openFile(io, "/proc/iomem", .{});
     defer proc_iomem.close(io);
     var buffer: [1024]u8 = undefined;
-    var proc_iomem_reader = proc_iomem.reader(&buffer);
+    var proc_iomem_reader = proc_iomem.reader(io, &buffer);
     const memory_ranges = try getMemoryRanges(allocator, &proc_iomem_reader.interface);
     defer allocator.free(memory_ranges);
 
@@ -185,7 +185,7 @@ pub fn kexecLoad(
     defer sys_firmware_fdt.close(io);
 
     var fdt_buffer: [1024]u8 = undefined;
-    var fdt_reader = sys_firmware_fdt.reader(&fdt_buffer);
+    var fdt_reader = sys_firmware_fdt.reader(io, &fdt_buffer);
     var fdt = try Fdt.init(&fdt_reader.interface, allocator);
     defer fdt.deinit();
 
@@ -202,7 +202,7 @@ pub fn kexecLoad(
 
     const initrd_size = b: {
         if (initrd) |initrd_file| {
-            initrd_buf = try mmapFile(initrd_file);
+            initrd_buf = try mmapFile(io, initrd_file);
 
             initrd_base = try locateHole(
                 memory_ranges,
@@ -224,7 +224,7 @@ pub fn kexecLoad(
                 defer hwrng.close(io);
 
                 var hwrng_buf: [@sizeOf(u64)]u8 = undefined;
-                var hwrng_reader = hwrng.reader(&hwrng_buf);
+                var hwrng_reader = hwrng.reader(io, &hwrng_buf);
                 const seed = try hwrng_reader.interface.takeInt(u64, builtin.cpu.arch.endian());
                 try fdt.upsertU64Property("/chosen/kaslr-seed", seed);
             } else |err| {

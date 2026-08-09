@@ -194,7 +194,15 @@ pub fn main(init: std.process.Init) !void {
     defer _ = linux.close(memfd);
 
     // TODO(jared): error handling
-    _ = linux.lseek(memfd, 0, linux.SEEK.SET);
+    switch (@sizeOf(usize)) {
+        4 => {
+            _ = linux.llseek(memfd, 0, null, linux.SEEK.SET);
+        },
+        8 => {
+            _ = linux.lseek(memfd, 0, linux.SEEK.SET);
+        },
+        else => unreachable,
+    }
 
     var buf: [1024]u8 = undefined;
     const read = try std.posix.read(memfd, &buf);
@@ -207,4 +215,7 @@ pub fn main(init: std.process.Init) !void {
         tboot_bls_entry,
         action,
     );
+}
+
+fn lseek() void {
 }

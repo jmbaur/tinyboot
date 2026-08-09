@@ -220,7 +220,11 @@ fn persistEntryForNextKernel(io: std.Io, bls_entry_file: *BlsEntryFile, liveupda
 
     // Best effort to reset the seek positition, since the next kernel will
     // _most likely_ want to start reading from the start.
-    _ = linux.lseek(memfd, 0, linux.SEEK.SET);
+    switch (@sizeOf(usize)) {
+        4 => _ = linux.llseek(memfd, 0, null, linux.SEEK.SET),
+        8 => _ = linux.lseek(memfd, 0, linux.SEEK.SET),
+        else => unreachable,
+    }
 }
 
 fn diskEntryLoaded(self: *@This(), ctx: *anyopaque, io: std.Io, liveupdate: *LiveUpdate) !void {
