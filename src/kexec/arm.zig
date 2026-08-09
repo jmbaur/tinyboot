@@ -178,7 +178,7 @@ pub fn kexecLoad(
     // aligned.
     var initrd_base = kernel_base + std.mem.alignForward(u32, uncompressed_kernel_size, page_size);
 
-    std.log.debug("kernel: address=0x{x} size=0x{x}", .{ kernel_base, uncompressed_kernel_size });
+    std.log.info("kernel: address=0x{x} size=0x{x}", .{ kernel_base, uncompressed_kernel_size });
 
     // TODO(jared): we need to be able to inject the kernel parameters into /chosen/bootargs
     const sys_firmware_fdt = try std.Io.Dir.cwd().openFile(io, "/sys/firmware/fdt", .{});
@@ -211,7 +211,7 @@ pub fn kexecLoad(
                 initrd_base,
             );
 
-            std.log.debug("initrd: address=0x{x} size=0x{x}", .{ initrd_base, initrd_buf.?.len });
+            std.log.info("initrd: address=0x{x} size=0x{x}", .{ initrd_base, initrd_buf.?.len });
 
             const initrd_start = std.mem.nativeToBig(u32, initrd_base);
             const initrd_end = std.mem.nativeToBig(u32, initrd_base + initrd_buf.?.len);
@@ -243,21 +243,20 @@ pub fn kexecLoad(
     try fdt.save(&out_writer);
 
     const dtb_offset = b: {
-        var offset = std.mem.alignBackward(
+        const offset = std.mem.alignBackward(
             u32,
             initrd_base + initrd_size + page_size,
             page_size,
         );
-        offset = try locateHole(
+        break :b try locateHole(
             memory_ranges,
             dtb_buf.len,
             page_size,
             offset,
         );
-        break :b offset;
     };
 
-    std.log.debug("devicetree: address=0x{x} size=0x{x}", .{ dtb_offset, dtb_buf.len });
+    std.log.info("devicetree: address=0x{x} size=0x{x}", .{ dtb_offset, dtb_buf.len });
     try addSegment(allocator, &segments, page_size, dtb_buf, dtb_buf.len, dtb_offset, dtb_buf.len);
 
     try addSegment(allocator, &segments, page_size, kernel_buf, kernel_buf_size, kernel_base, kernel_mem_size);
@@ -339,7 +338,7 @@ fn locateHole(
     return error.MemoryRangeNotFound;
 }
 
-test "locate hole" {
+test locateHole {
     const memory_ranges = [_]MemoryRange{
         .{
             .start = 0,

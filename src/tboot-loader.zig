@@ -59,7 +59,10 @@ fn init(io: std.Io) !TbootLoader {
     const device_watcher = try DeviceWatcher.init(io);
     const console = try Console.init(io);
     const liveupdate = LiveUpdate.init(io, .preserve) catch |err| switch (err) {
-        error.LiveUpdateUnavailable => null,
+        error.LiveUpdateUnavailable => b: {
+            std.log.warn("platform does not have kexec_file_load(), liveupdate not available", .{});
+            break :b null;
+        },
         else => return err,
     };
 
