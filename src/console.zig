@@ -706,7 +706,7 @@ pub fn handleResize(self: *Console) void {
     self.prompt();
 }
 
-pub fn handleStdin(self: *Console, io: std.Io, boot_loaders: []*BootLoader, liveupdate: *LiveUpdate) !?Event {
+pub fn handleStdin(self: *Console, io: std.Io, boot_loaders: []*BootLoader, liveupdate: ?*LiveUpdate) !?Event {
     const maybe_input = try self.shell.handleInput(self.context);
 
     if (maybe_input) |user_input| {
@@ -753,7 +753,7 @@ fn runCommand(
     io: std.Io,
     args: *ArgsIterator,
     boot_loaders: []*BootLoader,
-    liveupdate: *LiveUpdate,
+    liveupdate: ?*LiveUpdate,
 ) !?Event {
     if (args.next()) |cmd| {
         if (std.mem.eql(u8, cmd, "help")) {
@@ -851,7 +851,7 @@ pub const Command = struct {
             shell.print("unknown command \"{s}\"\n", .{cmd});
         }
 
-        fn run(console: *Console, _: std.Io, args: *ArgsIterator, _: []*BootLoader, _: *LiveUpdate) !?Event {
+        fn run(console: *Console, _: std.Io, args: *ArgsIterator, _: []*BootLoader, _: ?*LiveUpdate) !?Event {
             if (args.next()) |cmd| {
                 if (console.context == null) {
                     helpOne(&console.shell, NoContext, cmd);
@@ -879,7 +879,7 @@ pub const Command = struct {
             \\poweroff
         ;
 
-        fn run(_: *Console, _: std.Io, _: *ArgsIterator, _: []*BootLoader, _: *LiveUpdate) !?Event {
+        fn run(_: *Console, _: std.Io, _: *ArgsIterator, _: []*BootLoader, _: ?*LiveUpdate) !?Event {
             return .poweroff;
         }
     };
@@ -893,7 +893,7 @@ pub const Command = struct {
             \\reboot
         ;
 
-        fn run(_: *Console, _: std.Io, _: *ArgsIterator, _: []*BootLoader, _: *LiveUpdate) !?Event {
+        fn run(_: *Console, _: std.Io, _: *ArgsIterator, _: []*BootLoader, _: ?*LiveUpdate) !?Event {
             return .reboot;
         }
     };
@@ -911,7 +911,7 @@ pub const Command = struct {
             \\logs 7
         ;
 
-        fn run(console: *Console, _: std.Io, args: *ArgsIterator, _: []*BootLoader, _: *LiveUpdate) !?Event {
+        fn run(console: *Console, _: std.Io, args: *ArgsIterator, _: []*BootLoader, _: ?*LiveUpdate) !?Event {
             var filter = if (args.next()) |filter_str|
                 try std.fmt.parseInt(usize, filter_str, 10)
             else
@@ -940,7 +940,7 @@ pub const Command = struct {
             \\fdt
         ;
 
-        fn run(console: *Console, io: std.Io, _: *ArgsIterator, _: []*BootLoader, _: *LiveUpdate) !?Event {
+        fn run(console: *Console, io: std.Io, _: *ArgsIterator, _: []*BootLoader, _: ?*LiveUpdate) !?Event {
             const sys_firmware_fdt = std.Io.Dir.cwd().openFile(io, "/sys/firmware/fdt", .{}) catch {
                 console.shell.writeAll("FDT not found\n");
                 return null;
@@ -1000,7 +1000,7 @@ pub const Command = struct {
             \\history
         ;
 
-        fn run(console: *Console, _: std.Io, _: *ArgsIterator, _: []*BootLoader, _: *LiveUpdate) !?Event {
+        fn run(console: *Console, _: std.Io, _: *ArgsIterator, _: []*BootLoader, _: ?*LiveUpdate) !?Event {
             console.shell.writeAll("\n");
             const len = console.shell.history.items.len;
             for (0..len) |i| {
@@ -1024,7 +1024,7 @@ pub const Command = struct {
             \\clear
         ;
 
-        fn run(console: *Console, _: std.Io, _: *ArgsIterator, _: []*BootLoader, _: *LiveUpdate) !?Event {
+        fn run(console: *Console, _: std.Io, _: *ArgsIterator, _: []*BootLoader, _: ?*LiveUpdate) !?Event {
             console.shell.clearScreen();
 
             return null;
@@ -1048,7 +1048,7 @@ pub const Command = struct {
             \\select 8:1        Selects the boot loader attached to device 8:1
         ;
 
-        fn run(console: *Console, _: std.Io, args: *ArgsIterator, boot_loaders: []*BootLoader, _: *LiveUpdate) !?Event {
+        fn run(console: *Console, _: std.Io, args: *ArgsIterator, boot_loaders: []*BootLoader, _: ?*LiveUpdate) !?Event {
             const select_arg = args.next() orelse return error.InvalidArgument;
 
             var split = std.mem.splitScalar(u8, select_arg, ':');
@@ -1103,7 +1103,7 @@ pub const Command = struct {
             \\info
         ;
 
-        fn run(console: *Console, io: std.Io, args: *ArgsIterator, boot_loaders: []*BootLoader, _: *LiveUpdate) !?Event {
+        fn run(console: *Console, io: std.Io, args: *ArgsIterator, boot_loaders: []*BootLoader, _: ?*LiveUpdate) !?Event {
             _ = args;
             _ = boot_loaders;
 
@@ -1181,7 +1181,7 @@ pub const Command = struct {
             \\list
         ;
 
-        fn run(console: *Console, _: std.Io, _: *ArgsIterator, boot_loaders: []*BootLoader, _: *LiveUpdate) !?Event {
+        fn run(console: *Console, _: std.Io, _: *ArgsIterator, boot_loaders: []*BootLoader, _: ?*LiveUpdate) !?Event {
             console.shell.writeAll("\n");
 
             for (boot_loaders, 0..) |bl, index| {
@@ -1209,7 +1209,7 @@ pub const Command = struct {
             \\exit
         ;
 
-        fn run(console: *Console, _: std.Io, _: *ArgsIterator, _: *BootLoader, _: *LiveUpdate) !?Event {
+        fn run(console: *Console, _: std.Io, _: *ArgsIterator, _: *BootLoader, _: ?*LiveUpdate) !?Event {
             defer console.context = null;
 
             return null;
@@ -1225,7 +1225,7 @@ pub const Command = struct {
             \\probe
         ;
 
-        fn run(console: *Console, io: std.Io, _: *ArgsIterator, boot_loader: *BootLoader, _: *LiveUpdate) !?Event {
+        fn run(console: *Console, io: std.Io, _: *ArgsIterator, boot_loader: *BootLoader, _: ?*LiveUpdate) !?Event {
             const entries = boot_loader.probe(io) catch |err| {
                 console.shell.print("failed to probe: {}\n", .{err});
                 return null;
@@ -1258,7 +1258,7 @@ pub const Command = struct {
             \\boot 7
         ;
 
-        fn run(console: *Console, io: std.Io, args: *ArgsIterator, boot_loader: *BootLoader, liveupdate: *LiveUpdate) !?Event {
+        fn run(console: *Console, io: std.Io, args: *ArgsIterator, boot_loader: *BootLoader, liveupdate: ?*LiveUpdate) !?Event {
             const want_index = try std.fmt.parseInt(
                 usize,
                 args.next() orelse "0",
@@ -1300,7 +1300,7 @@ pub const Command = struct {
             \\autoboot
         ;
 
-        fn run(_: *Console, io: std.Io, _: *ArgsIterator, boot_loaders: []*BootLoader, liveupdate: *LiveUpdate) !?Event {
+        fn run(_: *Console, io: std.Io, _: *ArgsIterator, boot_loaders: []*BootLoader, liveupdate: ?*LiveUpdate) !?Event {
             for (boot_loaders) |bl| {
                 if (bl.autoboot) {
                     const entries = bl.probe(io) catch |err| {

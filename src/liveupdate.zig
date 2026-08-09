@@ -32,7 +32,10 @@ liveupdate: std.Io.File,
 session_fd: std.posix.fd_t,
 
 pub fn init(io: std.Io, op_mode: OpMode) !LiveUpdate {
-    var liveupdate = try std.Io.Dir.cwd().openFile(io, liveupdate_chardev, .{ .mode = .read_write });
+    var liveupdate = std.Io.Dir.cwd().openFile(io, liveupdate_chardev, .{ .mode = .read_write },) catch |err| switch (err) {
+        std.Io.File.OpenError.FileNotFound => return error.LiveUpdateUnavailable,
+        else => return err,
+    };
     errdefer liveupdate.close(io);
 
     const session_fd = b: switch (op_mode) {

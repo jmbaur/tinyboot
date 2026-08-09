@@ -175,7 +175,7 @@ pub fn probe(self: *YmodemBootLoader, io: std.Io, entries: *std.array_list.Manag
     });
 }
 
-pub fn entryLoaded(self: *YmodemBootLoader, ctx: *anyopaque, io: std.Io, liveupdate: *LiveUpdate) void {
+pub fn entryLoaded(self: *YmodemBootLoader, ctx: *anyopaque, io: std.Io, liveupdate: ?*LiveUpdate) void {
     _ = self;
     _ = ctx;
     _ = io;

@@ -35,7 +35,7 @@ epoll: posix.fd_t,
 /// removed from the system.
 device_watcher: DeviceWatcher,
 
-liveupdate: LiveUpdate,
+liveupdate: ?LiveUpdate,
 
 /// Console instance used to handle user input.
 console: Console,
@@ -58,7 +58,10 @@ fn init(io: std.Io) !TbootLoader {
     const timer: posix.fd_t = @intCast(linux.timerfd_create(posix.timerfd_clockid_t.MONOTONIC, .{}));
     const device_watcher = try DeviceWatcher.init(io);
     const console = try Console.init(io);
-    const liveupdate = try LiveUpdate.init(io, .preserve);
+    const liveupdate = LiveUpdate.init(io, .preserve) catch |err| switch (err) {
+        error.LiveUpdateUnavailable => null,
+        else => return err,
+    };
 
     var timer_event = epoll_event{
         .data = .{ .fd = timer },
@@ -141,7 +144,11 @@ fn handleConsoleInput(self: *TbootLoader, io: std.Io) !?posix.RebootCommand {
         self.console.prompt();
     }
 
-    const outcome = try self.console.handleStdin(io, boot_loaders.items, &self.liveupdate) orelse return null;
+    const outcome = try self.console.handleStdin(
+        io,
+        boot_loaders.items,
+        if (self.liveupdate) |*liveupdate| liveupdate else null,
+    ) orelse return null;
 
     switch (outcome) {
         .reboot => return posix.RebootCommand.RESTART,
@@ -243,7 +250,12 @@ fn handleTimer(self: *TbootLoader, io: std.Io) ?posix.RebootCommand {
 
     std.debug.assert(self.state == .autobooting);
 
-    if (self.autoboot.run(io, &boot_loaders, self.timer, &self.liveupdate)) |maybe_event| {
+    if (self.autoboot.run(
+        io,
+        &boot_loaders,
+        self.timer,
+        if (self.liveupdate) |*liveupdate| liveupdate else null,
+    )) |maybe_event| {
         if (maybe_event) |outcome| {
             switch (outcome) {
                 .reboot => return posix.RebootCommand.RESTART,
@@ -261,7 +273,9 @@ fn handleTimer(self: *TbootLoader, io: std.Io) ?posix.RebootCommand {
 
 fn deinit(self: *TbootLoader, io: std.Io) void {
     self.console.deinit();
-    self.liveupdate.deinit(io);
+    if (self.liveupdate) |*liveupdate| {
+        liveupdate.deinit(io);
+    }
 
     _ = linux.close(self.timer);
     _ = linux.close(self.epoll);

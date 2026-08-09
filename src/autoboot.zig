@@ -18,7 +18,7 @@ pub fn run(
     io: std.Io,
     boot_loaders: *std.array_list.Managed(*BootLoader),
     timerfd: posix.fd_t,
-    liveupdate: *LiveUpdate,
+    liveupdate: ?*LiveUpdate,
 ) !?Console.Event {
     if (self.boot_loader) |boot_loader| {
         // After we attempt to boot with this boot loader, we unset it from the

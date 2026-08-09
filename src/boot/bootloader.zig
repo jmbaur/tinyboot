@@ -48,7 +48,7 @@ vtable: *const struct {
     name: *const fn () []const u8,
     probe: *const fn (*anyopaque, std.Io, *std.array_list.Managed(Entry), Device) anyerror!void,
     timeout: *const fn (*anyopaque) u8,
-    entryLoaded: *const fn (*anyopaque, Entry, std.Io, *LiveUpdate) void,
+    entryLoaded: *const fn (*anyopaque, Entry, std.Io, ?*LiveUpdate) void,
     deinit: *const fn (*anyopaque, std.Io, std.mem.Allocator) void,
 },
 
@@ -84,7 +84,7 @@ pub fn init(
             try self.probe(io, entries, d);
         }
 
-        pub fn entryLoaded(ctx: *anyopaque, entry: Entry, io: std.Io, liveupdate: *LiveUpdate) void {
+        pub fn entryLoaded(ctx: *anyopaque, entry: Entry, io: std.Io, liveupdate: ?*LiveUpdate) void {
             const self: *T = @ptrCast(@alignCast(ctx));
 
             self.entryLoaded(entry.context, io, liveupdate);
@@ -141,7 +141,7 @@ pub fn probe(self: *BootLoader, io: std.Io) ![]const Entry {
     return self.entries.items;
 }
 
-pub fn load(self: *BootLoader, io: std.Io, entry: Entry, liveupdate: *LiveUpdate) !void {
+pub fn load(self: *BootLoader, io: std.Io, entry: Entry, liveupdate: ?*LiveUpdate) !void {
     self.boot_attempted = true;
 
     try kexec(io, self.allocator, entry.linux, entry.initrd, entry.cmdline);

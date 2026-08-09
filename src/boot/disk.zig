@@ -195,8 +195,9 @@ pub fn probe(
     try self.searchForEntries(io, disk_device, entries);
 }
 
-pub fn entryLoaded(self: *DiskBootLoader, ctx: *anyopaque, io: std.Io, liveupdate: *LiveUpdate) void {
-    self.diskEntryLoaded(ctx, io, liveupdate) catch |err| {
+pub fn entryLoaded(self: *DiskBootLoader, ctx: *anyopaque, io: std.Io, liveupdate: ?*LiveUpdate) void {
+    const liveupdate_ = liveupdate orelse return;
+    self.diskEntryLoaded(ctx, io, liveupdate_) catch |err| {
         std.log.err(
             "failed to finalize BLS boot counter for chosen entry: {}",
             .{err},
