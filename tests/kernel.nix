@@ -21,10 +21,12 @@ linuxKernel.manualConfig {
       (builtins.readFile ../doc/required.config)
       + ''
         CONFIG_64BIT=y
+        CONFIG_DYNAMIC_DEBUG=y
+        CONFIG_EFI=y
+        CONFIG_EFI_STUB=y
         CONFIG_FW_CFG_SYSFS=y
         CONFIG_HVC_CONSOLE=y
         CONFIG_IKCONFIG=y
-        CONFIG_DYNAMIC_DEBUG=y
         CONFIG_PCI=y
         CONFIG_SCSI=y
         CONFIG_SCSI_VIRTIO=y
