@@ -25,6 +25,7 @@ linuxKernel.manualConfig {
         CONFIG_IKCONFIG=y
         CONFIG_DYNAMIC_DEBUG=y
         CONFIG_PCI=y
+        CONFIG_PCI_HOST_GENERIC=y
         CONFIG_SCSI=y
         CONFIG_SCSI_VIRTIO=y
         CONFIG_TCG_TIS=y
@@ -47,7 +48,6 @@ linuxKernel.manualConfig {
         CONFIG_ARM_SCMI_TRANSPORT_VIRTIO=y
         CONFIG_CMDLINE="kho=on liveupdate=on debug"
         CONFIG_CMDLINE_FORCE=y
-        CONFIG_PCI_HOST_GENERIC=y
         CONFIG_SERIAL_AMBA_PL011=y
         CONFIG_SERIAL_AMBA_PL011_CONSOLE=y
       ''
