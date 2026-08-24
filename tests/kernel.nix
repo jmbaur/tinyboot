@@ -20,10 +20,10 @@ linuxKernel.manualConfig {
       (builtins.readFile ../doc/required.config)
       + lib.optionalString stdenv.hostPlatform.is64bit (builtins.readFile ../doc/required-64bit.config)
       + ''
+        CONFIG_DYNAMIC_DEBUG=y
         CONFIG_FW_CFG_SYSFS=y
         CONFIG_HVC_CONSOLE=y
         CONFIG_IKCONFIG=y
-        CONFIG_DYNAMIC_DEBUG=y
         CONFIG_PCI=y
         CONFIG_PCI_HOST_GENERIC=y
         CONFIG_SCSI=y
