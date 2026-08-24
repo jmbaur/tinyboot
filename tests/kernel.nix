@@ -1,6 +1,4 @@
 {
-  bison,
-  flex,
   lib,
   linuxKernel,
   linux_7_2,
@@ -11,12 +9,13 @@ linuxKernel.manualConfig {
   inherit (linux_7_2) src version;
   configfile = stdenv.mkDerivation {
     pname = linux_7_2.pname + "-config";
-    inherit (linux_7_2) src version;
+    inherit (linux_7_2)
+      src
+      version
+      depsBuildBuild
+      nativeBuildInputs
+      ;
     dontConfigure = true;
-    nativeBuildInputs = [
-      flex
-      bison
-    ];
     extraConfig =
       (builtins.readFile ../doc/required.config)
       + lib.optionalString stdenv.hostPlatform.is64bit (builtins.readFile ../doc/required-64bit.config)
@@ -49,7 +48,7 @@ linuxKernel.manualConfig {
       ''
       + lib.optionalString stdenv.hostPlatform.isAarch64 ''
         CONFIG_ARM_SCMI_TRANSPORT_VIRTIO=y
-        CONFIG_CMDLINE="kho=on liveupdate=on debug console=ttyAMA0,115200"
+        CONFIG_CMDLINE="kho=on liveupdate=on debug"
         CONFIG_CMDLINE_FORCE=y
         CONFIG_PCI_HOST_GENERIC=y
         CONFIG_SERIAL_AMBA_PL011=y
@@ -59,10 +58,14 @@ linuxKernel.manualConfig {
         CONFIG_MMU=y
         CONFIG_ARCH_VIRT=y
         CONFIG_ARCH_MULTI_V7=y
-        CONFIG_CMDLINE="debug console=ttyAMA0,115200"
+        CONFIG_CMDLINE="debug"
         CONFIG_CMDLINE_FORCE=y
         CONFIG_SERIAL_AMBA_PL011=y
         CONFIG_SERIAL_AMBA_PL011_CONSOLE=y
+        CONFIG_VFP=y
+        CONFIG_VFPv3=y
+        CONFIG_NEON=y
+        CONFIG_KERNEL_MODE_NEON=y
       '';
     passAsFile = [ "extraConfig" ];
     env = {
