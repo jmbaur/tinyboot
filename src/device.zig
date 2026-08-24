@@ -70,16 +70,3 @@ pub const Subsystem = enum {
         return utils.enumFromStr(@This(), value);
     }
 };
-
-// grep --no-filename DEVTYPE /sys/class/*/*/uevent  | cut -d'=' -f2 | sort | uniq
-//
-/// Device types we care about when acting as a bootloader.
-pub const DevType = enum {
-    disk,
-    mtd,
-    partition,
-
-    pub fn fromStr(value: []const u8) !@This() {
-        return utils.enumFromStr(@This(), value);
-    }
-};
