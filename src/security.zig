@@ -82,7 +82,7 @@ fn loadQemuFwCfgKey(io: std.Io, allocator: std.mem.Allocator) ![]const u8 {
     };
     defer fw_cfg_key.close(io);
 
-    var reader = fw_cfg_key.reader(io, &.{});
+    var reader = fw_cfg_key.readerStreaming(io, &.{});
     return try reader.interface.allocRemaining(allocator, .limited(MAX_KEY_SIZE));
 }
 
@@ -193,9 +193,7 @@ fn addKey(keyring_id: usize, key_content: []const u8) !usize {
     );
 
     switch (linux.errno(rc)) {
-        .SUCCESS => {
-            return rc;
-        },
+        .SUCCESS => return rc,
         else => |err| return posix.unexpectedErrno(err),
     }
 }
