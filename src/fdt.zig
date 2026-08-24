@@ -72,10 +72,6 @@ dt_struct: std.DoublyLinkedList = .{},
 pub fn init(reader: *std.Io.Reader, allocator: std.mem.Allocator) !@This() {
     const header = try reader.takeStruct(Header, .big);
 
-    std.debug.assert(header.off_mem_rsvmap >= @sizeOf(Header));
-    std.debug.assert(header.off_dt_struct > header.off_mem_rsvmap);
-    std.debug.assert(header.off_dt_strings > header.off_dt_struct);
-
     if (header.magic != magic) {
         return error.InvalidMagic;
     }
@@ -84,6 +80,14 @@ pub fn init(reader: *std.Io.Reader, allocator: std.mem.Allocator) !@This() {
         return error.IncompatibleVersion;
     }
 
+    if (header.off_mem_rsvmap < @sizeOf(Header) or
+        header.off_dt_struct <= header.off_mem_rsvmap or
+        header.off_dt_strings <= header.off_dt_struct)
+    {
+        return error.InvalidHeader;
+    }
+
+    try reader.discardAll(header.off_mem_rsvmap - @sizeOf(Header));
     const mem_rsvmap = try reader.readAlloc(allocator, header.off_dt_struct - header.off_mem_rsvmap);
     errdefer allocator.free(mem_rsvmap);
 
@@ -193,6 +197,7 @@ fn parseDtStruct(
 
                     dt_struct.prepend(&new_node.inner);
                 } else {
+                    std.debug.assert(current_node != null);
                     dt_struct.insertAfter(&current_node.?.inner, &new_node.inner);
                 }
 
@@ -207,22 +212,26 @@ fn parseDtStruct(
 
                 new_node.* = Node{ .token = .{ .Prop = .{ .inner = prop, .value = value } } };
 
+                std.debug.assert(current_node != null);
                 dt_struct.insertAfter(&current_node.?.inner, &new_node.inner);
                 current_node = new_node;
             },
             .EndNode => {
                 new_node.* = Node{ .token = .EndNode };
+                std.debug.assert(current_node != null);
                 dt_struct.insertAfter(&current_node.?.inner, &new_node.inner);
                 current_node = new_node;
             },
             .End => {
                 new_node.* = Node{ .token = .End };
+                std.debug.assert(current_node != null);
                 dt_struct.insertAfter(&current_node.?.inner, &new_node.inner);
                 current_node = new_node;
                 break;
             },
             .Nop => {
                 new_node.* = Node{ .token = .Nop };
+                std.debug.assert(current_node != null);
                 dt_struct.insertAfter(&current_node.?.inner, &new_node.inner);
                 current_node = new_node;
             },
@@ -908,4 +917,59 @@ test "fdt write" {
     // ensure the unique strings we removed don't appear
     try std.testing.expectEqual(null, std.mem.indexOf(u8, buf, "bool"));
     try std.testing.expectEqual(null, std.mem.indexOf(u8, buf, "this_is_a_stringlist"));
+}
+
+pub fn main(init_: std.process.Init) !void {
+    var iter = init_.minimal.args.iterate();
+    _ = iter.skip();
+    var file = if (iter.next()) |fdt_file|
+        try std.Io.Dir.cwd().openFile(init_.io, fdt_file, .{})
+    else
+        std.Io.File.stdin();
+
+    defer if (file.handle != 0) file.close(init_.io);
+
+    var buf: [1024]u8 = @splat(0);
+    var reader = file.reader(init_.io, &buf);
+
+    var stdout = std.Io.File.stdout();
+    var writer = stdout.writer(init_.io, &.{});
+
+    var fdt = try Fdt.init(&reader.interface, init_.arena.allocator());
+    defer fdt.deinit();
+
+    var node = fdt.dt_struct.first orelse return error.InvalidFdt;
+
+    var depth: usize = 0;
+
+    while (true) {
+        const node_data: *Fdt.Node = @fieldParentPtr("inner", node);
+        switch (node_data.token) {
+            .Nop => {},
+            .BeginNode => |node_name| {
+                if (node_name.len != 0) {
+                    if (depth == 0) {
+                        try writer.interface.writeByte('\n');
+                    }
+                    try writer.interface.splatByteAll('\t', depth);
+                    try writer.interface.print("{s}:\n", .{node_name});
+
+                    depth += 1;
+                }
+            },
+            .EndNode => {
+                depth -%= 1;
+            },
+            .End => break,
+            .Prop => |prop| {
+                const prop_name = try fdt.getString(prop.inner.name_offset);
+                try writer.interface.splatByteAll('\t', depth);
+                try writer.interface.print("{s}=", .{prop_name});
+                try Fdt.printValue(&writer.interface, prop.value);
+                try writer.interface.print("\n", .{});
+            },
+        }
+
+        node = node.next orelse return error.InvalidFdt;
+    }
 }
