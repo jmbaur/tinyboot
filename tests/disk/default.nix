@@ -82,6 +82,8 @@ testers.runNixOSTest {
       # Set NIX_DISK_IMAGE so that the qemu script finds the right disk image.
       os.environ['NIX_DISK_IMAGE'] = tmp_disk_image.name
 
+      machine.start()
+      machine.wait_for_console_text("boot measurement and verification is enabled")
       machine.wait_for_unit("boot-complete.target")
       assert "active" == machine.succeed("systemctl is-active tboot-bless-boot.service").strip()
       machine.succeed("test -e /boot/loader/entries/nixos-generation-1.conf")
