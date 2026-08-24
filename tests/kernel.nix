@@ -35,9 +35,6 @@ linuxKernel.manualConfig {
         CONFIG_VIRTIO_MMIO=y
         CONFIG_VIRTIO_PCI=y
       ''
-      + lib.optionalString stdenv.hostPlatform.is64bit ''
-        CONFIG_64BIT=y
-      ''
       + lib.optionalString stdenv.hostPlatform.isx86_64 ''
         CONFIG_ACPI=y
         CONFIG_CMDLINE="kho=on liveupdate=on debug console=ttyS0,115200"
