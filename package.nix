@@ -1,7 +1,6 @@
 {
   firmwareDirectory ? null,
 
-  breakpointHook,
   lib,
   nukeReferences,
   stdenvNoCC,
@@ -45,7 +44,6 @@ stdenvNoCC.mkDerivation (
     nativeBuildInputs = [
       nukeReferences
       zig
-      breakpointHook
     ];
 
     # Prevent zig (or anything else) from being in the runtime closure
