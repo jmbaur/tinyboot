@@ -1,6 +1,6 @@
 # Kernel Configuration
 
-Tinyboot requires a small set of kernel configuration to be enabled, see [here](./required.config) for the set of required configuration. All configuration after this can be considered hardware support. For example, to enable a serial console for an x86_64 qemu machine, you could add the following configuration.
+Tinyboot requires a small set of kernel configuration to be enabled, see [here](./required.config) and [here](./required-64bit.config) (for 64-bit platforms) for the set of required configuration. All configuration after this can be considered hardware support. For example, to enable a serial console for an x86_64 qemu machine, you could add the following configuration.
 
 ```conf
 CONFIG_CMDLINE_BOOL=y
