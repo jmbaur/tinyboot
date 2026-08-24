@@ -236,11 +236,12 @@ pub fn printKernelLogs(
             break;
         }
 
-        if (std.mem.indexOf(u8, line[0..], ">")) |right_chevron_index| {
+        if (std.mem.indexOfScalar(u8, line[0..], '>')) |right_chevron_index| {
             const syslog_prefix = try std.fmt.parseInt(u32, line[1..right_chevron_index], 10);
             const log_level = 0x7 & syslog_prefix; // lower 3 bits
             if (log_level <= filter) {
                 try writer.print("{s}\n", .{line[right_chevron_index + 1 ..]});
+                try writer.flush();
             }
         }
     }
