@@ -1,15 +1,15 @@
 {
   lib,
   linuxKernel,
-  linux_7_2,
+  linux_7_1,
   stdenv,
 }:
 
 linuxKernel.manualConfig {
-  inherit (linux_7_2) src version;
+  inherit (linux_7_1) src version;
   configfile = stdenv.mkDerivation {
-    pname = linux_7_2.pname + "-config";
-    inherit (linux_7_2)
+    pname = linux_7_1.pname + "-config";
+    inherit (linux_7_1)
       src
       version
       depsBuildBuild
