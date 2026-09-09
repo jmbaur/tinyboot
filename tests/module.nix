@@ -10,7 +10,7 @@ in
 {
   imports = [ ../nixos ];
 
-  boot.kernelPackages = pkgs.linuxPackages_7_1;
+  boot.kernelPackages = pkgs.linuxPackages_7_2;
 
   system.switch.enable = true;
 
