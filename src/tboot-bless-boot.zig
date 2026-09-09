@@ -3,7 +3,7 @@ const std = @import("std");
 const clap = @import("clap");
 const linux = std.os.linux;
 
-pub const std_options = std.Options{ .log_level = if (builtin.mode == .Debug) .debug else .info };
+pub const std_options = std.Options{ .log_level = if (builtin.mode == .debug) .debug else .info };
 
 const DiskBootLoader = @import("./boot/disk.zig");
 const LiveUpdate = @import("./liveupdate.zig");

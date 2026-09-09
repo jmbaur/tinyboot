@@ -4,7 +4,7 @@ const clap = @import("clap");
 const zstd = @import("zstd");
 const CpioArchive = @import("./cpio.zig");
 
-pub const std_options = std.Options{ .log_level = if (builtin.mode == .Debug) .debug else .info };
+pub const std_options = std.Options{ .log_level = if (builtin.mode == .debug) .debug else .info };
 
 const BoolArgument = enum {
     yes,

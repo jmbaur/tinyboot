@@ -23,7 +23,7 @@ stdenvNoCC.mkDerivation (
       '';
       outputHashAlgo = null;
       outputHashMode = "recursive";
-      outputHash = "sha256-+i28+Eq7Abl3txiL2Up5EAT3fS9WIDImKNsVoXEjGmI=";
+      outputHash = "sha256-9gTF1Ir7HhgZqg1iswQEF4buU+KpLoCpHJuPneIKMBE=";
     };
   in
   {
@@ -72,13 +72,13 @@ stdenvNoCC.mkDerivation (
 
     buildPhase = ''
       runHook preBuild
-      zig build install --prefix $out ''${zigBuildFlags[@]}
+      zig build -j$NIX_BUILD_CORES install --prefix $out ''${zigBuildFlags[@]}
       runHook postBuild
     '';
 
     checkPhase = ''
       runHook preCheck
-      zig build test ''${zigBuildFlags[@]}
+      zig build -j$NIX_BUILD_CORES test ''${zigBuildFlags[@]}
       runHook postCheck
     '';
 

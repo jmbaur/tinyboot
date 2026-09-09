@@ -1,5 +1,6 @@
 const std = @import("std");
 const mem = std.mem;
+const Crc32 = std.hash.crc.@"CRC-32/ISO-HDLC";
 const Io = std.Io;
 
 /// expects a guid string formatted like so: 00000000-0000-0000-0000-000000000000
@@ -49,7 +50,7 @@ fn guidFromString(str: []const u8) !std.os.uefi.Guid {
         try std.fmt.parseInt(u8, fifth_section[8..10], 16),
         try std.fmt.parseInt(u8, fifth_section[10..12], 16),
     };
-    const guid: std.os.uefi.Guid = @bitCast(guid_bytes);
+    const guid: std.os.uefi.Guid = std.mem.bytesToValue(std.os.uefi.Guid, &guid_bytes);
     return guid;
 }
 
@@ -671,7 +672,7 @@ const PartitionRecord = extern struct {
     }
 
     pub fn partType(self: *const @This()) ?PartitionType {
-        const guid: std.os.uefi.Guid = @bitCast(self.partition_type);
+        const guid: std.os.uefi.Guid = std.mem.bytesToValue(std.os.uefi.Guid, &self.partition_type);
         return PartitionType.fromGuid(guid);
     }
 };
@@ -744,7 +745,7 @@ pub fn init(allocator: std.mem.Allocator, reader: *Io.Reader) !Gpt {
         @memcpy(hdr_bytes_to_hash[header_crc32_offset .. header_crc32_offset + @sizeOf(u32)], &@as([@sizeOf(u32)]u8, @splat(0)));
 
         // The CRC calculation is done without the unused bytes.
-        const calculated_header_crc = std.hash.crc.Crc32.hash(
+        const calculated_header_crc = Crc32.hash(
             hdr_bytes_to_hash[0..@offsetOf(Header, "unused_reserved")],
         );
 
@@ -777,7 +778,7 @@ fn findPartitions(allocator: std.mem.Allocator, reader: *Io.Reader, header: Head
     const partition_entries_position = header.starting_partition_entry_lba * sector_size;
     const partition_entries_end = (header.num_partition_entries * @sizeOf(PartitionRecord)) + partition_entries_position;
     _ = try reader.discard(.limited(@as(usize, @intCast(partition_entries_position)) - current_position));
-    var crc = std.hash.crc.Crc32.init();
+    var crc = Crc32.init();
 
     var no_more_partitions = false;
 
@@ -811,7 +812,7 @@ fn findPartitions(allocator: std.mem.Allocator, reader: *Io.Reader, header: Head
 test "guid parsing" {
     const got_guid = try guidFromString("C12A7328-F81F-11D2-BA4B-00A0C93EC93B");
     const bytes = [_]u8{ 0x28, 0x73, 0x2a, 0xc1, 0x1f, 0xf8, 0xd2, 0x11, 0xba, 0x4b, 0x00, 0xa0, 0xc9, 0x3e, 0xc9, 0x3b };
-    const expected_guid: std.os.uefi.Guid = @bitCast(bytes);
+    const expected_guid: std.os.uefi.Guid = std.mem.bytesToValue(std.os.uefi.Guid, &bytes);
 
     try std.testing.expect(expected_guid.eql(got_guid));
 

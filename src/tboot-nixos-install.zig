@@ -5,7 +5,7 @@ const utils = @import("./utils.zig");
 const clap = @import("clap");
 
 pub const std_options = std.Options{
-    .log_level = if (builtin.mode == .Debug) .debug else .info,
+    .log_level = if (builtin.mode == .debug) .debug else .info,
 };
 
 const DiskBootLoader = @import("./boot/disk.zig");
