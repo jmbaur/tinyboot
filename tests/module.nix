@@ -78,6 +78,8 @@ in
     };
     virtualisation.graphics = false;
     virtualisation.tpm.enable = true;
+    # TODO(jared): remove this once we have https://github.com/NixOS/nixpkgs/pull/562501
+    virtualisation.tpm.deviceModel = lib.mkIf pkgs.stdenv.hostPlatform.isArmv7 "tpm-tis-device";
 
     # Boot tinyboot through UEFI firmware instead of pretending that the
     # platform's firmware already contains it.

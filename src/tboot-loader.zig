@@ -168,7 +168,15 @@ const settled_timespec: std.posix.system.itimerspec = .{
 };
 
 fn armTimer(self: *TbootLoader) !void {
-    _ = linux.timerfd_settime(self.timer, .{}, &settled_timespec, null);
+    return switch (linux.errno(linux.timerfd_settime(
+        self.timer,
+        .{},
+        &settled_timespec,
+        null,
+    ))) {
+        .SUCCESS => {},
+        else => |err| posix.unexpectedErrno(err),
+    };
 }
 
 const ALL_BOOTLOADERS = .{ DiskBootLoader, YmodemBootLoader };

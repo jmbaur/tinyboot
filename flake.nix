@@ -50,6 +50,7 @@
         {
           disk = pkgs.callPackage ./tests/disk { };
           efiStub = pkgs.callPackage ./tests/efi-stub { };
+          kexecLoad = pkgs.callPackage ./tests/kexec-load { };
           ymodem = pkgs.callPackage ./tests/ymodem { };
           tinybootNative = pkgs.tinyboot;
         }

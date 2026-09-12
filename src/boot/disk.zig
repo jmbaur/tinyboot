@@ -30,11 +30,19 @@ pub fn match(io: std.Io, device: *const Device) ?u8 {
     const disk_major, const disk_minor = device.type.node;
     _ = disk_minor;
 
+    // Block devices that never hold a boot entry we could use. Anything not
+    // named here gets probed for a partition table, so a driver with a
+    // dynamically allocated major (virtio-blk, nvme, mmc) still works.
     switch (disk_major) {
+        linux_headers.DRBD_MAJOR,
+        linux_headers.FLOPPY_MAJOR,
         linux_headers.LOOP_MAJOR,
-        linux_headers.MEM_MAJOR,
+        linux_headers.MD_MAJOR,
         linux_headers.MTD_BLOCK_MAJOR,
         linux_headers.NBD_MAJOR,
+        // Same number as MEM_MAJOR, but in the block major space this is a
+        // ramdisk.
+        linux_headers.RAMDISK_MAJOR,
         => return null,
         else => {},
     }

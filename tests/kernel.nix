@@ -23,6 +23,8 @@ linuxKernel.manualConfig {
         CONFIG_DYNAMIC_DEBUG=y
         CONFIG_FW_CFG_SYSFS=y
         CONFIG_HVC_CONSOLE=y
+        CONFIG_HW_RANDOM=y
+        CONFIG_HW_RANDOM_VIRTIO=y
         CONFIG_IKCONFIG=y
         CONFIG_PCI=y
         CONFIG_SCSI=y
@@ -61,6 +63,13 @@ linuxKernel.manualConfig {
         CONFIG_MMU=y
         CONFIG_ARCH_VIRT=y
         CONFIG_ARCH_MULTI_V7=y
+        # qemu's arm "virt" machine puts the PCIe ECAM window at 0x4010000000,
+        # which a 32-bit phys_addr_t can't hold, so pci-host-generic rejects
+        # the devicetree node as malformed unless the kernel is built for
+        # LPAE. PCI is what gets us to the virtio-rng that the NixOS test
+        # framework puts on every VM, which is where the KASLR seed we hand
+        # the next kernel comes from.
+        CONFIG_ARM_LPAE=y
         CONFIG_CMDLINE="debug"
         CONFIG_VFP=y
         CONFIG_VFPv3=y

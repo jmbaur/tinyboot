@@ -25,7 +25,7 @@ pub const MemoryRange = struct {
 /// This structure is used to hold the arguments that
 /// are used when loading  kernel binaries.
 /// https://github.com/torvalds/linux/blob/0d8d44db295ccad20052d6301ef49ff01fb8ae2d/include/uapi/linux/kexec.h#L59
-pub const KexecSegment = struct {
+pub const KexecSegment = extern struct {
     buf: *anyopaque,
     buf_size: usize,
     mem: *anyopaque,

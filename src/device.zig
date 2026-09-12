@@ -59,6 +59,8 @@ pub fn format(
 pub const Subsystem = enum {
     block,
     mem,
+    // The hardware RNG that seeds the next kernel's KASLR lives here.
+    misc,
     mtd,
     net,
     rtc,

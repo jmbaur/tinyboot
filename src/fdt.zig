@@ -690,18 +690,33 @@ fn upsertProperty(self: *@This(), path: []const u8, value_bytes: []const u8) !vo
         std.debug.assert(node_data.token == .Prop);
         switch (node_data.token) {
             .Prop => |*prop| {
+                // Both sizes have to be worked out before prop.value is
+                // replaced, otherwise the "old" one reads back as the new one
+                // and the struct block silently stops matching the header.
+                const old_size: u32 = @intCast(prop.value.len + fdtPad(@intCast(prop.value.len)));
+                const new_size: u32 = @intCast(value_bytes.len + fdtPad(@intCast(value_bytes.len)));
+
                 self.allocator.free(prop.value); // free old value
 
                 prop.value = value_bytes;
+                prop.inner.len = @intCast(value_bytes.len);
 
-                const struct_bytes_diff: u32 = @intCast(
-                    value_bytes.len + fdtPad(@intCast(value_bytes.len)) // new value plus padding
-                    - (prop.value.len + fdtPad(@intCast(prop.value.len))), // old value plus padding
-                );
+                // Values are padded out to a four byte boundary, so a
+                // property can change length without the struct block
+                // changing size at all, and it can just as well shrink.
+                if (new_size >= old_size) {
+                    const struct_bytes_added = new_size - old_size;
 
-                self.header.size_dt_struct += struct_bytes_diff;
-                self.header.off_dt_strings += struct_bytes_diff;
-                self.header.total_size += struct_bytes_diff;
+                    self.header.size_dt_struct += struct_bytes_added;
+                    self.header.off_dt_strings += struct_bytes_added;
+                    self.header.total_size += struct_bytes_added;
+                } else {
+                    const struct_bytes_removed = old_size - new_size;
+
+                    self.header.size_dt_struct -= struct_bytes_removed;
+                    self.header.off_dt_strings -= struct_bytes_removed;
+                    self.header.total_size -= struct_bytes_removed;
+                }
             },
             else => unreachable,
         }
@@ -965,6 +980,52 @@ test "fdt round trip" {
     try std.testing.expectEqual(0x11223344, try round_trip.getU32Property("/chosen/this_is_a_u32"));
     try std.testing.expectEqual(0x1122334455667788, try round_trip.getU64Property("/chosen/this_is_a_u64"));
     try std.testing.expect(round_trip.getBoolProperty("/chosen/this_is_a_bool"));
+}
+
+test "fdt round trip after replacing existing properties" {
+    var reader: std.Io.Reader = .fixed(&test_fdt);
+
+    var fdt = try Fdt.init(&reader, std.testing.allocator);
+    defer fdt.deinit();
+
+    // Ensure we can amend existing properties as expected, a common operation when our
+    // bootloader gets an FDT that needs to modify existing properties.
+    try fdt.upsertStringProperty(
+        "/chosen/this_is_a_string",
+        "a considerably longer value than the one that was there before",
+    );
+    try fdt.upsertStringProperty("/chosen/this_is_a_stringlist", "x");
+
+    const buf = try std.testing.allocator.alloc(u8, fdt.size());
+    defer std.testing.allocator.free(buf);
+    var writer: std.Io.Writer = .fixed(buf);
+    try fdt.save(&writer);
+    try writer.flush();
+
+    try std.testing.expectEqual(buf.len, writer.end);
+
+    var round_trip_reader: std.Io.Reader = .fixed(buf);
+    var round_trip = try Fdt.init(&round_trip_reader, std.testing.allocator);
+    defer round_trip.deinit();
+
+    try std.testing.expectEqualStrings(
+        "a considerably longer value than the one that was there before",
+        try round_trip.getStringProperty("/chosen/this_is_a_string"),
+    );
+    try std.testing.expectEqualStrings(
+        "x",
+        try round_trip.getStringProperty("/chosen/this_is_a_stringlist"),
+    );
+
+    // The properties either side of the ones that changed are what catch a
+    // struct block that has drifted out of step with the header.
+    try std.testing.expectEqual(0x11223344, try round_trip.getU32Property("/chosen/this_is_a_u32"));
+    try std.testing.expectEqual(0x1122334455667788, try round_trip.getU64Property("/chosen/this_is_a_u64"));
+    try std.testing.expect(round_trip.getBoolProperty("/chosen/this_is_a_bool"));
+    try std.testing.expectEqualStrings(
+        "/chosen",
+        try round_trip.getPhandleProperty("/chosen/this_is_a_phandle"),
+    );
 }
 
 pub fn main(init_: std.process.Init) !void {

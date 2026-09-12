@@ -36,6 +36,10 @@ const ZimageTag = extern struct {
         krnl_size: extern struct {
             size_ptr: u32,
             bss_size: u32,
+            // Only present on a six word tag; check byteSize() before
+            // reading either, older kernels stop after bss_size.
+            text_offset: u32,
+            malloc_size: u32,
         },
     },
 };
@@ -51,6 +55,26 @@ fn mmapFile(io: std.Io, file: std.Io.File) ![]align(std.heap.page_size_min) u8 {
         file.handle,
         0,
     );
+}
+
+// The hardware RNG is a misc device, so it always lands on major 10, minor 183
+// (https://github.com/torvalds/linux/blob/0e1329d4045ca3606f9c06a8c47f62e758a09105/Documentation/admin-guide/devices.txt).
+const HWRNG_NODE = "/dev/char/10:183";
+
+/// Hand the next kernel a seed to randomize its own load address with, taken
+/// from a hardware RNG since we have no entropy of our own to speak of.
+fn addKaslrSeed(io: std.Io, fdt: *Fdt) !void {
+    const hwrng = try std.Io.Dir.cwd().openFile(io, HWRNG_NODE, .{});
+    defer hwrng.close(io);
+
+    var hwrng_buf: [@sizeOf(u64)]u8 = undefined;
+    var hwrng_reader = hwrng.reader(io, &hwrng_buf);
+
+    // Any bit pattern is as good as any other, so the endianness here only
+    // decides which end of the read the property's high bits come from.
+    const seed = try hwrng_reader.interface.takeInt(u64, builtin.cpu.arch.endian());
+
+    try fdt.upsertU64Property("/chosen/kaslr-seed", seed);
 }
 
 // No need to pass a purgatory program since the current kernel handles
@@ -153,7 +177,26 @@ pub fn kexecLoad(
 
     std.log.debug("resulting kernel space: 0x{x}", .{uncompressed_kernel_size});
 
-    const extra_size = 0x8000; // TEXT_OFFSET
+    // Where the kernel expects to land within its memory region. With
+    // CONFIG_AUTO_ZRELADDR the decompressor works this out for itself as
+    // (pc & 0xf8000000) + TEXT_OFFSET, so loading the zImage anywhere else
+    // leaves everything it does afterwards -- decompressing, then relocating
+    // itself past _edata of the decompressed kernel -- shifted from where we
+    // reserved room for it, and it walks off the end onto the initrd.
+    //
+    // 32KiB only holds for a kernel built with the arm default. An armv7
+    // multiplatform kernel with ARCH_MESON or ARCH_QCOM_RESERVE_SMEM enabled
+    // asks for 2MiB instead, which is what the zImage tells us here.
+    const default_text_offset = 0x8000;
+    const extra_size: u32 = if (tag) |tag_|
+        if (byteSize(tag_) >= @sizeOf(ZimageTag))
+            tag_.u.krnl_size.text_offset
+        else
+            default_text_offset
+    else
+        default_text_offset;
+
+    std.log.debug("text offset: 0x{x}", .{extra_size});
 
     const proc_iomem = try std.Io.Dir.cwd().openFile(io, "/proc/iomem", .{});
     defer proc_iomem.close(io);
@@ -193,6 +236,12 @@ pub fn kexecLoad(
         try fdt.upsertStringProperty("/chosen/bootargs", cmdline_);
     }
 
+    // Best effort: a platform with no hardware RNG just boots the next kernel
+    // without KASLR.
+    addKaslrSeed(io, &fdt) catch |err| {
+        std.log.warn("unable to add KASLR seed: {}", .{err});
+    };
+
     var initrd_buf: ?[]align(std.heap.page_size_min) u8 = null;
     defer {
         if (initrd_buf) |buf| {
@@ -215,18 +264,6 @@ pub fn kexecLoad(
 
             try fdt.upsertU32Property("/chosen/linux,initrd-start", initrd_base);
             try fdt.upsertU32Property("/chosen/linux,initrd-end", initrd_base + initrd_buf.?.len);
-
-            // Insert KASLR seed if a hardware RNG is available
-            if (std.Io.Dir.cwd().openFile(io, "/dev/char/10:183", .{})) |hwrng| {
-                defer hwrng.close(io);
-
-                var hwrng_buf: [@sizeOf(u64)]u8 = undefined;
-                var hwrng_reader = hwrng.reader(io, &hwrng_buf);
-                const seed = try hwrng_reader.interface.takeInt(u64, builtin.cpu.arch.endian());
-                try fdt.upsertU64Property("/chosen/kaslr-seed", seed);
-            } else |err| {
-                std.log.warn("unable to add KASLR seed: {}", .{err});
-            }
 
             try addSegment(allocator, &segments, page_size, initrd_buf.?, initrd_buf.?.len, initrd_base, initrd_buf.?.len);
             break :b initrd_buf.?.len;
