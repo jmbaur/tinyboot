@@ -49,6 +49,7 @@
         _system: pkgs:
         {
           disk = pkgs.callPackage ./tests/disk { };
+          efiStub = pkgs.callPackage ./tests/efi-stub { };
           ymodem = pkgs.callPackage ./tests/ymodem { };
           tinybootNative = pkgs.tinyboot;
         }
