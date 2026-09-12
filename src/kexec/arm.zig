@@ -301,6 +301,50 @@ fn addSegment(
     });
 }
 
+test addSegment {
+    const allocator = std.testing.allocator;
+    const alignment = 4096;
+
+    var buf: [16]u8 = @splat(0xaa);
+
+    var segments: std.ArrayList(KexecSegment) = .empty;
+    defer segments.deinit(allocator);
+
+    // A segment that occupies no memory is of no use to the next kernel, so it
+    // never makes it into the list.
+    try addSegment(allocator, &segments, alignment, &buf, buf.len, 64 * 1024 * 1024, 0);
+    try std.testing.expectEqual(0, segments.items.len);
+
+    // The load address is where the next kernel expects to find itself, so an
+    // unaligned one is refused instead of quietly rounded.
+    try std.testing.expectError(error.UnalignedLoadAddress, addSegment(
+        allocator,
+        &segments,
+        alignment,
+        &buf,
+        buf.len,
+        64 * 1024 * 1024 + 1,
+        buf.len,
+    ));
+    try std.testing.expectEqual(0, segments.items.len);
+
+    // bufsz may not exceed memsz, see kexec_load(2), and memsz is rounded up to
+    // whole pages.
+    try addSegment(allocator, &segments, alignment, &buf, buf.len, 64 * 1024 * 1024, 8);
+    try std.testing.expectEqual(1, segments.items.len);
+    try std.testing.expectEqual(@intFromPtr(&buf), @intFromPtr(segments.items[0].buf));
+    try std.testing.expectEqual(8, segments.items[0].buf_size);
+    try std.testing.expectEqual(64 * 1024 * 1024, @intFromPtr(segments.items[0].mem));
+    try std.testing.expectEqual(alignment, segments.items[0].mem_size);
+
+    // The other way round the buffer is left alone, and the kernel zeroes the
+    // rest of the segment. This is how the zImage gets room for its bss.
+    try addSegment(allocator, &segments, alignment, &buf, buf.len, 96 * 1024 * 1024, 2 * alignment);
+    try std.testing.expectEqual(2, segments.items.len);
+    try std.testing.expectEqual(buf.len, segments.items[1].buf_size);
+    try std.testing.expectEqual(2 * alignment, segments.items[1].mem_size);
+}
+
 fn locateHole(
     memory_ranges: []const MemoryRange,
     size: usize,
@@ -397,21 +441,9 @@ fn getMemoryRanges(allocator: std.mem.Allocator, reader: *std.Io.Reader) ![]Memo
     var memory_ranges: std.ArrayList(MemoryRange) = .empty;
     errdefer memory_ranges.deinit(allocator);
 
-    var buf: [255]u8 = @splat(0); // unlikely to encounter a line this large
-
-    while (true) {
-        var buf_writer: std.Io.Writer = .fixed(&buf);
-
-        _ = reader.streamDelimiter(&buf_writer, '\n') catch |err| switch (err) {
-            std.Io.Reader.StreamError.EndOfStream => break,
-            else => return err,
-        };
-
-        try reader.streamExact(&buf_writer, 1); // skip newline
-
-        const written = buf_writer.buffered();
+    while (try reader.takeDelimiter('\n')) |line| {
         const memory_range, const name = b: {
-            var split = std.mem.splitScalar(u8, written, ':');
+            var split = std.mem.splitScalar(u8, line, ':');
             const left = split.next() orelse continue;
             const right = split.next() orelse continue;
             break :b .{
@@ -561,6 +593,95 @@ test "getMemoryRanges" {
         try std.testing.expectEqual(0x40000000, ranges[0].start);
         try std.testing.expectEqual(0xbfffffff, ranges[0].end);
     }
+}
+
+test "locateHole skips memory that isn't RAM" {
+    const memory_ranges = [_]MemoryRange{
+        .{
+            .start = 0x40000000,
+            .end = 0x4fffffff,
+            .type = .Reserved,
+        },
+        .{
+            .start = 0x50000000,
+            .end = 0x5fffffff,
+            .type = .Ram,
+        },
+    };
+
+    const alignment = 4096;
+
+    // The reserved range is roomy enough, but handing the next kernel memory
+    // that the current one has claimed would corrupt it.
+    try std.testing.expectEqual(0x50000000, locateHole(
+        &memory_ranges,
+        0x1000,
+        alignment,
+        0,
+    ));
+
+    // Nothing usable at or above the minimum address.
+    try std.testing.expectError(error.MemoryRangeNotFound, locateHole(
+        &memory_ranges,
+        0x1000,
+        alignment,
+        0x60000000,
+    ));
+}
+
+test "getMemoryRanges reserved regions" {
+    // Reserved regions get entries of their own, including the ones nested
+    // inside a "System RAM" region, so that locateHole() knows to stay away
+    // from them. A boot alias counts as RAM just like a plain "System RAM"
+    // does.
+    const proc_iomem =
+        \\00000000-0000ffff : System RAM (boot alias)
+        \\40000000-bfffffff : System RAM
+        \\  40000000-4fffffff : reserved
+        \\  50208000-526fffff : Kernel code
+        \\bff00000-bfffffff : reserved
+        \\c0000000-c0000fff : pl011@c0000000
+    ;
+
+    var reader: std.Io.Reader = .fixed(proc_iomem[0..]);
+    const ranges = try getMemoryRanges(std.testing.allocator, &reader);
+    defer std.testing.allocator.free(ranges);
+
+    try std.testing.expectEqual(4, ranges.len);
+
+    try std.testing.expectEqual(.Ram, ranges[0].type);
+    try std.testing.expectEqual(0x0, ranges[0].start);
+    try std.testing.expectEqual(0xffff, ranges[0].end);
+
+    try std.testing.expectEqual(.Ram, ranges[1].type);
+    try std.testing.expectEqual(0x40000000, ranges[1].start);
+    try std.testing.expectEqual(0xbfffffff, ranges[1].end);
+
+    try std.testing.expectEqual(.Reserved, ranges[2].type);
+    try std.testing.expectEqual(0x40000000, ranges[2].start);
+    try std.testing.expectEqual(0x4fffffff, ranges[2].end);
+
+    try std.testing.expectEqual(.Reserved, ranges[3].type);
+    try std.testing.expectEqual(0xbff00000, ranges[3].start);
+    try std.testing.expectEqual(0xbfffffff, ranges[3].end);
+}
+
+test "getMemoryRanges parses a final line with no trailing newline" {
+    const proc_iomem =
+        \\09000000-09000fff : pl011@9000000
+        \\40000000-bfffffff : System RAM
+    ;
+
+    try std.testing.expect(!std.mem.endsWith(u8, proc_iomem, "\n"));
+
+    var reader: std.Io.Reader = .fixed(proc_iomem[0..]);
+    const ranges = try getMemoryRanges(std.testing.allocator, &reader);
+    defer std.testing.allocator.free(ranges);
+
+    try std.testing.expectEqual(1, ranges.len);
+    try std.testing.expectEqual(.Ram, ranges[0].type);
+    try std.testing.expectEqual(0x40000000, ranges[0].start);
+    try std.testing.expectEqual(0xbfffffff, ranges[0].end);
 }
 
 inline fn byteSize(tag: *ZimageTag) u32 {

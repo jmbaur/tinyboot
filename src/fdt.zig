@@ -553,9 +553,9 @@ fn removeString(self: *@This(), name_offset: u32) !usize {
 fn updateNameOffsets(self: *@This(), removed_name_offset: u32, bytes_removed: u32) void {
     var node = self.dt_struct.first orelse return;
 
-    const node_data: *Node = @fieldParentPtr("inner", node);
-
     while (true) {
+        const node_data: *Node = @fieldParentPtr("inner", node);
+
         switch (node_data.token) {
             .Prop => |*prop| {
                 if (prop.inner.name_offset > removed_name_offset) {
@@ -917,6 +917,54 @@ test "fdt write" {
     // ensure the unique strings we removed don't appear
     try std.testing.expectEqual(null, std.mem.indexOf(u8, buf, "bool"));
     try std.testing.expectEqual(null, std.mem.indexOf(u8, buf, "this_is_a_stringlist"));
+}
+
+test "fdt round trip" {
+    var reader: std.Io.Reader = .fixed(&test_fdt);
+
+    var fdt = try Fdt.init(&reader, std.testing.allocator);
+    defer fdt.deinit();
+
+    // The properties an arm kexec hands to the next kernel.
+    try fdt.upsertStringProperty("/chosen/bootargs", "console=ttyAMA0,115200 init=/init");
+    try fdt.upsertU32Property("/chosen/linux,initrd-start", 0x42000000);
+    try fdt.upsertU32Property("/chosen/linux,initrd-end", 0x44000000);
+    try fdt.upsertU64Property("/chosen/kaslr-seed", 0x0123456789abcdef);
+    try fdt.removeProperty("/chosen/this_is_a_stringlist");
+
+    const buf = try std.testing.allocator.alloc(u8, fdt.size());
+    defer std.testing.allocator.free(buf);
+    var writer: std.Io.Writer = .fixed(buf);
+    try fdt.save(&writer);
+    try writer.flush();
+
+    // size() has to be exact, since it is what the kexec segment holding the
+    // devicetree gets sized from.
+    try std.testing.expectEqual(buf.len, writer.end);
+
+    var round_trip_reader: std.Io.Reader = .fixed(buf);
+    var round_trip = try Fdt.init(&round_trip_reader, std.testing.allocator);
+    defer round_trip.deinit();
+
+    try std.testing.expectEqualStrings(
+        "console=ttyAMA0,115200 init=/init",
+        try round_trip.getStringProperty("/chosen/bootargs"),
+    );
+    try std.testing.expectEqual(0x42000000, try round_trip.getU32Property("/chosen/linux,initrd-start"));
+    try std.testing.expectEqual(0x44000000, try round_trip.getU32Property("/chosen/linux,initrd-end"));
+    try std.testing.expectEqual(0x0123456789abcdef, try round_trip.getU64Property("/chosen/kaslr-seed"));
+    try std.testing.expectError(
+        error.PropertyNotFound,
+        round_trip.getStringProperty("/chosen/this_is_a_stringlist"),
+    );
+
+    try std.testing.expectEqualStrings(
+        "foo bar baz",
+        try round_trip.getStringProperty("/chosen/this_is_a_string"),
+    );
+    try std.testing.expectEqual(0x11223344, try round_trip.getU32Property("/chosen/this_is_a_u32"));
+    try std.testing.expectEqual(0x1122334455667788, try round_trip.getU64Property("/chosen/this_is_a_u64"));
+    try std.testing.expect(round_trip.getBoolProperty("/chosen/this_is_a_bool"));
 }
 
 pub fn main(init_: std.process.Init) !void {
