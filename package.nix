@@ -25,6 +25,41 @@ stdenvNoCC.mkDerivation (
       outputHashMode = "recursive";
       outputHash = "sha256-9gTF1Ir7HhgZqg1iswQEF4buU+KpLoCpHJuPneIKMBE=";
     };
+
+    buildRunnerCache = stdenvNoCC.mkDerivation {
+      pname = finalAttrs.pname + "-build-runner-cache";
+      inherit (finalAttrs) version zigBuildFlags;
+
+      src = lib.fileset.toSource {
+        root = ./.;
+        fileset = lib.fileset.unions [
+          ./build.zig
+          ./build.zig.zon
+          ./deps
+          ./vendor
+        ];
+      };
+
+      nativeBuildInputs = [ zig ];
+
+      __structuredAttrs = true;
+      strictDeps = true;
+      dontInstall = true;
+      dontFixup = true;
+
+      buildPhase = ''
+        runHook preBuild
+        export ZIG_GLOBAL_CACHE_DIR=$TMPDIR/zig-cache
+        mkdir -p $ZIG_GLOBAL_CACHE_DIR $out
+        ln -s ${deps} $ZIG_GLOBAL_CACHE_DIR/p
+        # --list-steps compiles the build script without running any of the
+        # steps it describes.
+        zig build --list-steps ''${zigBuildFlags[@]} > /dev/null
+        rm $ZIG_GLOBAL_CACHE_DIR/p
+        cp -r $ZIG_GLOBAL_CACHE_DIR/. $out/
+        runHook postBuild
+      '';
+    };
   in
   {
     pname = "tinyboot";
@@ -65,7 +100,10 @@ stdenvNoCC.mkDerivation (
 
     configurePhase = ''
       runHook preConfigure
-      export ZIG_GLOBAL_CACHE_DIR=$TMPDIR
+      export ZIG_GLOBAL_CACHE_DIR=$TMPDIR/zig-cache
+      mkdir -p $ZIG_GLOBAL_CACHE_DIR
+      cp -r ${buildRunnerCache}/. $ZIG_GLOBAL_CACHE_DIR/
+      chmod -R u+w $ZIG_GLOBAL_CACHE_DIR
       ln -s ${deps} $ZIG_GLOBAL_CACHE_DIR/p
       runHook postConfigure
     '';
