@@ -143,8 +143,8 @@ pub fn probe(
             if (!part.isBootable() and part_type == .ProtectedMbr) {
                 var gpt_buffer: [1024]u8 = undefined;
                 var gpt_reader = disk.reader(io, &gpt_buffer);
-                const gpt = Gpt.init(self.arena.allocator(), &gpt_reader.interface) catch |err| switch (err) {
-                    Gpt.Error.MissingMagicNumber => {
+                const gpt = Gpt.init(self.arena.allocator(), &gpt_reader) catch |err| switch (err) {
+                    Gpt.Error.NoGptFound, Gpt.Error.MissingMagicNumber => {
                         std.log.debug("disk {f} does not contain a GUID partition table", .{disk_device});
                         continue;
                     },
