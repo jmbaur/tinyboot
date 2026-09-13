@@ -214,7 +214,7 @@ pub fn signFile(
         .content = .{
             .signed_data = .{
                 .version = 1,
-                .digest_algorithms = .{ .inner = .{ .algorithm = .sha256, .parameters = .{} } },
+                .digest_algorithms = .{ .inner = .{ .algorithm = .sha256 } },
                 .encapsulated_content_info = .{ .content_type = .pkcs7 },
                 .signer_infos = .{
                     .inner = &.{
@@ -232,8 +232,8 @@ pub fn signFile(
                                     },
                                 },
                             },
-                            .digest_algorithm = .{ .algorithm = .sha256, .parameters = .{} },
-                            .signature_algorithm = .{ .algorithm = .rsa, .parameters = .{} },
+                            .digest_algorithm = .{ .algorithm = .sha256 },
+                            .signature_algorithm = .{ .algorithm = .rsa },
                             .signature = .{ .data = signature },
                         },
                     },
@@ -258,7 +258,7 @@ pub fn signFile(
 
     const sig_info = ModuleSignature{
         .sig_len = std.mem.nativeToBig(u32, @intCast(pkcs7_encoded.len)),
-        .id_type = @intFromEnum(PkeyIdType.PkeyIdPkcs7),
+        .id_type = @backingInt(PkeyIdType.PkeyIdPkcs7),
         .algo = 0,
         .hash = 0,
         .__pad = @splat(0),

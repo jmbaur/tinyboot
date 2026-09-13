@@ -19,13 +19,9 @@ const DigestAlgorithmIdentifier = struct {
 
     algorithm: Algorithm,
 
-    // TODO(jared): make encoding this work OOTB
-    parameters: struct {
-        pub fn encodeDer(self: @This(), encoder: *asn1.der.Encoder) !void {
-            _ = self;
-            try encoder.any(null);
-        }
-    },
+    // The digest algorithms we support take no parameters, which DER spells
+    // as an explicit NULL rather than an absent field.
+    comptime parameters: @TypeOf(null) = null,
 };
 
 const SignatureAlgorithmIdentifier = struct {
@@ -39,13 +35,8 @@ const SignatureAlgorithmIdentifier = struct {
 
     algorithm: Algorithm,
 
-    // TODO(jared): make encoding this work OOTB
-    parameters: struct {
-        pub fn encodeDer(self: @This(), encoder: *asn1.der.Encoder) !void {
-            _ = self;
-            try encoder.any(null);
-        }
-    },
+    // See `DigestAlgorithmIdentifier.parameters`.
+    comptime parameters: @TypeOf(null) = null,
 };
 
 const ContentType = enum {
