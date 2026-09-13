@@ -49,18 +49,6 @@ const LINUX_INITRD_MEDIA_GUID align(8) = uefi.Guid{
     .node = [_]u8{ 0xca, 0x55, 0x52, 0x31, 0xcc, 0x68 },
 };
 
-const LoadFile2 = struct {
-    const guid align(8) = uefi.Guid{
-        .time_low = 0x4006c0c1,
-        .time_mid = 0xfcb3,
-        .time_high_and_version = 0x403e,
-        .clock_seq_high_and_reserved = 0x99,
-        .clock_seq_low = 0x6d,
-        .node = [_]u8{ 0x4a, 0x6c, 0x87, 0x24, 0xe0, 0x6d },
-    };
-};
-const EFI_LOAD_FILE2_PROTOCOL_GUID align(8) = uefi.Guid;
-
 const LoadFile = *const fn (
     *LoadFileProtocol,
     *uefi.protocol.DevicePath,
@@ -71,11 +59,21 @@ const LoadFile = *const fn (
 
 const LoadFileProtocol = extern struct {
     load_file: LoadFile,
+
+    /// EFI_LOAD_FILE2_PROTOCOL_GUID
+    pub const guid align(8) = uefi.Guid{
+        .time_low = 0x4006c0c1,
+        .time_mid = 0xfcb3,
+        .time_high_and_version = 0x403e,
+        .clock_seq_high_and_reserved = 0x99,
+        .clock_seq_low = 0x6d,
+        .node = [_]u8{ 0x4a, 0x6c, 0x87, 0x24, 0xe0, 0x6d },
+    };
 };
 
-const InitrdLoader = struct {
+const InitrdLoader = extern struct {
     load_file: LoadFileProtocol,
-    address: *const anyopaque,
+    address: [*]const u8,
     length: usize,
 };
 
@@ -92,7 +90,7 @@ fn initrd_load_file(
         return .unsupported;
     }
 
-    const loader: *InitrdLoader = @ptrCast(this);
+    const loader: *InitrdLoader = @fieldParentPtr("load_file", this);
 
     if (loader.length == 0) {
         return .not_found;
@@ -103,18 +101,23 @@ fn initrd_load_file(
         return .buffer_too_small;
     }
 
-    const dest: [*]u8 = @ptrCast(buffer);
-    const source: [*]u8 = @ptrCast(@constCast(loader.address));
-    @memcpy(dest, source[0..loader.length]);
+    const dest: [*]u8 = @ptrCast(buffer.?);
+    @memcpy(dest[0..loader.length], loader.address[0..loader.length]);
     buffer_size.* = loader.length;
 
     return .success;
 }
 
-const efi_initrd_device_path: extern struct {
+/// The vendor-defined media device path that linux looks for in order to find
+/// the initrd we hand it through `LoadFileProtocol`.
+const InitrdDevicePath = extern struct {
     vendor: uefi.DevicePath.Media.VendorDevicePath,
     end: uefi.protocol.DevicePath,
-} = .{
+
+    pub const guid align(8) = uefi.protocol.DevicePath.guid;
+};
+
+const efi_initrd_device_path: InitrdDevicePath = .{
     .vendor = .{
         .type = .media,
         .subtype = .vendor,
@@ -123,7 +126,7 @@ const efi_initrd_device_path: extern struct {
     },
     .end = .{
         .type = .end,
-        .subtype = @intFromEnum(uefi.DevicePath.End.Subtype.end_entire),
+        .subtype = @backingInt(uefi.DevicePath.End.Subtype.end_entire),
         .length = @sizeOf(uefi.protocol.DevicePath),
     },
 };
@@ -133,7 +136,12 @@ const TbootStubError = error{
     OutOfMemory,
     EndOfStream,
     MissingPEHeader,
-} || uefi.Status.Error || uefi.tables.BootServices.StartImageError || uefi.tables.BootServices.HandleProtocolError;
+    InvalidUtf8,
+} ||
+    uefi.Status.Error ||
+    uefi.tables.BootServices.StartImageError ||
+    uefi.tables.BootServices.HandleProtocolError ||
+    uefi.tables.BootServices.InstallProtocolInterfacesError;
 
 fn run() TbootStubError!void {
     const self_loaded_image = try boot_services.handleProtocol(
@@ -158,12 +166,39 @@ fn run() TbootStubError!void {
         .{ .buffer = linux_data },
     );
 
-    // TODO(jared): do we need this?
-    const linux_loaded_image = try boot_services.handleProtocol(
-        uefi.protocol.LoadedImage,
-        linux_image_handle,
-    );
-    _ = linux_loaded_image;
+    // Linux' EFI stub takes its command line from the load options of its own
+    // loaded image, so this is how the ".cmdline" section of the unified
+    // kernel image reaches the kernel.
+    //
+    // We deliberately don't fall back to our own load options, since
+    // everything we hand to the kernel should be covered by the signature over
+    // this PE image.
+    if (coff.getSectionByName(".cmdline")) |cmdline_section| {
+        const cmdline = std.mem.trim(
+            u8,
+            coff.getSectionData(cmdline_section),
+            " \t\r\n\x00",
+        );
+
+        if (cmdline.len > 0) {
+            const linux_loaded_image = try boot_services.handleProtocol(
+                uefi.protocol.LoadedImage,
+                linux_image_handle,
+            ) orelse return uefi.Status.Error.NotFound;
+
+            const cmdline_utf16 = try std.unicode.utf8ToUtf16LeAllocZ(
+                uefi.pool_allocator,
+                cmdline,
+            );
+
+            linux_loaded_image.load_options = @ptrCast(cmdline_utf16.ptr);
+            // The NUL terminator is part of the size, same as what
+            // systemd-stub does.
+            linux_loaded_image.load_options_size = @intCast(
+                (cmdline_utf16.len + 1) * @sizeOf(u16),
+            );
+        }
+    }
 
     const initrd = coff.getSectionByName(".initrd") orelse {
         return TbootStubError.MissingSection;
@@ -174,34 +209,29 @@ fn run() TbootStubError!void {
     const loader = try uefi.pool_allocator.create(InitrdLoader);
     loader.* = InitrdLoader{
         .load_file = .{ .load_file = initrd_load_file },
-        .address = @ptrCast(initrd_data.ptr),
+        .address = initrd_data.ptr,
         .length = initrd_data.len,
     };
 
-    // In the happy path, this doesn't get cleaned up by us, since it needs to
-    // outlive our application so linux can use it.
-    errdefer uefi.pool_allocator.destroy(loader);
+    // In the happy path none of this cleanup runs, since StartImage() doesn't
+    // return control to us when linux boots. That's exactly why the initrd
+    // needs to outlive our application.
+    defer uefi.pool_allocator.destroy(loader);
 
-    // TODO(jared): if StartImage() fails, we need to unregister the initrd.
+    const initrd_handle = try boot_services.installProtocolInterfaces(null, .{
+        &efi_initrd_device_path,
+        &loader.load_file,
+    });
+
+    // If we do get back here, linux didn't boot, so take the initrd back out
+    // of the protocol database before the firmware unloads us and the
+    // interfaces we installed go stale.
+    //
     // See https://github.com/systemd/systemd/blob/0015502168b868e8b6380765bdce3abee33b856c/src/boot/initrd.c#L112.
-    var initrd_image_handle: ?uefi.Handle = null;
-
-    const efi_initrd_device_path_: [*]uefi.protocol.DevicePath = @ptrCast(@constCast(&efi_initrd_device_path));
-
-    // TODO(jared): Use InstallMultipleProtocolInterfaces()
-    try uefi.Status.err(boot_services._installProtocolInterface(
-        @ptrCast(&initrd_image_handle),
-        &uefi.protocol.DevicePath.guid,
-        .native,
-        efi_initrd_device_path_,
-    ));
-
-    try uefi.Status.err(boot_services._installProtocolInterface(
-        @ptrCast(&initrd_image_handle),
-        &LoadFile2.guid,
-        .native,
-        loader,
-    ));
+    defer boot_services.uninstallProtocolInterfaces(initrd_handle, .{
+        &efi_initrd_device_path,
+        &loader.load_file,
+    }) catch |err| println("Failed to unregister initrd: {t}", .{err});
 
     _ = try boot_services.startImage(linux_image_handle);
 }
@@ -215,6 +245,7 @@ pub fn main() uefi.Status {
         error.MissingPEHeader => .not_found,
         error.MissingSection => .not_found,
         error.OutOfMemory => .out_of_resources,
+        error.InvalidUtf8 => .invalid_parameter,
         error.Unexpected => unreachable,
 
         // Errors from std.os.uefi.Status.Error

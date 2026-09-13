@@ -30,6 +30,7 @@ let
     ${pkgs.buildPackages.systemdUkify}/lib/systemd/ukify build \
       --stub=${stub} \
       --linux=${kernel} \
+      --uname=${tinybootKernel.modDirVersion} \
       --initrd=${initrd} \
       --os-release=@${osRelease} \
       --output=$out
