@@ -92,24 +92,84 @@ fn kexecFileLoad(
 
     switch (std.os.linux.errno(rc)) {
         .SUCCESS => {},
+        // This architecture has kexec_file_load(), but the running kernel was
+        // built without it.
+        .NOSYS => {
+            std.log.err("kernel is missing CONFIG_KEXEC_FILE", .{});
+            return error.KexecFileLoadUnavailable;
+        },
+        // No CAP_SYS_BOOT, kexec turned off with the kernel.kexec_load_disabled
+        // sysctl, or the kernel.kexec_load_limit_reboot budget is used up.
+        .PERM => {
+            std.log.err("not permitted to kexec", .{});
+            return error.PermissionDenied;
+        },
         // IMA appraisal failed
-        .ACCES => return error.PermissionDenied,
+        .ACCES => {
+            std.log.err("kernel or initrd rejected by IMA appraisal, is it signed by a trusted key?", .{});
+            return error.ImaAppraisalFailed;
+        },
+        // CONFIG_KEXEC_SIG verification failed, or this architecture's image
+        // loader can't check signatures at all.
+        .KEYREJECTED => {
+            std.log.err("kernel image signature rejected by the kernel", .{});
+            return error.SignatureRejected;
+        },
         // Invalid kernel image (CONFIG_RELOCATABLE not enabled?)
-        .NOEXEC => return error.InvalidExe,
+        .NOEXEC => {
+            std.log.err("no kexec loader recognized the kernel image", .{});
+            return error.InvalidExe;
+        },
+        // The kernel or initrd is bigger than KEXEC_FILE_SIZE_MAX.
+        .FBIG => {
+            std.log.err("kernel or initrd too large to load", .{});
+            return error.FileTooBig;
+        },
+        // Bad flags, or a command line the kernel won't take. Ours to fix.
+        .INVAL => {
+            std.log.err("kernel rejected our kexec_file_load() arguments", .{});
+            return error.InvalidParameter;
+        },
         // Another image is already loaded
-        .BUSY => return error.FilesAlreadyRegistered,
-        .NOMEM => return error.SystemResources,
-        .BADF => return error.InvalidFileDescriptor,
+        .BUSY => {
+            std.log.err("another kernel image is already loaded", .{});
+            return error.FilesAlreadyRegistered;
+        },
+        .NOMEM => {
+            std.log.err("not enough memory to load the kernel image", .{});
+            return error.SystemResources;
+        },
+        .BADF => {
+            std.log.err("kernel or initrd file descriptor is invalid", .{});
+            return error.InvalidFileDescriptor;
+        },
         else => |err| {
-            std.log.err("kexec load failed for unknown reason: {}", .{err});
+            std.log.err("kexec load failed for unknown reason: {t}", .{err});
             return posix.unexpectedErrno(err);
         },
     }
 }
 
+/// Linux only wires up the kexec_file_load() syscall on architectures that
+/// define ARCH_SUPPORTS_KEXEC_FILE, since CONFIG_KEXEC_FILE depends on it. As
+/// of linux 7.2, that is exactly the set below. Note that a kernel for one of
+/// these architectures still needs CONFIG_KEXEC_FILE turned on, so the syscall
+/// can fail with ENOSYS at runtime even when this is true.
 pub const kexec_file_load_available = switch (builtin.cpu.arch) {
-    // TODO(jared): confirm there aren't any more.
-    .aarch64, .riscv64, .x86_64 => true,
+    // arch/arm64/Kconfig: def_bool y
+    .aarch64, .aarch64_be => true,
+    // arch/loongarch/Kconfig: def_bool 64BIT
+    .loongarch64 => true,
+    // arch/parisc/Kconfig: def_bool y
+    .hppa, .hppa64 => true,
+    // arch/powerpc/Kconfig: def_bool PPC64
+    .powerpc64, .powerpc64le => true,
+    // arch/riscv/Kconfig: def_bool 64BIT
+    .riscv64 => true,
+    // arch/s390/Kconfig: def_bool y
+    .s390x => true,
+    // arch/x86/Kconfig: def_bool X86_64
+    .x86_64 => true,
     else => false,
 };
 
@@ -129,7 +189,7 @@ pub fn kexecUnload() !void {
         0,
     );
 
-    return switch (std.os.linux.E.init(rc)) {
+    return switch (std.os.linux.errno(rc)) {
         .SUCCESS => {},
         else => |err| return posix.unexpectedErrno(err),
     };
