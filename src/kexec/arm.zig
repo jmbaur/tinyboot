@@ -223,7 +223,6 @@ pub fn kexecLoad(
 
     std.log.info("kernel: address=0x{x} size=0x{x}", .{ kernel_base, uncompressed_kernel_size });
 
-    // TODO(jared): we need to be able to inject the kernel parameters into /chosen/bootargs
     const sys_firmware_fdt = try std.Io.Dir.cwd().openFile(io, "/sys/firmware/fdt", .{});
     defer sys_firmware_fdt.close(io);
 
