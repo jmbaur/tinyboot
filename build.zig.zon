@@ -3,7 +3,7 @@
     .fingerprint = 0xf283d479be749c48,
     .version = "0.1.0",
     .minimum_zig_version = "0.17.0",
-    .paths = .{ "build.zig", "build.zig.zon", "src", "vendor" },
+    .paths = .{ "build.zig", "build.zig.zon", "src" },
     .dependencies = .{
         .clap = .{
             .url = "https://github.com/hejsil/zig-clap/archive/05faf3905e8548f5cc269a8836e154065e70128d.tar.gz",
