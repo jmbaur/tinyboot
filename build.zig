@@ -128,12 +128,12 @@ pub fn build(b: *std.Build) !void {
         \\#include <asm-generic/setup.h>
         \\#include <linux/kexec.h>
         \\#include <linux/keyctl.h>
+        \\#include <linux/liveupdate.h>
         \\#include <linux/major.h>
         \\#include <sys/epoll.h>
         \\#include <sys/ioctl.h>
         \\#include <termios.h>
-        \\
-    ++ @embedFile("vendor/liveupdate.h"));
+    );
 
     const linux_headers = b.addTranslateC(.{
         .root_source_file = .{ .generated = .{ .index = linux_h.generated_directory, .sub_path = "linux.h" } },
