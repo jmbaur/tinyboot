@@ -1,12 +1,12 @@
 .{
     .name = .mbedtls,
     .fingerprint = 0x841b00c20264d254,
-    .version = "3.6.6",
+    .version = "3.6.7",
     .paths = .{"build.zig"},
     .dependencies = .{
         .mbedtls = .{
-            .url = "https://github.com/MBED-TLS/mbedtls/archive/v3.6.6.tar.gz",
-            .hash = "N-V-__8AAI1FmQLj92go7nR7_J6kwr-7uYyuitngGqydvWkd",
+            .url = "https://github.com/MBED-TLS/mbedtls/archive/v3.6.7.tar.gz",
+            .hash = "N-V-__8AALrvlQKVtYlvv9dpBnbrJfdwR_F0wAgwsvZhAF1Y",
         },
     },
 }
