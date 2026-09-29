@@ -54,6 +54,7 @@ linuxKernel.manualConfig {
         CONFIG_CMDLINE_FORCE=y
       ''
       + lib.optionalString stdenv.hostPlatform.isAarch64 ''
+        CONFIG_ACPI=y
         CONFIG_ARM_SCMI_TRANSPORT_VIRTIO=y
         CONFIG_EFI=y
         CONFIG_EFI_STUB=y
