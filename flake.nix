@@ -1,9 +1,7 @@
 {
   description = "A kexec-based bootloader";
 
-  inputs.nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
-  inputs.zig-overlay.url = "github:mitchellh/zig-overlay";
-  inputs.zig-overlay.inputs.nixpkgs.follows = "nixpkgs";
+  inputs.nixpkgs.url = "https://channels.nixos.org/nixos-unstable/nixexprs.tar.zst";
 
   outputs =
     inputs:
@@ -18,9 +16,7 @@
       };
 
       overlays.default = final: _prev: {
-        tinyboot = final.callPackage ./package.nix {
-          zig = inputs.zig-overlay.packages.${final.stdenv.buildPlatform.system}.master;
-        };
+        tinyboot = final.callPackage ./package.nix { };
       };
 
       legacyPackages = genAttrs [ "aarch64-linux" "x86_64-linux" ] (
@@ -34,7 +30,7 @@
       devShells = mapAttrs (system: pkgs: {
         default = pkgs.mkShell {
           packages = [
-            inputs.zig-overlay.packages.${system}.master
+            pkgs.zig_0_17
             pkgs.lldb
             pkgs.qemu
             pkgs.swtpm

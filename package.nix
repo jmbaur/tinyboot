@@ -4,7 +4,7 @@
   lib,
   nukeReferences,
   stdenvNoCC,
-  zig,
+  zig_0_17,
 }:
 
 stdenvNoCC.mkDerivation (
@@ -13,7 +13,7 @@ stdenvNoCC.mkDerivation (
     deps = stdenvNoCC.mkDerivation {
       pname = finalAttrs.pname + "-deps";
       inherit (finalAttrs) src version;
-      depsBuildBuild = [ zig ];
+      depsBuildBuild = [ zig_0_17 ];
       buildCommand = ''
         export ZIG_GLOBAL_CACHE_DIR=$(mktemp -d)
         runHook unpackPhase
@@ -39,7 +39,7 @@ stdenvNoCC.mkDerivation (
         ];
       };
 
-      nativeBuildInputs = [ zig ];
+      nativeBuildInputs = [ zig_0_17 ];
 
       __structuredAttrs = true;
       strictDeps = true;
@@ -76,7 +76,7 @@ stdenvNoCC.mkDerivation (
 
     nativeBuildInputs = [
       nukeReferences
-      zig
+      zig_0_17
     ];
 
     # Prevent zig (or anything else) from being in the runtime closure
